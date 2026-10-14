@@ -24,11 +24,10 @@ def test_findings_map_to_the_right_widget_types():
     by_kind = {s["kind"]: s for s in out}
     assert by_kind["standout"]["widget_type"] == "bar"
     assert by_kind["standout"]["config"] == {"dimension": "region", "measure": "revenue", "aggregation": "sum"}
-    assert by_kind["correlation"]["widget_type"] == "scatter"
-    # shape_series semantics: dimension = x numeric, measure = y, averaged
-    assert by_kind["correlation"]["config"] == {
-        "dimension": "cost", "measure": "weight", "aggregation": "avg",
-        "limit": 250, "sort": "asc", "sort_by": "name"}
+    # Two measures row by row, read back as a correlation (2026-10-02); the
+    # category scatter averaged y per x value and read as a ranking.
+    assert by_kind["correlation"]["widget_type"] == "numeric_series"
+    assert by_kind["correlation"]["config"] == {"measure": "cost", "measure2": "weight"}
     assert by_kind["trend"]["widget_type"] == "line"
     assert by_kind["trend"]["config"]["dimension_granularity"] == "month"
     # data_quality is prose, never a chart

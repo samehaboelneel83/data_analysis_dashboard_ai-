@@ -76,3 +76,11 @@ describe('standaloneClone', () => {
     expect(svg.getAttribute('width')).toBe('100%')
   })
 })
+
+describe('copyChartImage (9-polish)', () => {
+  it('says there is nothing to copy when the widget has no chart', async () => {
+    const { copyChartImage } = await import('./widgetImage')
+    const div = document.createElement('div')
+    await expect(copyChartImage(div)).rejects.toThrow('no chart')
+  })
+})

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useT } from '../../i18n'
+import { richNodes } from '../../i18n/pages/adminPlatform'
 import toast from 'react-hot-toast'
 import { orgUnitsApi, adminUsersApi, type OrgUnit, type User } from '../../services/api'
 import { useConfirm } from '../../components/ui/ConfirmDialog'
@@ -21,6 +22,9 @@ import LoadingState from '../../components/ui/LoadingState'
  * The page authors the tree; it never decides access. Expansion happens
  * server-side in core/rls.py, which is the single place worth auditing.
  */
+
+/** A rule, shown as code in every language. */
+const MYSCOPE_RULE = 'branch in MYSCOPE()'
 
 interface TreeNode extends OrgUnit { children: TreeNode[] }
 
@@ -63,45 +67,45 @@ export default function AdminOrgUnits() {
     if (placingUser === '') { setPlacements([]); return }
     orgUnitsApi.forUser(placingUser as number)
       .then(rows => setPlacements(rows.map(r => r.org_unit_id)))
-      .catch(() => toast.error('Could not load that user’s placements'))
-  }, [placingUser])
+      .catch(() => toast.error(t('pg.adminPlatform.units.placementsLoadFailed')))
+  }, [placingUser, t])
 
   const tree = useMemo(() => nest(units), [units])
 
   const addUnit = async (parent: OrgUnit | null) => {
     const name = (await prompt({
-      title: parent ? `New unit under ${parent.name}` : 'New top-level unit',
-      label: 'Unit name', placeholder: 'e.g. Egypt', confirmLabel: 'Next',
+      title: parent ? t('pg.adminPlatform.units.newUnder', { name: parent.name }) : t('pg.adminPlatform.units.newTop'),
+      label: t('pg.adminPlatform.units.unitName'), placeholder: t('pg.adminPlatform.units.unitNamePh'),
+      confirmLabel: t('pg.adminPlatform.units.next'), cancelLabel: t('pg.adminPlatform.cancel'),
     }))?.trim()
     if (!name) return
     const level = (await prompt({
-      title: `What kind of unit is ${name}?`,
-      body: 'Optional — leave empty to skip.',
-      label: 'Level name', placeholder: 'e.g. Country, Region, Branch, Team',
-      confirmLabel: 'Add unit', required: false,
+      title: t('pg.adminPlatform.units.whatKind', { name }),
+      body: t('pg.adminPlatform.units.optional'),
+      label: t('pg.adminPlatform.units.levelName'), placeholder: t('pg.adminPlatform.units.levelPh'),
+      confirmLabel: t('pg.adminPlatform.units.addUnit'), cancelLabel: t('pg.adminPlatform.cancel'), required: false,
     }))?.trim()
     try {
       await orgUnitsApi.create({ name, parent_id: parent?.id ?? null, level_name: level || undefined })
       load()
-      toast.success(`Added ${name}`)
+      toast.success(t('pg.adminPlatform.units.added', { name }))
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail ?? 'Could not add the unit')
+      toast.error(e?.response?.data?.detail ?? t('pg.adminPlatform.units.addFailed'))
     }
   }
 
   const removeUnit = async (u: OrgUnit) => {
     if (!await confirm({
-      title: `Delete “${u.name}”?`,
+      title: t('pg.adminPlatform.units.deleteTitle', { name: u.name }),
       // Said plainly: the cascade is not recoverable, and it silently changes
       // what people can see.
-      body: `Everything beneath it is deleted too, and anyone placed there loses that access. `
-        + `Users placed only here will see no rows at all until they are placed again.`,
+      body: t('pg.adminPlatform.units.deleteBody'),
     })) return
     try {
       await orgUnitsApi.remove(u.id)
       load()
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail ?? 'Could not delete the unit')
+      toast.error(e?.response?.data?.detail ?? t('pg.adminPlatform.units.deleteFailed'))
     }
   }
 
@@ -114,10 +118,10 @@ export default function AdminOrgUnits() {
     try {
       await orgUnitsApi.setForUser(placingUser as number, placements)
       toast.success(placements.length
-        ? 'Placement saved — access flows down from there'
-        : 'Placements cleared — this user now matches no rows where MYSCOPE() is used')
+        ? t('pg.adminPlatform.units.placementSaved')
+        : t('pg.adminPlatform.units.placementsCleared'))
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail ?? 'Could not save the placement')
+      toast.error(e?.response?.data?.detail ?? t('pg.adminPlatform.units.placementFailed'))
     }
   }
 
@@ -131,7 +135,7 @@ export default function AdminOrgUnits() {
           <button onClick={() => setOpen(p => {
             const next = new Set(p); next.has(n.id) ? next.delete(n.id) : next.add(n.id); return next
           })}
-            aria-label={hasKids ? (isOpen ? `Collapse ${n.name}` : `Expand ${n.name}`) : n.name}
+            aria-label={hasKids ? t(isOpen ? 'pg.adminPlatform.units.collapse' : 'pg.adminPlatform.units.expand', { name: n.name }) : n.name}
             style={{ border: 'none', background: 'none', cursor: hasKids ? 'pointer' : 'default',
               color: 'var(--muted)', padding: 0, visibility: hasKids ? 'visible' : 'hidden',
               display: 'inline-flex' }}>
@@ -139,31 +143,31 @@ export default function AdminOrgUnits() {
           </button>
 
           {placingUser !== '' && (
-            <input type="checkbox" aria-label={`Place at ${n.name}`}
+            <input type="checkbox" aria-label={t('pg.adminPlatform.units.placeAt', { name: n.name })}
               checked={placements.includes(n.id)} onChange={() => togglePlacement(n.id)} />
           )}
 
-          <span style={{ fontSize: 13, fontWeight: 600 }}>{n.name}</span>
+          <span style={{ fontSize: 13, fontWeight: 600 }}><bdi>{n.name}</bdi></span>
           {n.level_name && (
             <span style={{ fontSize: 10.5, color: 'var(--muted)', border: '1px solid var(--border)',
               borderRadius: 99, padding: '1px 7px', textTransform: 'uppercase' }}>
-              {n.level_name}
+              <bdi>{n.level_name}</bdi>
             </span>
           )}
           {n.match_value !== n.name && (
-            <span title="The value this unit takes in your data"
+            <span title={t('pg.adminPlatform.units.matchTitle')}
               style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--mono)' }}>
-              = {n.match_value}
+              = <bdi>{n.match_value}</bdi>
             </span>
           )}
 
           <span style={{ marginInlineStart: 'auto', display: 'flex', gap: 4 }}>
             <button className="btn btn-ghost btn-sm" onClick={() => addUnit(n)}
-              aria-label={`Add a unit under ${n.name}`} style={{ fontSize: 11 }}>
+              aria-label={t('pg.adminPlatform.units.addUnder', { name: n.name })} style={{ fontSize: 11 }}>
               <Plus size={11} />
             </button>
             <button className="btn btn-ghost btn-sm" onClick={() => removeUnit(n)}
-              aria-label={`Delete ${n.name}`} style={{ fontSize: 11, color: 'var(--danger)' }}>
+              aria-label={t('pg.adminPlatform.units.delete', { name: n.name })} style={{ fontSize: 11, color: 'var(--danger)' }}>
               <Trash2 size={11} />
             </button>
           </span>
@@ -182,15 +186,13 @@ export default function AdminOrgUnits() {
         </button>
       </div>
       <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 20, maxWidth: 680 }}>
-        Build your hierarchy — Country, Region, Branch, Department, Team, to whatever depth you
-        use. Place a person at one node and they automatically see that node and everything
-        beneath it. Write the rule once as <code>branch in MYSCOPE()</code> on a Row security
-        rule; it then means something different, and correct, for every user.
+        {richNodes(t('pg.adminPlatform.units.intro'), { code: <code dir="ltr">{MYSCOPE_RULE}</code> })}
       </p>
 
       {loading && <LoadingState />}
       {!loading && loadError != null && (
-        <LoadError what="the organization chart" error={loadError} onRetry={load} />
+        <LoadError what={t('pg.adminPlatform.units.loadWhat')} title={t('pg.adminPlatform.loadErr', { what: t('pg.adminPlatform.units.loadWhat') })}
+          retryLabel={t('pg.adminPlatform.retry')} error={loadError} onRetry={load} />
       )}
 
       {!loading && loadError == null && (
@@ -198,27 +200,27 @@ export default function AdminOrgUnits() {
           <div className="card" style={{ padding: '10px 12px', marginBottom: 16, display: 'flex',
             gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             <Users size={15} aria-hidden style={{ color: 'var(--accent)' }} />
-            <label htmlFor="place-user" style={{ fontSize: 12, fontWeight: 600 }}>Place a user</label>
+            <label htmlFor="place-user" style={{ fontSize: 12, fontWeight: 600 }}>{t('pg.adminPlatform.units.placeUser')}</label>
             <select id="place-user" value={placingUser}
               onChange={e => setPlacingUser(e.target.value ? Number(e.target.value) : '')}
               style={{ fontSize: 12, minWidth: 240 }}>
-              <option value="">Choose someone…</option>
+              <option value="">{t('pg.adminPlatform.units.chooseSomeone')}</option>
               {users.map(u => <option key={u.id} value={u.id}>{u.email}</option>)}
             </select>
             {placingUser !== '' && (
               <>
                 <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-                  Tick every unit they cover — access includes everything beneath each one.
+                  {t('pg.adminPlatform.units.tick')}
                 </span>
                 <button className="btn btn-primary btn-sm" onClick={savePlacements}
-                  style={{ marginInlineStart: 'auto' }}>Save placement</button>
+                  style={{ marginInlineStart: 'auto' }}>{t('pg.adminPlatform.units.savePlacement')}</button>
               </>
             )}
           </div>
 
           {units.length === 0 ? (
-            <EmptyState icon={Network} title="No hierarchy yet"
-              description="Start with a top-level unit — a country or the organization itself — then add regions and branches beneath it." />
+            <EmptyState icon={Network} title={t('pg.adminPlatform.units.empty')}
+              description={t('pg.adminPlatform.units.emptyDesc')} />
           ) : (
             <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
               {tree.map(n => row(n, 0))}

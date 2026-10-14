@@ -31,9 +31,191 @@ def write_csv_atomic(df: pd.DataFrame, path) -> list[str]:
     converted = normalize_instants(df)
     path = Path(path)
     tmp = path.with_name(path.name + ".tmp")
-    df.to_csv(tmp, index=False)
+    if is_parquet(path):
+        # A dataset imported as a stream is a parquet file: CSV text written
+        # under that name would be unreadable.
+        df.to_parquet(tmp, index=False)
+    else:
+        df.to_csv(tmp, index=False)
     os.replace(tmp, path)
     return converted
+
+
+def is_parquet(path) -> bool:
+    return str(path).lower().endswith(".parquet")
+
+
+def rows_of(df: pd.DataFrame) -> int:
+    """How many rows the dataset now holds. A refresh that was written to disk
+    as it arrived hands back a SAMPLE of the rows, with the real count on it."""
+    return int(df.attrs.get("rows", len(df)))
+
+
+def missing_of(df: pd.DataFrame, column: str) -> float:
+    """How empty a column is, counted on every row either way."""
+    from .ingest import missing_pct
+    counted = df.attrs.get("missing")
+    return float(counted.get(column, 0.0)) if isinstance(counted, dict) else missing_pct(df[column])
+
+
+STAGE_PREFIX = "refresh_"
+
+
+def _stage_dir(path: Path) -> str:
+    """Where a large reload is written before it replaces the file. One per
+    dataset file: what an earlier attempt left behind (a reload cancelled
+    after the fetch) is removed first."""
+    import shutil
+    import tempfile
+    mine = f"{STAGE_PREFIX}{path.stem}_"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    for old in path.parent.glob(mine + "*"):
+        shutil.rmtree(old, ignore_errors=True)
+    return tempfile.mkdtemp(prefix=mine, dir=str(path.parent))
+
+
+def _drop_stage(stage: str | None) -> None:
+    import shutil
+    if stage:
+        shutil.rmtree(stage, ignore_errors=True)
+
+
+def _fetch_full(source_cfg: dict, table: str | None, query: str | None, path: Path | None,
+                required: set[str] | None, column_map: dict[str, str] | None,
+                cursor_column: str | None = None) -> tuple[pd.DataFrame, str | None, object]:
+    """The whole source, for a full reload: (frame, stage, cursor).
+
+    A dataset whose file is parquet may be far larger than memory, so its
+    reload is written to disk as it arrives, exactly as its import was. The
+    frame handed back is then a random SAMPLE of the rows, carrying
+    `attrs["rows"]` (the real count), `attrs["missing"]` (how empty each
+    column is, counted on every row) and `attrs["staged"]` (the finished file,
+    not yet swapped in); `cursor` is the highest cursor value in the file.
+    Anything else is fetched into memory as it always was (stage None)."""
+    from .connections import Streamed, import_to_dataframe
+    from .ingest import detect_types
+    from .timezones import normalize_instants
+    if path is None or not is_parquet(path):
+        return guard_schema(import_to_dataframe(source_cfg, table, query), required, column_map), None, None
+    rename = {new: old for new, old in (column_map or {}).items()}
+
+    def _prepare(chunk):
+        if rename:
+            chunk = chunk.rename(columns={n: o for n, o in rename.items() if n in chunk.columns})
+        normalize_instants(chunk)
+        detect_types(chunk)
+        return chunk
+
+    stage = _stage_dir(path)
+    try:
+        got = import_to_dataframe(source_cfg, table, query, stream_dir=stage, prepare=_prepare)
+        if not isinstance(got, Streamed):
+            _drop_stage(stage)
+            return guard_schema(got, required, column_map), None, None
+        sample = guard_schema(got.sample, required)
+        sample.attrs.update(rows=int(got.rows), missing=dict(got.missing), staged=str(got.path), file=str(got.path))
+        cursor = None
+        if cursor_column and cursor_column in sample.columns:
+            import duckdb
+            con = duckdb.connect()
+            try:
+                cursor = con.execute(
+                    'SELECT max("%s") FROM read_parquet(?)' % cursor_column.replace('"', '""'),
+                    [str(got.path)]).fetchone()[0]
+            finally:
+                con.close()
+        return sample, stage, cursor
+    except BaseException:
+        _drop_stage(stage)
+        raise
+
+
+def _incremental_on_disk(source_cfg, source_table, source_query, path: Path, stage: str, held: list[str],
+                         cursor_column, cursor_value, column_map, key_column, lookback_hours,
+                         reconcile_deletes, family) -> dict:
+    """An incremental load of a dataset too large for memory: the rows past
+    the cursor are fetched (to disk themselves when there are many) and merged
+    into the file by DuckDB (services/refresh_on_disk.py). The frame handed
+    back is a SAMPLE of the merged file, as `_fetch_full` describes."""
+    import os
+
+    from . import refresh_on_disk
+    from .connections import Streamed, _import_cap, _too_large, import_to_dataframe
+    from .ingest import detect_types
+    from .timezones import normalize_instants
+    warning = None
+    if key_column and key_column not in held:
+        warning = f"Key column '{key_column}' not found on the dataset — appended without merging."
+        key_column = None
+    fetch_from = lookback_cursor(cursor_value, lookback_hours) if key_column else cursor_value
+    rename = dict(column_map or {})
+
+    def _prepare(chunk):
+        if rename:
+            chunk = chunk.rename(columns={n: o for n, o in rename.items() if n in chunk.columns})
+        normalize_instants(chunk)
+        detect_types(chunk)
+        return chunk
+
+    incr_sql = build_incremental_query(source_table, source_query, cursor_column, cursor_value, set(held), family)
+    fetch_dir = os.path.join(stage, "fetch")
+    os.makedirs(fetch_dir, exist_ok=True)
+    got = import_to_dataframe(source_cfg, None, incr_sql, params={"cursor_val": fetch_from},
+                              stream_dir=fetch_dir, prepare=_prepare)
+    new = got.path if isinstance(got, Streamed) else _prepare(got)
+    alive = None
+    if reconcile_deletes and key_column:
+        try:
+            keys = import_to_dataframe(source_cfg, None, build_key_query(
+                source_table, source_query, key_column, set(held), family))
+            if rename:
+                keys = keys.rename(columns={n: o for n, o in rename.items() if n in keys.columns})
+            alive = keys[key_column] if key_column in keys.columns else keys.iloc[:, 0]
+            if not len(alive):
+                alive, warning = None, "The source returned no keys, so no rows were removed as deleted."
+        except Exception as e:  # noqa: BLE001 -- the merge stands; deletes wait for next run
+            alive, warning = None, f"Could not check for deleted rows ({e}); none were removed this time."
+    m = refresh_on_disk.merge(path, new, stage, key_column=key_column, alive_keys=alive,
+                              cursor_column=cursor_column)
+    import shutil
+    shutil.rmtree(fetch_dir, ignore_errors=True)
+    cap = _import_cap()
+    if cap and m["rows"] > cap:
+        raise _too_large(cap)
+    df = m["sample"]
+    # `file`: where the checks count on every row -- the merged file, or the
+    # live one when nothing changed (then there is nothing to swap in).
+    df.attrs.update(rows=int(m["rows"]), missing=dict(m["missing"]), file=str(m["path"] or path))
+    if m["path"]:
+        df.attrs["staged"] = str(m["path"])
+    return {"df": df, "cursor": m["cursor"], "warning": warning,
+            "rows_added": m["rows_new"] - m["rows_updated"], "rows_updated": m["rows_updated"],
+            "rows_deleted": m["rows_deleted"]}
+
+
+def _swap_staged(df: pd.DataFrame, path: Path) -> None:
+    """Put a staged reload in the dataset's place, and clear its folder."""
+    import os
+    staged = Path(df.attrs.pop("staged"))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    os.replace(staged, path)
+    _drop_stage(str(staged.parent))
+
+
+def _staged_cursor(found, previous):
+    """`_max_cursor` for a value read off the staged file. The file holds
+    wall-clock time in the reference zone; the watermark goes back to the
+    source as an instant."""
+    if found is None or (not isinstance(found, str) and pd.isna(found)):
+        return previous
+    import datetime as _dt
+    if isinstance(found, (_dt.datetime, pd.Timestamp)):
+        stamp = pd.Timestamp(found)
+        if stamp.tzinfo is None:
+            from .timezones import reference_zone
+            stamp = stamp.tz_localize(reference_zone(), ambiguous=True, nonexistent="shift_forward")
+        return stamp.isoformat()
+    return str(found)
 
 
 class SchemaBreak(Exception):
@@ -78,18 +260,30 @@ def guard_schema(df: pd.DataFrame, required: set[str] | None,
 def rewrite_dataset_file(
     source_cfg: dict, filename: str, source_table: str | None, source_query: str | None,
     required_columns: set[str] | None = None,
+    validate=None,
 ) -> tuple[pd.DataFrame, dict]:
     """Re-fetch from the connection and overwrite the cached CSV in place.
 
     Returns the fresh frame and its detected type map so the caller can update
     DatasetColumn rows. Synchronous and blocking — callers run it in a thread.
     `required_columns`: raise SchemaBreak, writing nothing, if any is gone.
+    `validate(df)`: called on the new frame before anything is written; it
+    raises (services/data_checks.ChecksBlocked) to keep the old file.
     """
     from .ingest import detect_types
-    from .connections import import_to_dataframe
 
-    df = guard_schema(import_to_dataframe(source_cfg, source_table, source_query), required_columns)
     path = Path(filename)
+    df, stage, _cursor = _fetch_full(source_cfg, source_table, source_query, path, required_columns, None)
+    try:
+        if validate is not None:
+            validate(df)
+    except BaseException:
+        _drop_stage(stage)
+        raise
+    if stage:
+        # Larger than memory: already on disk; `df` is a sample (see rows_of).
+        _swap_staged(df, path)
+        return df, detect_types(df)
     path.parent.mkdir(parents=True, exist_ok=True)
     write_csv_atomic(df, path)
     write_parquet_sidecar(str(path))  # synchronous like the rest; callers thread us
@@ -100,7 +294,8 @@ def rewrite_dataset_file(
 
 def build_incremental_query(table: str | None, query: str | None,
                              cursor_column: str, cursor_value,
-                             valid_columns: set[str] | None = None) -> str:
+                             valid_columns: set[str] | None = None,
+                             family: str | None = None) -> str:
     """The incremental fetch: everything past the watermark. `:cursor_val` is a
     SQLAlchemy bind parameter, never string-interpolated, so the cursor value
     (whatever type or content it carries) can never reshape the query.
@@ -120,11 +315,43 @@ def build_incremental_query(table: str | None, query: str | None,
     or trailing semicolon) stays intact and simply gets filtered further."""
     if valid_columns is not None and cursor_column not in valid_columns:
         raise ValueError(f"Unknown cursor column: {cursor_column!r}")
-    quoted_col = '"{}"'.format(cursor_column.replace('"', '""'))
+    # Quoted for the source's dialect (2026-10-10): MySQL reads "col" as a
+    # TEXT value, so `"updated_at" > :cursor_val` compared a constant string.
+    from .sql_safety import quote_ident
+    quoted_col = quote_ident(family or "postgresql", cursor_column)
+    return f"SELECT * FROM {_base_source(table, query, family)} WHERE {quoted_col} > :cursor_val"
+
+
+def _base_source(table: str | None, query: str | None, family: str | None) -> str:
+    from .sql_safety import quote_ident
     if query:
-        base = query.strip().rstrip(";")
-        return f"SELECT * FROM ({base}) AS _base WHERE {quoted_col} > :cursor_val"
-    return f'SELECT * FROM "{table}" WHERE {quoted_col} > :cursor_val'
+        return f"({query.strip().rstrip(';')}) AS _base"
+    return quote_ident(family or "postgresql", table or "")
+
+
+def build_key_query(table: str | None, query: str | None, key_column: str,
+                    valid_columns: set[str] | None = None, family: str | None = None) -> str:
+    """Every key the source holds NOW (one column), to find rows deleted there.
+    The key is checked against the dataset's columns like the cursor is."""
+    if valid_columns is not None and key_column not in valid_columns:
+        raise ValueError(f"Unknown key column: {key_column!r}")
+    from .sql_safety import quote_ident
+    return f"SELECT {quote_ident(family or 'postgresql', key_column)} FROM {_base_source(table, query, family)}"
+
+
+def drop_deleted(df: pd.DataFrame, key_column: str, source_keys: pd.Series) -> tuple[pd.DataFrame, int, str | None]:
+    """Rows whose key the source no longer has, removed: (frame, removed, warning).
+
+    An EMPTY key list while the dataset holds rows is far more likely a broken
+    or filtered source than "everything was deleted": nothing is removed and
+    the run says so, rather than emptying every dashboard."""
+    if len(df) and not len(source_keys):
+        return df, 0, "The source returned no keys, so no rows were removed as deleted."
+    from .data_checks import key_text
+    alive = set(key_text(source_keys))
+    # A row with no key cannot be matched, so it is never treated as deleted.
+    keep = df[key_column].isna() | key_text(df[key_column], keep_empty=True).isin(alive)
+    return df[keep].reset_index(drop=True), int((~keep).sum()), None
 
 
 def _max_cursor(df: pd.DataFrame, cursor_column: str | None, previous,
@@ -166,8 +393,25 @@ def refresh_dataset(
     required_columns: set[str] | None = None,
     column_map: dict[str, str] | None = None,
     write: bool = True,
+    validate=None,
+    key_column: str | None = None,
+    lookback_hours: int | None = None,
+    reconcile_deletes: bool = False,
 ) -> dict:
     """Full or incremental refresh of one source-backed dataset's cached file.
+
+    2026-10-10: `reconcile_deletes` (with a key) also removes rows whose key
+    the source no longer holds -- a merge otherwise keeps deleted rows forever.
+
+    Phase 4: `key_column` makes an incremental load a MERGE -- an incoming
+    row whose key the file already holds replaces it, so an updated order
+    appears once with its new values instead of twice. `lookback_hours`
+    re-reads that far behind a date cursor to catch late updates (only with
+    a key; the re-read rows are then replaced, not duplicated).
+
+    `validate(df)` (pipeline plan, phase 3) is called on the frame the
+    dataset would hold -- after an incremental append, the whole of it --
+    before anything is written, so a blocking check keeps the old file.
 
     E12: `write=False` fetches and builds the new frame but leaves the file
     alone; the caller writes it with `write_dataset_files` once it knows its
@@ -203,7 +447,7 @@ def refresh_dataset(
         result = _refresh_dataset_body(
             source_cfg, filename, source_table, source_query, mode,
             cursor_column, cursor_value, valid_columns, required_columns, column_map,
-            write,
+            write, validate, key_column, lookback_hours, reconcile_deletes,
         )
         span.set_attribute("status", "ok")
         span.set_attribute("effective_mode", result["mode"])
@@ -224,10 +468,16 @@ def _refresh_dataset_body(
     required_columns: set[str] | None = None,
     column_map: dict[str, str] | None = None,
     write: bool = True,
+    validate=None,
+    key_column: str | None = None,
+    lookback_hours: int | None = None,
+    reconcile_deletes: bool = False,
 ) -> dict:
     from .ingest import detect_types
     from .timezones import normalize_instants
     from .connections import import_to_dataframe
+    from . import connectors
+    family = connectors.sql_family_of(source_cfg) if source_cfg else None
 
     warning = None
     effective_mode = "incremental" if mode == "incremental" else "full"
@@ -238,37 +488,124 @@ def _refresh_dataset_body(
         warning = "No watermark column configured — ran a full refresh instead."
 
     existing_df = None
+    on_disk: list[str] | None = None      # the file's columns, when it is merged without being loaded
     if effective_mode == "incremental" and path is not None and path.exists():
         try:
-            existing_df = pd.read_csv(path)
-        except Exception:  # noqa: BLE001 - unreadable cache: full refresh recovers it
+            if is_parquet(path):
+                # Appending means holding every row; a file too large for
+                # that is reloaded whole, written to disk as it arrives.
+                from . import memory_guard
+                with memory_guard.reserved(str(path)):
+                    existing_df = pd.read_parquet(path)
+            else:
+                existing_df = pd.read_csv(path)
+        except Exception as e:  # noqa: BLE001 - unreadable cache: full refresh recovers it
             existing_df = None
+            from .memory_guard import TooLargeToLoad
+            if isinstance(e, TooLargeToLoad):
+                # Too large to hold: the new rows are merged into it on disk.
+                try:
+                    from .refresh_on_disk import schema as _file_schema
+                    on_disk = [c for c, _ in _file_schema(path)]
+                except Exception:  # noqa: BLE001 - unreadable: the full reload recovers it
+                    on_disk = None
+        if on_disk is not None and cursor_column not in on_disk:
+            on_disk = None
+            effective_mode = "full"
+            warning = f"Column '{cursor_column}' not found on the dataset — ran a full refresh instead."
         if existing_df is not None and cursor_column not in existing_df.columns:
             effective_mode = "full"
             warning = f"Column '{cursor_column}' not found on the dataset — ran a full refresh instead."
 
-    if effective_mode == "incremental" and cursor_value not in (None, ""):
+    if effective_mode == "incremental" and cursor_value not in (None, "") and on_disk is not None:
+        stage = _stage_dir(path)
+        try:
+            out = _incremental_on_disk(source_cfg, source_table, source_query, path, stage, on_disk, cursor_column,
+                                       cursor_value, column_map, key_column, lookback_hours, reconcile_deletes, family)
+        except Exception as e:  # noqa: BLE001 - as below: a bad cursor or query falls back
+            _drop_stage(stage)
+            effective_mode = "full"
+            warning = f"Incremental query failed ({e}) — ran a full refresh instead."
+        else:
+            df = out.pop("df")
+            try:
+                if validate is not None:
+                    validate(df)
+            except BaseException:
+                _drop_stage(stage)
+                raise
+            if not df.attrs.get("staged"):
+                _drop_stage(stage)                          # nothing changed: the file stands
+            elif write:
+                _swap_staged(df, path)
+            return {"df": df, "type_map": detect_types(df), "mode": "incremental",
+                    "cursor_value": _staged_cursor(out.pop("cursor"), cursor_value),
+                    "warning": out.pop("warning") or warning, **out}
+
+    if effective_mode == "incremental" and cursor_value not in (None, "") and on_disk is None:
         # Allowlist for the identifier interpolated into the query below: the
         # cached file's own columns when we just read it, else whatever the
         # caller knows about the dataset's schema (e.g. its DatasetColumn
         # names) — either way, `cursor_column` must be an actual column, not
         # arbitrary attacker-settable SQL-identifier text.
         cols = set(existing_df.columns) if existing_df is not None else valid_columns
+        # A key the file does not hold cannot be merged on: append, and say so.
+        if key_column and existing_df is not None and key_column not in existing_df.columns:
+            warning = f"Key column '{key_column}' not found on the dataset — appended without merging."
+            key_column = None
+        fetch_from = lookback_cursor(cursor_value, lookback_hours) if key_column else cursor_value
         try:
-            incr_sql = build_incremental_query(source_table, source_query, cursor_column, cursor_value, cols)
-            new_rows = import_to_dataframe(source_cfg, None, incr_sql, params={"cursor_val": cursor_value})
+            incr_sql = build_incremental_query(source_table, source_query, cursor_column, cursor_value, cols, family)
+            new_rows = import_to_dataframe(source_cfg, None, incr_sql, params={"cursor_val": fetch_from})
             if column_map:
                 new_rows = new_rows.rename(columns={n: o for n, o in column_map.items() if n in new_rows.columns})
         except Exception as e:  # noqa: BLE001 - bad cursor/query: fall back, don't 500
             effective_mode = "full"
             warning = f"Incremental query failed ({e}) — ran a full refresh instead."
         else:
-            df = (pd.concat([existing_df, new_rows], ignore_index=True)
-                  if existing_df is not None and len(existing_df) else new_rows)
+            if existing_df is not None and new_rows.empty:
+                # Nothing new -- the commonest incremental run. The empty fetch
+                # has UNTYPED columns; concatenated onto the file it turned whole
+                # numbers into objects, which the instant normaliser then read as
+                # nanoseconds: every id became 1970-01-01 00:00:00.000000001.
+                new_rows = existing_df.iloc[0:0]
+            rows_updated = 0
+            if key_column and existing_df is not None and len(existing_df) and key_column in new_rows.columns:
+                # Merge: the incoming row wins. Keys are compared as text so
+                # 7 and "7" (a CSV round trip) are one key.
+                # Keys compared as text (data_checks.key_text): 7, "7" and 7.0
+                # are one key -- a CSV round trip or a key column with a gap
+                # stores 7 as 7.0, and the update was appended as a duplicate.
+                from .data_checks import key_text
+                held_txt = key_text(existing_df[key_column], keep_empty=True)
+                incoming = key_text(new_rows[key_column], keep_empty=True)
+                rows_updated = int(incoming.isin(set(held_txt.dropna())).sum())
+                kept = existing_df[~held_txt.isin(set(incoming.dropna()))]
+                df = pd.concat([kept, new_rows], ignore_index=True)
+                dedup = key_text(df[key_column], keep_empty=True)
+                df = df[~(dedup.notna() & dedup.duplicated(keep="last"))].reset_index(drop=True)
+            else:
+                df = (pd.concat([existing_df, new_rows], ignore_index=True)
+                      if existing_df is not None and len(existing_df) else new_rows)
+            rows_deleted = 0
+            if reconcile_deletes and key_column and key_column in df.columns:
+                try:
+                    keys = import_to_dataframe(source_cfg, None, build_key_query(
+                        source_table, source_query, key_column, cols, family))
+                    if column_map:
+                        keys = keys.rename(columns={n: o for n, o in column_map.items() if n in keys.columns})
+                    df, rows_deleted, note = drop_deleted(df, key_column, keys[key_column] if key_column in keys.columns
+                                                          else keys.iloc[:, 0])
+                    if note:
+                        warning = note
+                except Exception as e:  # noqa: BLE001 -- the merge stands; deletes wait for next run
+                    warning = f"Could not check for deleted rows ({e}); none were removed this time."
             # The cap is on what the dataset HOLDS: appending past it refuses
             # like a full load over it would, rather than growing unchecked.
             from .connections import _checked, _import_cap
             _checked(df, _import_cap())
+            if validate is not None:
+                validate(df)
             converted: list[str] = []
             if path is not None and write:
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -279,13 +616,31 @@ def _refresh_dataset_body(
             return {
                 "df": df, "type_map": detect_types(df), "mode": "incremental",
                 "cursor_value": _max_cursor(df, cursor_column, cursor_value, converted),
-                "warning": warning, "rows_added": len(new_rows),
+                "warning": warning, "rows_added": len(new_rows) - rows_updated,
+                "rows_updated": rows_updated, "rows_deleted": rows_deleted,
             }
 
     # Full load: explicitly requested, the first incremental run (no baseline
     # cursor yet), or any of the fallbacks above.
-    df = guard_schema(import_to_dataframe(source_cfg, source_table, source_query),
-                      required_columns, column_map)
+    df, stage, staged_cursor = _fetch_full(source_cfg, source_table, source_query, path,
+                                           required_columns, column_map, cursor_column)
+    try:
+        if validate is not None:
+            validate(df)
+    except BaseException:
+        _drop_stage(stage)
+        raise
+    if stage:
+        # Larger than memory: the reload is a finished file beside the live
+        # one, and `df` a sample of it. Swapped in here, or by the caller's
+        # `write_dataset_files` when the write was left to it.
+        if write:
+            _swap_staged(df, path)
+        return {
+            "df": df, "type_map": detect_types(df), "mode": "full",
+            "cursor_value": _staged_cursor(staged_cursor, cursor_value) if cursor_column else cursor_value,
+            "warning": warning, "rows_added": rows_of(df),
+        }
     converted: list[str] = []
     if path is not None and write:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -301,10 +656,42 @@ def _refresh_dataset_body(
     }
 
 
+def lookback_cursor(cursor_value, lookback_hours: int | None):
+    """The cursor to fetch from: `lookback_hours` before a DATE cursor.
+
+    A numeric or opaque cursor is returned as it is -- "six hours before
+    order 1,042" means nothing. The stored watermark is never moved back;
+    only this fetch reads further."""
+    if not lookback_hours or cursor_value in (None, ""):
+        return cursor_value
+    text = str(cursor_value)
+    try:
+        float(text)
+        return cursor_value               # a number, not a date
+    except ValueError:
+        pass
+    try:
+        stamp = pd.Timestamp(text)
+    except (ValueError, TypeError):
+        return cursor_value
+    if pd.isna(stamp):
+        return cursor_value
+    back = stamp - pd.Timedelta(hours=int(lookback_hours))
+    # Same shape as the stored value: a date stays a date, a time a time.
+    return back.date().isoformat() if len(text) <= 10 else back.isoformat(sep=" ")
+
+
 def write_dataset_files(df: pd.DataFrame, filename: str) -> None:
     """The file write `refresh_dataset(write=False)` left to its caller: the
     CSV swapped in atomically, then its parquet sidecar. Blocking."""
     path = Path(filename)
+    if df.attrs.get("staged"):
+        _swap_staged(df, path)
+        return
+    if "rows" in df.attrs:
+        # A sample of a file that is already in place (nothing changed): the
+        # sample must never be written over the dataset.
+        return
     path.parent.mkdir(parents=True, exist_ok=True)
     write_csv_atomic(df, path)
     write_parquet_sidecar(str(path))

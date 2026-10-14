@@ -21,6 +21,8 @@
  *     classic version of this going wrong.
  */
 
+import type { MessageKey, TranslateFn } from '../i18n'
+
 export interface AutoField {
   name: string
   dtype: string
@@ -31,6 +33,14 @@ export interface AutoField {
    *  is what the role is for: assign it, drop the field, get a map — without
    *  it the classification could be set and did nothing visible. */
   geography?: boolean
+  /** How this measure rolls up when nobody chose (`defaultSummary`): an average
+   *  for a price, age or rate, a total for an amount. Missing means sum.
+   *  Fields plan F3 (2026-10-09): every placement used to SUM. */
+  summary?: string
+  /** A link, or text whose values are (almost) all different: there is
+   *  nothing to group, so it is listed, never counted per value. Fields plan
+   *  F4: a click on `item_url` drew 9,319 bars of height 1. */
+  listOnly?: boolean
 }
 
 export interface AutoChart {
@@ -47,9 +57,30 @@ export interface AutoChart {
 }
 
 const isDate = (f: AutoField) => f.dtype === 'datetime'
+const agg = (f: AutoField) => f.summary || 'sum'
+
+/** QA5b S3: the title templates, in the reader's language when a translator is
+ *  given. Without one (tests, the View-as pick) the English is the same text it
+ *  always was. */
+type TitleFn = (key: string, p: Record<string, string>) => string
+const TITLE_EN: Record<string, string> = {
+  countBy: 'Count by {a}', mBy: '{m} by {a}', m2By: '{m1} and {m2} by {a}', mByTwo: '{m} by {a} and {b}',
+  aByB: '{a} by {b}', against: '{y} against {x}', dist: 'Distribution of {m}', trend: 'Trend of {f}',
+  listOf: 'List of {a}', listOfMany: 'List: {names}',
+  // A summary that is not a sum is named: "car_age_years by body_type" read as a total.
+  avgBy: 'Average {m} by {a}', medianBy: 'Median {m} by {a}', minBy: 'Lowest {m} by {a}',
+  maxBy: 'Highest {m} by {a}', countdBy: 'Distinct {m} by {a}',
+}
+const englishTitle: TitleFn = (key, p) => TITLE_EN[key].replace(/\{(\w+)\}/g, (_, k) => p[k])
 
 /** The chart for a dropped set of fields, or null when there is nothing to draw. */
-export function chartForFields(fields: AutoField[]): AutoChart | null {
+export function chartForFields(fields: AutoField[], t?: TranslateFn): AutoChart | null {
+  const title: TitleFn = t ? (key, p) => t(`bc.canvas.auto.${key}` as MessageKey, p) : englishTitle
+  /** "{m} by {a}", or "Average {m} by {a}" when the measure is not summed. */
+  const mByTitle = (m: AutoField, a: string) => {
+    const key = `${agg(m)}By`
+    return title(agg(m) !== 'sum' && TITLE_EN[key] ? key : 'mBy', { m: m.name, a })
+  }
   const all = fields.filter(f => f && f.name)
   if (all.length === 0) return null
 
@@ -69,6 +100,17 @@ export function chartForFields(fields: AutoField[]): AutoChart | null {
     ignored: all.filter(f => !used.includes(f)).map(f => f.name),
   })
 
+  // ── a link or an all-different column: list the rows ──────────────────
+  // Grouping by it has nothing to group; a table of it (and of whatever was
+  // dropped with it) is what the person can read and click.
+  const listed = all.find(f => f.listOnly)
+  if (listed) {
+    // The link goes last: a row reads "price, make, model … link".
+    const names = [...all.filter(f => !f.listOnly), ...all.filter(f => f.listOnly)].map(f => f.name)
+    return make('table', all.length === 1 ? title('listOf', { a: listed.name }) : title('listOfMany', { names: names.join(', ') }),
+      { columns: names, aggregation: 'none' }, all)
+  }
+
   // ── geography beats the generic rules, but never a date ─────────────────
   // A classified column asked for a map explicitly. A DATE still wins the axis:
   // dropping a region and a date has two honest readings, and letting arrival
@@ -78,9 +120,9 @@ export function chartForFields(fields: AutoField[]): AutoChart | null {
     const measure = measures[0] ?? null
     const used = measure ? [geoField, measure] : [geoField]
     return make('map_choropleth',
-      measure ? `${measure.name} by ${geoField.name}` : `Count by ${geoField.name}`,
+      measure ? mByTitle(measure, geoField.name) : title('countBy', { a: geoField.name }),
       measure
-        ? { dimension: geoField.name, measure: measure.name, aggregation: 'sum' }
+        ? { dimension: geoField.name, measure: measure.name, aggregation: agg(measure) }
         : { dimension: geoField.name, aggregation: 'count' },
       used)
   }
@@ -89,14 +131,14 @@ export function chartForFields(fields: AutoField[]): AutoChart | null {
   if (all.length === 1) {
     const f = all[0]
     if (isDate(f)) {
-      return make('line', `Trend of ${f.name}`,
+      return make('line', title('trend', { f: f.name }),
         { dimension: f.name, aggregation: 'count' }, [f])
     }
     if (f.numeric) {
-      return make('histogram', `Distribution of ${f.name}`,
+      return make('histogram', title('dist', { m: f.name }),
         { measure: f.name, bins: 20 }, [f])
     }
-    return make('bar', `Count by ${f.name}`,
+    return make('bar', title('countBy', { a: f.name }),
       { dimension: f.name, aggregation: 'count' }, [f])
   }
 
@@ -104,16 +146,16 @@ export function chartForFields(fields: AutoField[]): AutoChart | null {
   if (axis && measures.length === 1 && !second) {
     const m = measures[0]
     return make(isDate(axis) ? 'line' : 'bar',
-      `${m.name} by ${axis.name}`,
-      { dimension: axis.name, measure: m.name, aggregation: 'sum' }, [axis, m])
+      mByTitle(m, axis.name),
+      { dimension: axis.name, measure: m.name, aggregation: agg(m) }, [axis, m])
   }
 
   // ── an axis and two measures: one bar per measure, two scales ────────────
   if (axis && measures.length >= 2 && !second) {
     const [m1, m2] = measures
-    return make('dual_axis_bar', `${m1.name} and ${m2.name} by ${axis.name}`,
+    return make('dual_axis_bar', title('m2By', { m1: m1.name, m2: m2.name, a: axis.name }),
       { dimension: axis.name, measure: m1.name, measure2: m2.name,
-        aggregation: 'sum' }, [axis, m1, m2])
+        aggregation: agg(m1), aggregation2: agg(m2) }, [axis, m1, m2])
   }
 
   // ── a date axis with a category to split by ──────────────────────────────
@@ -122,20 +164,20 @@ export function chartForFields(fields: AutoField[]): AutoChart | null {
   // is the category.
   if (axis && isDate(axis) && second && measures.length >= 1) {
     const m = measures[0]
-    return make('bar', `${m.name} by ${axis.name} and ${second.name}`,
+    return make('bar', title('mByTwo', { m: m.name, a: axis.name, b: second.name }),
       { dimension: axis.name, dimension2: second.name, measure: m.name,
-        aggregation: 'sum' }, [axis, second, m])
+        aggregation: agg(m) }, [axis, second, m])
   }
 
   // ── two categories, with or without a measure ────────────────────────────
   if (axis && second && measures.length >= 1) {
     const m = measures[0]
-    return make('heatmap', `${m.name} by ${axis.name} and ${second.name}`,
+    return make('heatmap', title('mByTwo', { m: m.name, a: axis.name, b: second.name }),
       { dimension: axis.name, dimension2: second.name, measure: m.name,
-        aggregation: 'sum' }, [axis, second, m])
+        aggregation: agg(m) }, [axis, second, m])
   }
   if (axis && second) {
-    return make('crosstab', `${axis.name} by ${second.name}`,
+    return make('crosstab', title('aByB', { a: axis.name, b: second.name }),
       { dimension: axis.name, dimension2: second.name, aggregation: 'count' },
       [axis, second])
   }
@@ -143,20 +185,20 @@ export function chartForFields(fields: AutoField[]): AutoChart | null {
   // ── no category at all: a numeric against a numeric ──────────────────────
   if (measures.length >= 2) {
     const [x, y] = measures
-    return make('numeric_series', `${y.name} against ${x.name}`,
+    return make('numeric_series', title('against', { y: y.name, x: x.name }),
       { measure: x.name, measure2: y.name }, [x, y])
   }
 
   // ── a lone measure with nothing to put it against ────────────────────────
   if (measures.length === 1) {
     const m = measures[0]
-    return make('histogram', `Distribution of ${m.name}`,
+    return make('histogram', title('dist', { m: m.name }),
       { measure: m.name, bins: 20 }, [m])
   }
 
   // Several dates and nothing else: chart the first as a trend rather than
   // refusing, and name the rest as unused.
   const f = all[0]
-  return make('line', `Trend of ${f.name}`,
+  return make('line', title('trend', { f: f.name }),
     { dimension: f.name, aggregation: 'count' }, [f])
 }

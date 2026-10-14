@@ -5,21 +5,30 @@ import ValueMapEditor from './ValueMapEditor'
 import IntervalEditor from './IntervalEditor'
 import DataBarEditor from './DataBarEditor'
 import { ruleControls } from './ruleCapabilities'
+import { useT, type MessageKey } from '../../i18n'
 
-const RULE_KINDS: { value: DisplayRule['kind']; label: string }[] = [
-  { value: 'expression', label: 'Expression' },
-  { value: 'value_map', label: 'Colour map' },
-  { value: 'interval', label: 'Bands' },
-  { value: 'data_bar', label: 'Data bar' },
+// `value` is what is saved; only the label is translated, at display.
+const RULE_KINDS: { value: DisplayRule['kind']; labelKey: MessageKey }[] = [
+  { value: 'expression', labelKey: 'bc.rules.dr.kind.expression' },
+  { value: 'value_map', labelKey: 'bc.rules.dr.kind.valueMap' },
+  { value: 'interval', labelKey: 'bc.rules.dr.kind.interval' },
+  { value: 'data_bar', labelKey: 'bc.rules.dr.kind.dataBar' },
 ]
 
-const OPERATORS: { value: RuleOperator; label: string }[] = [
-  { value: 'gt', label: 'is greater than' }, { value: 'gte', label: 'is at least' },
-  { value: 'lt', label: 'is less than' },    { value: 'lte', label: 'is at most' },
-  { value: 'eq', label: 'equals' },          { value: 'ne', label: 'does not equal' },
-  { value: 'between', label: 'is between' }, { value: 'in', label: 'is one of' },
-  { value: 'isnull', label: 'is blank' },    { value: 'notnull', label: 'is not blank' },
+const OPERATORS: { value: RuleOperator; labelKey: MessageKey }[] = [
+  { value: 'gt', labelKey: 'bc.rules.dr.op.gt' },           { value: 'gte', labelKey: 'bc.rules.dr.op.gte' },
+  { value: 'lt', labelKey: 'bc.rules.dr.op.lt' },           { value: 'lte', labelKey: 'bc.rules.dr.op.lte' },
+  { value: 'eq', labelKey: 'bc.rules.dr.op.eq' },           { value: 'ne', labelKey: 'bc.rules.dr.op.ne' },
+  { value: 'between', labelKey: 'bc.rules.dr.op.between' }, { value: 'in', labelKey: 'bc.rules.dr.op.in' },
+  { value: 'isnull', labelKey: 'bc.rules.dr.op.isnull' },   { value: 'notnull', labelKey: 'bc.rules.dr.op.notnull' },
 ]
+
+// QA4 E1: what a column of each kind can be compared with. A comparison
+// (> ≥ < ≤ between) on a text or date column is an error on the server
+// ("'>' not supported between instances of 'str' and 'int'").
+const ORDERED_OPS: RuleOperator[] = ['gt', 'gte', 'lt', 'lte', 'between']
+export const opsForColumn = (numeric: boolean): RuleOperator[] =>
+  OPERATORS.map(o => o.value).filter(op => numeric || !ORDERED_OPS.includes(op))
 
 interface Props {
   rules: DisplayRule[]
@@ -51,6 +60,7 @@ export default function DisplayRulesPanel({ rules: initialRules, columns, numeri
   // controls responsive; the panel is remounted (keyed on widget id) when the author
   // switches widgets, so this never goes stale across widgets.
   const [rules, setRules] = useState<DisplayRule[]>(initialRules)
+  const t = useT()
 
   const commit = (next: DisplayRule[]) => {
     setRules(next)
@@ -67,6 +77,10 @@ export default function DisplayRulesPanel({ rules: initialRules, columns, numeri
     // persist it via the debounced save if the author navigates away mid-edit. Wait
     // for value2 to be set before compiling; the expression stays at its prior value
     // (still syntactically valid) in the meantime.
+    // QA4 E1: a column that cannot take the operator gets one it can.
+    if (patch.column && rule.condition && rule.kind === 'expression' && numericColumns !== undefined && !opsForColumn(numericColumns!.includes(patch.column)).includes(rule.condition.op)) {
+      rule.condition = { op: 'eq', value: '' }
+    }
     const readyToCompile = !(rule.condition?.op === 'between' && rule.condition.value2 === undefined)
     if (rule.condition && rule.column && readyToCompile) {
       rule.expression = compileCondition(rule.column, rule.condition)
@@ -129,18 +143,25 @@ export default function DisplayRulesPanel({ rules: initialRules, columns, numeri
   const intervalColumn = (current?: string) =>
     (current && intervalColumns.includes(current)) ? current : (intervalColumns[0] ?? 'value')
 
-  const addRule = () => commit([...rules, {
-    id: crypto.randomUUID(), kind: 'expression', target: 'mark',
-    column: columns[0] ?? 'value', condition: { op: 'gt', value: 0 },
-    expression: compileCondition(columns[0] ?? 'value', { op: 'gt', value: 0 }),
-    style: { fill: '#f87171' },
-  }])
+  // QA4 E1: a new rule starts on something the server can evaluate. "> 0"
+  // needs a number: the first numeric column. With none (dtypes known), a
+  // colour per value, which fits a text column. It used to be the first column,
+  // whatever it was ("date > 0", a raw Python error).
+  const addRule = () => {
+    const numericCol = dtypesKnown ? numericRuleColumns[0] : columns[0]
+    commit([...rules, numericCol != null || !columns.length
+      ? { id: crypto.randomUUID(), kind: 'expression', target: 'mark',
+          column: numericCol ?? 'value', condition: { op: 'gt', value: 0 },
+          expression: compileCondition(numericCol ?? 'value', { op: 'gt', value: 0 }),
+          style: { fill: '#f87171' } }
+      : { id: crypto.randomUUID(), kind: 'value_map', target: 'mark', column: columns[0], mappings: [] }])
+  }
 
   return (
     <div>
       <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase',
         letterSpacing: '.06em', marginBottom: 8 }}>
-        Display Rules
+        {t('bc.rules.dr.title')}
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -154,10 +175,10 @@ export default function DisplayRulesPanel({ rules: initialRules, columns, numeri
           // Shared across all three kinds: which rule shape this row authors.
           const kindSelect = (
             <label style={{ ...lbl, flex: '1 1 110px' }} htmlFor={`kind-${rule.id}`}>
-              Rule kind
+              {t('bc.rules.dr.ruleKind')}
               <select id={`kind-${rule.id}`} value={rule.kind} style={inp}
                 onChange={e => changeKind(i, e.target.value as DisplayRule['kind'])}>
-                {RULE_KINDS.map(k => <option key={k.value} value={k.value}>{k.label}</option>)}
+                {RULE_KINDS.map(k => <option key={k.value} value={k.value}>{t(k.labelKey)}</option>)}
               </select>
             </label>
           )
@@ -185,7 +206,7 @@ export default function DisplayRulesPanel({ rules: initialRules, columns, numeri
 
           const columnSelect = (
             <label style={{ ...lbl, flex: '1 1 90px' }} htmlFor={`col-${rule.id}`}>
-              Column
+              {t('bc.rules.dr.column')}
               <select id={`col-${rule.id}`} value={colValue} style={inp}
                 onChange={e => update(i, { column: e.target.value })}>
                 {colOptions.map(c => <option key={c} value={c}>{c}</option>)}
@@ -195,12 +216,12 @@ export default function DisplayRulesPanel({ rules: initialRules, columns, numeri
 
           const targetSelect = (
             <label style={{ ...lbl, flex: '1 1 110px' }} htmlFor={`target-${rule.id}`}>
-              Applies to
+              {t('bc.rules.dr.appliesTo')}
               <select id={`target-${rule.id}`} value={rule.target} style={inp}
                 onChange={e => update(i, { target: e.target.value as DisplayRule['target'] })}>
-                <option value="mark">The mark</option>
-                <option value="background">Widget background</option>
-                <option value="visibility">Hide the widget</option>
+                <option value="mark">{t('bc.rules.dr.target.mark')}</option>
+                <option value="background">{t('bc.rules.dr.target.background')}</option>
+                <option value="visibility">{t('bc.rules.dr.target.visibility')}</option>
               </select>
             </label>
           )
@@ -216,7 +237,7 @@ export default function DisplayRulesPanel({ rules: initialRules, columns, numeri
           // ruleStyles.widget.background for the container's own paint.
           const fillControl = controls.includes('fill') && (
             <label style={{ ...lbl, flex: '0 0 auto' }} htmlFor={`fill-${rule.id}`}>
-              {rule.target === 'background' ? 'Background' : 'Fill'}
+              {t(rule.target === 'background' ? 'bc.rules.dr.background' : 'bc.rules.dr.fill')}
               <input id={`fill-${rule.id}`} type="color"
                 value={(rule.target === 'background' ? rule.style?.background : rule.style?.fill) ?? '#f87171'}
                 style={{ width: 36, height: 26, padding: 2, border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', background: 'var(--surface)' }}
@@ -241,17 +262,15 @@ export default function DisplayRulesPanel({ rules: initialRules, columns, numeri
 
               {rule.target === 'visibility' && (
                 <p style={{ fontSize: 10.5, color: 'var(--muted)', margin: '4px 0 0' }}>
-                  Presentational only — matching rows are still sent to the client, and a
-                  broken visibility rule reveals the widget (rules fail open). Not a
-                  substitute for row-level security.
+                  {t('bc.rules.dr.visibilityNote')}
                 </p>
               )}
 
-              {error && <div role="alert" style={{ color: '#f87171', fontSize: 11, marginTop: 5 }}>{error.message}</div>}
+              {error && <RuleError message={error.message} />}
 
               <button type="button" onClick={() => commit(rules.filter((_, j) => j !== i))}
                 style={{ marginTop: 6, background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 11, padding: 0 }}>
-                Remove
+                {t('bc.rules.dr.remove')}
               </button>
             </div>
           )
@@ -267,8 +286,7 @@ export default function DisplayRulesPanel({ rules: initialRules, columns, numeri
 
               {noNumericColumns && (
                 <p role="note" style={{ fontSize: 10.5, color: '#f87171', margin: '4px 0 0' }}>
-                  A Bands rule reads a number, and this widget has no numeric column to
-                  read. Pick a different rule kind, or add a numeric field.
+                  {t('bc.rules.dr.noNumericBands')}
                 </p>
               )}
 
@@ -278,17 +296,15 @@ export default function DisplayRulesPanel({ rules: initialRules, columns, numeri
 
               {rule.target === 'visibility' && (
                 <p style={{ fontSize: 10.5, color: 'var(--muted)', margin: '4px 0 0' }}>
-                  Presentational only — matching rows are still sent to the client, and a
-                  broken visibility rule reveals the widget (rules fail open). Not a
-                  substitute for row-level security.
+                  {t('bc.rules.dr.visibilityNote')}
                 </p>
               )}
 
-              {error && <div role="alert" style={{ color: '#f87171', fontSize: 11, marginTop: 5 }}>{error.message}</div>}
+              {error && <RuleError message={error.message} />}
 
               <button type="button" onClick={() => commit(rules.filter((_, j) => j !== i))}
                 style={{ marginTop: 6, background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 11, padding: 0 }}>
-                Remove
+                {t('bc.rules.dr.remove')}
               </button>
             </div>
           )
@@ -302,8 +318,7 @@ export default function DisplayRulesPanel({ rules: initialRules, columns, numeri
 
               {noNumericColumns && (
                 <p role="note" style={{ fontSize: 10.5, color: '#f87171', margin: '4px 0 0' }}>
-                  A Data bar rule reads a number, and this widget has no numeric column
-                  to read. Pick a different rule kind, or add a numeric field.
+                  {t('bc.rules.dr.noNumericBar')}
                 </p>
               )}
 
@@ -311,11 +326,11 @@ export default function DisplayRulesPanel({ rules: initialRules, columns, numeri
                 <DataBarEditor rule={rule} onChange={next => update(i, next)} />
               </div>
 
-              {error && <div role="alert" style={{ color: '#f87171', fontSize: 11, marginTop: 5 }}>{error.message}</div>}
+              {error && <RuleError message={error.message} />}
 
               <button type="button" onClick={() => commit(rules.filter((_, j) => j !== i))}
                 style={{ marginTop: 6, background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 11, padding: 0 }}>
-                Remove
+                {t('bc.rules.dr.remove')}
               </button>
             </div>
           )
@@ -326,12 +341,12 @@ export default function DisplayRulesPanel({ rules: initialRules, columns, numeri
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 6 }}>
                 {kindSelect}
               </div>
-              <label htmlFor={`expr-${rule.id}`} style={lbl}>Expression</label>
-              <input id={`expr-${rule.id}`} value={rule.expression ?? ''} readOnly style={inp} />
-              {error && <div role="alert" style={{ color: '#f87171', fontSize: 11, marginTop: 4 }}>{error.message}</div>}
+              <label htmlFor={`expr-${rule.id}`} style={lbl}>{t('bc.rules.dr.expression')}</label>
+              <input id={`expr-${rule.id}`} value={rule.expression ?? ''} readOnly dir="ltr" style={inp} />
+              {error && <RuleError message={error.message} />}
               <button type="button" onClick={() => commit(rules.filter((_, j) => j !== i))}
                 style={{ marginTop: 6, background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 11, padding: 0 }}>
-                Remove
+                {t('bc.rules.dr.remove')}
               </button>
             </div>
           )
@@ -343,10 +358,11 @@ export default function DisplayRulesPanel({ rules: initialRules, columns, numeri
                 {showColumnSelect && columnSelect}
 
                 <label style={{ ...lbl, flex: '1 1 110px' }} htmlFor={`op-${rule.id}`}>
-                  Operator
+                  {t('bc.rules.dr.operator')}
                   <select id={`op-${rule.id}`} value={cond.op} style={inp}
                     onChange={e => update(i, { condition: { ...cond, op: e.target.value as RuleOperator } })}>
-                    {OPERATORS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    {OPERATORS.filter(o => !dtypesKnown || !rule.column || opsForColumn(numericColumns!.includes(rule.column)).includes(o.value) || o.value === cond.op)
+                      .map(o => <option key={o.value} value={o.value}>{t(o.labelKey)}</option>)}
                   </select>
                 </label>
 
@@ -354,13 +370,13 @@ export default function DisplayRulesPanel({ rules: initialRules, columns, numeri
                   const isNumeric = !!rule.column && !!numericColumns?.includes(rule.column)
                   return (<>
                     <label style={{ ...lbl, flex: '1 1 70px' }} htmlFor={`val-${rule.id}`}>
-                      Value
+                      {t('bc.rules.dr.value')}
                       <input id={`val-${rule.id}`} value={String(cond.value ?? '')} style={inp}
                         onChange={e => update(i, { condition: { ...cond, value: coerce(e.target.value, isNumeric) } })} />
                     </label>
                     {cond.op === 'between' && (
                       <label style={{ ...lbl, flex: '1 1 70px' }} htmlFor={`val2-${rule.id}`}>
-                        To
+                        {t('bc.rules.dr.to')}
                         <input id={`val2-${rule.id}`} value={String(cond.value2 ?? '')} style={inp}
                           onChange={e => update(i, { condition: { ...cond, value2: coerce(e.target.value, isNumeric) } })} />
                       </label>
@@ -374,17 +390,15 @@ export default function DisplayRulesPanel({ rules: initialRules, columns, numeri
 
               {rule.target === 'visibility' && (
                 <p style={{ fontSize: 10.5, color: 'var(--muted)', margin: '4px 0 0' }}>
-                  Presentational only — matching rows are still sent to the client, and a
-                  broken visibility rule reveals the widget (rules fail open). Not a
-                  substitute for row-level security.
+                  {t('bc.rules.dr.visibilityNote')}
                 </p>
               )}
 
-              {error && <div role="alert" style={{ color: '#f87171', fontSize: 11, marginTop: 5 }}>{error.message}</div>}
+              {error && <RuleError message={error.message} />}
 
               <button type="button" onClick={() => commit(rules.filter((_, j) => j !== i))}
                 style={{ marginTop: 6, background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 11, padding: 0 }}>
-                Remove
+                {t('bc.rules.dr.remove')}
               </button>
             </div>
           )
@@ -394,14 +408,29 @@ export default function DisplayRulesPanel({ rules: initialRules, columns, numeri
       <button type="button" onClick={addRule}
         style={{ marginTop: 8, width: '100%', padding: '5px 0', background: 'var(--surface2)',
           border: '1px dashed var(--border)', borderRadius: 5, color: 'var(--accent)', cursor: 'pointer', fontSize: 11 }}>
-        + Add rule
+        {t('bc.rules.dr.add')}
       </button>
 
       {rules.length === 0 && (
         <p style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center', padding: '8px 0', margin: 0 }}>
-          No display rules yet
+          {t('bc.rules.dr.empty')}
         </p>
       )}
+    </div>
+  )
+}
+
+/** QA4 E1: a rule the server could not apply, in the reader's words; the
+ *  server's own text (Python, English) only as a left-to-right detail. */
+function RuleError({ message }: { message: string }) {
+  const t = useT()
+  return (
+    <div role="alert" style={{ color: '#f87171', fontSize: 11, marginTop: 5 }}>
+      {t('bc.rules.dr.error')}
+      <details style={{ marginTop: 2, color: 'var(--muted)' }}>
+        <summary style={{ cursor: 'pointer' }}>{t('bc.rules.dr.errorDetail')}</summary>
+        <code dir="ltr" style={{ display: 'block', unicodeBidi: 'isolate', textAlign: 'left', fontSize: 10.5 }}>{message}</code>
+      </details>
     </div>
   )
 }

@@ -223,7 +223,11 @@ class TestDataQualityReport:
         df = pd.DataFrame({"IMSI": range(n), "LAC": range(n), "latitude": [30 + i / 100 for i in range(n)],
                            "A_NUMBER": [9990000001] * n,
                            "volume": [i * 2 for i in range(n)], "amount": [i * 3 + 1 for i in range(n)]})
-        r = analyze_numeric(df, list(df.columns))
+        # What an identifier is comes from its stored role (or a name any
+        # database uses -- an id, a number, a coordinate), not from one
+        # industry's column names (tests/test_domain_neutral.py).
+        meta = {"IMSI": {"role": "identifier"}, "LAC": {"role": "identifier"}}
+        r = analyze_numeric(df, list(df.columns), meta)
         assert set(r["correlation"]) == {"volume", "amount"}
         assert set(r["columns"]) == set(df.columns)                  # statistics for every column still
 

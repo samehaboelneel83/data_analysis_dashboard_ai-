@@ -251,11 +251,11 @@
   <div class="stack">
     <a class="slab" data-l="1" href="#l1"><span class="sn">01</span><span class="st">Data Sources &amp; Connectivity</span><span class="sd">45 connectors · DirectQuery</span></a>
     <a class="slab" data-l="2" href="#l2"><span class="sn">02</span><span class="st">Ingestion &amp; Metadata</span><span class="sd">profile · introspect · drift</span></a>
-    <a class="slab" data-l="3" href="#l3"><span class="sn">03</span><span class="st">Storage &amp; Persistence</span><span class="sd">86 tables · Valkey cache</span></a>
+    <a class="slab" data-l="3" href="#l3"><span class="sn">03</span><span class="st">Storage &amp; Persistence</span><span class="sd">100 tables · Valkey cache</span></a>
     <a class="slab" data-l="4" href="#l4"><span class="sn">04</span><span class="st">Query &amp; Semantic</span><span class="sd">25 aggregations · RLS</span></a>
     <a class="slab" data-l="5" href="#l5"><span class="sn">05</span><span class="st">Analytics &amp; AI</span><span class="sd">stats · forecast · NL→SQL</span></a>
     <a class="slab" data-l="6" href="#l6"><span class="sn">06</span><span class="st">API &amp; Services</span><span class="sd">19 routers · auth · delivery</span></a>
-    <a class="slab" data-l="7" href="#l7"><span class="sn">07</span><span class="st">Presentation</span><span class="sd">57 widgets · 20 pages</span></a>
+    <a class="slab" data-l="7" href="#l7"><span class="sn">07</span><span class="st">Presentation</span><span class="sd">57 widgets · 23 pages</span></a>
   </div>
   <p class="flowhint">↑ data flows upward · dependencies point downward ↓</p>
 
@@ -621,13 +621,13 @@ STAT_FAMILIES       = {"postgresql"}</code></pre>
   <p class="owns"><strong>Owns:</strong> durable state, cached state, and schema evolution.</p>
 
   <h3>Relational store</h3>
-  <p>PostgreSQL 16 Alpine. <strong>86 tables</strong> defined in <code>models/models.py</code> via async SQLAlchemy, grouped by concern.</p>
+  <p>PostgreSQL 16 Alpine. <strong>100 tables</strong> defined in <code>models/models.py</code> via async SQLAlchemy, grouped by concern.</p>
   <div class="scroll">
     <table>
       <thead><tr><th>Group</th><th>Representative tables</th></tr></thead>
       <tbody>
         <tr><th>Datasets</th><td><code>datasets</code>, <code>dataset_columns</code>, <code>dataset_shares</code>, <code>analysis_results</code></td></tr>
-        <tr><th>Reports</th><td><code>reports</code>, <code>report_pages</code>, <code>report_widgets</code>, <code>report_parameters</code>, <code>bookmarks</code>, <code>report_user_grants</code>, <code>recent_views</code>, <code>org_units</code>, <code>user_org_units</code></td></tr>
+        <tr><th>Reports</th><td><code>reports</code>, <code>report_pages</code>, <code>report_widgets</code>, <code>report_parameters</code>, <code>bookmarks</code>, <code>report_user_grants</code>, <code>report_favorites</code>, <code>recent_views</code>, <code>org_units</code>, <code>user_org_units</code></td></tr>
         <tr><th>Modelling</th><td><code>relationships</code>, <code>hierarchy_nodes</code>, <code>data_views</code>, <code>common_filters</code></td></tr>
         <tr><th>Sources</th><td><code>data_sources</code>, <code>source_objects</code>, <code>source_columns</code>, <code>source_relationships</code></td></tr>
         <tr><th>Identity</th><td><code>organizations</code>, <code>users</code>, <code>roles</code>, <code>api_keys</code>, <code>org_idps</code>, <code>org_parents</code></td></tr>
@@ -646,7 +646,7 @@ STAT_FAMILIES       = {"postgresql"}</code></pre>
       </tbody>
     </table>
   </div>
-  <p>Schema changes go through <strong>Alembic</strong> (<code>backend/alembic/</code>, 46 revisions). <code>postgres/init.sql</code> provides the initial schema and indexes. Every timestamp column is <code>TIMESTAMPTZ</code> and the app writes naive UTC; <code>core/database.py</code> marks each bound naive datetime as UTC (asyncpg would read it as the process's local time) and pins the session time zone to UTC, so stored times are right on a server whose clock is not UTC.</p>
+  <p>Schema changes go through <strong>Alembic</strong> (<code>backend/alembic/</code>, 68 revisions). <code>postgres/init.sql</code> provides the initial schema and indexes. Every timestamp column is <code>TIMESTAMPTZ</code> and the app writes naive UTC; <code>core/database.py</code> marks each bound naive datetime as UTC (asyncpg would read it as the process's local time) and pins the session time zone to UTC, so stored times are right on a server whose clock is not UTC.</p>
 
   <h3>Cache</h3>
   <p><code>services/cache_backend.py</code> defines a <code>CacheBackend</code> interface with two implementations — <code>InProcessCache</code> for single-process or test runs, and <code>ValkeyCache</code> for the deployed stack. <code>frame_cache.py</code> caches computed result frames. With <code>VALKEY_URL</code> set, the rate limiter's buckets and the AI concurrent-ask counter live in the same Valkey (<code>core/shared_limits.py</code>), so every API process shares one ceiling; without it, or while Valkey is down, each process keeps its own.</p>
@@ -680,6 +680,7 @@ STAT_FAMILIES       = {"postgresql"}</code></pre>
 
   <h3>2 · SQL construction</h3>
   <p><code>services/query_builder.py</code> builds dialect-correct SQL from a model definition: <code>build_sql(model, dialect, known, …)</code>, with <code>_quote()</code> handling per-dialect identifier quoting and <code>introspect_tables()</code> validating that referenced tables and columns actually exist before emission.</p>
+  <p>Conditions nest: a filter may be a <code>{group: and|or, filters: [...]}</code> box, compiled by the same code as any other condition. <code>services/sql_safety.py</code> holds the injection rules every path shares: values become per-dialect literals (<code>encode_literal</code>; backslashes doubled where the database treats them as an escape &mdash; MySQL, MariaDB, ClickHouse), names are quoted with the quote character doubled (<code>quote_ident</code>), and hand-written SQL (the SQL tab, custom-SQL imports, previews) must be exactly one read (<code>ensure_read_only</code>) before <code>services/connections.py</code> runs it.</p>
   <p><code>sql_expr.py</code> and <code>measure_eval.py</code> evaluate user-authored expressions and calculated measures. <code>parameters.py</code> binds report parameters.</p>
 
   <h3>3 · Governance</h3>
@@ -716,7 +717,7 @@ STAT_FAMILIES       = {"postgresql"}</code></pre>
   <p>Both hand their result to the <strong>same shaper</strong>, <code>get_widget_data_from_df</code>, which is why <code>direct_query.py</code> rejects aggregations that are not grain-safe: the shaper re-runs its groupby over an already-aggregated frame, and only <code>sum/avg/min/max/median/percentiles</code> survive that second pass unchanged. <code>count</code>, <code>countd</code>, <code>std</code>, <code>variance</code> and <code>range</code> do not, so they are refused rather than silently computed wrong.</p>
   <p><strong>One evaluation order for all three engines</strong> is written down in <code>docs/EVALUATION_ORDER.md</code>: access, row rule, column rule, prep, dataset filter, calculated columns, parameters, relative dates, widget filters, grouping, aggregation, measures, then HAVING, suppression, ranking, quick calcs, limit and totals over every group. A pushdown engine is used only where it gives the same answer; DirectQuery fetches the rows for anything its <code>GROUP BY</code> page cannot do (HAVING, suppression, quick calcs, date buckets, drill filters on a bucket) and runs the import shaper over them. Named measures on DirectQuery are written as SQL by <code>services/measure_sql.py</code> where the grammar allows (<code>SUM</code>, <code>AVG</code>, <code>COUNT</code>, <code>COUNTD</code>, <code>MEDIAN</code>, arithmetic with <code>NULLIF</code> division, <code>IF</code>) and evaluated over fetched rows otherwise. <code>tests/test_engine_parity.py</code> requires the import engine's rows from each engine.</p>
   <p><strong>The import path materialises the whole frame</strong>, which is the platform's main scale limit. Measured on 2026-08-28: a 406 MB / 2M-row / 30-column CSV costs <strong>~1.8 GB of RSS</strong> to answer a five-row question — roughly 4.5× the file — and every concurrent render holds its own frame.</p>
-  <p><code>settings.import_row_cap</code> bounds it. The cap <strong>refuses</strong> rather than truncating: a truncated frame would produce totals over an arbitrary subset with no way to say so in the result, and a confident wrong number is worse than an error. Over the cap the request returns <strong>413</strong> naming both the dataset size and the limit. It defaults to <strong>2,000,000 rows</strong> - roughly where the measured 1.8 GB-per-render cost stops being survivable on a shared box. An operator with the memory to spare can still set <code>0</code> to disable it.</p>
+  <p><code>settings.import_row_cap</code> bounds it. The cap <strong>refuses</strong> rather than truncating: a truncated frame would produce totals over an arbitrary subset with no way to say so in the result, and a confident wrong number is worse than an error. Over the cap the request returns <strong>413</strong> naming both the dataset size and the limit. It defaults to <strong>200,000,000 rows</strong> (2,000,000 until 2026-10-11) and is an administrator's setting (Admin → Settings, or <code>IMPORT_ROW_CAP</code>); <code>0</code> disables it. At the default the host's memory is the real limit - about 2.1 GB per million rows at import on the benchmark table - so a small or shared host should set it to what <code>scripts/bench_import.py</code> reports there.</p>
 
   <h3>DuckDB pre-aggregation</h3>
   <p><code>services/duck_agg.py</code>, behind <code>settings.widget_duckdb_pushdown</code> (default <strong>on</strong> since 2026-08-29), aggregates eligible import-mode queries with DuckDB and hands the small result to the same shaper — the pattern <code>run_direct_query</code> already uses.</p>
@@ -755,7 +756,7 @@ STAT_FAMILIES       = {"postgresql"}</code></pre>
   widget list. <code>suggest_dataset_dashboard.py</code> starts from a
   <strong>dataset that already exists</strong> and a person&rsquo;s own description of
   their job, and returns whole dashboards for that person.</p>
-  <p>It is fenced three ways, because a model handed 74 widget types will
+  <p>It is fenced three ways, because a model handed 77 widget types will
   otherwise propose tiles that render blank:</p>
   <ol>
     <li><code>dataset_profile.py</code> builds what the model is told &mdash;
@@ -833,7 +834,7 @@ llm_reserved_interactive = 2</code></pre>
   <p class="owns"><strong>Owns:</strong> the HTTP surface, identity, and everything that leaves the system.</p>
 
   <h3>Routers</h3>
-  <p><strong>34 router modules</strong>, mounted with 34 <code>include_router</code> calls in <code>main.py</code> — <code>analysis</code> and <code>metadata</code> each expose a second router. All under <code>/api/v1</code> except the agent.</p>
+  <p><strong>38 router modules</strong>, mounted with 41 <code>include_router</code> calls in <code>main.py</code> — <code>analysis</code>, <code>metadata</code> and <code>publishing</code> each expose a second router. All under <code>/api/v1</code> except the agent.</p>
   <div class="scroll">
     <table>
       <thead><tr><th>Router</th><th>Surface</th></tr></thead>
@@ -855,6 +856,7 @@ llm_reserved_interactive = 2</code></pre>
         <tr><th><code>authz</code></th><td>Batched &ldquo;may I, and why not&rdquo; decisions for the UI</td></tr>
         <tr><th><code>review</code></th><td>Report review, publish gate, performance evaluation</td></tr>
         <tr><th><code>report_copilot</code></th><td>Copilot edits to a report (versioned, undoable)</td></tr>
+        <tr><th><code>publishing</code> (+ <code>portal</code>)</th><td>A dashboard's state, details, approval, release rollback, archive, owner; what a person may do with it; the reader's catalogue, favourites and deliveries</td></tr>
         <tr><th><code>semantic</code></th><td>Governed semantic-layer API (datasets, measures, RLS)</td></tr>
         <tr><th><code>prediction_models</code></th><td>Train, save and score models</td></tr>
         <tr><th><code>boundary_sets</code>, <code>map_settings</code></th><td>Region boundaries, starter packs, basemap tiles</td></tr>
@@ -994,7 +996,7 @@ llm_reserved_interactive = 2</code></pre>
   <p class="owns"><strong>Owns:</strong> authoring and rendering reports. React 18 · TypeScript · Vite · Recharts.</p>
 
   <h3>Pages</h3>
-  <p><strong>20 pages</strong> in <code>frontend/src/pages/</code>.</p>
+  <p><strong>25 pages</strong> in <code>frontend/src/pages/</code>.</p>
   <div class="scroll">
     <table>
       <thead><tr><th>Page</th><th>Purpose</th></tr></thead>
@@ -1022,7 +1024,7 @@ llm_reserved_interactive = 2</code></pre>
   </div>
 
   <h3>Widget system</h3>
-  <p><strong>74 widget types</strong> declared in <code>types/report.ts</code> as <code>WidgetType</code> and catalogued in <code>WIDGET_CATALOG</code> — the source of truth; do not maintain a parallel list.</p>
+  <p><strong>77 widget types</strong> declared in <code>types/report.ts</code> as <code>WidgetType</code> and catalogued in <code>WIDGET_CATALOG</code> — the source of truth; do not maintain a parallel list.</p>
   <div class="scroll">
     <table>
       <thead><tr><th>Category</th><th>Types</th></tr></thead>
@@ -1161,8 +1163,8 @@ llm_reserved_interactive = 2</code></pre>
     <table>
       <thead><tr><th>Suite</th><th>Scope</th><th>Count</th></tr></thead>
       <tbody>
-        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~6,670 tests · 426 modules</td></tr>
-        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~3,410 tests · 248 files</td></tr>
+        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~6,670 tests · 538 modules</td></tr>
+        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~3,410 tests · 389 files</td></tr>
         <tr><th>Evals</th><td><code>backend/evals/</code></td><td>Agent quality gates (<code>run_eval_gate.ps1</code>)</td></tr>
         <tr><th>Conformance</th><td><code>tests/test_layer_conformance.py</code></td><td>Enforces the layer boundaries above</td></tr>
         <tr><th>Doc audit</th><td><code>tests/test_architecture_doc.py</code></td><td>Enforces the <em>counts</em> in this document</td></tr>

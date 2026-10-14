@@ -1,17 +1,5 @@
-import { describe, it, expect, afterEach } from 'vitest'
-import { readViewStyle, updatedAgo } from './viewStyle'
-
-describe('the view style preference', () => {
-  afterEach(() => { localStorage.removeItem('datalytics.viewStyle') })
-
-  it('is Default until a viewer chooses Modern', () => {
-    expect(readViewStyle()).toBe('default')
-    localStorage.setItem('datalytics.viewStyle', 'modern')
-    expect(readViewStyle()).toBe('modern')
-    localStorage.setItem('datalytics.viewStyle', 'something-else')
-    expect(readViewStyle()).toBe('default')
-  })
-})
+import { describe, it, expect } from 'vitest'
+import { updatedAgo } from './viewStyle'
 
 describe('updatedAgo', () => {
   const now = Date.parse('2026-09-27T12:00:00Z')

@@ -56,7 +56,7 @@ async def pair(db_session, two_orgs, tmp_path):
 def rewrites(monkeypatch):
     calls = []
 
-    def _rewrite(cfg, filename, source_table, source_query):
+    def _rewrite(cfg, filename, source_table, source_query, **_kw):
         calls.append(source_query)
         df = pd.DataFrame([{"tenant": "acme", "region": "N", "amount_sum": 2.0, "row_count": 1}])
         df.to_csv(filename, index=False)
@@ -169,7 +169,7 @@ async def test_a_failed_rewrite_does_not_erase_a_prior_failure(db_session, pair,
     await refresh_scheduler.record_failure(db_session, "dataset", agg.id, "old failure")
     monkeypatch.setattr(refresh_scheduler, "rescan_insights", _noop_async)
 
-    def _boom(cfg, filename, source_table, source_query):
+    def _boom(cfg, filename, source_table, source_query, **_kw):
         raise RuntimeError("the source is unreachable")
     from app.services import dataset_refresh
     monkeypatch.setattr(dataset_refresh, "rewrite_dataset_file", _boom)
@@ -262,7 +262,7 @@ async def test_the_scheduler_tick_keeps_the_prior_failure_when_the_rewrite_fails
     row.next_attempt_at = datetime.utcnow() - timedelta(minutes=1)
     await db_session.commit()
 
-    def _boom(cfg, filename, source_table, source_query):
+    def _boom(cfg, filename, source_table, source_query, **_kw):
         raise RuntimeError("the source is unreachable")
     from app.services import dataset_refresh
     monkeypatch.setattr(dataset_refresh, "rewrite_dataset_file", _boom)

@@ -158,6 +158,10 @@ class TestRunScheduleLogsDeliveries:
         assert len(rows) == 1
         assert rows[0]["status"] == "ok"
         assert rows[0]["error"] is None
+        # 5.18: the row says what it was, to whom, and which file
+        assert rows[0]["recipients"] == "a@b.co"
+        assert (rows[0]["subject"] or "").startswith("Report: ")
+        assert rows[0]["file_name"]
 
     @pytest.mark.asyncio
     async def test_no_valid_recipients_is_logged_as_error(self, app_db, client, auth_headers, db_session, two_orgs, sales_ds):
@@ -221,6 +225,7 @@ class TestCheckAlertLogsDeliveries:
         row = rows[0]
         assert row["kind"] == "alert"
         assert row["status"] == "ok"
+        assert row["subject"] == "Alert: Low revenue" and row["recipients"] == "a@b.co"
         assert row["schedule_id"] is None
         assert row["report_id"] is None
         assert row["org_id"] == org.id

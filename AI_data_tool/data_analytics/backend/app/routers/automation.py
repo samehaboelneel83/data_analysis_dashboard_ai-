@@ -107,9 +107,8 @@ async def start_run(body: StartRun, db: AsyncSession = Depends(get_db),
     if ds is None or ds.org_id != user.org_id:
         raise HTTPException(404, "Dataset not found")
     await require_dataset_capability(db, user, body.dataset_id, "data")
-    if ds.mode == "directquery" or not ds.filename:
-        raise HTTPException(400, "Automated analysis reads the dataset's rows, so it works on "
-                                 "imported datasets only")
+    if not ds.filename and not (ds.mode == "directquery" and ds.data_source_id):
+        raise HTTPException(400, "This dataset has no data behind it to analyse")
     active = (await db.execute(select(AutomationRun).where(
         AutomationRun.org_id == user.org_id, AutomationRun.subject_type == "dataset",
         AutomationRun.subject_id == ds.id,

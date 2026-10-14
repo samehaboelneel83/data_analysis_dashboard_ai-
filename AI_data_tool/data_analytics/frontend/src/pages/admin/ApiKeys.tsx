@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { inlineFieldStyle } from '../../components/ui/fieldStyle'
 import { useT } from '../../i18n'
+import { richNodes } from '../../i18n/pages/adminPlatform'
 import { Key } from 'lucide-react'
 import { apiKeysApi } from '../../services/api'
 import type { ApiKey } from '../../services/api'
@@ -9,6 +10,10 @@ import { useConfirm } from '../../components/ui/ConfirmDialog'
 import EmptyState from '../../components/ui/EmptyState'
 import LoadError from '../../components/ui/LoadError'
 import LoadingState from '../../components/ui/LoadingState'
+
+/** The environment variable an MCP agent reads; a name, not words. */
+const TOKEN_ENV = 'DATALYTICS_TOKEN'
+const keyHint = (prefix: string) => `dk_${prefix}…`
 
 export default function ApiKeys() {
   const t = useT()
@@ -31,14 +36,14 @@ export default function ApiKeys() {
   useEffect(() => { load().finally(() => setLoading(false)) }, [])
 
   const create = async () => {
-    if (!name.trim()) { toast.error('Name the key first'); return }
+    if (!name.trim()) { toast.error(t('pg.adminPlatform.keys.nameFirst')); return }
     setCreating(true)
     try {
       const k = await apiKeysApi.create(name.trim())
       setFreshKey(k.key)          // reveal once
       setName('')
       await load()
-    } catch (e: any) { toast.error(e?.response?.data?.detail ?? 'Create failed') }
+    } catch (e: any) { toast.error(e?.response?.data?.detail ?? t('pg.adminPlatform.createFailed')) }
     finally { setCreating(false) }
   }
 
@@ -47,9 +52,9 @@ export default function ApiKeys() {
     // revoking a key read "Delete" while the button that opened it said
     // "Revoke".
     if (!await confirm({
-      title: `Revoke "${k.name}"?`,
-      body: 'Any agent using this key stops working immediately. This cannot be undone.',
-      confirmLabel: 'Revoke key',
+      title: t('pg.adminPlatform.keys.revokeTitle', { name: k.name }),
+      body: t('pg.adminPlatform.keys.revokeBody'),
+      confirmLabel: t('pg.adminPlatform.keys.revokeConfirm'),
     })) return
     // Previously unguarded, unlike `create` right above it. A failed revoke
     // threw out of the handler before the toast: no success message, no error
@@ -58,12 +63,12 @@ export default function ApiKeys() {
     try {
       await apiKeysApi.revoke(k.id)
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail ?? 'Could not revoke this key — it is still active')
+      toast.error(e?.response?.data?.detail ?? t('pg.adminPlatform.keys.revokeFailed'))
       return
     }
     if (freshKey) setFreshKey(null)
     await load()
-    toast.success('Revoked')
+    toast.success(t('pg.adminPlatform.keys.revoked'))
   }
 
   const inp = { style: inlineFieldStyle }
@@ -72,25 +77,25 @@ export default function ApiKeys() {
     <div>
       <h1 className="dl-page-title" style={{ marginBottom: 6 }}>{t('nav.apiKeys')}</h1>
       <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 20 }}>
-        Durable bearer tokens for machine access — e.g. the MCP server that exposes datalytics to AI agents.
-        A key authenticates as you, so it can see and do exactly what you can. Use it as <code>DATALYTICS_TOKEN</code>.
+        {richNodes(t('pg.adminPlatform.keys.intro'), { code: <code dir="ltr">{TOKEN_ENV}</code> })}
       </div>
 
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: 16, marginBottom: 16 }}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <input aria-label="Key name" placeholder="Key name (e.g. MCP agent)" value={name} onChange={e => setName(e.target.value)} {...inp} />
+          <input aria-label={t('pg.adminPlatform.keys.keyName')} placeholder={t('pg.adminPlatform.keys.keyNamePh')} value={name} onChange={e => setName(e.target.value)} {...inp}
+            id="api-key-name" name="api-key-name" autoComplete="off" />
           <button className="btn btn-primary btn-sm" onClick={create} disabled={creating}>
-            {creating ? 'Creating…' : 'Create key'}
+            {creating ? t('pg.adminPlatform.creating') : t('pg.adminPlatform.keys.create')}
           </button>
         </div>
         {freshKey && (
           <div style={{ marginTop: 12, padding: 12, background: 'var(--surface2)', border: '1px solid var(--accent)', borderRadius: 8 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', marginBottom: 6 }}>
-              Copy this key now — it is shown only once and cannot be recovered.
+              {t('pg.adminPlatform.keys.copyNow')}
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <code style={{ fontFamily: 'var(--mono)', fontSize: 12, wordBreak: 'break-all', flex: 1 }}>{freshKey}</code>
-              <button className="btn btn-ghost btn-sm" onClick={() => { navigator.clipboard.writeText(freshKey).then(() => toast.success('Copied')).catch(() => {}) }}>Copy</button>
+              <code dir="ltr" style={{ fontFamily: 'var(--mono)', fontSize: 12, wordBreak: 'break-all', flex: 1 }}>{freshKey}</code>
+              <button className="btn btn-ghost btn-sm" onClick={() => { navigator.clipboard.writeText(freshKey).then(() => toast.success(t('pg.adminPlatform.keys.copied'))).catch(() => {}) }}>{t('pg.adminPlatform.keys.copy')}</button>
             </div>
           </div>
         )}
@@ -98,19 +103,20 @@ export default function ApiKeys() {
 
       {loading && <LoadingState />}
       {!loading && loadError != null && (
-        <LoadError what="your API keys" error={loadError} onRetry={load} />
+        <LoadError what={t('pg.adminPlatform.keys.loadWhat')} title={t('pg.adminPlatform.loadErr', { what: t('pg.adminPlatform.keys.loadWhat') })}
+          retryLabel={t('pg.adminPlatform.retry')} error={loadError} onRetry={load} />
       )}
       {!loading && loadError == null && keys.length === 0 && (
-        <EmptyState icon={Key} title="No API keys yet"
-          description="Create a key above to authenticate machine access, like an MCP agent." />
+        <EmptyState icon={Key} title={t('pg.adminPlatform.keys.empty')}
+          description={t('pg.adminPlatform.keys.emptyDesc')} />
       )}
       <div className="dl-rows">
         {keys.map(k => (
           <div key={k.id} className="dl-rows__row">
             <div className="dl-rows__main">
-              <div className="dl-rows__title">{k.name}</div>
+              <div className="dl-rows__title"><bdi>{k.name}</bdi></div>
               <div className="dl-rows__meta dl-rows__meta--mono">
-                {`dk_${k.prefix}…`}{k.last_used_at ? '' : ' · never used'}
+                <bdi dir="ltr">{keyHint(k.prefix)}</bdi>{k.last_used_at ? '' : t('pg.adminPlatform.keys.neverUsed')}
               </div>
             </div>
             <button className="btn btn-ghost btn-sm dl-danger-item" onClick={() => revoke(k)}>{t('admin.revoke')}</button>

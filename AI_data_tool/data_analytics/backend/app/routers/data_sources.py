@@ -84,26 +84,21 @@ def _may_administer(ds: DataSource, user: User) -> bool:
 async def _visible_source_ids(db: AsyncSession, user: User) -> set[int] | None:
     """Connections this user may SEE. None means all of them (admins).
 
-    Yours, plus any that backs a dataset you can read -- a member who was
-    given a dataset still needs to see the connection behind it for the
-    dataset picker and the Ask-AI scope selector to make sense. Seeing a
-    connection is not using it: the config comes back redacted, importing
-    stays admin-only, and changing it needs `_may_administer` below.
-    """
-    if user.role and user.role.is_org_admin:
+    The rule lives in services/guided_setup/access.py so services (the guided
+    setup, the review catalog) can apply it without reaching into a router."""
+    from ..services.guided_setup.access import visible_source_ids
+    return await visible_source_ids(db, user)
+
+
+def _valid_label(label: str | None) -> str | None:
+    """A connection's sensitivity label, canonical spelling -- or None."""
+    from ..services.sensitivity import LEVELS as LABELS
+    if not label:
         return None
-    ids = set((await db.execute(
-        select(DataSource.id).where(
-            DataSource.org_id == user.org_id,
-            or_(DataSource.created_by == user.id, DataSource.created_by.is_(None)))
-    )).scalars().all())
-    readable = await readable_dataset_ids(db, user)
-    q = select(Dataset.data_source_id).where(
-        Dataset.org_id == user.org_id, Dataset.data_source_id.isnot(None))
-    if readable is not None:
-        q = q.where(Dataset.id.in_(readable or {-1}))
-    ids |= set(x for x in (await db.execute(q)).scalars().all() if x is not None)
-    return ids
+    for known in LABELS:
+        if known.lower() == str(label).strip().lower():
+            return known
+    raise HTTPException(422, f"Unknown sensitivity label '{label}'. Use one of: {', '.join(LABELS)}")
 
 
 @router.get("", response_model=list[DataSourceOut])
@@ -144,7 +139,9 @@ async def create_data_source(body: DataSourceCreate, db: AsyncSession = Depends(
     config = secrets.encrypt_config(config, connectors.secret_field_names(ds_type))
     ds = DataSource(name=body.name, type=ds_type, config=config,
                     custom_connector_id=(preset.id if preset else None),
-                    org_id=current_user.org_id, created_by=current_user.id)
+                    org_id=current_user.org_id, created_by=current_user.id,
+                    sensitivity=_valid_label(body.sensitivity),
+                    allow_llm_sampling=body.allow_llm_sampling)
     db.add(ds)
     await db.commit()
     await db.refresh(ds)
@@ -335,6 +332,8 @@ async def update_data_source(ds_id: int, body: DataSourceUpdate, db: AsyncSessio
     await _administrable_or_404(ds, db, current_user)
     if body.name is not None:
         ds.name = body.name
+    if body.sensitivity is not None:
+        ds.sensitivity = _valid_label(body.sensitivity)
 
     preset = None
     if body.custom_connector_id is not None:
@@ -404,10 +403,22 @@ async def test_data_source(ds_id: int, db: AsyncSession = Depends(get_db), curre
     check_org(ds, current_user, "Data source not found")
     # A live credential probe, so it belongs with the other administration.
     await _administrable_or_404(ds, db, current_user)
-    cfg = dict(ds.config)
+    cfg = {k: v for k, v in dict(ds.config).items() if k != HEALTH_KEY}
     cfg['type'] = ds.type
     result = await asyncio.to_thread(test_connection, cfg)
+    # The last test is kept with the connection, so the list can show which
+    # connections answer (persona test 2026-10-12: four broken connections
+    # looked the same as the working ones).
+    first = str(result.get("error") or "").strip().splitlines()
+    ds.config = {**dict(ds.config or {}), HEALTH_KEY: {
+        "ok": bool(result.get("ok")), "at": datetime.utcnow().isoformat() + "Z",
+        "error": first[0][:300] if first else None}}
+    await db.commit()
     return result
+
+
+#: Where the last connection test is kept in a connection's config.
+HEALTH_KEY = "__health__"
 
 
 @router.get("/{ds_id}/schema")
@@ -431,9 +442,134 @@ async def preview_data(ds_id: int, req: TablePreviewRequest, db: AsyncSession = 
     cfg['type'] = ds.type
     try:
         result = await asyncio.to_thread(preview_table, cfg, req.table, req.query, req.limit)
-        return result
     except Exception as e:
         raise HTTPException(400, str(e))
+    # 4.2: a query that RAN is kept in the person's history for this
+    # connection, so the workforce SQL is one click away next time.
+    if req.query and req.query.strip():
+        await _remember_run(db, current_user, ds, req.query.strip())
+    return result
+
+
+#: How many past runs Browse keeps per person and connection (4.2).
+HISTORY_KEEP = 20
+
+
+async def _remember_run(db: AsyncSession, user: User, ds: DataSource, sql: str) -> None:
+    from ..models.models import SavedQuery
+    mine = (SavedQuery.user_id == user.id) & (SavedQuery.data_source_id == ds.id) & (SavedQuery.name.is_(None))
+    # The same statement run again moves to the top instead of filling the list.
+    for old in (await db.execute(select(SavedQuery).where(mine, SavedQuery.sql == sql))).scalars().all():
+        await db.delete(old)
+    db.add(SavedQuery(org_id=user.org_id, user_id=user.id, data_source_id=ds.id, name=None, sql=sql,
+                      created_at=datetime.utcnow()))
+    await db.flush()
+    rows = (await db.execute(select(SavedQuery).where(mine)
+                             .order_by(SavedQuery.created_at.desc(), SavedQuery.id.desc()))).scalars().all()
+    for extra in rows[HISTORY_KEEP:]:
+        await db.delete(extra)
+    await db.commit()
+
+
+def _query_out(q) -> dict:
+    return {"id": q.id, "name": q.name, "sql": q.sql,
+            "created_at": q.created_at.isoformat() if q.created_at else None}
+
+
+class SavedQueryIn(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    sql: str = Field(min_length=1, max_length=100_000)
+
+
+@router.get("/{ds_id}/queries")
+async def list_saved_queries(ds_id: int, db: AsyncSession = Depends(get_db),
+                             current_user: User = Depends(require_org_admin)):
+    """The person's saved queries (org-wide for this connection: an admin's
+    saved workforce query helps the next admin too) and their own last runs."""
+    from ..models.models import SavedQuery
+    ds = await db.get(DataSource, ds_id)
+    check_org(ds, current_user, "Data source not found")
+    saved = (await db.execute(select(SavedQuery).where(
+        SavedQuery.data_source_id == ds.id, SavedQuery.org_id == current_user.org_id,
+        SavedQuery.name.is_not(None)).order_by(SavedQuery.name))).scalars().all()
+    history = (await db.execute(select(SavedQuery).where(
+        SavedQuery.data_source_id == ds.id, SavedQuery.user_id == current_user.id,
+        SavedQuery.name.is_(None)).order_by(SavedQuery.created_at.desc(), SavedQuery.id.desc())
+        .limit(HISTORY_KEEP))).scalars().all()
+    return {"saved": [_query_out(q) for q in saved], "history": [_query_out(q) for q in history]}
+
+
+@router.post("/{ds_id}/queries", status_code=201)
+async def save_query(ds_id: int, body: SavedQueryIn, db: AsyncSession = Depends(get_db),
+                     current_user: User = Depends(require_org_admin)):
+    from ..models.models import SavedQuery
+    ds = await db.get(DataSource, ds_id)
+    check_org(ds, current_user, "Data source not found")
+    name = body.name.strip()
+    same = (await db.execute(select(SavedQuery).where(
+        SavedQuery.data_source_id == ds.id, SavedQuery.org_id == current_user.org_id,
+        SavedQuery.name == name))).scalar_one_or_none()
+    if same is not None:
+        # Saving under an existing name updates it -- "Save" twice is not two queries.
+        same.sql, same.user_id, same.created_at = body.sql, current_user.id, datetime.utcnow()
+        q = same
+    else:
+        q = SavedQuery(org_id=current_user.org_id, user_id=current_user.id, data_source_id=ds.id,
+                       name=name, sql=body.sql, created_at=datetime.utcnow())
+        db.add(q)
+    await db.commit()
+    await db.refresh(q)
+    return _query_out(q)
+
+
+@router.delete("/{ds_id}/queries/{query_id}", status_code=204)
+async def delete_saved_query(ds_id: int, query_id: int, db: AsyncSession = Depends(get_db),
+                             current_user: User = Depends(require_org_admin)):
+    from ..models.models import SavedQuery
+    q = await db.get(SavedQuery, query_id)
+    if q is None or q.data_source_id != ds_id or q.org_id != current_user.org_id:
+        raise HTTPException(404, "Query not found")
+    await db.delete(q)
+    await db.commit()
+
+
+#: Most rows a Browse CSV download carries (4.3). Bigger results are what an
+#: import is for; the header says when the file was cut.
+CSV_ROW_CAP = 100_000
+
+
+@router.post("/{ds_id}/query-csv")
+async def download_query_csv(ds_id: int, req: TablePreviewRequest, db: AsyncSession = Depends(get_db),
+                             current_user: User = Depends(require_org_admin)):
+    """The rows of a table or query as CSV (4.3), under the connection's
+    sensitivity: a Restricted connection's rows are not handed out as files."""
+    from fastapi.responses import Response
+    ds = await db.get(DataSource, ds_id)
+    check_org(ds, current_user, "Data source not found")
+    if (getattr(ds, "sensitivity", None) or "") == "Restricted":
+        raise HTTPException(403, f"{ds.name} is labelled Restricted, so its rows are not downloaded "
+                                 f"as files. Import them into a dataset, where the export policy applies.")
+    if not (req.table or (req.query and req.query.strip())):
+        raise HTTPException(400, "Choose a table or write a query first")
+    cfg = dict(ds.config)
+    cfg['type'] = ds.type
+    try:
+        result = await asyncio.to_thread(preview_table, cfg, req.table, req.query, CSV_ROW_CAP + 1)
+    except Exception as e:
+        raise HTTPException(400, str(e))
+    rows = result.get("rows") or []
+    cut = len(rows) > CSV_ROW_CAP
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(result.get("columns") or [])
+    for r in rows[:CSV_ROW_CAP]:
+        w.writerow(["" if v is None else v for v in r])
+    name = (req.table or "query").replace('"', "")
+    return Response(content="\ufeff" + buf.getvalue(), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{name}.csv"',
+                             "X-Rows": str(min(len(rows), CSV_ROW_CAP)),
+                             "X-Truncated": "1" if cut else "0",
+                             "Access-Control-Expose-Headers": "X-Rows, X-Truncated"})
 
 
 @router.post("/{ds_id}/import")
@@ -577,7 +713,8 @@ async def get_functions(ds_id: int, db: AsyncSession = Depends(get_db),
 
 
 @router.post("/{ds_id}/build-query")
-async def compile_query(ds_id: int, model: dict, db: AsyncSession = Depends(get_db),
+async def compile_query(ds_id: int, model: dict, mode: str = "import",
+                        db: AsyncSession = Depends(get_db),
                         current_user: User = Depends(get_current_user)):
     """Compile the visual model to SQL WITHOUT running it -- the builder shows
     the statement as it evolves. Every identifier is membership-checked against
@@ -592,7 +729,10 @@ async def compile_query(ds_id: int, model: dict, db: AsyncSession = Depends(get_
         from ..services.query_builder import list_functions, referenced_functions
         known = introspect_tables(cfg, referenced_tables(model))
         funcs = {f["name"] for f in list_functions(cfg)} if referenced_functions(model) else set()
-        return build_sql(model, connectors.sql_family_of(cfg) or ds.type, known, cfg.get('schema') or None, funcs)
+        # `mode=directquery` shows the statement a live dataset will store:
+        # no row LIMIT (query_builder.build_sql `unlimited`).
+        return build_sql(model, connectors.sql_family_of(cfg) or ds.type, known, cfg.get('schema') or None, funcs,
+                         unlimited=(mode == "directquery"))
 
     try:
         return {"sql": await asyncio.to_thread(_run)}

@@ -175,8 +175,11 @@ class TestItFailsQuietlyAndKeepsGoing:
     @pytest.mark.asyncio
     async def test_a_deleted_source_does_not_stop_the_loop(
             self, db_session, two_orgs, _uploads):
-        """One broken recipe must not stop every other dataset refreshing, and
-        the timestamp advances so it retries on schedule rather than every tick."""
+        """One broken recipe must not stop every other dataset refreshing.
+
+        It retries on backoff, not every tick -- and, since pipeline plan
+        phase 1, the timestamp does NOT advance: a dataset whose rebuild failed
+        must not read as freshly refreshed."""
         out = _uploads / "d.csv"
         pd.DataFrame({"k": ["x"]}).to_csv(out, index=False)
         derived = Dataset(
@@ -191,7 +194,10 @@ class TestItFailsQuietlyAndKeepsGoing:
 
         assert ran is True, "a missing source should be handled, not crash the loop"
         await db_session.refresh(derived)
-        assert derived.last_refreshed_at is not None
+        assert derived.last_refreshed_at is None
+        from app.services.refresh_scheduler import in_backoff
+        from datetime import datetime as _dt
+        assert await in_backoff(db_session, "dataset", derived.id, _dt.utcnow())
 
     @pytest.mark.asyncio
     async def test_a_departed_builder_stops_the_rebuild(

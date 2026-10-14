@@ -1,4 +1,6 @@
-﻿from pydantic import Field, model_validator
+﻿from typing import Literal
+
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -41,6 +43,12 @@ class Settings(BaseSettings):
     # seconds). Bounded, the queue drains at the same total rate and the loop
     # stays responsive.
     widget_work_max_concurrency: int = Field(default=4, ge=1)
+    # Connections this process keeps to the app's own database, and how many
+    # more it may open under load. A request holds one only while it reads or
+    # writes the app's records -- not while a chart is being computed -- so
+    # this is sized for requests in flight, not for readers.
+    db_pool_size: int = Field(default=10, ge=1)
+    db_pool_overflow: int = Field(default=20, ge=0)
 
     # DirectQuery pools one SQLAlchemy engine per distinct connection (services/
     # direct_query.py). The registry is an LRU capped here: beyond the cap the
@@ -94,6 +102,59 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_timeout_s: float = Field(default=180.0, gt=0)
     llm_enabled: bool = True
+    # Where the charts of an AI-designed dashboard come from.
+    #   cards -- the model CHOOSES among charts the platform has already built,
+    #            validated and drawn on the data (the statistics engine, the
+    #            discovery engine, the standard series). It cannot invent one:
+    #            the validated set is the single source of truth.
+    #   free  -- the model proposes its own charts, lens by lens, and each is
+    #            then checked and drawn (how it worked before 2026-10-11).
+    #   both  -- the model's own proposals join the validated set, and it also
+    #            chooses among everything that survived.
+    suggest_ai_selection: Literal["cards", "free", "both"] = "cards"
+    # The same choice for the GUIDED SETUP's designer, which answers the
+    # person's own questions. "free" by default, measured (2026-10-11, five
+    # questions about one part of a table): free answered five in 66 s, both
+    # five in 108 s, cards two or three in 25 s -- a question about a PART of
+    # the rows ("among the returned ones") needs a filter no ready-made chart
+    # carries. Every chart is drawn and judged before it is offered in all
+    # three modes.
+    setup_ai_selection: Literal["cards", "free", "both"] = "free"
+    # The same choice for dashboards suggested from a CONNECTION, before any
+    # dataset exists (services/source_brief.py). The model always writes the
+    # query there -- there are no rows until it has. free: it also designs the
+    # charts on the query's result, each then checked on the rows. cards: once
+    # the query has run, the platform makes the plain charts of its result and
+    # the model only chooses among them.
+    source_ai_selection: Literal["cards", "free"] = "free"
+    # How much the guided setup's dashboards use beyond a number, a bar and a
+    # line (services/guided_setup/dress.py): basic -- the simplest chart for
+    # each question, nothing added; balanced -- further chart kinds where the
+    # question calls for one, plus display rules, a number's history, filter
+    # controls, click-to-filter and buttons between pages; rich -- the same,
+    # with more of the further kinds per page.
+    setup_dashboard_richness: Literal["basic", "balanced", "rich"] = "balanced"
+    # Analyses (guided-setup runs) one connection may hold before one must be removed.
+    setup_max_analyses: int = Field(default=60, ge=1)
+    setup_ai_rule_auto_share: float = Field(default=0.01, ge=0, le=1)
+    min_group_rows: int = Field(default=30, ge=0)
+    # What each numeric column of a dataset IS (an amount to add up, a level to
+    # average, a code...) is asked of the model ONCE per dataset and kept in
+    # its column settings (services/column_classes.py). That is what lets the
+    # platform read any field of work without a built-in list of one
+    # industry's words. False = the rows and a neutral vocabulary only.
+    classify_columns_with_model: bool = True
+    # "Allow AI" for an UPLOADED file that nobody set a choice on. A dataset
+    # built from a connection follows the connection's switch instead
+    # (services/ai_policy.py).
+    ai_for_uploads_default: bool = True
+    # Several endpoints (services/llm_endpoints.py): a JSON list of
+    #   {"id", "name", "base_url", "model", "strength"?, "context"?, "api_key"?}
+    # used until a platform admin saves a list in Platform settings. Empty =
+    # the single endpoint above. docker-compose.yml ships the team's three
+    # vLLM boxes here. `llm_endpoints_default` is an id from it, or "auto".
+    llm_endpoints: str = ""
+    llm_endpoints_default: str = "auto"
 
     # Total in-flight requests to the model endpoint, ACROSS features -- the
     # sync's describe stage and agent runs share one box. Measured on the Qwen
@@ -188,6 +249,14 @@ class Settings(BaseSettings):
     # process that must not do background work (a one-off admin shell, a
     # dedicated web-only replica while another process runs the jobs).
     job_worker_enabled: bool = True
+    # The longest ONE background job may run (an import, a refresh, an analysis,
+    # an automation). Past it the job ends as failed with "took too long", so a
+    # stuck job cannot hold the worker for good. Generous: a large import is
+    # legitimately slow. 0 = no limit.
+    job_time_limit_s: int = Field(default=7200, ge=0)
+    # AI tokens ONE person may use in a day, besides the organisation's own
+    # budget: one heavy user cannot spend everyone's. 0 = no per-person limit.
+    ai_tokens_per_user_per_day: int = Field(default=0, ge=0)
 
     # E07: the zone every offset-carrying timestamp is stored in, as plain
     # wall-clock time (services/timezones.py). An IANA name; UTC unless an
@@ -213,13 +282,62 @@ class Settings(BaseSettings):
     # and the limit is a better answer than a dead worker, and 2M is roughly
     # where the measured 1.8 GB-per-render cost stops being survivable on a
     # shared box. An operator with the memory to spare can still set 0.
-    import_row_cap: int = Field(default=2_000_000, ge=0)
+    #
+    # Raised to 200M on 2026-10-11 at the owner's request. At that size the
+    # limit no longer protects a small host: scripts/bench_import.py measured
+    # about 2.1 GB of memory per million rows at import on a twenty-column
+    # table, so the number a host can really carry is its memory, and an
+    # administrator of a shared or small machine should lower this on the
+    # Settings page (or with IMPORT_ROW_CAP) to what that script reports.
+    import_row_cap: int = Field(default=200_000_000, ge=0)
+    # The share of the machine's FREE memory one whole-dataset load may take
+    # (services/memory_guard.py). Looked at before a file is read into memory:
+    # a dataset that would need more is refused with a sentence instead of
+    # ending the server process. Charts computed without loading (the DuckDB
+    # aggregate path, live connections) are not affected. 0 = never refuse.
+    load_memory_share: float = Field(default=0.6, ge=0, le=1)
+    # From how many rows an import from a database is written to disk AS IT
+    # ARRIVES instead of being gathered in memory first (services/connections.py,
+    # `Streamed`). Below it an import is as it always was; above it memory stays
+    # at about one chunk of rows whatever the size, and the dataset is kept as
+    # a parquet file. 0 = never stream.
+    import_stream_rows: int = Field(default=1_000_000, ge=0)
+    #: A CSV upload of at least this many megabytes (or one that would not fit
+    #: in memory parsed whole) is written to disk a chunk at a time instead
+    #: (services/upload_stream.py). 0 = never. Only matters once
+    #: `max_upload_mb` allows files this large.
+    upload_stream_mb: int = Field(default=300, ge=0)
+    #: The suggestions panel of a dashboard: after the ideas the data argues
+    #: for, how many FURTHER widget types the data has the shape for are
+    #: offered, one of each (services/suggest_variety.catalogue_suggestions).
+    #: 0 = only the ideas with a finding or a basic behind them.
+    suggest_more_types: int = Field(default=12, ge=0, le=40)
+    #: Guest links: a URL that shows a dashboard to anyone who holds it, with
+    #: no sign-in (routers/shared.py). OFF unless an administrator turns it
+    #: on: an anonymous door into data is a policy decision, not a default.
+    #: While off no link can be made and none that exists opens.
+    guest_links_enabled: bool = False
     #: How many rows an ANALYSIS pulls from a live source. Between the two
     #: caps either side of it: the widget cap (10,000) sizes a scatter plot,
     #: the import cap sizes a file on disk. Statistics over 10,000 rows of a
     #: 112,650-row table would be a needless estimate; pulling millions across
     #: the wire to compute a mean is a download, not an analysis.
     analysis_row_cap: int = Field(default=250_000, ge=1)
+    #: Rows from which a SLOW analysis (one that fits a model) is queued as a
+    #: background job instead of answered in the request. Measured
+    #: (scripts/bench_discovery.py, 2026-10-11): each answers in 0.1-5.6 s on
+    #: 2,000,000 rows on the development machine, so the default leaves room
+    #: for a slower host. 0 = never queue by size.
+    analysis_background_rows: int = Field(default=1_000_000, ge=0)
+    #: Rows the discovery engine measures a dataset on -- its profile, and the
+    #: look at the rows before a suggestion is offered. A larger table is
+    #: sampled (seeded, so the same data gives the same answer) and says so.
+    discovery_sample_rows: int = Field(default=200_000, ge=1_000)
+    #: Threads the model fits may use (the search for groups of similar rows).
+    #: ONE by default: on a many-core host the numeric library's threads fight
+    #: over a small problem -- 26 s on 24 threads, 4 s on one, same answer
+    #: (2026-10-11). 0 = leave it to the library.
+    model_fit_threads: int = Field(default=1, ge=0, le=256)
 
     # The automation chain's per-run frame ceiling, in megabytes of parquet.
     #

@@ -62,8 +62,9 @@ class TestARealMeasureIsUnchanged:
             [finding("correlation", ["wait_minutes", "encounter_id"])], ROLES)
         # x is a real measure here; the y is the identifier, and averaging
         # identity numbers is the same mistake on the other axis.
-        assert only(got, "scatter") == [] or \
-            only(got, "scatter")[0]["config"]["measure"] != "encounter_id"
+        assert only(got, "numeric_series") == [] or \
+            "encounter_id" not in (only(got, "numeric_series")[0]["config"].get("measure"),
+                                   only(got, "numeric_series")[0]["config"].get("measure2"))
 
     def test_suggestions_are_still_produced(self):
         got = suggest_widgets_from_findings(

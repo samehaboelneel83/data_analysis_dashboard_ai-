@@ -19,7 +19,7 @@
  * with one in another. Claiming more would be the lie this file exists to stop.
  */
 import { describe, it, expect, vi } from 'vitest'
-import { render } from '@testing-library/react'
+import { render, fireEvent } from '@testing-library/react'
 import HierarchyRenderer from './HierarchyRenderer'
 
 /** The props every chart renderer is handed. Spelled out rather than cast to
@@ -119,4 +119,58 @@ describe('circle packing', () => {
     expect(container.querySelector('svg')?.getAttribute('aria-label'))
       .toMatch(/sunburst/i)
   })
+})
+
+describe('hierarchy plan, step 4: ticks that filter, click-to-zoom (2026-10-10)', () => {
+  const leaf = (name: string, value: number, depth: number) => ({ name, value, depth, children: [] })
+  const geo = { name: '', value: 10, depth: 0, children: [
+    { name: 'Egypt', value: 6, depth: 0, children: [leaf('Alexandria', 2, 1), leaf('Cairo', 4, 1)] },
+    { name: 'US', value: 4, depth: 0, children: [leaf('Alexandria', 1, 1), leaf('Boston', 3, 1)] },
+  ] }
+
+  it('a tree tick sends the exact branch, and a part-ticked parent shows a dash', () => {
+    const onTreeChange = vi.fn()
+    const { getByLabelText, rerender } = render(
+      <HierarchyRenderer {...props({ type: 'tree', root: geo })} treePaths={null} onTreeChange={onTreeChange} />)
+    fireEvent.click(getByLabelText('US › Alexandria'))
+    expect(onTreeChange).toHaveBeenLastCalledWith([['US', 'Alexandria']])
+    rerender(<HierarchyRenderer {...props({ type: 'tree', root: geo })} treePaths={[['US', 'Alexandria']]} onTreeChange={onTreeChange} />)
+    expect((getByLabelText('US') as HTMLInputElement).indeterminate).toBe(true)
+    expect((getByLabelText('Egypt › Alexandria') as HTMLInputElement).checked).toBe(false)
+    fireEvent.click(getByLabelText('Egypt'))
+    expect(onTreeChange).toHaveBeenLastCalledWith([['Egypt'], ['US', 'Alexandria']])
+  })
+
+  it('a tree with nothing to filter by draws no boxes', () => {
+    const { queryAllByRole } = render(<HierarchyRenderer {...props({ type: 'tree', root: geo })} />)
+    expect(queryAllByRole('checkbox')).toHaveLength(0)
+  })
+
+  it('a sunburst zooms into a ring and back out from the centre or the trail', () => {
+    const { getByRole, queryByRole } = render(<HierarchyRenderer {...props({ type: 'sunburst', root: geo })} />)
+    fireEvent.click(getByRole('button', { name: 'Zoom into Egypt' }))
+    expect(getByRole('navigation').textContent).toContain('Egypt')
+    expect(queryByRole('button', { name: 'Zoom into US' })).toBeNull()
+    fireEvent.click(getByRole('button', { name: 'Zoom out' }))
+    expect(queryByRole('navigation')).toBeNull()
+    fireEvent.click(getByRole('button', { name: 'Zoom into US' }))
+    fireEvent.click(getByRole('button', { name: 'All' }))
+    expect(queryByRole('navigation')).toBeNull()
+  })
+
+  it('an icicle zooms into a block', () => {
+    const { getByRole, container } = render(<HierarchyRenderer {...props({ type: 'icicle', root: geo })} />)
+    fireEvent.click(getByRole('button', { name: 'Zoom into US' }))
+    expect(container.textContent).toContain('Boston')
+    expect(container.textContent).not.toContain('Cairo')
+  })
+})
+
+it('a sunburst with an only child still draws its ring', () => {
+  const { container } = render(<HierarchyRenderer {...props({ type: 'sunburst', root: { name: '', value: 5, depth: 0,
+    children: [{ name: 'Europe', value: 5, depth: 0, children: [{ name: 'Germany', value: 5, depth: 1, children: [] }] }] } })} />)
+  const d = Array.from(container.querySelectorAll('path')).map(p => p.getAttribute('d') ?? '')
+  expect(d).toHaveLength(2)
+  // Two half-arcs each, so the ring is not a zero-length path.
+  d.forEach(x => expect(x.match(/A/g)!.length).toBe(4))
 })

@@ -186,10 +186,37 @@ async def run_agent(db, *, question: str, source: DataSource | None = None,
             return _frames
         built: dict = {}
         for ds, tname in zip(datasets, table_names):
-            frame = await asyncio.to_thread(analytics.load_file, ds.filename)
             expr = await resolve_rls_expr(db, user, ds.id)
-            frame = widget_data.apply_rls_filter(frame, expr)
             denied_here = denied_by_table.get(tname)
+            if ds.mode == "directquery" or not ds.filename:
+                # A live dataset is read through its own SQL, with the row
+                # rule pushed down with the query (no new apply_rls_filter
+                # site). Asking from a dashboard built on "Current workforce"
+                # must answer from Current workforce -- not from the raw
+                # tables behind it, which hold every salary a person ever had
+                # (HR evaluation, blocker 3).
+                from ..analysis_frame import load_directquery_frame
+                from ...core.config import settings as _settings
+                got = await load_directquery_frame(
+                    db, ds, rls_filter_expr=expr, denied=set(denied_here or ()),
+                    row_cap=int(_settings.import_row_cap or 0) or None)
+                if got.sampled:
+                    raise ValueError(
+                        f"'{ds.name}' has {got.total_rows:,} rows, more than Ask AI "
+                        f"reads from a live dataset. Ask its connection instead, or "
+                        f"add an aggregate on the dataset's Aggregates tab.")
+                built[tname] = got.frame
+                continue
+            frame = await asyncio.to_thread(analytics.load_file, ds.filename)
+            frame = widget_data.apply_rls_filter(frame, expr)
+            # The dataset's Prepare steps, as every chart on it reads them:
+            # Ask AI answered from the raw rows (36.23) beside a dashboard
+            # drawn from the cleaned ones (37.60) -- persona test 2026-10-12.
+            from ..prep import apply_prep_steps, prep_steps_of, resolve_join_frames
+            steps = prep_steps_of(ds)
+            if steps:
+                aux = await resolve_join_frames(db, user, steps)
+                frame = await asyncio.to_thread(apply_prep_steps, frame, steps, aux)
             if denied_here:
                 present = [c for c in frame.columns
                            if c.casefold() in {x.casefold() for x in denied_here}]
@@ -220,7 +247,16 @@ async def run_agent(db, *, question: str, source: DataSource | None = None,
     # and applied at the single success exit -- there is no other way to say
     # "answer this, and draw the answer".
     chart_request: dict | None = None
-    if history:
+    # The reply to a clarifying question is not a new question: it settles
+    # the one asked before it. Re-reading it cold answered only the
+    # clarified part ("by department" came back as a list of departments)
+    # and dropped the rest of what was asked. So the original question is
+    # carried WHOLE, with the reply attached, and the run does not ask again
+    # -- one clarification, then the best reading.
+    clarified = clarified_question(question, history)
+    if clarified is not None:
+        effective_question = clarified
+    elif history:
         resolved = await resolve_followup(question, history, client)
         if resolved is not None:
             kind = resolved["kind"]
@@ -275,8 +311,20 @@ async def run_agent(db, *, question: str, source: DataSource | None = None,
     verdict = await classify(effective_question, await get_context(), client,
                              history=history)
     if verdict is None:
-        return _finish(run, started, status="failed",
-                       error="the model endpoint could not classify the question")
+        # No model -- switched off, not allowed for this data, out of budget
+        # or not answering. Ask AI still answers: with what the platform can
+        # compute by itself for this question (agent/without_model.py),
+        # saying plainly that no AI was used.
+        from . import without_model
+        from ..llm import AI_NOT_ALLOWED, BUDGET_SPENT
+        last = getattr(client, "last_error", None)
+        reason = ("AI is switched off for this data" if last == AI_NOT_ALLOWED
+                  else "the AI budget is used up" if last == BUDGET_SPENT
+                  else "AI is switched off" if not getattr(client, "enabled", True)
+                  else "it did not answer")
+        run.intent = "chat"
+        return _finish(run, started, status="ok",
+                       answer=without_model.answer(effective_question, await get_context(), reason))
     run.intent = verdict["intent"]
 
     # The message that is not a question about the data at all. Checked BEFORE
@@ -312,7 +360,7 @@ async def run_agent(db, *, question: str, source: DataSource | None = None,
             source_id=source_id, org_id=user.org_id,
             frames=await dataset_frames() if dataset_mode else None)
 
-    if verdict["ambiguous"]:
+    if verdict["ambiguous"] and clarified is None:
         ask = await clarify(question, verdict["ambiguity_reason"] or "", client)
         return _finish(run, started, status="needs_clarification",
                        answer=ask or "Could you make the question more specific?")
@@ -452,6 +500,13 @@ async def run_agent(db, *, question: str, source: DataSource | None = None,
                        # step reworded as "total ROUNDED_VOLUME per service" names
                        # the very column the question never asked for.
                        or measure_fit(effective_question, sql, context.family))
+            if failure is not None and failure.rung == "V7" and attempt == MAX_ATTEMPTS - 1:
+                # V7 is a hint about wording, not a safety rule: when every
+                # repair still adds up a column, that query is answered rather
+                # than refused (persona test 2026-10-12: "when is our busiest
+                # season" on a monthly summary, where COUNT(*) counts months).
+                failures.append({"rung": failure.rung, "detail": failure.detail})
+                failure = None
             if failure is not None:
                 failures.append({"rung": failure.rung, "detail": failure.detail})
                 feedback = f"{failure.rung}: {failure.detail}"
@@ -575,6 +630,12 @@ async def run_agent(db, *, question: str, source: DataSource | None = None,
 
     concerns = [c for r in results.values()
                 if (c := sanity_check(r.rows or [], step_question(steps, r.step_id)))]
+    if not dataset_mode:
+        from .policy import closed_table_note
+        for r in results.values():
+            note = closed_table_note(r.sql or "", context)
+            if note and note not in concerns:
+                concerns.append(note)
     if (failed or query_gave_up) and overview is not None:
         # Said in the answer, not swallowed: the person asked for a
         # description and got one, and should still know a query was tried.
@@ -756,6 +817,24 @@ def _ask_choices(run: AgentRun, started: float, question: str,
     return _finish(run, started, status="needs_clarification", answer=question)
 
 
+def clarified_question(reply: str, history: list[dict] | None) -> str | None:
+    """The original question plus the person's answer to the clarifying
+    question that followed it, or None when the last turn did not ask one."""
+    if not history or not reply.strip():
+        return None
+    last = history[-1]
+    if last.get("role") != "assistant" or last.get("status") != "needs_clarification":
+        return None
+    original = next((h.get("content") for h in reversed(history[:-1])
+                     if h.get("role") == "user" and (h.get("content") or "").strip()), None)
+    if not original:
+        return None
+    return (f"{original.strip()}\n"
+            f"(Clarification -- you asked: \"{(last.get('content') or '').strip()}\" "
+            f"and the answer is: \"{reply.strip()}\". Answer the ORIGINAL question "
+            f"in full, every part of it, using this clarification.)")
+
+
 #: Rows of the dataset read to decide what is worth charting. Enough for a
 #: constant column to give itself away; small enough to be free.
 _CHART_SAMPLE = 500
@@ -900,16 +979,13 @@ async def _suggest_dashboards(db, run: AgentRun, started: float, source, user,
     # is a fact about permissions, not about the job the dashboard serves --
     # "i am a department manager" was designed for a Platform Admin until the
     # request itself was read for this.
-    role_name = (await stated_persona(question, client)
-                 or getattr(getattr(user, "role", None), "name", None)
-                 or "analyst")
+    #: Read who they are while the database is measured: the two do not
+    #: depend on each other, and together they were a minute before the brief.
+    persona_task = asyncio.create_task(stated_persona(question, client))
+    role_fallback = (getattr(getattr(user, "role", None), "name", None) or "analyst")
     catalog = await load_catalog(db, source.id)
     joins = await load_joins(db, source.id)
     data_range = await load_data_range(db, source.id)
-    if not catalog:
-        return _finish(run, started, status="failed",
-                       error="no catalog for this source — run a metadata sync first")
-
     cfg = dict(source.config)
     cfg["type"] = source.type
 
@@ -935,58 +1011,133 @@ async def _suggest_dashboards(db, run: AgentRun, started: float, source, user,
         shapes[sql] = {"columns": got.get("columns") or [], "row": rows[0]}
         return None
 
-    proposals, why = await suggest_dashboards(catalog, role_name, question,
-                                              count=3, probe=probe, joins=joins,
-                                              data_range=data_range)
+    # The analyst's way (services/source_brief.py): measured facts first, a
+    # brief of who this person is and what they decide, dashboards that answer
+    # the brief, and every chart judged on the rows it will draw. The old path
+    # below only checked that a query returned a row -- on the food database
+    # that offered "highest risk governorate = max(governorate)" and prices
+    # averaged across kilos, eggs and bottles of oil (live, 2026-10-03).
+    from ..llm import get_client as _get_llm
+    from ..source_brief import design, load_catalog_facts
+    from .. import connectors as _connectors
+    _family = _connectors.sql_family_of(cfg) or cfg["type"]
+    #: One designer query may take this long; a query that takes longer is
+    #: refused like any other, and the model is asked for a cheaper one.
+    QUERY_DEADLINE_S = 90
+
+    async def run_query(sql: str, limit: int) -> dict:
+        """The designer's queries, always bounded: rows by the dialect's own
+        limit clause, time by a deadline. There is no unbounded fallback: the
+        query "as written" pulled an Olist join of millions of rows into
+        pandas and froze the server for minutes (live, 2026-10-03)."""
+        from ..connections import preview_table
+        from ..source_brief import wrap_limit
+        return await asyncio.wait_for(
+            asyncio.to_thread(preview_table, cfg, None, wrap_limit(sql, limit, _family), limit),
+            timeout=QUERY_DEADLINE_S)
+
+    # Reach the database before spending minutes of model time on it: the
+    # Moodle connection points at a file that no longer exists, and the
+    # reviewer pointed at a host that is gone (live, 2026-10-03).
+    try:
+        await run_query("SELECT 1 AS ok", 1)
+    except Exception as exc:                              # noqa: BLE001
+        reason = "it did not answer in time" if isinstance(exc, (TimeoutError, asyncio.TimeoutError)) \
+            else str(exc).splitlines()[0][:300]
+        persona_task.cancel()
+        return _finish(run, started, status="failed",
+                       error=f"This connection cannot be reached right now ({reason}). "
+                             f"Fix the connection settings, then ask again.")
+    # Reachable but never described: the catalog comes from a metadata sync.
+    # Checked after the ping, so an unreachable host is reported as that
+    # rather than as a missing sync (QA Conn 1125, 2026-10-03).
+    if not catalog:
+        persona_task.cancel()
+        return _finish(run, started, status="failed",
+                       error="no catalog for this source — run a metadata sync first")
+    facts_catalog = await load_catalog_facts(db, source.id)
+    from ..metadata.profile import quote_identifier
+    from ..source_brief import enrich_facts
+    _quote = lambda name: quote_identifier(name, _family)    # noqa: E731
+    _t0 = time.monotonic()
+    said, _ = await asyncio.gather(persona_task, enrich_facts(facts_catalog, run_query, _quote),
+                                   return_exceptions=True)
+    facts_s = round(time.monotonic() - _t0, 1)
+    if isinstance(_, BaseException):
+        log.warning("measuring the catalog failed: %r", _)
+    role_name = (said if isinstance(said, str) and said else None) or role_fallback
+    brief = None
+    try:
+        # Their request, then what they wrote about themselves and what the
+        # connection is described as (services/ai_context.py).
+        from ..ai_context import compose as _compose
+        asked = _compose(question, llm_on=True, about=getattr(user, "about", None),
+                         connection=getattr(source, "description", None),
+                         connection_name=getattr(source, "name", None)) or question
+        proposals, brief, why = await design(
+            client=client or _get_llm(), catalog=facts_catalog, persona=role_name,
+            request=asked, joins=joins, run_query=run_query, count=3,
+            quote=_quote, enriched=True)
+        if isinstance(brief, dict) and isinstance(brief.get("_timings"), dict):
+            brief["_timings"]["facts_s"] = facts_s
+    except Exception as exc:                              # noqa: BLE001
+        log.exception("brief-first designer failed")
+        proposals, why = [], f"the designer failed ({type(exc).__name__})"
+    if not proposals and brief is None:
+        # No brief at all (model unreachable or unusable): the older designer,
+        # which needs less of the model, rather than nothing.
+        proposals, why = await suggest_dashboards(catalog, role_name, question,
+                                                  count=3, probe=probe, joins=joins,
+                                                  data_range=data_range)
     if not proposals:
+        if brief:
+            run.presentation = {"kind": "dashboard_proposals", "source_id": source.id,
+                                "for_role": role_name, "proposals": [], "brief": brief}
         return _finish(run, started, status="failed",
                        error=why or "no dashboard could be designed for this data")
 
-    # Every proposal is valid by here. This second pass makes each chart READABLE
-    # -- a limit on the bar chart of 400 courses, a sort on the ranking table, a
-    # monthly bucket on the line chart of raw timestamps -- and attaches the
-    # reason to each widget so the person can disagree with it.
-    from ..ingest import detect_types
-    from ..widget_review import review_attributes
+    if brief is None:
+        # Older designer only: tune the drawing settings it left unset.
+        from ..ingest import detect_types
+        from ..widget_review import review_attributes
 
-    import pandas as pd
+        import pandas as pd
 
-    async def _review(proposal: dict) -> None:
-        shape = shapes.get(proposal["sql"])
-        if not shape or not shape["columns"]:
-            log.warning("no probed shape for %r (probed %d queries) -- skipping "
-                        "attribute review", proposal.get("title"), len(shapes))
-            return
-        try:
-            frame = pd.DataFrame([shape["row"]], columns=shape["columns"])
-            column_types = detect_types(frame)
-            sample = dict(zip(shape["columns"], shape["row"]))
-            proposal["widgets"] = await review_attributes(
-                proposal["widgets"], column_types, sample)
-        except Exception:                                 # noqa: BLE001
-            # An improvement, never a requirement -- a proposal with plain
-            # attributes is still a proposal. But LOGGED: a silent `continue`
-            # here cost an hour of guessing why every widget came back untuned.
-            log.exception("attribute review failed for %r", proposal.get("title"))
+        async def _review(proposal: dict) -> None:
+            shape = shapes.get(proposal["sql"])
+            if not shape or not shape["columns"]:
+                return
+            try:
+                frame = pd.DataFrame([shape["row"]], columns=shape["columns"])
+                proposal["widgets"] = await review_attributes(
+                    proposal["widgets"], detect_types(frame),
+                    dict(zip(shape["columns"], shape["row"])))
+            except Exception:                             # noqa: BLE001
+                log.exception("attribute review failed for %r", proposal.get("title"))
 
-    # Concurrently, not one after another. Three proposals reviewed in sequence
-    # pushed a request that took 25s past six minutes, which is not a feature
-    # anybody waits for. The model endpoint already bounds its own concurrency
-    # (llm_max_concurrency), so this queues there rather than piling on.
-    await asyncio.gather(*(_review(p) for p in proposals))
+        await asyncio.gather(*(_review(p) for p in proposals))
 
     run.presentation = {"kind": "dashboard_proposals",
                         "source_id": source.id,
                         "for_role": role_name,
-                        "proposals": proposals}
+                        "proposals": proposals,
+                        "brief": brief,
+                        # What was designed but failed its check, and why.
+                        "not_built": why or None,
+                        # Where the minutes went: facts, brief, each dashboard.
+                        "timings": (brief or {}).get("_timings")}
     one = len(proposals) == 1
-    # "a Instructor" reads as a bug in the very first sentence the feature shows.
-    article = "an" if role_name[:1].lower() in "aeiou" else "a"
-    return _finish(run, started, status="ok",
-                   answer=f"Here {'is' if one else 'are'} {len(proposals)} "
-                          f"{'dashboard' if one else 'dashboards'} I would build "
-                          f"for {article} {role_name} from this data. "
-                          f"Pick one to create it.")
+    if brief and str(brief.get("language") or "").lower().startswith("ar"):
+        answer = (f"قرأت البيانات وفكرت في قراراتك أولاً، ثم صممت "
+                  f"{'لوحة واحدة' if one else f'{len(proposals)} لوحات'} لـ{role_name}. "
+                  f"كل رسم يجيب عن سؤال محدد، واختُبر على البيانات الفعلية. اختر لوحة لإنشائها.")
+    else:
+        article = "an" if role_name[:1].lower() in "aeiou" else "a"
+        answer = (f"Here {'is' if one else 'are'} {len(proposals)} "
+                  f"{'dashboard' if one else 'dashboards'} I would build "
+                  f"for {article} {role_name} from this data. Each chart answers one of the "
+                  f"questions above and was checked on the real rows. Pick one to create it.")
+    return _finish(run, started, status="ok", answer=answer)
 
 
 def _finish(run: AgentRun, started: float, *, status: str,
@@ -1063,3 +1214,4 @@ def _analysis_answer(analysed: dict) -> str:
                     f"{factors[0]['column']}. These factors move with the "
                     f"outcome; that is not proof they cause it.")
     return "Here is what the analysis found."
+

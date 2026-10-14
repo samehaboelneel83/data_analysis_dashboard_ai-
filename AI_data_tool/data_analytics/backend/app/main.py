@@ -7,6 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from .core.widget_errors import CodedHTTPException
+from .core.said_errors import SaidHTTPException
+from .services.memory_guard import TooLargeToLoad as _TooLargeToLoad
 from .core.config import settings
 from .services.quotas import QuotaExceeded
 
@@ -18,6 +20,8 @@ from .routers import boundary_sets, map_settings, calendar_settings, prediction_
 from .routers import workspace
 from .routers import dataflows
 from .routers import pins
+from .routers import publishing
+from .routers import guided_setup
 from .routers import jobs as jobs_router
 from .routers import automation as automation_router
 from .routers import agent as agent_router
@@ -56,13 +60,42 @@ async def _migrate(conn):
         "ALTER TABLE report_pages ADD COLUMN IF NOT EXISTS layout_template VARCHAR(40)",
         # 0038: session revocation cut-off (see User.tokens_valid_after).
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS tokens_valid_after TIMESTAMP WITH TIME ZONE",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS about TEXT",
         # 0039: duplicate-upload detection (see Dataset.content_sha256).
         "ALTER TABLE datasets ADD COLUMN IF NOT EXISTS content_sha256 VARCHAR(64)",
+        # 0056: each refresh run's check results (see RefreshRun.checks).
+        "ALTER TABLE refresh_runs ADD COLUMN IF NOT EXISTS checks JSON",
+        # 0057: incremental merge and run-after-source (pipeline plan, phase 4).
+        "ALTER TABLE watermarks ADD COLUMN IF NOT EXISTS key_column VARCHAR(255)",
+        "ALTER TABLE watermarks ADD COLUMN IF NOT EXISTS lookback_hours INTEGER",
+        "ALTER TABLE watermarks ADD COLUMN IF NOT EXISTS full_reload_days INTEGER",
+        "ALTER TABLE watermarks ADD COLUMN IF NOT EXISTS last_full_at TIMESTAMP WITH TIME ZONE",
+        "ALTER TABLE pipeline_watches ADD COLUMN IF NOT EXISTS run_after_source BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE pipeline_watches ADD COLUMN IF NOT EXISTS trigger_pending BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE pipeline_watches ADD COLUMN IF NOT EXISTS followers JSON",
         "CREATE INDEX IF NOT EXISTS ix_datasets_content_sha256 ON datasets (content_sha256)",
         # 0042: AI budgets (see Quota.max_ai_tokens_per_day); ai_usage itself
         # is a new table, which create_all provisions.
         "ALTER TABLE quotas ADD COLUMN IF NOT EXISTS max_ai_tokens_per_day INTEGER",
         "ALTER TABLE quotas ADD COLUMN IF NOT EXISTS max_ai_tokens_per_month INTEGER",
+        # 0047: business rules on glossary terms (HR evaluation, blocker 3).
+        "ALTER TABLE glossary_terms ADD COLUMN IF NOT EXISTS rule TEXT",
+        "ALTER TABLE glossary_terms ADD COLUMN IF NOT EXISTS always BOOLEAN NOT NULL DEFAULT FALSE",
+        # 0048: a connection's sensitivity label (HR evaluation, item 2.2).
+        "ALTER TABLE data_sources ADD COLUMN IF NOT EXISTS sensitivity VARCHAR(20)",
+        # 0049: dataset share levels; dataset_group_shares is a new table.
+        "ALTER TABLE dataset_shares ADD COLUMN IF NOT EXISTS level VARCHAR(10) NOT NULL DEFAULT 'edit'",
+        # 0050: change alerts and webhooks (HR evaluation, items 3.1 / 4.8).
+        "ALTER TABLE data_alerts ADD COLUMN IF NOT EXISTS last_value DOUBLE PRECISION",
+        "ALTER TABLE data_alerts ADD COLUMN IF NOT EXISTS change_pct DOUBLE PRECISION",
+        "ALTER TABLE data_alerts ADD COLUMN IF NOT EXISTS change_direction VARCHAR(5)",
+        "ALTER TABLE data_alerts ADD COLUMN IF NOT EXISTS webhook_url VARCHAR(500)",
+        # 0052: snapshot dataflows (HR evaluation, item 4.6).
+        "ALTER TABLE dataflows ADD COLUMN IF NOT EXISTS snapshot JSON",
+        # 0053: what a delivery row is about (HR evaluation, item 5.18).
+        "ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS subject VARCHAR(255)",
+        "ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS recipients TEXT",
+        "ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS file_name VARCHAR(255)",
         # 0043: model versions (see PredictionModel.version). The unique key
         # moves from (org, dataset, name) to (..., version).
         "ALTER TABLE prediction_models ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1",
@@ -77,6 +110,32 @@ async def _migrate(conn):
         "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS fiscal_year_start_month INTEGER NOT NULL DEFAULT 1",
         "ALTER TABLE reports ADD COLUMN IF NOT EXISTS theme VARCHAR(20) NOT NULL DEFAULT 'default'",
         "ALTER TABLE reports ADD COLUMN IF NOT EXISTS display_rules JSON DEFAULT '[]'",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS style JSON DEFAULT '{}'",
+        # ── Publishing and sharing (docs/publishing/PLAN.md; alembic 0068) ───
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS category VARCHAR(60)",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS tags JSON DEFAULT '[]'",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS published_at TIMESTAMP WITH TIME ZONE",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS published_by INTEGER REFERENCES users(id) ON DELETE SET NULL",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP WITH TIME ZONE",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS viewers_may_export BOOLEAN NOT NULL DEFAULT true",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS review_state VARCHAR(12) NOT NULL DEFAULT 'none'",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS review_revision INTEGER",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS review_requested_by INTEGER REFERENCES users(id) ON DELETE SET NULL",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS review_decided_by INTEGER REFERENCES users(id) ON DELETE SET NULL",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS review_note VARCHAR(500)",
+        "CREATE INDEX IF NOT EXISTS ix_reports_category ON reports (category)",
+        "CREATE INDEX IF NOT EXISTS ix_reports_archived_at ON reports (archived_at)",
+        "CREATE INDEX IF NOT EXISTS ix_reports_org_published ON reports (org_id, published)",
+        "ALTER TABLE report_user_grants ALTER COLUMN user_id DROP NOT NULL",
+        "ALTER TABLE report_user_grants ADD COLUMN IF NOT EXISTS role_id INTEGER REFERENCES roles(id) ON DELETE CASCADE",
+        "ALTER TABLE report_user_grants ADD COLUMN IF NOT EXISTS org_unit_id INTEGER REFERENCES org_units(id) ON DELETE CASCADE",
+        "ALTER TABLE report_user_grants ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE",
+        "ALTER TABLE report_user_grants ADD COLUMN IF NOT EXISTS can_export BOOLEAN NOT NULL DEFAULT true",
+        "ALTER TABLE report_user_grants ADD COLUMN IF NOT EXISTS can_share BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE report_user_grants ADD COLUMN IF NOT EXISTS created_by INTEGER REFERENCES users(id) ON DELETE SET NULL",
+        "CREATE INDEX IF NOT EXISTS ix_report_user_grants_role_id ON report_user_grants (role_id)",
+        "CREATE INDEX IF NOT EXISTS ix_report_user_grants_org_unit_id ON report_user_grants (org_unit_id)",
+        "ALTER TABLE org_review_settings ADD COLUMN IF NOT EXISTS require_approval BOOLEAN NOT NULL DEFAULT false",
         # ── Layer 1 — Connectors & Ingestion ────────────────────────────────
         # The four new metadata tables come free from create_all; these are the
         # columns Layer 1 adds to tables that already exist in live databases.
@@ -93,6 +152,15 @@ async def _migrate(conn):
         "ALTER TABLE datasets ADD COLUMN IF NOT EXISTS description_source VARCHAR(20)",
         "ALTER TABLE datasets ADD COLUMN IF NOT EXISTS last_profiled_at TIMESTAMP WITH TIME ZONE",
         "ALTER TABLE data_sources ADD COLUMN IF NOT EXISTS allow_llm_sampling BOOLEAN NOT NULL DEFAULT FALSE",
+        # "Allow AI" per dataset (0064): NULL = follow the connection, or the
+        # installation default for an uploaded file (services/ai_policy.py).
+        "ALTER TABLE datasets ADD COLUMN IF NOT EXISTS allow_ai BOOLEAN",
+        # Guided setup (0059): the Understand step's kept summary, added after the
+        # table first shipped -- create_all never adds a column to a live table.
+        "ALTER TABLE setup_journeys ADD COLUMN IF NOT EXISTS summary JSON",
+        "ALTER TABLE setup_journeys ADD COLUMN IF NOT EXISTS proposals JSON",
+        "ALTER TABLE setup_journeys ADD COLUMN IF NOT EXISTS findings JSON",
+        "ALTER TABLE setup_journeys ADD COLUMN IF NOT EXISTS designs JSON",
         "ALTER TABLE data_sources ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMP WITH TIME ZONE",
         "ALTER TABLE data_sources ADD COLUMN IF NOT EXISTS sync_status VARCHAR(20) NOT NULL DEFAULT 'pending'",
         "ALTER TABLE data_sources ADD COLUMN IF NOT EXISTS description TEXT",
@@ -426,6 +494,9 @@ async def lifespan(app: FastAPI):
                 from .services.refresh_scheduler import reap_orphaned_failures, reap_stuck_sync_runs
                 await reap_stuck_sync_runs(session)
                 await reap_orphaned_failures(session)
+                # A refresh run a restart interrupted still says "running".
+                from .services.refresh_runs import reap_running
+                await reap_running(session)
                 # Same class of orphan, one table over: `automation_runner.tick`
                 # marks a step `running` before threading it, so a process that
                 # died mid-step leaves a row that says `running` forever. It has
@@ -433,6 +504,13 @@ async def lifespan(app: FastAPI):
                 # like progress nobody is making.
                 from .services.automation_runner import reap_stuck_automation_steps
                 await reap_stuck_automation_steps(session)
+                # Live datasets saved by the Query builder before it stopped
+                # baking a row LIMIT into their SQL (HR evaluation, blocker 1).
+                try:
+                    from .services.source_import import repair_capped_live_datasets
+                    await repair_capped_live_datasets(session)
+                except Exception:
+                    logging.getLogger(__name__).exception("live dataset LIMIT repair skipped")
         finally:
             if is_pg:
                 await lockconn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": _STARTUP_LOCK_KEY})
@@ -445,6 +523,15 @@ async def lifespan(app: FastAPI):
     # Settings saved by another worker or replica reach this one within 30s.
     from .services.app_settings import run_reloader
     settings_reloader = asyncio.create_task(run_reloader(AsyncSessionLocal))
+    # The up/down light for every LLM endpoint (services/llm_endpoints.py).
+    from .services.llm_endpoints import run_prober as run_llm_prober
+    llm_prober = asyncio.create_task(run_llm_prober())
+    # 4.5: live datasets get a cached row count, refreshed hourly.
+    from .services.live_counts import run_live_count_loop
+    live_counter = asyncio.create_task(run_live_count_loop(AsyncSessionLocal))
+    # 5.21: the automation queue's own loop (one step per tick, no minute gap).
+    from .services.automation_runner import run_automation_loop
+    automation_loop = asyncio.create_task(run_automation_loop(AsyncSessionLocal))
 
     # E07/E12: the durable job worker (services/jobs.py). One per process,
     # like the scheduler; claims are compare-and-set on the jobs row, so
@@ -463,8 +550,20 @@ async def lifespan(app: FastAPI):
         call; a schema violation is logged at ERROR and nothing else happens —
         the app must start regardless."""
         try:
-            from .services import llm as llm_service
-            client = llm_service.get_client()
+            from .services import llm as llm_service, llm_endpoints
+            if not settings.llm_enabled:
+                return
+            # Probe first: with no endpoint reachable the contract check has
+            # nothing to test, and trying anyway only logged a ConnectError
+            # traceback-shaped warning at every start. The top bar's light
+            # tells people the model is down; the log says it once, plainly.
+            await llm_endpoints.probe_all()
+            if not any(llm_endpoints.is_up(e.id) for e in llm_endpoints.endpoints() if e.enabled):
+                logging.getLogger(__name__).info(
+                    "No LLM endpoint is reachable right now; AI features stay off until one answers "
+                    "(add or fix endpoints in Platform settings -> LLM endpoints).")
+                return
+            client = llm_service.get_client("auto")
             got = await client.complete_json(
                 [{"role": "user", "content": "Reply with the number one."}],
                 {"type": "object",
@@ -507,6 +606,9 @@ async def lifespan(app: FastAPI):
     finally:
         _STARTUP_COMPLETE = False
         settings_reloader.cancel()
+        llm_prober.cancel()
+        live_counter.cancel()
+        automation_loop.cancel()
         scheduler.cancel()
         try:
             await scheduler
@@ -545,6 +647,30 @@ app = FastAPI(title="Datalytics API", version="2.0.0", lifespan=lifespan,
 # _run_secrets_migration above.
 from .core import telemetry as _telemetry
 _telemetry.setup_telemetry(app)
+
+
+@app.middleware("http")
+async def _llm_endpoint_choice(request, call_next):
+    """The person's LLM pick from the top bar rides on every request as the
+    X-LLM-Endpoint header; `llm.get_client()` reads it from here, so every AI
+    call site follows the pick without knowing about it."""
+    from .services import llm_endpoints
+    choice = request.headers.get("x-llm-endpoint")
+    token = llm_endpoints.use_choice(choice) if choice else None
+    # Every model call answered while serving this request is collected and
+    # returned as X-LLM-Used, so the top bar shows the model Auto REALLY
+    # used for this question (which differs per step: a light classification
+    # can go to the fast model and the SQL to the strongest).
+    usage = llm_endpoints.open_usage()
+    try:
+        response = await call_next(request)
+    finally:
+        used = llm_endpoints.close_usage(usage)
+        if token is not None:
+            llm_endpoints.release_choice(token)
+    if used:
+        response.headers["X-LLM-Used"] = llm_endpoints.used_header(used)
+    return response
 
 
 @app.middleware("http")
@@ -595,7 +721,7 @@ app.add_middleware(
     # cross-origin page unless it is exposed here: the app (3001) and the API
     # (8000) are different origins, so a 429's Retry-After -- when an AI
     # budget or a quota resets -- never reached the page that says so (E11).
-    expose_headers=["Retry-After"],
+    expose_headers=["Retry-After", "X-LLM-Used"],
 )
 
 app.include_router(datasets.router,     prefix="/api/v1")
@@ -603,6 +729,8 @@ app.include_router(analysis.router,     prefix="/api/v1")
 app.include_router(analysis.registry_router, prefix="/api/v1")
 app.include_router(reports.router,      prefix="/api/v1")
 app.include_router(report_copilot.router, prefix="/api/v1")
+app.include_router(publishing.router,   prefix="/api/v1")
+app.include_router(publishing.portal,   prefix="/api/v1")
 app.include_router(hierarchy.router,    prefix="/api/v1")
 app.include_router(widget_data.router,  prefix="/api/v1")
 app.include_router(data_sources.router, prefix="/api/v1")
@@ -623,11 +751,15 @@ app.include_router(notifications.router, prefix="/api/v1")
 app.include_router(shared.router,        prefix="/api/v1")
 app.include_router(embed.router,         prefix="/api/v1")
 app.include_router(widget_templates.router, prefix="/api/v1")
+from .routers import dashboard_templates as _dashboard_templates  # noqa: E402
+app.include_router(_dashboard_templates.router, prefix="/api/v1")
 app.include_router(workspace.router,     prefix="/api/v1")
 app.include_router(dataflows.router,     prefix="/api/v1")
 app.include_router(platform.router,      prefix="/api/v1")
 from .routers import platform_settings  # noqa: E402
 app.include_router(platform_settings.router, prefix="/api/v1")
+from .routers import llm as llm_router  # noqa: E402
+app.include_router(llm_router.router, prefix="/api/v1")
 app.include_router(sso.router,           prefix="/api/v1")
 app.include_router(pins.router,          prefix="/api/v1")
 app.include_router(jobs_router.router,   prefix="/api/v1")
@@ -637,6 +769,8 @@ app.include_router(automation_router.router, prefix="/api/v1")
 # statistics under a dataset.
 app.include_router(metadata.router,      prefix="/api/v1")
 app.include_router(metadata.stats_router, prefix="/api/v1")
+# Guided setup (docs/guided-setup/PLAN.md): one journey per person and connection.
+app.include_router(guided_setup.router, prefix="/api/v1")
 # Layer 4 — agent chat surface. Mounted under /api/v1 like every other router.
 #
 # It was previously mounted bare, on the reasoning that the router "owns its own
@@ -649,6 +783,23 @@ app.include_router(metadata.stats_router, prefix="/api/v1")
 # test_router_reachability.py now pins every router to the prefix the client
 # actually uses, so a future unprefixed mount fails instead of going dark.
 app.include_router(agent_router.router,  prefix="/api/v1")
+
+
+@app.exception_handler(_TooLargeToLoad)
+async def _too_large_to_load_handler(request, exc: _TooLargeToLoad):
+    """A dataset that does not fit in this server's free memory: said, with
+    what still works, instead of a dead process (services/memory_guard.py)."""
+    return JSONResponse(status_code=413, content={"detail": str(exc), "code": "too_large_to_load"})
+
+
+@app.exception_handler(SaidHTTPException)
+async def _said_http_exception_handler(request, exc: SaidHTTPException):
+    """A refusal with its sentence's key beside the English, so the browser
+    says it in the reader's language -- see core/said_errors.py. On the
+    subclass, for the reason given below."""
+    return JSONResponse(status_code=exc.status_code,
+                        content={"detail": exc.detail, "detail_i18n": exc.detail_i18n},
+                        headers=getattr(exc, "headers", None))
 
 
 @app.exception_handler(CodedHTTPException)
@@ -762,9 +913,16 @@ async def health_ready(response: Response):
             from .services.widget_data import _get_cache_backend
 
             backend = _get_cache_backend()
-            probe_key = "__readiness__"
-            backend.set(probe_key, {"v": 1}, ttl_s=5)
-            backend.get(probe_key)
+            # A direct PING, not a set/get through the cache: the old probe
+            # wrote a dict, which redis refuses. That raised inside
+            # ValkeyCache, opened its circuit and logged "Valkey connection
+            # failed ... Invalid input of type: 'dict'" on every healthcheck,
+            # so the shared cache was switched off almost all the time.
+            if not hasattr(backend, "ping"):
+                raise RuntimeError("valkey_url is set but the cache is in-process")
+            backend.ping()
+            if backend.circuit_open:
+                raise RuntimeError("recent Valkey errors: serving from the fallback")
             checks["valkey"] = {
                 "status": "ok",
                 "latency_ms": round((time.perf_counter() - started) * 1000, 1),

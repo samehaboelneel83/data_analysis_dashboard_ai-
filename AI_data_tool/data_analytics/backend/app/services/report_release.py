@@ -46,7 +46,7 @@ async def content_snapshot(db: AsyncSession, report_id: int) -> tuple[dict, int]
     with db.sync_session.no_autoflush:
         rep = (await db.execute(
             select(rep_t.c.revision, rep_t.c.theme, rep_t.c.display_rules, rep_t.c.dataset_id,
-                   rep_t.c.additional_dataset_ids).where(rep_t.c.id == report_id))).first()
+                   rep_t.c.additional_dataset_ids, rep_t.c.style).where(rep_t.c.id == report_id))).first()
         if rep is None:
             return None
         pages = (await db.execute(
@@ -78,6 +78,7 @@ async def content_snapshot(db: AsyncSession, report_id: int) -> tuple[dict, int]
         out_pages.append(d)
     snapshot = {
         "report": {"theme": rep.theme, "display_rules": rep.display_rules or [],
+                   "style": rep.style or {},
                    "dataset_id": rep.dataset_id,
                    "additional_dataset_ids": list(rep.additional_dataset_ids or [])},
         "pages": out_pages,

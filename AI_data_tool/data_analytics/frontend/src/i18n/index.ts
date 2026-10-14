@@ -1,3 +1,4 @@
+import { formatDate } from '../lib/dateFormat'
 import { useCallback } from 'react'
 import { useDirection, type Language } from '../contexts/DirectionContext'
 import { en, type MessageKey } from './en'
@@ -14,9 +15,14 @@ export const PATH_MESSAGE: [string, MessageKey][] = [
   ['/upload', 'nav.upload'],
   ['/datasets', 'nav.datasets'],
   ['/reports', 'nav.dashboards'],
+  ['/templates', 'tpl.nav'],
+  ['/portal', 'pub.nav'],
+  ['/profile', 'top.profile'],
   ['/dashboards', 'nav.dashboards'],
   ['/connections', 'nav.connections'],
+  ['/setup', 'setup.title'],
   ['/lineage', 'nav.lineage'],
+  ['/glossary', 'nav.glossary'],
   ['/dataflows', 'nav.dataflows'],
   ['/insights', 'nav.insights'],
   ['/automation', 'nav.automations'],
@@ -50,10 +56,13 @@ export const NAV_ITEM_MESSAGE: Record<string, MessageKey> = {
   '/ask': 'nav.askAi',
   '/datasets': 'nav.datasets',
   '/lineage': 'nav.lineage',
+  '/glossary': 'nav.glossary',
   '/dataflows': 'nav.dataflows',
   '/upload': 'nav.upload',
   '/connections': 'nav.connections',
   '/reports': 'nav.dashboards',
+  '/templates': 'tpl.nav',
+  '/portal': 'pub.nav',
   '/insights': 'nav.insights',
   '/automation': 'nav.automations',
   '/migration': 'nav.migration',
@@ -92,13 +101,40 @@ function interpolate(template: string, vars?: Record<string, string | number>): 
     vars[k] === undefined ? `{${k}}` : String(vars[k]))
 }
 
+/** `{n, plural, one{...} two{...} few{# ...} other{# ...}}` -- the ICU shape,
+ *  categories chosen by Intl.PluralRules for the language. Arabic needs it:
+ *  "منذ 2 ساعة" and "3 عمود" read as mistakes (HR re-test 2026-10-01); the
+ *  right forms are "منذ ساعتين" and "3 أعمدة". `#` is the value as passed, so
+ *  an already-formatted "240,124" stays formatted. */
+const PLURAL = /\{(\w+),\s*plural,\s*((?:[a-z]+\s*\{[^{}]*\}\s*)+)\}/g
+
+export function pluralize(template: string, language: string,
+                          vars?: Record<string, string | number>): string {
+  if (!vars || !template.includes('plural')) return template
+  return template.replace(PLURAL, (whole, k: string, body: string) => {
+    const raw = vars[k]
+    if (raw === undefined) return whole
+    // Arabic-Indic digits ("٨", "٢٫٥") are read too: callers pass localDigits()
+    // output, and NaN here left the raw template on screen (QA T2).
+    const latin = String(raw).replace(/[\u0660-\u0669]/g, d => String(d.charCodeAt(0) - 0x0660)).replace(/\u066B/g, '.')
+    const n = typeof raw === 'number' ? raw : Number(latin.replace(/[,\s\u066C]/g, ''))
+    if (!Number.isFinite(n)) return whole
+    const forms: Record<string, string> = {}
+    for (const m of body.matchAll(/([a-z]+)\s*\{([^{}]*)\}/g)) forms[m[1]] = m[2]
+    let cat = 'other'
+    try { cat = new Intl.PluralRules(language).select(n) } catch { /* 'other' */ }
+    const form = forms[cat] ?? forms.other ?? ''
+    return form.replace(/#/g, String(raw))
+  })
+}
+
 export function translate(
   language: Language,
   key: MessageKey,
   vars?: Record<string, string | number>,
 ): string {
   const table = CATALOG[language] ?? en
-  return interpolate(table[key] ?? en[key], vars)
+  return interpolate(pluralize(table[key] ?? en[key], language, vars), vars)
 }
 
 export function messageForPath(pathname: string): MessageKey {
@@ -125,7 +161,7 @@ export function formatTimeAgo(iso: string | undefined, t: TranslateFn): string |
   if (days < 30) {
     return t(days === 1 ? 'time.daysAgo' : 'time.daysAgo_other', { n: days })
   }
-  return new Date(iso).toLocaleDateString()
+  return formatDate(iso, 'date')   // QA3 D4: in the UI language, not the browser's
 }
 
 export type TranslateFn = (key: MessageKey, vars?: Record<string, string | number>) => string

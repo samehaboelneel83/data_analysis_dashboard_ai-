@@ -85,11 +85,15 @@ class TestStarting:
         await _set_status(db_session, first["id"], "done")
         assert (await _start(world)).status_code == 201
 
-    async def test_a_live_connection_dataset_is_refused_with_the_reason(self, world, db_session):
+    async def test_a_dataset_with_nothing_behind_it_is_refused_with_the_reason(self, world, db_session):
+        # Live datasets ARE analysed now (HR evaluation, item 3.5); one with
+        # neither a file nor a connection has nothing to read.
         world["ds"].mode = "directquery"
+        world["ds"].filename = None
+        world["ds"].data_source_id = None
         await db_session.commit()
         r = await _start(world)
-        assert r.status_code == 400 and "imported datasets only" in r.json()["detail"]
+        assert r.status_code == 400 and "no data behind it" in r.json()["detail"]
 
     async def test_another_orgs_dataset_is_not_found(self, world):
         assert (await _start(world, who="other_org")).status_code == 404

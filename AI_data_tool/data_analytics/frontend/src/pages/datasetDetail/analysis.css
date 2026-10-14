@@ -1,0 +1,31 @@
+/* Analysis tab (redesign step 3c): questions on the left, the answer on the right. */
+.dl-an3 { display: grid; grid-template-columns: 276px minmax(0, 1fr); gap: 16px; align-items: start; }
+.dl-an3__nav {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--dl-radius-card, 12px);
+  padding: 16px 10px; position: sticky; top: 12px;
+}
+.dl-an3__nav h2 { font-size: 15px; margin: 0 8px 12px; color: var(--text); }
+.dl-an3__group { margin-block-end: 10px; }
+.dl-an3__group h3 { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 8px 6px; }
+.dl-an3__q {
+  display: flex; flex-direction: column; gap: 2px; inline-size: 100%; text-align: start; padding: 8px 10px;
+  border: 0; border-radius: var(--dl-radius-control, 8px); background: none; cursor: pointer; color: var(--text);
+}
+.dl-an3__q strong { font-size: 12.5px; font-weight: 500; }
+.dl-an3__q span { font-size: 11.5px; color: var(--muted); }
+.dl-an3__q:hover { background: var(--mc-canvas-2, var(--surface2)); }
+.dl-an3__q[aria-current] { background: var(--mc-accent-soft, var(--surface2)); }
+.dl-an3__all {
+  margin: 6px 8px 0; padding: 0; border: 0; background: none; cursor: pointer; font-size: 13px;
+  color: var(--mc-accent-ink, var(--accent));
+}
+.dl-an3__all[aria-current] { font-weight: 600; }
+.dl-an3__body {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--dl-radius-card, 12px);
+  padding: 16px; min-block-size: 420px; min-inline-size: 0;
+}
+.dl-an3__body > section, .dl-an3__body section { margin-block-end: 0 !important; }
+@media (max-width: 900px) {
+  .dl-an3 { grid-template-columns: minmax(0, 1fr); }
+  .dl-an3__nav { position: static; }
+}

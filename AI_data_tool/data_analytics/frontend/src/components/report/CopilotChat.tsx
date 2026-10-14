@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent } from 'react'
+import { useAiOffline } from '../../pages/ask/useAiOffline'
 import { ArrowUp, ArrowUpRight, BookOpen, Check, Lightbulb, Minus, MoreHorizontal, PencilLine,
   RotateCcw, Sparkles, TrendingUp, X } from 'lucide-react'
 import { insightsApi, reportsApi } from '../../services/api'
-import type { AgentResult, AnswerEvidence } from '../../services/api'
+import type { AgentResult, AnswerEvidence, CopilotSuggestion } from '../../services/api'
+import { sayText } from '../../lib/readbackText'
+import toast from 'react-hot-toast'
 import ResultView, { focusFor, type EvidenceFocus } from '../chat/ResultView'
 import AnswerText from '../chat/AnswerText'
 import AiMascot from '../ai/AiMascot'
@@ -68,6 +71,8 @@ interface Turn {
   results?: AgentResult[]
   /** The reply's numbers, traced to those rows (E11). */
   evidence?: AnswerEvidence | null
+  /** Ready charts offered when no model was used: each is a button. */
+  suggestions?: CopilotSuggestion[]
 }
 
 interface Insight { key: string; title: string; detail: string }
@@ -100,6 +105,9 @@ export default function CopilotChat({
 }: CopilotChatProps) {
   const t = useT()
   const [open, setOpen] = useState(false)
+  // 7e5: the top bar's model light, as Ask AI reads it (4b). While it is
+  // down, new requests are paused and the panel says why in one line.
+  const { offline } = useAiOffline()
   const [turns, setTurns] = useState<Turn[]>([])
   // The number of a reply whose source the reader asked to see (E11).
   const [evidenceFocus, setEvidenceFocus] = useState<{ turn: number; at: EvidenceFocus } | null>(null)
@@ -204,6 +212,26 @@ export default function CopilotChat({
     }
   }, [open, insight, seen])
 
+  // A ready chart offered without AI, added to this page as the builder would add it.
+  const [added, setAdded] = useState<string[]>([])
+  const [adding, setAdding] = useState<string | null>(null)
+  const addReady = async (key: string, s: CopilotSuggestion, title: string) => {
+    setAdding(key)
+    try {
+      const small = s.widget_type === 'kpi'
+      await reportsApi.addWidget(reportId, pageId, {
+        widget_type: s.widget_type, title: title.slice(0, 120), config: s.config,
+        layout: { x: 0, y: 999, w: small ? 3 : 6, h: small ? 3 : 5 },
+      } as never)
+      setAdded(a => [...a, key])
+      await onApplied()
+    } catch {
+      toast.error(t('copilot.ready.failed'))
+    } finally {
+      setAdding(null)
+    }
+  }
+
   const send = async (text?: string) => {
     const message = (text ?? input).trim()
     if (!message || busy) return
@@ -221,7 +249,9 @@ export default function CopilotChat({
         `${appliedVerb(a.op, t)} ${a.title ?? `widget ${a.widget_id ?? ''}`}`.trim())
       setTurns(x => [...x, {
         id: nextId++, role: 'assistant',
-        text: [got.reply, ...(got.notes ?? [])].filter(Boolean).join('\n'),
+        // With charts to offer, the words come without their list: the list is the buttons.
+        text: [got.suggestions?.length ? got.lead ?? got.reply : got.reply, ...(got.notes ?? [])].filter(Boolean).join('\n'),
+        suggestions: got.suggestions ?? [],
         applied, results: got.results ?? [],
         // Traced against the reply alone: notes are the copilot's own.
         evidence: got.notes?.length ? null : got.evidence ?? null,
@@ -293,10 +323,8 @@ export default function CopilotChat({
     saveCorner(f(corner))
   }
 
-  // Float over the CANVAS, not over the settings panel: pinned to the window
-  // corner, the button covered that panel's own bottom controls (its Send and
-  // Apply buttons). The panel is resizable and collapsible, so follow its width.
-  const endOffset = useEndPanelWidth('builder-right')
+  // Float over the CANVAS, never over the panels beside it (QA3 B1).
+  const inset = useCanvasInsets()
 
   if (presenting) return null
 
@@ -305,7 +333,7 @@ export default function CopilotChat({
     ? { left: drag.x - 28, top: drag.y - 28 }
     : {
         [vert]: vert === 'bottom' ? 'var(--dl-askai-bottom)' : 'var(--dl-askai-top)',
-        [horiz === 'end' ? 'insetInlineEnd' : 'insetInlineStart']: horiz === 'end' ? 24 + endOffset : 24,
+        [horiz === 'end' ? 'insetInlineEnd' : 'insetInlineStart']: (horiz === 'end' ? inset.end : inset.start) + 24,
       }
 
   const n = widgetCount ?? 0
@@ -385,7 +413,7 @@ export default function CopilotChat({
                       <p className="dl-askai__insight-text" dir="auto">
                         {insight.title}{insight.detail ? ` — ${insight.detail}` : ''}
                       </p>
-                      <button type="button" className="dl-askai__insight-more" disabled={busy}
+                      <button type="button" className="dl-askai__insight-more" disabled={busy || offline}
                         onClick={() => void send(t('copilot.tellMore', { title: insight.title }))}>
                         {t('copilot.tellMoreBtn')}
                       </button>
@@ -396,7 +424,7 @@ export default function CopilotChat({
                 <ul className="dl-askai__sug">
                   {suggestions.map(s => (
                     <li key={s.text}>
-                      <button type="button" disabled={busy}
+                      <button type="button" disabled={busy || offline}
                         onClick={() => {
                           if (s.fill) { setInput(s.text + ' '); inputRef.current?.focus() }
                           else void send(s.text)
@@ -436,6 +464,27 @@ export default function CopilotChat({
                         focus={evidenceFocus?.turn === x.id ? evidenceFocus.at : null} />
                     </div>
                   )}
+                  {x.suggestions && x.suggestions.length > 0 && (
+                    <ul data-testid="copilot-ready-charts" style={{ listStyle: 'none', margin: '8px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {x.suggestions.map((s, i) => {
+                        const key = `${x.id}:${i}`
+                        const title = sayText(t, s.title, s.title_i18n)
+                        const done = added.includes(key)
+                        return (
+                          <li key={key} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, border: '1px solid var(--border)', borderRadius: 8, padding: '6px 8px' }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div dir="auto" style={{ fontSize: 12, fontWeight: 600 }}>{title}</div>
+                              {s.sentence && <div dir="auto" style={{ fontSize: 11, color: 'var(--muted)' }}>{sayText(t, s.sentence, s.sentence_i18n)}</div>}
+                            </div>
+                            <button type="button" className="btn btn-secondary btn-sm" disabled={done || adding === key}
+                              aria-label={`${t('copilot.ready.add')}: ${title}`} onClick={() => void addReady(key, s, title)}>
+                              {done ? <><Check size={12} aria-hidden /> {t('copilot.ready.added')}</> : t('copilot.ready.add')}
+                            </button>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
                   {x.applied && x.applied.length > 0 && (
                     <ul className="dl-askai__applied">
                       {x.applied.map((a, i) => (
@@ -463,15 +512,16 @@ export default function CopilotChat({
           </div>
 
           <div className="dl-askai__composer">
+            {offline && <p role="status" className="dl-chat__note dl-chat__note--error dl-chat__offline" data-testid="copilot-offline">{t('off.title')}</p>}
             <div className="dl-askai__box">
-              <textarea ref={inputRef} rows={1} value={input} disabled={busy}
-                placeholder={t('copilot.placeholder')}
+              <textarea ref={inputRef} rows={1} value={input} disabled={busy || offline}
+                placeholder={offline ? t('off.composer') : t('copilot.placeholder')}
                 aria-label={t('copilot.inputLabel')}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={e => {
                   if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send() }
                 }} />
-              <button type="button" className="dl-askai__send" onClick={() => void send()} disabled={busy}
+              <button type="button" className="dl-askai__send" onClick={() => void send()} disabled={busy || offline}
                 aria-label={t('copilot.send')} title={t('copilot.send')}>
                 <ArrowUp size={16} aria-hidden />
               </button>
@@ -518,16 +568,26 @@ function appliedVerb(op: string, t: ReturnType<typeof useT>): string {
   }
 }
 
-function useEndPanelWidth(sideId: string): number {
-  const [w, setW] = useState(0)
+/** QA3 B1: how far the canvas column's edges sit from the window's edges, so the button floats inside the canvas whatever is beside it: the
+ *  settings panel, the pinned Properties next to it, and the icon rail (v1
+ *  measured only the settings panel, so the button sat on its section
+ *  headers, the Comments box and "Add schedule"). Follows resizes and RTL. */
+function useCanvasInsets(): { start: number; end: number } {
+  const [w, setW] = useState({ start: 0, end: 0 })
   useEffect(() => {
-    const el = document.querySelector<HTMLElement>(`[data-side="${sideId}"]`)
-    if (!el || typeof ResizeObserver === 'undefined') return
-    const measure = () => setW(Math.round(el.getBoundingClientRect().width))
+    const el = document.querySelector<HTMLElement>('[data-canvas-scroll]')
+    if (!el) return
+    const measure = () => {
+      const r = el.getBoundingClientRect()
+      const rtl = getComputedStyle(document.documentElement).direction === 'rtl'
+      const left = Math.max(0, Math.round(r.left)), right = Math.max(0, Math.round(window.innerWidth - r.right))
+      setW(rtl ? { start: right, end: left } : { start: left, end: right })
+    }
     measure()
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [sideId])
+    window.addEventListener('resize', measure)
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    ro?.observe(el)
+    return () => { window.removeEventListener('resize', measure); ro?.disconnect() }
+  }, [])
   return w
 }

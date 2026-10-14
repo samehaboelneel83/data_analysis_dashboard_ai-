@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
-import { alertsApi, type DataAlert, type DatasetColumn } from '../../services/api'
+import { alertsApi, type AlertTestResult, type DataAlert, type DatasetColumn } from '../../services/api'
 import ExpressionBuilder from '../expr/ExpressionBuilder'
 import LoadError from '../ui/LoadError'
 import EmptyState from '../ui/EmptyState'
-import { useT } from '../../i18n'
-import { BellRing } from 'lucide-react'
+import { useT, type TranslateFn } from '../../i18n'
+import { localDigits } from '../../lib/arabicFormats'
+import { Bell, BellRing } from 'lucide-react'
+import '../../pages/datasetDetail/rules.css'
 import { useConfirm } from '../ui/ConfirmDialog'
+import { formatDate } from '../../lib/dateFormat'
+import { storedStatus } from '../../lib/storedStatus'
 
 /**
  * Watch a condition on this dataset and email someone when it becomes true.
@@ -31,16 +35,16 @@ import { useConfirm } from '../ui/ConfirmDialog'
 
 /** The same aggregate namespace measures use — the expression is evaluated by
  *  the widget sandbox, so the palette must not offer anything it would reject. */
-const ALERT_FUNCS = [
+const alertFuncs = (t: TranslateFn) => [
   {
-    label: 'Aggregation', color: '#f472b6',
+    label: t('i2d.c.aggregation'), color: '#f472b6',
     items: [
-      { label: 'SUM(col)', snippet: 'SUM()', back: 1, hint: 'Total over the dataset' },
-      { label: 'AVG(col)', snippet: 'AVG()', back: 1, hint: 'Mean over the dataset' },
-      { label: 'COUNT(col)', snippet: 'COUNT()', back: 1, hint: 'Non-null count' },
-      { label: 'COUNTD(col)', snippet: 'COUNTD()', back: 1, hint: 'Distinct count' },
-      { label: 'MIN(col)', snippet: 'MIN()', back: 1, hint: 'Smallest value' },
-      { label: 'MAX(col)', snippet: 'MAX()', back: 1, hint: 'Largest value' },
+      { label: 'SUM(col)', snippet: 'SUM()', back: 1, hint: t('i2d.al.fn.sum') }, // i18n-ok: a function, code
+      { label: 'AVG(col)', snippet: 'AVG()', back: 1, hint: t('i2d.al.fn.avg') }, // i18n-ok: a function, code
+      { label: 'COUNT(col)', snippet: 'COUNT()', back: 1, hint: t('i2d.al.fn.count') }, // i18n-ok: a function, code
+      { label: 'COUNTD(col)', snippet: 'COUNTD()', back: 1, hint: t('i2d.al.fn.countd') }, // i18n-ok: a function, code
+      { label: 'MIN(col)', snippet: 'MIN()', back: 1, hint: t('i2d.al.fn.min') }, // i18n-ok: a function, code
+      { label: 'MAX(col)', snippet: 'MAX()', back: 1, hint: t('i2d.al.fn.max') }, // i18n-ok: a function, code
     ],
   },
 ]
@@ -65,17 +69,17 @@ function splitEmails(text: string): string[] {
  * either a bug or an alert hammering the database on every tick — the opposite
  * of what it means. Caught by photographing the real page.
  */
-function cadence(minutes: number): string {
-  if (minutes <= 0) return 'not scheduled'
+function cadence(minutes: number, t: TranslateFn): string {
+  if (minutes <= 0) return t('al.cad.none')
   if (minutes >= 1440) {
     const days = Math.round(minutes / 1440)
-    return `every ${days} day${days === 1 ? '' : 's'}`
+    return t(days === 1 ? 'al.cad.day' : 'al.cad.days', { n: localDigits(String(days)) })
   }
   if (minutes >= 60) {
     const hours = Math.round(minutes / 60)
-    return `every ${hours} hour${hours === 1 ? '' : 's'}`
+    return t(hours === 1 ? 'al.cad.hour' : 'al.cad.hours', { n: localDigits(String(hours)) })
   }
-  return `every ${minutes} minutes`
+  return t('al.cad.minutes', { n: localDigits(String(minutes)) })
 }
 
 export default function AlertsPanel({ datasetId, columns }: {
@@ -93,6 +97,15 @@ export default function AlertsPanel({ datasetId, columns }: {
   const [interval, setInterval] = useState(60)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  // A CHANGE alert watches a number and fires when it moves by a percentage
+  // since the last check -- "leavers up 20%" (HR evaluation, item 3.1).
+  const [kind, setKind] = useState<'condition' | 'change'>('condition')
+  const [changePct, setChangePct] = useState('20')
+  const [direction, setDirection] = useState<'up' | 'down' | 'any'>('any')
+  const [webhook, setWebhook] = useState('')
+  const [testing, setTesting] = useState(false)
+  const [test, setTest] = useState<AlertTestResult | null>(null)
+  const [testError, setTestError] = useState<string | null>(null)
 
   const load = useCallback(() => {
     setLoadError(null)
@@ -102,7 +115,22 @@ export default function AlertsPanel({ datasetId, columns }: {
   }, [datasetId])
   useEffect(() => { load() }, [load])
 
-  const complete = !!name.trim() && !!expression.trim() && splitEmails(emails).length > 0
+  const complete = !!name.trim() && !!expression.trim()
+    && (splitEmails(emails).length > 0 || !!webhook.trim())
+    && (kind === 'condition' || Number(changePct) > 0)
+
+  const runTest = async () => {
+    if (!expression.trim()) return
+    setTesting(true); setTest(null); setTestError(null)
+    try {
+      setTest(await alertsApi.test(datasetId, {
+        expression: expression.trim(),
+        ...(kind === 'change' ? { change_pct: Number(changePct), change_direction: direction } : {}),
+      }))
+    } catch (e: unknown) {
+      setTestError((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? t('i2d.al.testFailed'))
+    } finally { setTesting(false) }
+  }
 
   const create = async () => {
     if (!complete) return
@@ -111,8 +139,10 @@ export default function AlertsPanel({ datasetId, columns }: {
       await alertsApi.create(datasetId, {
         name: name.trim(), expression: expression.trim(),
         interval_minutes: interval, recipients: splitEmails(emails),
+        ...(kind === 'change' ? { change_pct: Number(changePct), change_direction: direction } : {}),
+        ...(webhook.trim() ? { webhook_url: webhook.trim() } : {}),
       })
-      setAdding(false); setName(''); setExpression(''); setEmails('')
+      setAdding(false); setName(''); setExpression(''); setEmails(''); setWebhook(''); setTest(null)
       load()
     } catch (e: unknown) {
       // The endpoint validates the expression through the same sandbox gate the
@@ -120,7 +150,7 @@ export default function AlertsPanel({ datasetId, columns }: {
       // rejected: name 'os' is not defined"). Anything generic would leave the
       // user editing at random.
       setSaveError((e as { response?: { data?: { detail?: string } } })
-        ?.response?.data?.detail ?? 'The alert could not be created')
+        ?.response?.data?.detail ?? t('i2d.al.createFailed'))
     } finally {
       setSaving(false)
     }
@@ -128,8 +158,8 @@ export default function AlertsPanel({ datasetId, columns }: {
 
   const remove = async (alert: DataAlert) => {
     if (!await confirm({
-      title: `Delete the alert "${alert.name}"?`,
-      body: 'It stops being checked immediately. This cannot be undone.',
+      title: t('i2d.al.deleteTitle', { name: alert.name }),
+      body: t('i2d.al.deleteBody'),
     })) return
     await alertsApi.remove(datasetId, alert.id)
     load()
@@ -138,24 +168,21 @@ export default function AlertsPanel({ datasetId, columns }: {
   if (loadError) {
     return <LoadError what="the alerts on this dataset" error={loadError} onRetry={load} />
   }
-  if (!alerts) return <p style={{ color: 'var(--muted)' }}>Loading…</p>
+  if (!alerts) return <p style={{ color: 'var(--muted)' }}>{t('common.loading')}</p>
 
   return (
-    <div style={{ maxWidth: 760 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    marginBottom: 12 }}>
+    <section className="dl-rules__card">
+      <header className="dl-rules__head">
         <div>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>{t('alerts.title')}</div>
-          <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-            {t('alerts.desc')}
-          </div>
+          <h3>{t('alerts.title')}</h3>
+          <p>{t('alerts.desc')}</p>
         </div>
         {!adding && (
           <button className="btn btn-primary btn-sm" onClick={() => setAdding(true)}>
             {t('alerts.new')}
           </button>
         )}
-      </div>
+      </header>
 
       {adding && (
         <div className="card" style={{ padding: 16, marginBottom: 16 }}>
@@ -163,16 +190,54 @@ export default function AlertsPanel({ datasetId, columns }: {
             <label htmlFor="alert-name" style={label}>{t('alerts.name')}</label>
             <input id="alert-name" value={name} style={{ width: '100%' }}
               onChange={e => setName(e.target.value)}
-              placeholder="Revenue fell below target" />
+              placeholder={t('i2d.al.namePh')} />
+          </div>
+
+          <div role="radiogroup" aria-label={t('i2d.al.watch')} style={{ display: 'flex', gap: 14, marginBottom: 10, fontSize: 12 }}>
+            <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              <input type="radio" name="alert-kind" checked={kind === 'condition'} onChange={() => { setKind('condition'); setTest(null) }} />
+              {t('i2d.al.kindCondition')}
+            </label>
+            <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              <input type="radio" name="alert-kind" checked={kind === 'change'} onChange={() => { setKind('change'); setTest(null) }} />
+              {t('i2d.al.kindChange')}
+            </label>
           </div>
 
           <div style={{ marginBottom: 10 }}>
-            <label htmlFor="alert-expr" style={label}>{t('alerts.condition')}</label>
+            <label htmlFor="alert-expr" style={label}>{kind === 'condition' ? t('alerts.condition') : t('i2d.al.numberToWatch')}</label>
             <ExpressionBuilder
-              columns={columns} functionsCatalog={ALERT_FUNCS}
-              value={expression} onChange={setExpression}
+              columns={columns} functionsCatalog={alertFuncs(t)}
+              value={expression} onChange={v => { setExpression(v); setTest(null) }}
               layout="flat" rows={2} textareaId="alert-expr"
-              placeholder="SUM(revenue) < 100000" />
+              placeholder={kind === 'condition' ? 'SUM(amount) < 100000' : 'COUNT(id)'} // i18n-ok: code samples
+            />
+          </div>
+
+          {kind === 'change' && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, fontSize: 12, flexWrap: 'wrap' }}>
+              {t('i2d.al.fireWhen')}
+              <select aria-label={t('i2d.al.direction')} value={direction} onChange={e => setDirection(e.target.value as 'up' | 'down' | 'any')}>
+                <option value="any">{t('i2d.al.dirAny')}</option>
+                <option value="up">{t('i2d.al.dirUp')}</option>
+                <option value="down">{t('i2d.al.dirDown')}</option>
+              </select>
+              {t('i2d.al.byAtLeast')}
+              <input aria-label={t('i2d.al.changePct')} type="number" min={1} value={changePct}
+                onChange={e => setChangePct(e.target.value)} style={{ width: 70 }} />
+              {t('i2d.al.sincePrev')}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+            <button className="btn btn-sm" disabled={!expression.trim() || testing} onClick={() => void runTest()}>
+              {testing ? t('i2d.al.testing') : t('i2d.al.testNow')}
+            </button>
+            {test && (
+              <span role="status" data-testid="alert-test-result" style={{ fontSize: 12,
+                color: test.firing ? 'var(--warning, #b45309)' : 'var(--muted)' }}>{test.message}</span>
+            )}
+            {testError && <span role="alert" style={{ fontSize: 12, color: 'var(--danger)' }}>{testError}</span>}
           </div>
 
           <div style={{ display: 'flex', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
@@ -180,10 +245,18 @@ export default function AlertsPanel({ datasetId, columns }: {
               <label htmlFor="alert-emails" style={label}>{t('alerts.email')}</label>
               <input id="alert-emails" value={emails} style={{ width: '100%' }}
                 onChange={e => setEmails(e.target.value)}
-                placeholder="ops@example.com, lead@example.com" />
+                placeholder="one@example.com, two@example.com" // i18n-ok: email addresses
+              />
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
                 {t('alerts.comma')}
               </div>
+            </div>
+            <div style={{ flex: '1 1 260px' }}>
+              <label htmlFor="alert-webhook" style={label}>{t('i2d.al.webhook')}</label>
+              <input id="alert-webhook" value={webhook} style={{ width: '100%' }}
+                onChange={e => setWebhook(e.target.value)}
+                placeholder="https://…" // i18n-ok: a URL
+              />
             </div>
             <div style={{ width: 150 }}>
               <label htmlFor="alert-interval" style={label}>{t('alerts.every')}</label>
@@ -191,11 +264,11 @@ export default function AlertsPanel({ datasetId, columns }: {
                 onChange={e => setInterval(Number(e.target.value))}>
                 {/* 15 is the floor the endpoint clamps to; offering 5 here would
                     silently become 15 on save. */}
-                <option value={15}>15 minutes</option>
-                <option value={30}>30 minutes</option>
-                <option value={60}>hour</option>
-                <option value={360}>6 hours</option>
-                <option value={1440}>day</option>
+                <option value={15}>{t('i2d.al.minutes', { n: localDigits('15') })}</option>
+                <option value={30}>{t('i2d.al.minutes', { n: localDigits('30') })}</option>
+                <option value={60}>{t('i2d.al.hour')}</option>
+                <option value={360}>{t('i2d.al.hours', { n: localDigits('6') })}</option>
+                <option value={1440}>{t('i2d.al.day')}</option>
               </select>
             </div>
           </div>
@@ -206,13 +279,13 @@ export default function AlertsPanel({ datasetId, columns }: {
           )}
 
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn btn-primary btn-sm" disabled={!complete || saving} title={!complete ? 'Give the alert a name, a condition and an email first' : undefined}
+            <button className="btn btn-primary btn-sm" disabled={!complete || saving} title={!complete ? t('i2d.al.needAll') : undefined}
               onClick={() => void create()}>
-              {saving ? 'Creating…' : 'Create'}
+              {saving ? t('i2d.c.creating') : t('i2d.al.create')}
             </button>
             <button className="btn btn-sm" onClick={() => {
               setAdding(false); setSaveError(null)
-            }}>Cancel</button>
+            }}>{t('common.cancel')}</button>
           </div>
         </div>
       )}
@@ -226,15 +299,21 @@ export default function AlertsPanel({ datasetId, columns }: {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {alerts.map(a => <AlertRow key={a.id} alert={a} onDelete={() => void remove(a)} />)}
       </div>
-    </div>
+    </section>
   )
 }
 
 function AlertRow({ alert, onDelete }: { alert: DataAlert; onDelete: () => void }) {
-  const failed = !!alert.last_status && alert.last_status !== 'ok'
+  const t = useT()
+  // The scheduler writes "clear", "fired, emailed 2", "still firing (no re-send)"
+  // on success and "evaluation failed: ..." / "disabled: ..." on failure. Every
+  // status but "ok" used to read as a failure here.
+  const status = alert.last_status ?? ''
+  const failed = /failed|disabled|error|skipped/i.test(status) && !/^fired/i.test(status)
+  const firing = alert.last_state === 'firing' || alert.last_state === true
   return (
-    <div className="card" style={{ padding: 12, display: 'flex', gap: 12,
-                                   alignItems: 'flex-start' }}>
+    <div className="dl-rules__alert">
+      <span className="dl-ov__state dl-ov__state--none" aria-hidden><Bell size={12} /></span>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 13, fontWeight: 600 }}>{alert.name}</div>
         <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)',
@@ -242,27 +321,29 @@ function AlertRow({ alert, onDelete }: { alert: DataAlert; onDelete: () => void 
           {alert.expression}
         </div>
         <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-          {alert.recipients.join(', ')} · {cadence(alert.interval_minutes)}
+          {alert.change_pct ? `${t('al.fires', { dir: t(alert.change_direction === 'up' ? 'al.rise' : alert.change_direction === 'down' ? 'al.fall' : 'al.move'), pct: localDigits(String(alert.change_pct)) })} · ` : ''}
+          <bdi>{[...alert.recipients, ...(alert.webhook_url ? ['webhook'] : [])].join(', ')}</bdi> · {cadence(alert.interval_minutes, t)}
+          {alert.last_value != null ? ` · ${t('al.lastValue', { v: localDigits(alert.last_value.toLocaleString('en-US')) })}` : ''}
         </div>
         {/* A broken alert that looks fine is worse than no alert: nobody learns
             the condition stopped being watched. */}
         {failed ? (
           <div style={{ fontSize: 11, color: 'var(--danger)', marginTop: 4 }}>
-            Last check failed — {alert.last_status}
+            {t('al.failed')} — <bdi>{storedStatus(alert.last_status, t)}</bdi>
           </div>
         ) : alert.last_checked_at ? (
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-            Checked {new Date(alert.last_checked_at).toLocaleString()}
-            {alert.last_state ? ' · currently true, so the email has already gone' : ''}
+            {t('al.checked', { when: formatDate(alert.last_checked_at) })}
+            {` · ${t(firing ? 'al.firing' : 'al.quiet')}`}
           </div>
         ) : (
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-            Not yet checked.
+            {t('al.notYet')}
           </div>
         )}
       </div>
-      <button className="btn btn-sm" aria-label={`Delete ${alert.name}`}
-        onClick={onDelete}>Delete</button>
+      <button className="btn btn-sm" aria-label={t('al.deleteName', { name: alert.name })}
+        onClick={onDelete}>{t('al.delete')}</button>
     </div>
   )
 }

@@ -51,6 +51,15 @@ class RefreshRefused(Exception):
         self.code = code
 
 
+class ChecksRefused(Exception):
+    """Phase 3: a blocking data check failed on the new data; nothing was
+    written. `payload` is the 409 body: the message and every check result."""
+
+    def __init__(self, payload: dict):
+        super().__init__(payload["detail"])
+        self.payload = payload
+
+
 class SchemaBreakRefused(Exception):
     """E05: the source dropped columns this dataset uses; nothing was written.
     `payload` is the 409 body: the message, the missing columns, suggested
@@ -97,8 +106,58 @@ async def active_refresh_job(db: AsyncSession, org_id: int, dataset_id: int) -> 
     return next((j for j in rows if (j.inputs or {}).get("dataset_id") == dataset_id), None)
 
 
-async def refresh_now(
+async def refresh_now(db: AsyncSession, user: User, dataset_id: int, **kwargs
+                      ) -> tuple[Dataset, str | None]:
+    """A manual refresh (see `_refresh_now`), recorded as a `RefreshRun`.
+
+    Pipeline plan, phase 1: the manual path left one `QueryRun` row on
+    success and nothing on failure. The run starts only once the dataset is
+    known to be refreshable, so a refusal ("a DirectQuery dataset has
+    nothing to refresh") is an answer, not a failed run."""
+    from .refresh_runs import finish_run, start_run
+    run: dict = {"id": None, "mutating": False}
+
+    async def _started() -> None:
+        run["id"] = await start_run(db, "dataset", dataset_id, user.org_id, "manual")
+
+    try:
+        dataset, warning = await _refresh_now(db, user, dataset_id, _on_loaded=_started,
+                                              _state=run, **kwargs)
+    except BaseException as e:
+        if run["id"] is not None:
+            # Only a failure AFTER the dataset rows were changed has anything
+            # to discard -- and must discard it, or recording the run would
+            # commit a half-applied refresh. Earlier failures leave the
+            # session clean, and the caller's instances usable.
+            if run["mutating"]:
+                try:
+                    await db.rollback()
+                except Exception:  # noqa: BLE001
+                    pass
+            if isinstance(e, (jobs.LeaseLost, jobs.JobCancelled)):
+                await finish_run(db, run["id"], "skipped",
+                                 error="Cancelled" if isinstance(e, jobs.JobCancelled)
+                                 else "Another worker took this refresh over",
+                                 error_code="cancelled")
+            elif isinstance(e, ChecksRefused):
+                await finish_run(db, run["id"], "blocked", error=e.payload["detail"],
+                                 error_code="checks_blocked", checks=e.payload.get("checks"))
+            else:
+                detail = e.payload.get("detail") if isinstance(e, SchemaBreakRefused) else str(e)
+                code = ("schema_break" if isinstance(e, SchemaBreakRefused)
+                        else getattr(e, "code", None) or "refresh_failed")
+                await finish_run(db, run["id"], "failed", error=detail or type(e).__name__,
+                                 error_code=str(code)[:40])
+        raise
+    await finish_run(db, run["id"], "ok", rows=dataset.row_count, checks=run.get("checks"))
+    return dataset, warning
+
+
+async def _refresh_now(
     db: AsyncSession, user: User, dataset_id: int, *,
+    _on_loaded: Callable[[], Awaitable[None]] | None = None,
+    _state: dict | None = None,
+    publish_anyway: bool = False,
     mode: str = "full", cursor_column: str | None = None,
     column_map: dict[str, str] | None = None, force: bool = False,
     checkpoint: Callable[..., Awaitable[None]] | None = None,
@@ -118,14 +177,15 @@ async def refresh_now(
     `before_commit` has run -- which is where a job fences its success -- so
     a refresh whose outcome does not stand writes nothing."""
     from ..services.audit import record as audit
-    from ..services.dataset_refresh import (SchemaBreak, refresh_dataset,
-                                            write_dataset_files,
+    from ..services.dataset_refresh import (SchemaBreak, missing_of, refresh_dataset,
+                                            rows_of, write_dataset_files,
                                             write_materialization)
     from ..services.dependencies import find_dependents_of
-    from ..services.ingest import missing_pct
     from ..services.query_log import log_query_run_sync
 
     dataset, src = await load_refreshable(db, user, dataset_id)
+    if _on_loaded is not None:
+        await _on_loaded()
     cfg = dict(src.config)
     cfg['type'] = src.type
 
@@ -156,13 +216,33 @@ async def refresh_now(
 
     if checkpoint is not None:
         await checkpoint("querying")
+    # Phase 3: the dataset's saved checks run on the new frame before it is
+    # written. `publish_anyway` -- an editor's decision after seeing them
+    # fail -- records the results and publishes regardless.
+    from ..services.data_checks import (ChecksBlocked, blocking_failures, describe,
+                                        known_types, load_checks, make_validator)
+    holder = _state if _state is not None else {}
+    validate = make_validator(await load_checks(db, dataset_id), dataset.row_count,
+                              await known_types(db, dataset_id), holder, force=publish_anyway)
     start = time.monotonic()
     try:
         outcome = await asyncio.to_thread(
             refresh_dataset, cfg, dataset.filename, dataset.source_table, dataset.source_query,
             requested_mode, cursor_column, cursor_value, known_columns,
-            required, column_map, not defer_write,
+            required, column_map, not defer_write, validate,
+            # Phase 4: the merge key and look-back saved on the watermark.
+            (watermark.key_column if watermark else None),
+            (watermark.lookback_hours if watermark else None),
+            bool(watermark.reconcile_deletes) if watermark else False,
         )
+    except ChecksBlocked as e:
+        failed = blocking_failures(e.results)
+        raise ChecksRefused({
+            "detail": "Not published: " + "; ".join(describe(r) for r in failed)
+                      + ". The previous data is still live.",
+            "code": "checks_blocked",
+            "checks": e.results,
+        })
     except SchemaBreak as e:
         raise SchemaBreakRefused({
             "detail": (f"Not refreshed: the source no longer has {', '.join(repr(m) for m in e.missing)}, "
@@ -179,10 +259,12 @@ async def refresh_now(
     duration_ms = int((time.monotonic() - start) * 1000)
     if checkpoint is not None:
         # The last point a cancel can stop it: nothing has been written yet.
-        await checkpoint("saving", rows=len(outcome["df"]))
+        await checkpoint("saving", rows=rows_of(outcome["df"]))
 
     df, type_map = outcome["df"], outcome["type_map"]
-    dataset.row_count = len(df)
+    if _state is not None:
+        _state["mutating"] = True
+    dataset.row_count = rows_of(df)
     dataset.col_count = len(df.columns)
     dataset.last_refreshed_at = datetime.utcnow()
 
@@ -192,7 +274,7 @@ async def refresh_now(
     for col_name, dtype in type_map.items():
         db.add(DatasetColumn(
             dataset_id=dataset.id, name=col_name, dtype=dtype,
-            missing_pct=missing_pct(df[col_name]), stats={},
+            missing_pct=missing_of(df, col_name), stats={},
             semantic_type=semantic_types.get(col_name),
         ))
 
@@ -200,19 +282,29 @@ async def refresh_now(
         if watermark is None:
             watermark = Watermark(dataset_id=dataset_id)
             db.add(watermark)
-        watermark.strategy = outcome["mode"]
+        # The strategy is what the dataset is SET to do (phase 4: the
+        # scheduler follows it), not what this run happened to do. Asking for
+        # an incremental load sets it -- even when this first run had to load
+        # everything to set the baseline; a one-off full reload by hand does
+        # not switch a scheduled incremental dataset back to full loads.
+        if requested_mode == "incremental":
+            watermark.strategy = "incremental"
+        elif not watermark.strategy:
+            watermark.strategy = "full"
         watermark.cursor_column = cursor_column
         watermark.cursor_value = outcome["cursor_value"]
+    if watermark is not None and outcome["mode"] == "full":
+        watermark.last_full_at = datetime.utcnow()
 
     if dataset.filename:
         await write_materialization(
             db, dataset.id, dataset.filename, outcome["mode"],
-            len(df), list(df.columns), outcome.get("cursor_value"),
+            rows_of(df), list(df.columns), outcome.get("cursor_value"),
         )
 
     # E07: a manual reload replaces what every dashboard on it shows.
     await audit(db, user, "dataset.refresh", "dataset", dataset.id,
-                f"{outcome['mode']} from {src.name} -> {len(df):,} rows"
+                f"{outcome['mode']} from {src.name} -> {rows_of(df):,} rows"
                 + (" (forced past a schema break)" if force else ""))
     if before_commit is not None:
         await before_commit(db, dataset, outcome)
@@ -224,16 +316,17 @@ async def refresh_now(
 
     log_query_run_sync(
         org_id=user.org_id, source_kind="refresh", data_source_id=dataset.data_source_id,
-        dataset_id=dataset.id, sql_hash=None, rows_returned=len(df),
+        dataset_id=dataset.id, sql_hash=None, rows_returned=rows_of(df),
         duration_ms=duration_ms, executor="pandas", cache_hit=False,
     )
     return dataset, outcome.get("warning")
 
 
 def job_inputs(dataset_id: int, mode: str, cursor_column: str | None,
-               column_map: dict[str, str] | None, force: bool) -> dict:
+               column_map: dict[str, str] | None, force: bool,
+               publish_anyway: bool = False) -> dict:
     """What a refresh job runs with, frozen at enqueue."""
-    return {"dataset_id": dataset_id,
+    return {"dataset_id": dataset_id, "publish_anyway": bool(publish_anyway),
             "mode": "incremental" if mode == "incremental" else "full",
             "cursor_column": cursor_column or None,
             "column_map": dict(column_map) if column_map else None,
@@ -264,8 +357,12 @@ async def run_refresh_job(ctx: "jobs.JobContext") -> None:
                               cursor_column=inputs.get("cursor_column"),
                               column_map=inputs.get("column_map"),
                               force=bool(inputs.get("force")),
+                              publish_anyway=bool(inputs.get("publish_anyway")),
                               checkpoint=ctx.checkpoint, before_commit=_complete,
                               defer_write=True)
+        except ChecksRefused as e:
+            raise jobs.JobError(e.payload["detail"], code="checks_blocked",
+                                detail={"checks": e.payload["checks"]})
         except SchemaBreakRefused as e:
             raise jobs.JobError(e.payload["detail"], code="schema_break", detail={
                 k: e.payload[k] for k in ("missing", "suggestions", "available", "dependents")})

@@ -56,3 +56,17 @@ describe('OutlierDetailsDialog', () => {
     await waitFor(() => expect(outlierApi.details).toHaveBeenCalledWith(5, 'amount', 'iforest'))
   })
 })
+
+describe('outlier numbers (QA5 F3, R2)', () => {
+  it('rows use the app\'s cell format, and every number is isolated left-to-right', async () => {
+    vi.mocked(outlierApi.details).mockResolvedValue({ ...details,
+      stats: { ...details.stats, min: -12012 },
+      outliers: { ...details.outliers, columns: ['who', 'profit'], rows: [['r20', -6208.6900000000005]] } })
+    const { container } = render(<OutlierDetailsDialog datasetId={5} column="profit" onClose={() => {}} />)
+    await waitFor(() => expect(screen.getByText('r20')).toBeInTheDocument())
+    expect(screen.queryByText(/6208\.6900000000005/)).toBeNull()
+    const cell = [...container.querySelectorAll('td bdi[dir="ltr"]')].map(b => b.textContent)
+    expect(cell).toContain('-6208.69')
+    expect([...container.querySelectorAll('bdi[dir="ltr"]')].some(b => /-12,012/.test(b.textContent ?? ''))).toBe(true)
+  })
+})

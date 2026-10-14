@@ -202,9 +202,17 @@ def estimated_row_counts(engine, schema: str | None = None) -> dict[str, int]:
                       AND n.nspname = COALESCE(:schema, 'public')
                 """), {"schema": schema}).fetchall()
             return {name: int(count) for name, count in rows}
+        if dialect in ("mysql", "mariadb"):
+            with engine.connect() as conn:
+                rows = conn.execute(text(
+                    "SELECT TABLE_NAME, TABLE_ROWS FROM information_schema.TABLES "
+                    "WHERE TABLE_SCHEMA = COALESCE(:schema, DATABASE()) AND TABLE_TYPE = 'BASE TABLE'"),
+                    {"schema": schema}).fetchall()
+            return {name: int(count or 0) for name, count in rows}
     except Exception:
         logger.info("could not read row-count estimates", exc_info=True)
     return {}
+
 
 
 def count_rows(engine, name: str, schema: str | None) -> int | None:

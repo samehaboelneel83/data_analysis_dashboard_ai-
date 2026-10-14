@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useT } from '../../i18n'
 import type { DisplayRule } from '../../lib/displayRules'
 
 interface Props {
@@ -14,6 +15,7 @@ interface Props {
  *  IntervalEditor solves for its bounds: '-', '0.' are legitimate
  *  intermediate keystrokes, and a blank box means "auto", not "zero". */
 export default function DataBarEditor({ rule, onChange }: Props) {
+  const t = useT()
   const emit = (patch: Partial<DisplayRule>) => onChange({ ...rule, kind: 'data_bar', ...patch })
 
   const [minDraft, setMinDraft] = useState<string | null>(null)
@@ -33,19 +35,19 @@ export default function DataBarEditor({ rule, onChange }: Props) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
       <label style={{ fontSize: 11 }} htmlFor={`bar-min-${rule.id}`}>
-        Minimum (blank = auto)
+        {t('bc.rules.bar.min')}
         <input id={`bar-min-${rule.id}`} type="text" inputMode="decimal"
-          value={minValue} placeholder="auto"
+          value={minValue} placeholder={t('bc.rules.bar.auto')}
           onChange={e => setBound('min', e.target.value)} />
       </label>
       <label style={{ fontSize: 11 }} htmlFor={`bar-max-${rule.id}`}>
-        Maximum (blank = auto)
+        {t('bc.rules.bar.max')}
         <input id={`bar-max-${rule.id}`} type="text" inputMode="decimal"
-          value={maxValue} placeholder="auto"
+          value={maxValue} placeholder={t('bc.rules.bar.auto')}
           onChange={e => setBound('max', e.target.value)} />
       </label>
       <label style={{ fontSize: 11 }} htmlFor={`bar-color-${rule.id}`}>
-        Bar colour
+        {t('bc.rules.bar.color')}
         <input id={`bar-color-${rule.id}`} type="color" value={rule.color ?? '#60a5fa'}
           onChange={e => emit({ color: e.target.value })} />
       </label>

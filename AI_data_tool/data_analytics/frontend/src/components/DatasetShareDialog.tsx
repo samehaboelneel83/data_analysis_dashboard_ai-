@@ -1,53 +1,90 @@
 import { useEffect, useMemo, useState } from 'react'
-import { adminUsersApi, datasetSharesApi } from '../services/api'
+import { adminRolesApi, adminUsersApi, datasetSharesApi, lineageApi, orgUnitsApi } from '../services/api'
+import { Shield, X } from 'lucide-react'
+import '../pages/datasetDetail/share.css'
+import { useT } from '../i18n'
+import { localDigits } from '../lib/arabicFormats'
 import type { DatasetShare, User } from '../services/api'
 import toast from 'react-hot-toast'
 import { useConfirm } from './ui/ConfirmDialog'
 import { useModalDialog } from './ui/useModalDialog'
 
+type Kind = 'user' | 'role' | 'org_unit'
+type Level = 'view' | 'edit'
+
 /**
  * In-org dataset sharing, managed by org admins.
  *
- * SH1 shipped this as a BADGE: every member could already read every dataset
- * in the org, so a share only flagged provenance. Dataset ownership (0020)
- * made it a real grant -- `core.capability.readable_dataset_ids` reads these
- * rows -- so the copy below now describes access being given, not a bookmark
- * being set. Shape still mirrors ShareLinksDialog: a picker to grant, a list
- * to revoke.
+ * A share is a real grant (`core.capability.readable_dataset_ids` reads it),
+ * now with two things the HR evaluation asked for (item 2.5): share with a
+ * whole ROLE or an ORG UNIT (and everyone placed under it) instead of one
+ * person at a time, and choose VIEW (look only) or EDIT (may also re-model
+ * the data). Rows are still filtered by each viewer's own row rules.
  */
-export default function DatasetShareDialog({ datasetId, onClose }: {
+export default function DatasetShareDialog({ datasetId, onClose, datasetName, createdByMe }: {
   datasetId: number
   onClose: () => void
+  /** For the title: Share "Demo — Sales". */
+  datasetName?: string
+  /** Whether the viewer created it, for the "Can also open it" list. */
+  createdByMe?: boolean
 }) {
+  const t = useT()
   const dialogRef = useModalDialog<HTMLDivElement>(onClose)
   const confirm = useConfirm()
   const [shares, setShares] = useState<DatasetShare[]>([])
   const [orgUsers, setOrgUsers] = useState<User[]>([])
-  const [pickedUserId, setPickedUserId] = useState<number | ''>('')
+  const [roles, setRoles] = useState<{ id: number; name: string; is_org_admin?: boolean }[]>([])
+  const [units, setUnits] = useState<{ id: number; name: string }[]>([])
+  const [kind, setKind] = useState<Kind>('user')
+  const [picked, setPicked] = useState<number | ''>('')
+  const [level, setLevel] = useState<Level>('view')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  // Dashboards built on it, for "anyone who can open its N dashboards".
+  const [boards, setBoards] = useState<number | null>(null)
 
   useEffect(() => {
     Promise.all([datasetSharesApi.list(datasetId), adminUsersApi.list()])
       .then(([s, u]) => { setShares(s); setOrgUsers(u) })
-      .catch(() => toast.error('Failed to load shares'))
+      .catch(() => toast.error(t('i2c.dsd.loadFail')))
       .finally(() => setLoading(false))
+    // Roles and units are optional extras: a failure leaves user sharing working.
+    adminRolesApi?.list?.().then(r => setRoles(r as never)).catch(() => {})
+    orgUnitsApi?.list?.().then(u => setUnits(u as never)).catch(() => {})
+    Promise.resolve().then(() => lineageApi?.graph?.())
+      .then(g => { if (g) setBoards(g.reports.filter(r => r.dataset_ids.includes(datasetId)).length) }).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [datasetId])
 
-  const sharedUserIds = useMemo(() => new Set(shares.map(s => s.user_id)), [shares])
-  const shareable = orgUsers.filter(u => !sharedUserIds.has(u.id))
+  const kindOf = (s: DatasetShare): Kind => s.kind ?? 'user'
+  const taken = useMemo(() => new Set(shares.map(s =>
+    `${kindOf(s)}:${kindOf(s) === 'user' ? s.user_id : kindOf(s) === 'role' ? s.role_id : s.org_unit_id}`)), [shares])
+  const options: { id: number; label: string }[] = kind === 'user'
+    ? orgUsers.filter(u => !taken.has(`user:${u.id}`)).map(u => ({ id: u.id, label: u.email }))
+    : kind === 'role'
+      ? roles.filter(r => !r.is_org_admin && !taken.has(`role:${r.id}`)).map(r => ({ id: r.id, label: r.name }))
+      : units.filter(u => !taken.has(`org_unit:${u.id}`)).map(u => ({ id: u.id, label: u.name }))
+  const nameOf = (s: DatasetShare) => s.name ?? s.email ?? ''
+  const [taQuery, setTaQuery] = useState('')
+  const [taOpen, setTaOpen] = useState(false)
+  const [taAt, setTaAt] = useState(0)
+  const found = options.filter(o => o.label.toLowerCase().includes(taQuery.trim().toLowerCase())).slice(0, 8)
+  const choose = (o: { id: number; label: string }) => { setPicked(o.id); setTaQuery(o.label); setTaOpen(false) }
 
   const handleShare = async () => {
-    if (pickedUserId === '') return
+    if (picked === '') return
     setSaving(true)
     try {
-      const share = await datasetSharesApi.create(datasetId, pickedUserId as number)
+      const share = kind === 'user'
+        ? await datasetSharesApi.create(datasetId, picked as number, level)
+        : await datasetSharesApi.createGroup(datasetId, {
+            ...(kind === 'role' ? { role_id: picked as number } : { org_unit_id: picked as number }), level })
       setShares(prev => [share, ...prev])
-      setPickedUserId('')
-      toast.success('Dataset shared')
+      setPicked('')
+      toast.success(t('i2c.dsd.shared'))
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail ?? 'Failed to share dataset')
+      toast.error(e?.response?.data?.detail ?? t('i2c.dsd.shareFail'))
     } finally {
       setSaving(false)
     }
@@ -57,72 +94,129 @@ export default function DatasetShareDialog({ datasetId, onClose }: {
     // Naming who loses access: the row is one of several, and a mis-click here
     // silently cuts off a colleague rather than the person intended.
     if (!await confirm({
-      title: `Stop sharing with ${share.email}?`,
-      body: 'They lose access to this dataset immediately. You can share it with them again later.',
-      confirmLabel: 'Remove access',
+      title: t('i2c.dsd.stopQ', { name: nameOf(share) }),
+      body: kindOf(share) === 'user' ? t('i2c.dsd.stopUserBody') : t('i2c.dsd.stopGroupBody'),
+      confirmLabel: t('i2c.dsd.removeAccess'),
     })) return
     try {
-      await datasetSharesApi.delete(datasetId, share.id)
-      setShares(prev => prev.filter(s => s.id !== share.id))
-      toast.success('Share removed')
+      if (kindOf(share) === 'user') await datasetSharesApi.delete(datasetId, share.id)
+      else await datasetSharesApi.deleteGroup(datasetId, share.id)
+      setShares(prev => prev.filter(s => !(s.id === share.id && kindOf(s) === kindOf(share))))
+      toast.success(t('i2c.dsd.removed'))
     } catch {
-      toast.error('Failed to remove share')
+      toast.error(t('i2c.dsd.removeFail'))
     }
   }
 
+  const KIND_LABEL: Record<Kind, string> = { user: t('share3.person'), role: t('share3.role'), org_unit: t('share3.unit') }
+  const initials = (n: string) => (n.split(/[\s@._-]+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('') || '?').toUpperCase()
+  const subOf = (s: DatasetShare) => kindOf(s) === 'user' ? (s.email && s.email !== nameOf(s) ? s.email : t('share3.person'))
+    : kindOf(s) === 'role' ? t('share3.role') : t('share3.unitBelow')
+
   return (
-    <div onClick={onClose}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 1000,
-        display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Share dataset"
-          onClick={e => e.stopPropagation()}
-        style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
-          padding: 18, width: 440, maxWidth: '92vw' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <strong style={{ fontSize: 13 }}>Share dataset</strong>
-          <button onClick={onClose} aria-label="Close"
-            style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 14, color: 'var(--muted)' }}>✕</button>
-        </div>
-        <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 12 }}>
-          Gives a teammate access to this dataset — its rows are otherwise visible only to
-          whoever uploaded it, your admins, and anyone opening a dashboard built on it.
-          They see it filtered by <strong>their own</strong> row-security rules, not yours.
-        </p>
+    <div onClick={onClose} className="dl-share__backdrop">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={t('share3.titlePlain')}
+        onClick={e => e.stopPropagation()} className="dl-share">
+        <header className="dl-share__head">
+          <h2>{datasetName ? t('share3.title', { name: datasetName }) : t('share3.titlePlain')}</h2>
+          <button onClick={onClose} aria-label={t('i2c.dsd.close')} className="dl-share__close"><X size={16} aria-hidden /></button>
+        </header>
 
         {loading ? (
-          <p style={{ fontSize: 12, color: 'var(--muted)' }}>Loading…</p>
+          <p className="dl-share__muted">{t('common.loading')}</p>
         ) : (
           <>
-            <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-              <select aria-label="User to share with" value={pickedUserId}
-                onChange={e => setPickedUserId(e.target.value ? Number(e.target.value) : '')}
-                style={{ flex: 1, fontSize: 12, padding: '5px 8px', background: 'var(--surface2)',
-                  border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)' }}>
-                <option value="">Select a user…</option>
-                {shareable.map(u => <option key={u.id} value={u.id}>{u.email}</option>)}
+            <div className="dl-share__add">
+              <span role="radiogroup" aria-label={t('i2c.dsd.shareWith')} className="dl-share__seg">
+                {(['user', 'role', 'org_unit'] as Kind[]).map(k => (
+                  <button key={k} type="button" role="radio" aria-checked={kind === k}
+                    onClick={() => { setKind(k); setPicked(''); setTaQuery('') }}>{KIND_LABEL[k]}</button>
+                ))}
+              </span>
+              {/* 9-polish: type to find who to share with. */}
+              <div className="dl-share__ta">
+                <input role="combobox" aria-expanded={taOpen} aria-controls="dl-share-ta" aria-autocomplete="list"
+                  aria-activedescendant={taOpen && found[taAt] ? `dl-share-ta-${found[taAt].id}` : undefined}
+                  aria-label={t(kind === 'user' ? 'pol.share.findUser' : kind === 'role' ? 'pol.share.findRole' : 'pol.share.findUnit')}
+                  placeholder={kind === 'user' ? t('share3.addPerson') : kind === 'role' ? t('share3.addRole') : t('share3.addUnit')}
+                  className="dl-share__pick" value={taQuery} autoComplete="off" name="share-find" dir="auto"
+                  onChange={e => { setTaQuery(e.target.value); setPicked(''); setTaOpen(true); setTaAt(0) }}
+                  onFocus={() => setTaOpen(true)} onBlur={() => setTimeout(() => setTaOpen(false), 120)}
+                  onKeyDown={e => {
+                    if (e.key === 'ArrowDown') { e.preventDefault(); setTaOpen(true); setTaAt(a => Math.min(a + 1, found.length - 1)) }
+                    else if (e.key === 'ArrowUp') { e.preventDefault(); setTaAt(a => Math.max(a - 1, 0)) }
+                    else if (e.key === 'Enter' && taOpen && found[taAt]) { e.preventDefault(); choose(found[taAt]) }
+                    else if (e.key === 'Escape') setTaOpen(false)
+                  }} />
+                {taOpen && (
+                  <ul id="dl-share-ta" role="listbox" className="dl-share__ta-list"
+                    aria-label={t(kind === 'user' ? 'pol.share.findUser' : kind === 'role' ? 'pol.share.findRole' : 'pol.share.findUnit')}>
+                    {found.length ? found.map((o, i) => (
+                      <li key={o.id} id={`dl-share-ta-${o.id}`} role="option" aria-selected={i === taAt}
+                        className={i === taAt ? 'is-act' : undefined} dir="auto"
+                        onMouseDown={e => { e.preventDefault(); choose(o) }} onMouseEnter={() => setTaAt(i)}>{o.label}</li>
+                    )) : <li className="dl-share__ta-none" role="presentation">{t('pol.share.none')}</li>}
+                  </ul>
+                )}
+              </div>
+              <select aria-label={t('i2c.dsd.level')} value={level} className="dl-share__level"
+                onChange={e => setLevel(e.target.value as Level)}>
+                <option value="view">{t('share3.view')}</option>
+                <option value="edit">{t('share3.edit')}</option>
               </select>
-              <button className="btn btn-primary btn-sm" onClick={handleShare} disabled={pickedUserId === '' || saving} title={pickedUserId === '' ? 'Choose a person to share with first' : undefined}>
-                {saving ? 'Sharing…' : 'Share'}
+              <button className="btn btn-primary btn-sm" onClick={handleShare} disabled={picked === '' || saving}
+                title={picked === '' ? t('i2c.dsd.chooseFirst') : undefined}>
+                {saving ? t('share3.sharing') : t('share3.share')}
               </button>
             </div>
 
+            <h3 className="dl-share__label">{t('share3.direct')}</h3>
             {shares.length === 0 ? (
-              <p style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center', padding: '8px 0' }}>
-                Not shared with anyone yet.
-              </p>
+              <p className="dl-share__muted dl-share__none">{t('share3.none')}</p>
             ) : (
-              <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 220, overflowY: 'auto' }}>
+              <ul className="dl-share__list">
                 {shares.map(s => (
-                  <li key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11,
-                    border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px' }}>
-                    <span style={{ flex: 1 }}>{s.email}</span>
-                    <button aria-label={`Remove share for ${s.email}`} className="btn btn-ghost btn-sm"
-                      style={{ fontSize: 11, color: 'var(--danger)' }}
-                      onClick={() => handleRemove(s)}>Remove</button>
+                  <li key={`${kindOf(s)}-${s.id}`}>
+                    <span className={`dl-share__avatar dl-share__avatar--${kindOf(s)}`} aria-hidden>{initials(nameOf(s))}</span>
+                    <span className="dl-share__who"><strong dir="auto">{nameOf(s)}</strong><span>{subOf(s)}</span></span>
+                    <span className="dl-share__lvl">{(s.level ?? 'edit') === 'view' ? t('share3.view') : t('share3.edit')}</span>
+                    <button aria-label={t('i2c.dsd.removeFor', { name: nameOf(s) })} className="dl-share__remove"
+                      onClick={() => handleRemove(s)}><X size={14} aria-hidden /></button>
                   </li>
                 ))}
               </ul>
             )}
+
+            {/* Static on purpose (N9): who else can open it, in words, with no
+                counts of admins or viewers the server does not report. */}
+            <h3 className="dl-share__label">{t('share3.also')}</h3>
+            <ul className="dl-share__list">
+              <li>
+                <span className="dl-share__avatar" aria-hidden>{createdByMe ? t('share3.av.you') : t('share3.av.creator')}</span>
+                <span className="dl-share__who"><strong>{createdByMe ? t('share3.you') : t('share3.creator')}</strong>
+                  <span>{createdByMe ? t('share3.youMade') : t('share3.creatorBody')}</span></span>
+                <span className="dl-share__lvl dl-share__muted">{t('share3.creatorTag')}</span>
+              </li>
+              <li>
+                <span className="dl-share__avatar dl-share__avatar--role" aria-hidden>{t('share3.av.admins')}</span>
+                <span className="dl-share__who"><strong>{t('share3.admins')}</strong><span>{t('share3.adminsBody')}</span></span>
+                <span className="dl-share__lvl dl-share__muted">{t('share3.edit')}</span>
+              </li>
+              {boards != null && boards > 0 && (
+                <li>
+                  <span className="dl-share__avatar dl-share__avatar--role" aria-hidden>{localDigits(String(boards))}</span>
+                  <span className="dl-share__who"><strong>{t(boards === 1 ? 'share3.boardsOne' : 'share3.boards', { n: localDigits(String(boards)) })}</strong>
+                    <span>{t('share3.boardsBody')}</span></span>
+                  <span className="dl-share__lvl dl-share__muted">{t('share3.viaBoards')}</span>
+                </li>
+              )}
+            </ul>
+
+            <p className="dl-share__rls">
+              <Shield size={15} aria-hidden />
+              <span>{t('share3.rls')}</span>
+            </p>
+            <p className="dl-share__muted dl-share__foot">{t('share3.foot')}</p>
           </>
         )}
       </div>

@@ -27,6 +27,9 @@ export interface QuickCalcField {
   name: string
   dtype: string
   numeric: boolean
+  /** False for a quantity that cannot be added up (a price, an age, a rate):
+   *  a share of its total means nothing, so "% of total" is not offered. */
+  additive?: boolean
 }
 
 export interface QuickCalc {
@@ -47,9 +50,9 @@ export function quickCalcsFor(field: QuickCalcField): QuickCalc[] {
 
   if (field.numeric) {
     return [
-      { key: 'percent_of_total', label: '% of total',
+      ...(field.additive === false ? [] : [{ key: 'percent_of_total', label: '% of total',
         name: `% of total ${c}`,
-        expression: `SUM(${c}) / TOTAL(SUM(${c})) * 100` },
+        expression: `SUM(${c}) / TOTAL(SUM(${c})) * 100` }]),
       { key: 'average', label: 'Average', name: `Average ${c}`,
         expression: `AVG(${c})` },
       { key: 'median', label: 'Median', name: `Median ${c}`,

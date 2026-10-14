@@ -82,7 +82,7 @@ describe('QueryBuilderDialog', () => {
     await waitFor(() => expect(screen.getByLabelText('Column 1')).toHaveValue('region'))
     expect(screen.getByLabelText('Aggregation 2')).toHaveValue('sum')
     expect(screen.getByLabelText('Alias 2')).toHaveValue('total')
-    expect(screen.getByLabelText('Filter value 1')).toHaveValue('10')
+    expect(screen.getByLabelText('Value of condition 1')).toHaveValue('10')
     expect(screen.getByLabelText('Sort alias')).toHaveValue('total')
     expect(screen.getByLabelText('Row limit')).toHaveValue(500)
     expect(screen.getByRole('button', { name: 'Save changes' })).toBeInTheDocument()
@@ -215,19 +215,78 @@ describe('QueryBuilderDialog', () => {
   describe('D3: WHERE builder AND/OR', () => {
     it('a second filter row exposes a Match AND/OR selector, sent as filters_joiner', async () => {
       await buildBasicQuery()
-      fireEvent.click(screen.getByRole('button', { name: '+ Add filter' }))
-      fireEvent.click(screen.getByRole('button', { name: '+ Add filter' }))
-      await waitFor(() => expect(screen.getByLabelText('Filter column 1')).toBeInTheDocument())
-      fireEvent.change(screen.getByLabelText('Filter column 1'), { target: { value: 'region' } })
-      fireEvent.change(screen.getByLabelText('Filter value 1'), { target: { value: 'US' } })
-      fireEvent.change(screen.getByLabelText('Filter column 2'), { target: { value: 'amount' } })
-      fireEvent.change(screen.getByLabelText('Filter op 2'), { target: { value: 'gte' } })
-      fireEvent.change(screen.getByLabelText('Filter value 2'), { target: { value: '10' } })
-      fireEvent.change(screen.getByLabelText('Filters match'), { target: { value: 'or' } })
+      fireEvent.click(screen.getByRole('button', { name: '+ Condition' }))
+      fireEvent.click(screen.getByRole('button', { name: '+ Condition' }))
+      await waitFor(() => expect(screen.getByLabelText('Column of condition 1')).toBeInTheDocument())
+      fireEvent.change(screen.getByLabelText('Column of condition 1'), { target: { value: 'region' } })
+      fireEvent.change(screen.getByLabelText('Value of condition 1'), { target: { value: 'US' } })
+      fireEvent.change(screen.getByLabelText('Column of condition 2'), { target: { value: 'amount' } })
+      fireEvent.change(screen.getByLabelText('Comparison of condition 2'), { target: { value: 'gte' } })
+      fireEvent.change(screen.getByLabelText('Value of condition 2'), { target: { value: '10' } })
+      fireEvent.change(screen.getByLabelText('How the conditions in Rows to keep combine'), { target: { value: 'or' } })
       await waitFor(() => expect(queryBuilderApi.compile).toHaveBeenCalled(), { timeout: 2000 })
       const model = vi.mocked(queryBuilderApi.compile).mock.calls.at(-1)![1] as { filters_joiner?: string }
       expect(model.filters_joiner).toBe('or')
       expect(screen.getByTestId('qb-where-preview')).toHaveTextContent("region = 'US' OR amount >= 10")
+    })
+  })
+
+  describe('condition boxes (query builder plan step 2)', () => {
+    it('a group inside the conditions is sent as a nested group', async () => {
+      await buildBasicQuery()
+      fireEvent.click(screen.getByRole('button', { name: '+ Condition' }))
+      fireEvent.change(await screen.findByLabelText('Column of condition 1'), { target: { value: 'region' } })
+      fireEvent.change(screen.getByLabelText('Value of condition 1'), { target: { value: 'US' } })
+      // "+ Group" adds a box (with one empty condition) whose joiner is the other one: OR inside AND.
+      fireEvent.click(within(screen.getByTestId('qb-conditions')).getAllByRole('button', { name: '+ Group' })[0])
+      const group = await screen.findByTestId('qb-condition-group')
+      fireEvent.click(within(group).getByRole('button', { name: '+ Condition' }))
+      fireEvent.change(screen.getByLabelText('Column of condition 2'), { target: { value: 'amount' } })
+      fireEvent.change(screen.getByLabelText('Comparison of condition 2'), { target: { value: 'gte' } })
+      fireEvent.change(screen.getByLabelText('Value of condition 2'), { target: { value: '10' } })
+      fireEvent.change(screen.getByLabelText('Column of condition 3'), { target: { value: 'amount' } })
+      fireEvent.change(screen.getByLabelText('Comparison of condition 3'), { target: { value: 'is_null' } })
+      await waitFor(() => {
+        const model = vi.mocked(queryBuilderApi.compile).mock.calls.at(-1)![1] as { filters: unknown[] }
+        expect(model.filters).toEqual([
+          { table: 'orders', column: 'region', op: 'eq', value: 'US' },
+          { group: 'or', filters: [
+            { table: 'orders', column: 'amount', op: 'gte', value: 10 },
+            { table: 'orders', column: 'amount', op: 'is_null' }] },
+        ])
+      }, { timeout: 2000 })
+      expect(screen.getByTestId('qb-where-preview')).toHaveTextContent("region = 'US' AND (amount >= 10 OR amount IS NULL)")
+    })
+
+    it('an unfinished condition says what it needs and is left out', async () => {
+      await buildBasicQuery()
+      fireEvent.click(screen.getByRole('button', { name: '+ Condition' }))
+      fireEvent.change(await screen.findByLabelText('Column of condition 1'), { target: { value: 'region' } })
+      expect(screen.getByRole('status')).toHaveTextContent('Type a value')
+      await waitFor(() => expect(queryBuilderApi.compile).toHaveBeenCalled(), { timeout: 2000 })
+      const model = vi.mocked(queryBuilderApi.compile).mock.calls.at(-1)![1] as { filters: unknown[] }
+      expect(model.filters).toEqual([])
+    })
+
+    it('reopening keeps groups and a sub-query condition (it used to be dropped)', async () => {
+      const sub = { table: 'customers', columns: [{ column: 'region' }] }
+      render(<QueryBuilderDialog ds={ds} onClose={() => {}}
+        existing={{ id: 42, name: 'Built revenue', query_model: {
+          table: 'orders', columns: [{ column: 'region' }],
+          filters: [{ group: 'or', filters: [{ column: 'region', op: 'eq', value: 'US' },
+            { column: 'region', op: 'eq', value: 'EU' }] },
+          { column: 'region', op: 'in', subquery: sub }],
+        } }} />)
+      expect(await screen.findByTestId('qb-condition-group')).toBeInTheDocument()
+      expect(screen.getByTestId('qb-condition-kept')).toHaveTextContent('region')
+      await waitFor(() => {
+        const model = vi.mocked(queryBuilderApi.compile).mock.calls.at(-1)?.[1] as { filters: unknown[] } | undefined
+        expect(model?.filters).toEqual([
+          { group: 'or', filters: [{ table: 'orders', column: 'region', op: 'eq', value: 'US' },
+            { table: 'orders', column: 'region', op: 'eq', value: 'EU' }] },
+          { column: 'region', op: 'in', subquery: sub },
+        ])
+      }, { timeout: 2000 })
     })
   })
 
@@ -239,7 +298,7 @@ describe('QueryBuilderDialog', () => {
         filters: [{ column: 'region', op: 'eq', value: 'US' }, { column: 'amount', op: 'gte', value: 10 }],
         filters_joiner: 'or',
       } }} />)
-    await waitFor(() => expect(screen.getByLabelText('Filters match')).toHaveValue('or'))
+    await waitFor(() => expect(screen.getByLabelText('How the conditions in Rows to keep combine')).toHaveValue('or'))
   })
 
   it('D3: canvas checkboxes are disabled (greyed) in script mode', async () => {
@@ -325,4 +384,77 @@ describe('QueryBuilderDialog — self-referencing hierarchy', () => {
     expect(options).toContain('region')
     expect(options).not.toContain('__level')   // the SOURCE table's columns only
   })
+
+  describe('3.9: joins drawn on the diagram', () => {
+    async function withCustomersOnCanvas() {
+      render(<QueryBuilderDialog ds={ds} onClose={() => {}} />)
+      fireEvent.change(await screen.findByLabelText('Base table'), { target: { value: 'orders' } })
+      await waitFor(() => expect(screen.getByTestId('canvas-table-orders')).toBeInTheDocument())
+      fireEvent.change(screen.getByLabelText('Add table to canvas'), { target: { value: 'customers' } })
+      await waitFor(() => expect(screen.getByTestId('canvas-table-customers')).toBeInTheDocument())
+      await waitFor(() => expect(within(screen.getByTestId('canvas-table-customers')).getByText('region')).toBeInTheDocument())
+    }
+
+    it('a line drawn from the joined table back to the base still joins the new table', async () => {
+      await withCustomersOnCanvas()
+      fireEvent.click(within(screen.getByTestId('canvas-table-customers')).getByText('region'))
+      fireEvent.click(within(screen.getByTestId('canvas-table-orders')).getByText('region'))
+      await waitFor(() => expect(screen.getByLabelText('Join table 1')).toHaveValue('customers'))
+      expect(screen.getByLabelText('Join 1 base key')).toHaveValue('region')
+      expect(screen.getByLabelText('Join 1 joined key')).toHaveValue('region')
+    })
+
+    it('keeps the join type chosen on the row before the line was drawn', async () => {
+      await withCustomersOnCanvas()
+      fireEvent.change(screen.getByLabelText('Join type 1'), { target: { value: 'inner' } })
+      fireEvent.click(within(screen.getByTestId('canvas-table-orders')).getByText('region'))
+      fireEvent.click(within(screen.getByTestId('canvas-table-customers')).getByText('region'))
+      await waitFor(() => expect(screen.getByTestId('join-label-0')).toHaveTextContent('inner'))
+      expect(screen.getByLabelText('Join type 1')).toHaveValue('inner')
+    })
+
+    it('a type picked on the diagram (full outer) shows in the form, not as "left"', async () => {
+      await withCustomersOnCanvas()
+      fireEvent.click(within(screen.getByTestId('canvas-table-orders')).getByText('region'))
+      fireEvent.click(within(screen.getByTestId('canvas-table-customers')).getByText('region'))
+      fireEvent.click(await screen.findByTestId('join-label-0'))
+      fireEvent.click(screen.getByRole('menuitemradio', { name: /Full outer/ }))
+      await waitFor(() => expect(screen.getByLabelText('Join type 1')).toHaveValue('full'))
+    })
+
+    it('a second join can take its key from the first joined table', async () => {
+      vi.mocked(dataSourcesApi.schema).mockResolvedValue({ tables: [
+        { name: 'orders', kind: 'table' }, { name: 'customers', kind: 'table' }, { name: 'regions', kind: 'table' }] })
+      await withCustomersOnCanvas()
+      fireEvent.click(screen.getByRole('button', { name: '+ Add join' }))
+      const from = await screen.findByLabelText('Join 2 from table')
+      expect(within(from).getAllByRole('option').map(o => o.textContent)).toEqual(['orders', 'customers'])
+      fireEvent.change(from, { target: { value: 'customers' } })
+      expect(screen.getByLabelText('Join 2 from table')).toHaveValue('customers')
+    })
+  })
+
+
+  describe('4.1: Current rows only', () => {
+    it('offers one tick per history table and sends current_only', async () => {
+      vi.mocked(queryBuilderApi.columns).mockResolvedValue([
+        { name: 'emp_no', type: 'INT' }, { name: 'dept_no', type: 'TEXT' }, { name: 'to_date', type: 'DATE' }])
+      render(<QueryBuilderDialog ds={ds} onClose={() => {}} />)
+      fireEvent.change(await screen.findByLabelText('Base table'), { target: { value: 'orders' } })
+      const tick = await screen.findByLabelText('Current rows only in orders')
+      fireEvent.click(screen.getByRole('button', { name: '+ Add column' }))
+      fireEvent.change(await screen.findByLabelText('Column 1'), { target: { value: 'dept_no' } })
+      fireEvent.click(tick)
+      await waitFor(() => {
+        const last = vi.mocked(queryBuilderApi.compile).mock.calls.at(-1)!
+        expect(JSON.stringify(last)).toContain('"current_only":[{"table":"orders","column":"to_date"}]')
+      })
+    })
+
+    it('shows nothing for tables without an end date', async () => {
+      await buildBasicQuery()
+      expect(screen.queryByTestId('qb-current-only')).not.toBeInTheDocument()
+    })
+  })
+
 })

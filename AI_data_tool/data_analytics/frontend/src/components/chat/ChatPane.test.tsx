@@ -45,10 +45,10 @@ describe('asking a question', () => {
     expect(agentApi.createConversation).not.toHaveBeenCalled()
     fireEvent.change(screen.getByPlaceholderText(/ask/i), { target: { value: 'q1' } })
     fireEvent.click(screen.getByRole('button', { name: /send|ask/i }))
-    await waitFor(() => expect(ask).toHaveBeenCalledWith(7, 'q1'))
+    await waitFor(() => expect(ask).toHaveBeenCalledWith(7, 'q1', expect.any(AbortSignal)))
     fireEvent.change(screen.getByPlaceholderText(/ask/i), { target: { value: 'q2' } })
     fireEvent.click(screen.getByRole('button', { name: /send|ask/i }))
-    await waitFor(() => expect(ask).toHaveBeenCalledWith(7, 'q2'))
+    await waitFor(() => expect(ask).toHaveBeenCalledWith(7, 'q2', expect.any(AbortSignal)))
     expect(agentApi.createConversation).toHaveBeenCalledTimes(1)
   })
 
@@ -60,6 +60,19 @@ describe('asking a question', () => {
     await waitFor(() =>
       expect(screen.getByText(/did you mean/i)).toBeInTheDocument())
     expect(screen.getByText(/needs more detail/i)).toBeInTheDocument()
+  })
+
+  it('renders the clarification\'s markdown, laid out by its own script (redesign 1a, 1c)', async () => {
+    vi.spyOn(agentApi, 'ask').mockResolvedValue({
+      run_id: 4, status: 'needs_clarification',
+      answer: 'Did you mean the average final score by **faculty**, or a **department** column?',
+      intent: null, error: null })
+    await send('average final score by department')
+    const bold = await screen.findByText('faculty')
+    expect(bold.tagName).toBe('STRONG')
+    const p = bold.closest('p')!
+    expect(p.textContent).not.toContain('*')
+    expect(p).toHaveAttribute('dir', 'ltr')
   })
 
   it('a failure reads as a failure, never as an answer', async () => {
@@ -129,7 +142,7 @@ describe('asking a question', () => {
     const ask = vi.spyOn(agentApi, 'ask').mockResolvedValue({
       run_id: 1, status: 'ok', answer: 'ok', intent: null, error: null })
     await send('total sales')
-    await waitFor(() => expect(ask).toHaveBeenCalledWith(55, 'total sales'))
+    await waitFor(() => expect(ask).toHaveBeenCalledWith(55, 'total sales', expect.any(AbortSignal)))
     expect(agentApi.createConversation).not.toHaveBeenCalled()
   })
 
@@ -140,7 +153,7 @@ describe('asking a question', () => {
     const ask = vi.spyOn(agentApi, 'ask').mockResolvedValue({
       run_id: 1, status: 'ok', answer: 'ok', intent: null, error: null })
     await send('total sales')
-    await waitFor(() => expect(ask).toHaveBeenCalledWith(7, 'total sales'))
+    await waitFor(() => expect(ask).toHaveBeenCalledWith(7, 'total sales', expect.any(AbortSignal)))
     expect(agentApi.createConversation).toHaveBeenCalledTimes(1)
   })
 
@@ -321,7 +334,7 @@ describe('a conversation owned by the page', () => {
 
     fireEvent.change(screen.getByPlaceholderText(/ask/i), { target: { value: 'and giza?' } })
     fireEvent.click(screen.getByRole('button', { name: /send|ask/i }))
-    await waitFor(() => expect(ask).toHaveBeenCalledWith(55, 'and giza?'))
+    await waitFor(() => expect(ask).toHaveBeenCalledWith(55, 'and giza?', expect.any(AbortSignal)))
     expect(agentApi.createConversation).not.toHaveBeenCalled()
   })
 
@@ -371,7 +384,7 @@ describe('a conversation owned by the page', () => {
     // And a question continues that thread without re-resolving it.
     fireEvent.change(screen.getByPlaceholderText(/ask/i), { target: { value: 'more' } })
     fireEvent.click(screen.getByRole('button', { name: /send|ask/i }))
-    await waitFor(() => expect(ask).toHaveBeenCalledWith(55, 'more'))
+    await waitFor(() => expect(ask).toHaveBeenCalledWith(55, 'more', expect.any(AbortSignal)))
     expect(agentApi.createConversation).not.toHaveBeenCalled()
   })
 
@@ -551,7 +564,7 @@ describe('an answer that asks back with options', () => {
     } as never)
     fireEvent.click(screen.getByRole('button', { name: 'Chart symbol_code by id' }))
     await waitFor(() =>
-      expect(ask).toHaveBeenLastCalledWith(expect.any(Number), 'Chart symbol_code by id'))
+      expect(ask).toHaveBeenLastCalledWith(expect.any(Number), 'Chart symbol_code by id', expect.any(AbortSignal)))
     // The choice shows in the thread as the message it was -- so the option
     // text now appears twice: once as the button that was offered, once as
     // the message the person sent by clicking it.
@@ -754,5 +767,42 @@ describe('ChatPane accessibility', () => {
   it('has no structural accessibility violations', async () => {
     const { container } = render(<ChatPane dataSourceId={2} />)
     expect(await axeViolations(container)).toEqual([])
+  })
+})
+
+describe('a question handed in (Home → /ask?q=)', () => {
+  it('starts in the box and is not sent', async () => {
+    const ask = vi.spyOn(agentApi, 'ask')
+    render(<ChatPane datasetIds={[3]} conversationId={null} initialInput="Total sales by region" />)
+    expect(await screen.findByRole('textbox', { name: /question/i })).toHaveValue('Total sales by region')
+    expect(ask).not.toHaveBeenCalled()
+  })
+})
+
+describe('QAF M3 and 16: stopping, and failures the model caused', () => {
+  it('Stop lets go of the request, says the server may still finish, and frees Send', async () => {
+    let signal: AbortSignal | undefined
+    vi.spyOn(agentApi, 'ask').mockImplementation((_c, _q, s) => {
+      signal = s
+      return new Promise((_, reject) => s?.addEventListener('abort', () =>
+        reject(Object.assign(new Error('canceled'), { code: 'ERR_CANCELED' }))))
+    })
+    await send('Total units by channel')
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop' }))
+    expect(signal?.aborted).toBe(true)
+    expect(await screen.findByTestId('ai-stopped')).toHaveTextContent('Stopped waiting. The server may still finish.')
+    expect(screen.queryByText(/could not reach/i)).toBeNull()
+    expect(screen.getByRole('button', { name: /send|ask/i })).not.toBeDisabled()
+  })
+
+  it('a run the model endpoint failed reads "could not reach", and no chip repeats the question', async () => {
+    vi.spyOn(agentApi, 'ask').mockResolvedValue({ run_id: 31, status: 'failed', answer: null, intent: null,
+      error: 'the model endpoint could not classify the question' } as never)
+    render(<ChatPane dataSourceId={2} suggestions={['Total revenue by region', 'Units by channel']} />)
+    fireEvent.change(screen.getByPlaceholderText(/ask/i), { target: { value: 'Total revenue by region' } })
+    fireEvent.click(screen.getByRole('button', { name: /send|ask/i }))
+    expect(await screen.findByText('Could not reach the agent. Try again.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Units by channel' })).toBeNull()
+    expect(screen.queryAllByRole('button', { name: 'Total revenue by region' })).toHaveLength(0)
   })
 })

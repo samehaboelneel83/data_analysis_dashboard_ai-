@@ -318,10 +318,9 @@ async def get_tree(db: AsyncSession = Depends(get_db),
     # author named you on it. Without this a report someone shared directly
     # would sit among the org's general furniture, which is the same lie in
     # the other direction.
-    granted_reports = set((await db.execute(
-        select(ReportUserGrant.report_id)
-        .where(ReportUserGrant.user_id == current_user.id)
-    )).scalars().all())
+    # ...or named their role or their team on it (core.capability.report_grants).
+    from ..core.capability import report_grants
+    granted_reports = set(await report_grants(db, current_user, [r.id for r in reports]))
 
     roots = _serialize(nodes, pages_by_report, names_by_report, current_user,
                        grants, authors_by_report, caps_by_report, shared_ids,

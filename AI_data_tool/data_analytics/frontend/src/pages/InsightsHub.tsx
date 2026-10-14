@@ -1,3 +1,4 @@
+import { sayText } from '../lib/readbackText'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { datasetsApi, insightsApi } from '../services/api'
@@ -9,6 +10,10 @@ import LoadingState from '../components/ui/LoadingState'
 import FindingChart from '../components/insights/FindingChart'
 import { Database } from 'lucide-react'
 import { useT } from '../i18n'
+import DatasetListFilter, { useCleanDatasets } from '../components/dataset/DatasetListFilter'
+import { isCertified } from '../lib/cleanDatasets'
+import SetupInsights from '../components/setup/SetupInsights'
+import { isolateNumbers } from '../lib/isolateNumbers'
 
 /**
  * Pick a dataset, see what stands out in it.
@@ -52,29 +57,26 @@ export default function InsightsHub() {
   const load = () => {
     setLoadError(null)
     return datasetsApi.list()
-      .then(ds => {
-        setDatasets(ds)
-        // The API's own order is not a recency guarantee, and there is no
-        // "last opened" signal anywhere in the app (Home.tsx's own Recents
-        // falls back to created_at for the identical reason) -- this is the
-        // one honest default available without inventing new backend state.
-        // A user landing on the hub almost always wants to know something
-        // about the dataset they were just working with, not dataset #1.
-        if (ds.length > 0) {
-          const mostRecent = [...ds].sort((a, b) =>
-            new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime())[0]
-          setSelected(mostRecent.id)
-        }
-      })
+      // No dataset is chosen for the reader. Picking one starts a scan of it,
+      // and a scan the reader did not ask for -- of whichever dataset
+      // happened to be newest -- costs a wait and shows answers about data
+      // they were not asking about. The page opens asking them to choose.
+      .then(ds => { setDatasets(ds) })
       .catch(setLoadError)
   }
   useEffect(() => { load().finally(() => setLoading(false)) }, [])
 
+  // 4.7: certified first, test-looking leftovers out of sight.
+  const clean = useCleanDatasets(datasets)
   const { filtered, input, noMatches } = useListFilter(
-    datasets, d => [d.name], t('search.datasetsEllipsis'))
+    clean.visible, d => [d.name], t('search.datasetsEllipsis'))
 
   const current = datasets.find(d => d.id === selected) ?? null
-  const isDirectQuery = current?.mode === 'directquery'
+  // A live dataset is scanned on request, not on selection: the scan reads up
+  // to 250K rows from the source, which is the reader's call to make (HR
+  // evaluation, item 3.4 -- live data used to get no insights at all).
+  const [liveApproved, setLiveApproved] = useState<number | null>(null)
+  const isDirectQuery = current?.mode === 'directquery' && liveApproved !== current?.id
 
   // The inline "top insights" preview: fires the moment a dataset is
   // selected (auto or manual), so seeing whether there is anything worth
@@ -126,17 +128,27 @@ export default function InsightsHub() {
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
             <label htmlFor="insights-hub-dataset" style={{ fontSize: 12, color: 'var(--muted)' }}>{t('insights.dataset')}</label>
             <select id="insights-hub-dataset" value={selected ?? ''}
-              onChange={e => setSelected(Number(e.target.value))}
+              onChange={e => setSelected(e.target.value ? Number(e.target.value) : null)}
               style={{ fontSize: 12, padding: '6px 8px', background: 'var(--surface2)',
                 border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', minWidth: 240 }}>
-              {(noMatches ? datasets : filtered).map(d => (
+              <option value="" disabled>{t('insights.choose')}</option>
+              {(noMatches ? clean.visible : filtered).map(d => (
                 <option key={d.id} value={d.id}>
-                  {d.name}{d.mode === 'directquery' ? ' · live' : ''}
+                  {isCertified(d) ? '✓ ' : ''}{d.name}{d.mode === 'directquery' ? ` · ${t('common.live')}` : ''}
                 </option>
               ))}
             </select>
             {input}
+            <DatasetListFilter state={clean} />
           </div>
+          {/* Guided setup phase 5d: what the setup found, in plain words, first. */}
+          {selected != null && <SetupInsights datasetId={selected} />}
+
+          {selected == null && (
+            <p data-testid="insights-pick-first" style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 16px' }}>
+              {t('insights.pickFirst')}
+            </p>
+          )}
 
           {isDirectQuery && current && (
             <div style={{ marginBottom: 16, padding: 14, background: 'var(--surface)',
@@ -144,14 +156,19 @@ export default function InsightsHub() {
               <p style={{ fontSize: 13, margin: 0 }}>
                 {t('insights.live')}
               </p>
-              <Link to={`/datasets/${current.id}`} style={{ fontSize: 12, display: 'inline-block', marginTop: 8 }}>
-                {t('insights.openDataset')}
-              </Link>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 8 }}>
+                <button className="btn btn-primary btn-sm" onClick={() => setLiveApproved(current.id)}>
+                  {t('insights.scanLive')}
+                </button>
+                <Link to={`/datasets/${current.id}`} style={{ fontSize: 12 }}>
+                  {t('insights.openDataset')}
+                </Link>
+              </div>
             </div>
           )}
 
           {!isDirectQuery && scanLoading && (
-            <div style={{ marginBottom: 16 }}><LoadingState label="Scanning for insights…" /></div>
+            <div style={{ marginBottom: 16 }}><LoadingState label={t('insights.scanning')} /></div>
           )}
 
           {!isDirectQuery && scanError != null && (
@@ -182,15 +199,16 @@ export default function InsightsHub() {
                   about the same outlying row. Two or more, and it is the only
                   thing saying how they relate. */}
               {scan.narrative && strong.length !== 1 && (
-                <p style={{ fontSize: 13, marginBottom: strong.length ? 8 : 0 }}>{scan.narrative}</p>
+                // QA3 D5: the server's sentence takes its own direction; numbers and ranges keep their order.
+                <p dir="auto" style={{ fontSize: 13, marginBottom: strong.length ? 8 : 0 }}>{isolateNumbers(sayText(t, scan.narrative, (scan as { narrative_i18n?: unknown }).narrative_i18n as never))}</p>
               )}
               {strong.length > 0 && (
                 <ul style={{ margin: 0, paddingInlineStart: 18, display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {/* Top 3 -- the backend already returns findings sorted by score. */}
                   {strong.slice(0, 3).map((f, i) => (
-                    <li key={i} style={{ fontSize: 12 }}>
-                      <strong>{f.title}</strong>
-                      {f.detail && <span style={{ color: 'var(--muted)' }}> — {f.detail}</span>}
+                    <li key={i} dir="auto" style={{ fontSize: 12 }}>
+                      <strong>{isolateNumbers(sayText(t, f.title, (f as { title_i18n?: { key: string; vars?: Record<string, unknown> } | null }).title_i18n as never))}</strong>
+                      {f.detail && <span style={{ color: 'var(--muted)' }}> — {isolateNumbers(sayText(t, f.detail, (f as { detail_i18n?: unknown }).detail_i18n as never))}</span>}
                       {current && (
                         <FindingChart datasetId={current.id} finding={f}
                           columnTypes={Object.fromEntries(current.columns.map(c => [c.name, c.dtype ?? '']))} />

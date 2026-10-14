@@ -1,4 +1,6 @@
 import type { BoundaryPack } from '../../services/api'
+import { useT } from '../../i18n'
+import { tNodes } from './prepPipeline/tNodes'
 
 /**
  * The terms of a starter pack whose source requires them, shown BEFORE it is
@@ -17,33 +19,36 @@ export default function PackTermsConfirm({ pack, busy, onAccept, onCancel }: {
   onAccept: () => void
   onCancel: () => void
 }) {
+  const t = useT()
+  const bdi = (v: string | null | undefined) => <bdi>{v}</bdi>
+  const link = pack.license_url
+    ? <a href={pack.license_url} target="_blank" rel="noreferrer">{t('pg.panelsA.pack.readLicence')}</a>
+    : null
   return (
-    <div role="group" aria-label={`Terms for ${pack.name}`} data-testid="pack-terms"
+    <div role="group" aria-label={t('pg.panelsA.pack.aria', { name: pack.name })} data-testid="pack-terms"
       style={{
         marginTop: 6, padding: 8, border: '1px solid var(--border)', borderRadius: 6,
         fontSize: 11, background: 'var(--surface-2, transparent)',
       }}>
       <div style={{ fontWeight: 700, marginBottom: 4 }}>
-        {pack.name}: terms of use
+        {tNodes(t, 'pg.panelsA.pack.title', {}, { name: bdi(pack.name) })}
       </div>
       {pack.terms && <p style={{ margin: '0 0 4px' }}>{pack.terms}</p>}
       {pack.attribution && (
         <p style={{ margin: '0 0 4px' }}>
-          Every map drawn from it will show: <em>{pack.attribution}</em>
+          {tNodes(t, 'pg.panelsA.pack.attribution', {}, { attribution: <em>{pack.attribution}</em> })}
         </p>
       )}
       <p style={{ margin: '0 0 6px', color: 'var(--muted)' }}>
-        Source: {pack.source}. Licence: {pack.license}
-        {pack.license_url && (
-          <> (<a href={pack.license_url} target="_blank" rel="noreferrer">read the licence</a>)</>
-        )}.
+        {tNodes(t, link ? 'pg.panelsA.pack.sourceLink' : 'pg.panelsA.pack.source', {},
+          { source: bdi(pack.source), license: bdi(pack.license), link })}
       </p>
       <div style={{ display: 'flex', gap: 6 }}>
         <button type="button" className="btn btn-sm btn-primary" disabled={busy} onClick={onAccept}>
-          I accept, install
+          {t('pg.panelsA.pack.accept')}
         </button>
         <button type="button" className="btn btn-sm" disabled={busy} onClick={onCancel}>
-          Cancel
+          {t('pg.panelsA.pack.cancel')}
         </button>
       </div>
     </div>

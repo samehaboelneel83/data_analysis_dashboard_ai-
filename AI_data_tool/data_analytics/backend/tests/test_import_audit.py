@@ -110,3 +110,18 @@ async def test_a_quota_refusal_leaves_no_imported_file(
     root = tmp_path / "uploads"
     assert not [p for p in root.rglob("*") if p.is_file()]
     assert await _entries(db_session, "dataset.import") == []
+
+
+async def test_a_live_dataset_is_audited_as_created_live_not_imported(
+        client, db_session, two_orgs, auth_headers, tmp_path):
+    """5.7: nothing is copied, so the log must not say "import"."""
+    src = DataSource(name="Warehouse", type="sqlite", config={"filepath": _sqlite(tmp_path)},
+                     org_id=two_orgs["a"]["org"].id)
+    db_session.add(src)
+    await db_session.commit()
+    r = await client.post(f"/api/v1/data-sources/{src.id}/import", headers=auth_headers["a"],
+                          json={"dataset_name": "Live T", "table": "t", "mode": "directquery"})
+    assert r.status_code == 200, r.text
+    [e] = await _entries(db_session, "dataset.create_live")
+    assert e.entity_id == r.json()["id"] and e.detail.endswith("-> live")
+    assert await _entries(db_session, "dataset.import") == []

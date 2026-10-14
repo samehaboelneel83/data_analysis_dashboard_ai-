@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from ..core.database import get_db
+from ..core.said_errors import refused
 from ..core.org_scope import check_org
 from ..core.rls import resolve_denied_columns, resolve_rls_expr
 from ..dependencies import get_current_user, ai_meter
@@ -70,6 +71,23 @@ async def get_analysis_registry(current_user: User = Depends(get_current_user)):
 
 
 
+#: 5.5: what a reader is told when an analysis panel cannot run yet, instead
+#: of the generic "Internal server error" a raw exception used to surface.
+NOT_READY = ("This analysis could not run on this dataset yet. Open Overview and run "
+             "the analysis first, then try again.")
+
+
+def _load_file_for_analysis(path: str, steps) -> pd.DataFrame:
+    """The dataset for an analysis: whole, or a random sample when it is too
+    large to load (frame_cache.load_or_sample). With preparation steps the
+    whole file is needed -- a step that adds up or joins would be wrong on a
+    sample -- so such a dataset keeps its refusal."""
+    if steps:
+        return load_file(path)
+    from ..services.frame_cache import load_or_sample
+    return load_or_sample(path)
+
+
 async def _directquery_frame(db: AsyncSession, ds, current_user: User,
                              rls_expr: str | None):
     """Rows from a live source, sized for ANALYSIS rather than for a preview.
@@ -116,7 +134,7 @@ async def run_analysis(dataset_id: int, req: AnalysisRequest, db: AsyncSession =
         dq_present = [c for c in dq_denied if c in df.columns]
         if dq_present:
             df = df.drop(columns=dq_present)
-        analysis = run_full_analysis(df)
+        analysis = run_full_analysis(df, ds.column_meta)
         analysis["sampled"] = live.sampled
         analysis["total_rows"] = live.total_rows
         analysis["measured"] = live.describe()
@@ -140,13 +158,18 @@ async def run_analysis(dataset_id: int, req: AnalysisRequest, db: AsyncSession =
     denied = await resolve_denied_columns(db, current_user, dataset_id)
 
     def _load_and_analyze():
-        df = load_file(ds.filename)
+        df = _load_file_for_analysis(ds.filename, _steps)
+        sampled_of, n = df.attrs.get("sampled_of"), len(df)
         df = apply_rls_filter(df, rls_expr)
         df = apply_prep_steps(df, _steps, _aux)
         present = [c for c in denied if c in df.columns]
         if present:
             df = df.drop(columns=present)
-        return run_full_analysis(df)
+        out = run_full_analysis(df, ds.column_meta)
+        if sampled_of and isinstance(out, dict):
+            # As for a live source: the analysis says it read a sample.
+            out["sampled"], out["sample_size"], out["total_rows"] = True, int(n), int(sampled_of)
+        return out
 
     result = await asyncio.to_thread(_load_and_analyze)
 
@@ -242,7 +265,9 @@ async def run_segment(dataset_id: int, req: SegmentRequest, db: AsyncSession = D
 
     restricted = bool(await resolve_rls_expr(db, current_user, dataset_id))
     try:
-        contract = segment_dataframe(df, req.columns, include_rows=req.include_rows)
+        _ds = await db.get(Dataset, dataset_id)
+        contract = segment_dataframe(df, req.columns, include_rows=req.include_rows,
+                                     column_meta=(_ds.column_meta if _ds else None) or {})
     except SegmentError as e:
         # A viewer narrowed by a row rule is told it is their access, not the
         # data -- and without the counts, which would describe the rows the
@@ -282,6 +307,10 @@ async def run_association_rules(
     restricted = bool(await resolve_rls_expr(db, current_user, dataset_id))
     try:
         contract = await asyncio.to_thread(_run)
+    except (KeyError, TypeError, ValueError) as e:
+        if isinstance(e, PatternError):
+            raise HTTPException(400, explain_shortfall(str(e), restricted))
+        raise HTTPException(400, NOT_READY)
     except PatternError as e:
         # A viewer narrowed by a row rule is told it is their access, not the
         # data -- and without the counts, which would describe the rows the
@@ -325,12 +354,15 @@ async def run_key_influencers(
         _aux = await resolve_join_frames(db, current_user, _steps) if _steps else {}
 
         def _load():
-            frame = load_file(ds.filename)
+            frame = _load_file_for_analysis(ds.filename, _steps)
             frame = apply_rls_filter(frame, rls_expr)
             frame = apply_prep_steps(frame, _steps, _aux)
             return frame
 
-        df = await asyncio.to_thread(_load)
+        try:
+            df = await asyncio.to_thread(_load)
+        except FileNotFoundError:
+            raise HTTPException(409, "This dataset's data file is missing -- refresh or re-import it.")
 
     # A denied column must not become an "influencer": naming it, with a rate
     # attached, would leak exactly what the rule hides.
@@ -343,6 +375,10 @@ async def run_key_influencers(
     try:
         contract = await asyncio.to_thread(
             key_influencers, df, req.target, req.target_value, req.factors)
+    except (KeyError, TypeError, ValueError) as e:
+        if isinstance(e, InfluencerError):
+            raise HTTPException(400, explain_shortfall(str(e), bool(rls_expr)))
+        raise HTTPException(400, NOT_READY)
     except InfluencerError as e:
         # A viewer narrowed by a row rule is told it is their access, not the
         # data -- and without the counts, which would describe the rows the
@@ -388,7 +424,7 @@ async def _secured_frame(dataset_id: int, db: AsyncSession, current_user: User
         _aux = await resolve_join_frames(db, current_user, _steps) if _steps else {}
 
         def _load():
-            frame = load_file(ds.filename)
+            frame = _load_file_for_analysis(ds.filename, _steps)
             frame = apply_rls_filter(frame, rls_expr)
             frame = apply_prep_steps(frame, _steps, _aux)
             return frame
@@ -424,7 +460,7 @@ async def run_compare_groups(
     try:
         res = await asyncio.to_thread(compare_groups, df, req.value_col, req.group_col)
     except StatisticalError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     return res.to_dict()
 
 
@@ -441,7 +477,7 @@ async def run_independence(
     try:
         res = await asyncio.to_thread(test_independence, df, req.col_a, req.col_b)
     except StatisticalError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     return res.to_dict()
 
 
@@ -459,7 +495,7 @@ async def run_correlation_test(
         res = await asyncio.to_thread(
             correlation_test, df, req.col_a, req.col_b, req.method)
     except StatisticalError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     return res.to_dict()
 
 
@@ -476,7 +512,7 @@ async def run_regression(
     try:
         res = await asyncio.to_thread(regression, df, req.target, req.predictors)
     except StatisticalError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     return res.to_dict()
 
 @router.post("/{dataset_id}/statistics/glm-logistic")
@@ -493,7 +529,7 @@ async def run_glm_logistic(
         res = await asyncio.to_thread(
             glm_logistic, df, req.target, req.predictors, req.target_value)
     except StatisticalError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     return res.to_dict()
 
 
@@ -514,7 +550,7 @@ async def run_mixed_model(
         res = await asyncio.to_thread(
             mixed_model, df, req.target, req.predictors, req.group_col)
     except StatisticalError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     return res.to_dict()
 
 
@@ -533,7 +569,7 @@ async def run_survival(
         res = await asyncio.to_thread(
             survival, df, req.duration_col, req.event_col, req.predictors)
     except StatisticalError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     return res.to_dict()
 
 
@@ -551,7 +587,7 @@ async def run_pairwise(
         res = await asyncio.to_thread(
             pairwise_comparisons, df, req.value_col, req.group_col, req.method)
     except StatisticalError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     return res.to_dict()
 
 
@@ -574,6 +610,10 @@ async def run_pairwise(
 class RunAnalysisRequest(BaseModel):
     name: str
     params: dict = {}
+    #: true: queue it as a job and answer with `job_id`. "auto" (what the
+    #: browser sends): queue only a slow analysis on a large table. Absent or
+    #: false: run in the request, as always.
+    background: bool | str | None = None
 
 
 def _strings_in(value) -> list[str]:
@@ -629,7 +669,7 @@ async def difference_check_endpoint(
     try:
         return await asyncio.to_thread(_run)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
 
 
 @router.post("/{dataset_id}/analysis/run")
@@ -655,6 +695,19 @@ async def run_catalogued_analysis(
         raise HTTPException(
             400, f"'{req.name}' is listed but cannot be run through this endpoint yet")
 
+    from ..services import analysis_jobs
+    ds = await db.get(Dataset, dataset_id)
+    if analysis_jobs.should_queue(req.name, getattr(ds, "row_count", None), req.background):
+        # Minutes, on a large table: a job the person can leave and come back
+        # to. Readability and hidden columns are checked again when it runs,
+        # as the person is then (services/analysis_jobs.py).
+        from ..services import jobs as job_service
+        job, _ = await job_service.enqueue(
+            db, user=current_user, kind=analysis_jobs.ANALYSIS_JOB_KIND,
+            inputs={"dataset_id": dataset_id, "name": req.name, "params": safe_clean(req.params)},
+            subject=f"{req.name}: {getattr(ds, 'name', dataset_id)}", max_attempts=1)
+        return {"analysis": spec.name, "result_kind": spec.result_kind, "job_id": job.id, "state": job.state}
+
     df, denied = await _secured_frame(dataset_id, db, current_user)
     _refuse_denied(_strings_in(req.params), denied)
 
@@ -664,9 +717,9 @@ async def run_catalogued_analysis(
     except analysis_registry.UnknownAnalysisError:
         raise HTTPException(404, f"No analysis named '{req.name}'")
     except analysis_registry.NotRunnableError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     except (SegmentError, InfluencerError) as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     except TypeError as e:
         # Wrong or missing kwargs. `test_analysis_dispatch` pins every
         # handler's signature against its published schema, so this is a
@@ -676,7 +729,7 @@ async def run_catalogued_analysis(
         # Every analysis service refuses with a ValueError (GoalSeekError and
         # the inferential refusals both subclass it) and none raises
         # HTTPException, which is what keeps them callable off the HTTP path.
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     except KeyError as e:
         raise HTTPException(400, f"Column not found: {e}")
 

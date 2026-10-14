@@ -13,7 +13,8 @@ export type WidgetType =
   | 'script'
   | 'tree' | 'sunburst' | 'icicle' | 'dendrogram' | 'org' | 'circle_pack'
 | 'custom_graph'
-  | 'model_linear' | 'model_logistic' | 'model_tree' | 'model_cluster' | 'model_compare' | 'model_score'
+  | 'model_linear' | 'model_logistic' | 'model_tree' | 'model_cluster' | 'model_compare' | 'model_score' | 'model_rules' | 'model_influencers'
+  | 'analysis_result'
 
 export interface Widget {
   id: number
@@ -65,6 +66,9 @@ export interface BookmarkState {
   activeFilters: { column: string; value: unknown; label: string; sourceWidgetId: number; sourcePageId: number }[]
   promptValues: Record<number, string>
   hiddenWidgetIds: number[]
+  /** Where each widget's hierarchy was drilled (hierarchy plan, step 1).
+   *  Absent in bookmarks saved before it existed: those restore to the top level. */
+  drillStates?: Record<number, { path: { column: string; granularity?: string; value: unknown; label: string }[]; expand: number }>
 }
 
 export interface Bookmark {
@@ -100,6 +104,8 @@ export interface Report {
   dataset_id: number | null
   additional_dataset_ids: number[]
   theme: string
+  /** The dashboard's look beyond its palette (lib/dashboardStyle). */
+  style?: import('../lib/dashboardStyle').DashboardStyle | null
   /** Bumped server-side by every mutation to this report or anything nested under
    *  it. Compared against a poll to notice that another session changed it. */
   revision?: number
@@ -226,6 +232,9 @@ export const WIDGET_CATALOG = [
   { type: 'model_cluster'  as WidgetType, label: 'Clustering',          category: 'Models', icon: '⁂', defaultW: 7, defaultH: 7 },
   { type: 'model_compare'  as WidgetType, label: 'Model Comparison',    category: 'Models', icon: '⚖', defaultW: 7, defaultH: 6 },
   { type: 'model_score'    as WidgetType, label: 'Score with Saved Model', category: 'Models', icon: '🎯', defaultW: 6, defaultH: 6 },
+  { type: 'model_rules'    as WidgetType, label: 'Association Rules',   category: 'Models', icon: '⇄', defaultW: 8, defaultH: 7 },
+  { type: 'model_influencers' as WidgetType, label: 'Key Influencers',  category: 'Models', icon: '↗', defaultW: 7, defaultH: 7 },
+  { type: 'analysis_result' as WidgetType, label: 'Analysis Result',  category: 'Models', icon: '∑', defaultW: 7, defaultH: 7 },
 ]
 
 export const ROLE_TO_CONFIG_KEY: Record<string, string> = { category: 'dimension', category2: 'dimension2', measure: 'measure' }
@@ -487,18 +496,20 @@ export const ROLE_SPECS: Record<WidgetType, RoleField[]> = {
   // `facet_by` and `inner_widget_type` are widget options rather than field
   // roles: the panels are the SAME chart, so the chart's own roles apply
   // inside each one.
-  // One shaper drives all six, so they share one set of roles. `levels`
-  // (and the parent-child pair) are widget options rather than field roles:
-  // a hierarchy is an ORDERED list of columns, which a role slot cannot express.
-  tree: [{ role: 'measure', label: 'Value (optional)', required: false }],
-  sunburst: [{ role: 'measure', label: 'Value', required: false }],
-  icicle: [{ role: 'measure', label: 'Value', required: false }],
-  circle_pack: [{ role: 'measure', label: 'Value', required: false }],
+  // One shaper drives all six, so they share one set of roles. QA6 B2:
+  // `levels` is a role -- an ordered, multi-field one, outer level first -- so
+  // Assign data shows it and a field dropped on a sunburst fills it (it was
+  // only checkboxes in Properties, and a drop made a new chart). The
+  // parent-child pair stays a widget option.
+  tree: [{ role: 'levels', label: 'Levels (outer first)', multi: true, required: false }, { role: 'measure', label: 'Value (optional)', required: false }],
+  sunburst: [{ role: 'levels', label: 'Levels (outer first)', multi: true, required: false }, { role: 'measure', label: 'Value', required: false }],
+  icicle: [{ role: 'levels', label: 'Levels (outer first)', multi: true, required: false }, { role: 'measure', label: 'Value', required: false }],
+  circle_pack: [{ role: 'levels', label: 'Levels (outer first)', multi: true, required: false }, { role: 'measure', label: 'Value', required: false }],
   // The category only: each LAYER carries its own measure, so a measure role
   // here would be a seventh field the builder never reads.
   custom_graph: [{ role: 'category', label: 'Category', required: true }],
-  dendrogram: [{ role: 'measure', label: 'Value (optional)', required: false }],
-  org: [{ role: 'measure', label: 'Value (optional)', required: false }],
+  dendrogram: [{ role: 'levels', label: 'Levels (outer first)', multi: true, required: false }, { role: 'measure', label: 'Value (optional)', required: false }],
+  org: [{ role: 'levels', label: 'Levels (outer first)', multi: true, required: false }, { role: 'measure', label: 'Value (optional)', required: false }],
   small_multiples: [
     { role: 'category', label: 'Category', required: true },
     { role: 'measure',  label: 'Measure', required: false },
@@ -556,11 +567,24 @@ export const ROLE_SPECS: Record<WidgetType, RoleField[]> = {
   model_compare: [],
   // The saved model is chosen in the panel (it is not a column).
   model_score: [{ role: 'category', label: 'Break down by', required: false }],
+  // Which values travel together. Both optional: blank columns mine every
+  // usable text column; a focus keeps only conclusions about that column.
+  model_rules: [
+    { role: 'predictors', label: 'Columns (blank = every text column; numbers become bands)', required: false, multi: true },
+    { role: 'response',   label: 'Conclusions about (optional)', required: false },
+  ],
+  // What goes with an outcome. Blank predictors looks in every usable column.
+  model_influencers: [
+    { role: 'response',   label: 'Outcome', required: true },
+    { role: 'predictors', label: 'Look in (blank = every other column)', required: false, multi: true },
+  ],
+  // Its inputs are an analysis' own parameters, set by the suggestion that adds it.
+  analysis_result: [],
 }
 
 /** Model widgets: their data is a fitted model, not an aggregated series. */
 export const MODEL_WIDGETS: readonly string[] = [
-  'model_linear', 'model_logistic', 'model_tree', 'model_cluster', 'model_compare', 'model_score',
+  'model_linear', 'model_logistic', 'model_tree', 'model_cluster', 'model_compare', 'model_score', 'model_rules', 'model_influencers',
 ]
 
 export const AGGREGATIONS = [

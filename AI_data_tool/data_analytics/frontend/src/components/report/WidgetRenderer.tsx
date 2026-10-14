@@ -1,18 +1,29 @@
-import { lazy, memo, Suspense, useEffect, useState, useCallback, useMemo, useRef } from 'react'
+import { formatDate } from '../../lib/dateFormat'
+import { contrastTokens } from '../../lib/contrastTokens'
+import { lazy, memo, Suspense, useContext, useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import type { PartialPeriod, RelativeNote } from '../../lib/relativeDates'
+import { partialPeriodEnd } from '../../lib/relativeDates'
 import type { BrushRange } from './chartRenderers/axisOptions'
+import OverviewStrip from './chartRenderers/OverviewStrip'
+import { StaticChartsContext } from './chartRenderers/useChartViewport'
 import { createPortal } from 'react-dom'
 import { Copy, Trash2, MoreVertical, Link as LinkIcon } from 'lucide-react'
 import { widgetDataApi } from '../../services/api'
 import { isCanceledRequest } from '../../lib/canceledRequest'
-import { useT } from '../../i18n'
+import { useT, type MessageKey, type TranslateFn } from '../../i18n'
+import { usePanelLabel } from './panelLabels'
+import { useDirection } from '../../contexts/DirectionContext'
 import ConvertToMenu from './ConvertToMenu'
 import { pickChartSvg, svgToPng } from '../../lib/widgetImage'
 import toast from 'react-hot-toast'
 import ActionMenu from '../ActionMenu'
 import { DifferenceDialog, ExplainDialog, ScenarioDialog, WhyDialog, describeFilter, useViewAs, viewAsOptions, type WhySection } from './ViewerKit'
 import type { CalcColumn, CalcColumnFormat, Dataset } from '../../services/api'
-import { useCrossFilter, CrossFilterProvider } from './CrossFilterContext'
+import { useCrossFilter, CrossFilterProvider, type DrillStep } from './CrossFilterContext'
+import { describePaths } from '../../lib/slicerTree'
+/** How the server joins expanded hierarchy levels into one label
+ *  (widget_data.shape_series, `dimension_levels`). */
+const PATH_SEP = ' › '
 import { EmptyState } from './chartUtils'
 import type { Widget, ReportPage, HierarchyNode, Bookmark } from '../../types/report'
 import type { DisplayRule, RuleStyles } from '../../lib/displayRules'
@@ -22,6 +33,7 @@ import { getChildNode, walkToDepth } from '../../lib/hierarchyUtils'
 import { WidgetBody } from './WidgetBody'
 const ReconcileDialog = lazy(() => import('./ReconcileDialog'))
 import { ASSIGN_DATA_EVENT, missingRequiredRoles } from './WidgetPlaceholder'
+import { rangeLabel, type RangeValue } from './SlicerRange'
 
 /** Charts whose bars/points are groups of rows two of which can be tested (Phase 7.2). */
 const DIFFERENCE_TYPES: string[] = ['bar', 'line', 'area', 'pie', 'donut', 'dot_plot', 'step', 'treemap', 'funnel']
@@ -78,6 +90,10 @@ interface Props {
   reportDisplayRules?: DisplayRule[]
   /** Report-level filters applied to every widget (defined once for the whole report). */
   reportFilters?: { column: string; op: string; value: unknown }[]
+  /** The reader's own filters for the whole page (the filter bar above the
+   *  page). Applied only where this widget's data HAS the column -- a live
+   *  (DirectQuery) source refuses an unknown column outright. */
+  pageFilters?: { column: string; op: string; value: unknown }[]
   onDrillthrough?: (targetPageId: number, filterValue: unknown) => void
   isPreview?:    boolean
   hierarchy?:    HierarchyNode[]
@@ -145,15 +161,109 @@ function isHeaderControl(target: EventTarget | null): boolean {
     && !!target.closest('button, a, input, select, textarea, [role="menu"], [role="menuitem"], .dl-whead__ctl')
 }
 
-function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, geography, datasets, selected, isMultiSelected, onSelect, onDelete, onDuplicate, editMode, promptFilter, onDragStart, onResizeStart, isDragging, onFetchComplete, pages, reportDisplayRules, reportFilters, onDrillthrough, isPreview, hierarchy, bookmarks, onNavigateToPage, onApplyBookmark, reportId, parameters, onSetParameter, dataOverride, relationships, eagerFetch, allowExport = true, refreshNonce }: Props) {
-  const { emitFilter, emitMultiFilter, getFiltersFor, canBroadcast, canReceive, activeFilters, clearAllFilters, clearFilter, interactions, getReceiveMode, carryFiltersTo } = useCrossFilter()
+/** The server's account of auto-binning (services/auto_bin.py `finish`). */
+export interface Binning {
+  column: string; kind: 'date' | 'number' | 'text'; grouped: boolean
+  top_n?: number | null; top_n_choices?: number[] | null
+  grain?: string | null; width?: number | null; target?: number; distinct?: number
+  buckets?: number | null; window?: [unknown, unknown] | null; finest?: boolean
+}
+interface StripRowLike { name?: unknown; value?: unknown; bin_start?: unknown; bin_end?: unknown }
+
+/** How long a chart waits after a filter change for the next one before it
+ *  asks the server again. Long enough to swallow a burst of clicks, short
+ *  enough not to be felt. */
+export const FILTER_SETTLE_MS = 250
+
+/** Rows a raw table asks the server for at a time (and again on each scroll
+ *  to the bottom). A tile shows about twenty; the rest are one scroll away. */
+export const TABLE_PAGE = 200
+
+/** A table of the data's own rows -- no grouping -- which the server can page. */
+export function isRawTable(widgetType: string, cfg: Record<string, unknown>): boolean {
+  if (widgetType !== 'table') return false
+  if (cfg.dimension || cfg.dimension2 || cfg.dimension_levels) return false
+  const agg = String(cfg.aggregation ?? '').toLowerCase()
+  return !cfg.measure || agg === 'none' || agg === 'raw'
+}
+
+/** Append the next page to what is on screen. Display-rule styles arrive
+ *  indexed from the page's first row, so they are shifted by `offset`. */
+export function mergeTablePage(prev: any, next: any, offset: number): any {
+  const rows = [...(prev.rows ?? []), ...(next.rows ?? [])]
+  let rule_styles = prev.rule_styles
+  const nr = next.rule_styles
+  if (nr && (nr.rows?.length || (nr.cells && Object.keys(nr.cells).length))) {
+    const baseRows: any[] = [...(prev.rule_styles?.rows ?? [])]
+    while (baseRows.length < offset) baseRows.push(null)
+    const cells: Record<string, any> = { ...(prev.rule_styles?.cells ?? {}) }
+    Object.entries(nr.cells ?? {}).forEach(([k, v]) => { cells[String(Number(k) + offset)] = v })
+    rule_styles = { ...(prev.rule_styles ?? { widget: {} }), rows: [...baseRows.slice(0, offset), ...(nr.rows ?? [])], cells }
+  }
+  return { ...prev, rows, rule_styles, page: { ...(prev.page ?? {}), loaded: rows.length } }
+}
+
+/** Charts whose axis the smart slider zooms: a continuous axis of dates or numbers. */
+const SMART_ZOOM_TYPES = new Set(['line', 'area', 'step', 'bar'])
+
+const GRAIN_WORD: Record<string, string> = {
+  hour: 'hour', day: 'day', week: 'week', month: 'month', quarter: 'quarter', year: 'year',
+}
+
+const GRAIN_KEY: Record<string, MessageKey> = {
+  hour: 'bc.canvas.grain.hour', day: 'bc.canvas.grain.day', week: 'bc.canvas.grain.week',
+  month: 'bc.canvas.grain.month', quarter: 'bc.canvas.grain.quarter', year: 'bc.canvas.grain.year',
+}
+/** A grain in the reader's words when a translator is given. */
+function grainWord(grain: string | null | undefined, t?: TranslateFn): string {
+  const g = grain ?? ''
+  return t && GRAIN_KEY[g] ? t(GRAIN_KEY[g]) : GRAIN_WORD[g] ?? String(grain)
+}
+
+/** The binning chip's words; in the reader's language when given `t`. */
+export function binningLabel(b: Binning | undefined | null, t?: TranslateFn): string {
+  if (!b?.grouped) return ''
+  if (b.kind === 'date' && b.grain) {
+    return t ? t('bc.canvas.bin.by', { grain: grainWord(b.grain, t) }) : `by ${GRAIN_WORD[b.grain] ?? b.grain}`
+  }
+  if (b.kind === 'number' && b.width) {
+    const w = b.width.toLocaleString('en-US')
+    return t ? t('bc.canvas.bin.ranges', { width: w }) : `ranges of ${w}`
+  }
+  if (b.kind === 'text' && b.top_n) return t ? t('bc.canvas.bin.topN', { n: b.top_n }) : `top ${b.top_n} + other`
+  return t ? t('bc.canvas.bin.grouped') : 'grouped'
+}
+
+export function binningTitle(b: Binning | undefined | null, t?: TranslateFn): string {
+  if (!b?.grouped) return ''
+  if (t) {
+    const distinct = (b.distinct ?? 0).toLocaleString('en-US')
+    const column = String(b.column ?? '')
+    if (b.kind === 'text') return t('bc.canvas.bin.titleText', { distinct, column, n: b.top_n ?? '' })
+    return b.kind === 'date'
+      ? t('bc.canvas.bin.titleDate', { distinct, column, grain: grainWord(b.grain, t), buckets: b.buckets ?? '?' })
+      : t('bc.canvas.bin.titleRanges', { distinct, column, width: (b.width ?? 0).toLocaleString('en-US'), buckets: b.buckets ?? '?' })
+  }
+  if (b.kind === 'text') {
+    return `${(b.distinct ?? 0).toLocaleString('en-US')} different ${b.column} values are too many to draw, so the chart shows the top ${b.top_n} and puts the rest together as "All Other". `
+      + 'Every row is still counted. Pick 10, 20 or 50 to see more or fewer.'
+  }
+  const what = b.kind === 'date'
+    ? `grouped by ${GRAIN_WORD[b.grain ?? ''] ?? b.grain}`
+    : `grouped into ranges of ${(b.width ?? 0).toLocaleString('en-US')}`
+  return `${(b.distinct ?? 0).toLocaleString('en-US')} different ${b.column} values are too many to draw, so the chart is ${what} (${b.buckets ?? '?'} points). `
+    + 'Every row is still counted. Drag the slider under the chart to zoom in and see more detail.'
+}
+
+function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, geography, datasets, selected, isMultiSelected, onSelect, onDelete, onDuplicate, editMode, promptFilter, onDragStart, onResizeStart, isDragging, onFetchComplete, pages, reportDisplayRules, reportFilters, pageFilters, onDrillthrough, isPreview, hierarchy, bookmarks, onNavigateToPage, onApplyBookmark, reportId, parameters, onSetParameter, dataOverride, relationships, eagerFetch, allowExport = true, refreshNonce }: Props) {
+  const { emitFilter, emitMultiFilter, getFiltersFor, canBroadcast, canReceive, activeFilters, clearAllFilters, clearFilter, interactions, getReceiveMode, carryFiltersTo, drillOf, setDrill } = useCrossFilter()
   const [data,    setData]    = useState<any>(null)
   const [loading, setLoading] = useState(
     () => widgetFetchesData(widget.widget_type, widget.config, dataOverride))
   // The backend's `code` beside its `detail` (services/error_codes.py). The
   // detail is what the reader sees; the code is what decides whether a
-  // 'Try again' is offered -- `source_unavailable` and `quota` (after
-  // Retry-After) are the two answers that can change on retry.
+  // 'Try again' is offered -- `source_unavailable`, `source_busy` and `quota`
+  // (after Retry-After) are the answers that can change on retry.
   const [fetchError, setFetchError] = useState<{ detail: string; code?: string } | null>(null)
 
   // Per-widget dataset override: if the widget has dataset_id in its config, use that dataset's
@@ -172,20 +282,26 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
 
   const [containerTab, setContainerTab] = useState(0)
   const [containerOpen, setContainerOpen] = useState(true)
-  const [drillPath, setDrillPath] = useState<{ column: string; granularity?: string; value: unknown; label: string }[]>([])
+  // The drill position lives in the page's shared state (CrossFilterContext),
+  // so a bookmark can save and restore it (hierarchy plan, step 1).
+  const drill = drillOf(widget.id)
+  const drillPath = drill.path
+  const expandDepth = drill.expand
+  const setDrillPath = (next: DrillStep[] | ((p: DrillStep[]) => DrillStep[])) =>
+    setDrill(widget.id, { path: typeof next === 'function' ? next(drill.path) : next, expand: 0 })
+  const setExpandDepth = (next: number | ((d: number) => number)) =>
+    setDrill(widget.id, { path: [], expand: typeof next === 'function' ? next(drill.expand) : next })
   // Decomposition drilling. Held here rather than in the widget's saved config
   // for the same reason hierarchy drilling is: a reader exploring a dashboard
   // is not editing it, and their path must not be written back to a report
   // other people are looking at.
   const [decompPath, setDecompPath] = useState<{ field: string; value: string }[]>([])
   const [decompSplit, setDecompSplit] = useState<string | null>(null)
-  useEffect(() => { setDrillPath([]) }, [widget.id])
 
   const hierarchyNodeId = (widget.config as any).hierarchyNodeId as number | undefined
   // Power BI's expand: 0 = one level (drill mode), N = the bound level plus N
   // deeper levels shown together as a path label. Expanding and drilling are
   // exclusive -- each clears the other, matching how PBI's toolbar behaves.
-  const [expandDepth, setExpandDepth] = useState(0)
   const currentNodeId = hierarchyNodeId != null && hierarchy ? walkToDepth(hierarchy, hierarchyNodeId, drillPath.length) : undefined
   const currentNode = currentNodeId != null ? hierarchy?.find(n => n.id === currentNodeId) : undefined
   // the chain of DISTINCT column levels reachable from the bound node -- expand
@@ -204,6 +320,41 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
     }
     return cols
   })()
+
+  // A slicer bound to a hierarchy lists the whole chain as a tree (hierarchy
+  // plan, step 2): every level from the bound node down, date grains included
+  // (Year ▸ Quarter ▸ Month on one date column).
+  const isTreeSlicer = widget.widget_type === 'slicer' && hierarchyNodeId != null && !!hierarchy
+  /** Every level from a bound node down: {column, granularity}. */
+  const chainFrom = (start: number | undefined) => {
+    const out: { column: string; granularity: string | null }[] = []
+    if (start == null || !hierarchy) return out
+    let id: number | undefined = start
+    while (id != null) {
+      const node = hierarchy.find(n => n.id === id)
+      if (!node?.column_name) break
+      out.push({ column: node.column_name, granularity: node.format ?? null })
+      id = getChildNode(hierarchy, id)?.id
+    }
+    return out
+  }
+  const chainLevels = isTreeSlicer ? chainFrom(hierarchyNodeId) : []
+  // A tree widget built from level columns ticks branches the same way
+  // (hierarchy plan, step 4); a parent-child tree has no columns to filter by.
+  const treeWidgetLevels: { column: string; granularity: string | null }[] =
+    widget.widget_type === 'tree' && Array.isArray(widget.config.levels) && !widget.config.id_col
+      ? (widget.config.levels as string[]).map(c => ({ column: c, granularity: null })) : []
+  const tickLevels = isTreeSlicer ? chainLevels : treeWidgetLevels
+  // A crosstab bound to hierarchies opens them level by level in the grid
+  // (hierarchy plan, step 3): rows from `hierarchyNodeId`, columns from
+  // `hierarchyNodeId2`. It does not drill: every level is in one answer.
+  // A plain column on the other axis is a one-level chain.
+  const hierarchyNodeId2 = (widget.config as any).hierarchyNodeId2 as number | undefined
+  const isHierGrid = (widget.widget_type === 'crosstab' || widget.widget_type === 'matrix')
+    && (hierarchyNodeId != null || hierarchyNodeId2 != null) && !!hierarchy
+  const plainLevel = (col: unknown) => col ? [{ column: String(col), granularity: null }] : []
+  const gridRows = !isHierGrid ? [] : hierarchyNodeId != null ? chainFrom(hierarchyNodeId) : plainLevel(widget.config.dimension)
+  const gridCols = !isHierGrid ? [] : hierarchyNodeId2 != null ? chainFrom(hierarchyNodeId2) : plainLevel(widget.config.dimension2)
 
   // Cross-filters coming from OTHER widgets
   const incomingFilters = getFiltersFor(widget.id, widget.page_id)
@@ -232,11 +383,33 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
       return column
     }
     const crossFilters = incomingFilters.flatMap(f => {
-      const between = (f.value as { between?: [number, number] } | null)?.between
+      // A hierarchy slicer's selection: whole paths, applied exactly by the
+      // server (filter op "paths"); each level's column is mapped across a
+      // modelled relationship like any other filter.
+      const tree = f.value as { paths?: string[][]; columns?: string[]; granularities?: (string | null)[] } | null
+      if (tree && Array.isArray(tree.paths) && Array.isArray(tree.columns)) {
+        return [{ column: translate(f.column), op: 'paths',
+          value: { paths: tree.paths, columns: tree.columns.map(translate), granularities: tree.granularities ?? [] } }]
+      }
+      const between = (f.value as { between?: [number | string | null, number | string | null] } | null)?.between
+      // Two DAYS (a date range control): the engine's own date filter, which
+      // keeps [start, end) -- so the last day picked is included by ending
+      // on the day after it. An open end reaches as far as dates go.
+      if (Array.isArray(between) && between.length === 2 && between.some(v => typeof v === 'string')) {
+        const dayAfter = (iso: string) => {
+          const d = new Date(`${iso}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1)
+          return d.toISOString().slice(0, 10)
+        }
+        return [{ column: translate(f.column), op: 'date_range',
+          value: [between[0] ?? '1700-01-01', between[1] != null ? dayAfter(String(between[1])) : '2200-01-01'] }]
+      }
       // A map area arrives as a range on each coordinate axis.
       if (Array.isArray(between) && between.length === 2) {
-        return [{ column: translate(f.column), op: 'gte', value: between[0] },
-                { column: translate(f.column), op: 'lte', value: between[1] }]
+        // An open end (a range slicer with one bound) is null: no predicate.
+        return [
+          ...(between[0] != null ? [{ column: translate(f.column), op: 'gte', value: between[0] }] : []),
+          ...(between[1] != null ? [{ column: translate(f.column), op: 'lte', value: between[1] }] : []),
+        ]
       }
       return [{ column: translate(f.column), op: Array.isArray(f.value) ? 'in' : 'eq', value: f.value }]
     })
@@ -247,8 +420,18 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
     // modelled relationship like cross-filters do, and let the shaper skip any that
     // this widget's dataset lacks (_apply_filters ignores unknown columns).
     const reportWide = (reportFilters ?? []).map(f => ({ column: translate(f.column), op: f.op, value: f.value }))
-    cfg.filters = [...existing, ...reportWide, ...crossFilters, ...pagePrompt]
-    if (hierarchyNodeId != null && expandDepth > 0 && expandLevels.length > 1) {
+    const pageWide = (pageFilters ?? [])
+      .map(f => ({ column: translate(f.column), op: f.op, value: f.value }))
+      .filter(f => !myCols || myCols.size === 0 || myCols.has(f.column))
+    cfg.filters = [...existing, ...reportWide, ...pageWide, ...crossFilters, ...pagePrompt]
+    if (isHierGrid && gridRows.length > 0) {
+      cfg.hierarchy_rows = gridRows
+      if (gridCols.length) cfg.hierarchy_columns = gridCols
+      else delete cfg.hierarchy_columns
+    } else if (isTreeSlicer && chainLevels.length > 0) {
+      cfg.slicer_levels = chainLevels
+      cfg.dimension = chainLevels[0].column
+    } else if (hierarchyNodeId != null && expandDepth > 0 && expandLevels.length > 1) {
       cfg.dimension_levels = expandLevels.slice(0, expandDepth + 1)
       cfg.dimension = expandLevels[0]
       delete cfg.dimension_granularity
@@ -277,7 +460,7 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
     // rebuild this exact config WITHOUT them for its unfiltered baseline.
     return { config: cfg, crossFilters }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(widget.config), JSON.stringify(incomingFilters), promptFilter?.column, promptFilter?.value, hierarchyNodeId, currentNode?.column_name, currentNode?.format, JSON.stringify(drillPath), JSON.stringify(decompPath), decompSplit, widget.widget_type, expandDepth, expandLevels.join(','), JSON.stringify(relationships ?? []), JSON.stringify(reportDisplayRules), JSON.stringify(reportFilters)])
+  }, [JSON.stringify(widget.config), JSON.stringify(incomingFilters), promptFilter?.column, promptFilter?.value, hierarchyNodeId, currentNode?.column_name, currentNode?.format, JSON.stringify(drillPath), JSON.stringify(decompPath), decompSplit, widget.widget_type, expandDepth, expandLevels.join(','), JSON.stringify(chainLevels), JSON.stringify(gridRows), JSON.stringify(gridCols), JSON.stringify(relationships ?? []), JSON.stringify(reportDisplayRules), JSON.stringify(reportFilters), JSON.stringify(pageFilters)])
   const mergedConfig = mergedPair.config
   const translatedCrossFilters = mergedPair.crossFilters
 
@@ -287,6 +470,40 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
   const [brushRange, setBrushRange] = useState<BrushRange | null>(null)
   const [brushNonce, setBrushNonce] = useState(0)
   const [animFrame, setAnimFrame] = useState<string | null>(null)
+
+  // ── Smart slider (auto-bin zoom) ───────────────────────────────────────────
+  // When the server grouped this chart's axis (data.binning, services/
+  // auto_bin.py), the slider is an overview of the whole series. Dragging
+  // shows the coarse rows inside the window at once; letting go asks the
+  // server for that window again, at a finer grain. The base `data` is never
+  // replaced -- it IS the overview -- so a zoom is always one step from undone.
+  const binning = (data as { binning?: Binning } | null)?.binning
+  const baseRows = (data as { rows?: StripRowLike[] } | null)?.rows
+  const smartZoom = !!binning?.grouped && SMART_ZOOM_TYPES.has(widget.widget_type)
+    && Array.isArray(baseRows) && baseRows.length > 2
+    && baseRows.every(r => r && r.bin_start != null && r.bin_end != null)
+  const [zoomSel, setZoomSel] = useState<{ a: number; b: number } | null>(null)
+  const [zoom, setZoom] = useState<{ a: number; b: number; data: any } | null>(null)
+  const [zoomLoading, setZoomLoading] = useState(false)
+  const zoomCtl = useRef<AbortController | null>(null)
+  // New base data (a filter, a refresh, a setting): the old window means nothing.
+  useEffect(() => {
+    zoomCtl.current?.abort()
+    setZoomSel(null); setZoom(null); setZoomLoading(false)
+  }, [data])
+  useEffect(() => () => zoomCtl.current?.abort(), [])
+
+  // ── Paged raw table ───────────────────────────────────────────────────────
+  // Printed and static charts read every row (a page cannot be scrolled on
+  // paper); everything interactive asks for TABLE_PAGE rows, then more.
+  const isStaticChart = useContext(StaticChartsContext)
+  const [loadingMore, setLoadingMore] = useState(false)
+  // The reader's own Top N choice (10 / 20 / 50) for a text axis the server
+  // cut down to its largest values. Widget-local and never saved, like a zoom.
+  const [topN, setTopN] = useState<number | null>(null)
+  const moreCtl = useRef<AbortController | null>(null)
+  useEffect(() => { moreCtl.current?.abort(); setLoadingMore(false) }, [refreshNonce])
+  useEffect(() => () => moreCtl.current?.abort(), [])
   // No clearing on new data here: the chart owns its window (useChartViewport)
   // and reports it for every series it draws, then null when it unmounts. A
   // parent effect runs AFTER the child's, so clearing here wiped the window
@@ -302,39 +519,54 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
     const report = reportFilters ?? []
     const measureName = typeof cfg0.measure === 'string' ? cfg0.measure : null
     const agg = String(cfg0.aggregation ?? (measureName ? 'sum' : 'count'))
-    const t = (data as { truncation?: { applied?: boolean; shown?: number; of?: number; reason?: string } } | null)?.truncation
+    const trunc = (data as { truncation?: { applied?: boolean; shown?: number; of?: number; reason?: string } } | null)?.truncation
+    const notApply = (f: FilterLikeLocal) => applies(f.column) ? describeFilter(f, t) : t('bc.canvas.why.notApply', { filter: describeFilter(f, t) })
+    const shownN = brushRange ? brushRange.endIndex - brushRange.startIndex + 1 : 0
     const rank = cfg0.rank as { mode?: string; n?: number; percent?: boolean; other?: boolean } | undefined
+    const rankN = rank?.n ? `${rank.n}${rank.percent ? '%' : ''}` : ''
     const rules = [...(reportDisplayRules ?? []), ...((cfg0.display_rules as unknown[] | undefined) ?? [])]
     return [
-      { title: 'What is measured', empty: '', items: [
-        measureName ? `${agg} of ${measureName}` : 'number of rows',
-        ...(typeof cfg0.dimension === 'string' ? [`for each ${cfg0.dimension}`] : []),
-        ...(widgetDatasetId != null && datasets?.[widgetDatasetId]?.name ? [`from ${datasets[widgetDatasetId].name}`] : []),
+      { title: t('bc.canvas.why.measured'), empty: '', items: [
+        // QA3 C8: the aggregation in words in Arabic ("avg" glued to an Arabic
+        // sentence read garbled); English keeps the code as before.
+        measureName ? t('bc.canvas.why.aggOf', { agg: (() => {
+          if (document.documentElement.lang !== 'ar') return agg
+          const k = `rb.agg.${agg}` as MessageKey; const v = t(k); return v !== k ? v : agg })(), measure: measureName })
+          : t('bc.canvas.why.rowCount'),
+        ...(typeof cfg0.dimension === 'string' ? [t('bc.canvas.why.forEach', { dimension: cfg0.dimension })] : []),
+        ...(widgetDatasetId != null && datasets?.[widgetDatasetId]?.name ? [t('bc.canvas.why.from', { dataset: datasets[widgetDatasetId].name })] : []),
       ] },
-      { title: 'Set by the author (this widget)', empty: 'No filters.', items: own.map(describeFilter) },
-      { title: 'Set by the author (whole report)', empty: 'No report filters.',
-        items: report.map(f => `${describeFilter(f)}${applies(f.column) ? '' : ' — does not apply: this widget’s data has no such column'}`) },
-      { title: 'Your selections', empty: 'None — click a mark on another widget to filter this one.',
+      { title: t('bc.canvas.why.ownTitle'), empty: t('bc.canvas.why.ownEmpty'), items: own.map(f => describeFilter(f, t)) },
+      { title: t('bc.canvas.why.reportTitle'), empty: t('bc.canvas.why.reportEmpty'),
+        items: report.map(f => notApply(f)) },
+      { title: t('bc.canvas.why.pageTitle'), empty: t('bc.canvas.why.pageEmpty'),
+        items: (pageFilters ?? []).map(f => notApply(f as FilterLikeLocal)) },
+      { title: t('bc.canvas.why.selTitle'), empty: t('bc.canvas.why.selEmpty'),
         items: [
-          ...translatedCrossFilters.map(f => describeFilter(f as FilterLikeLocal)),
-          ...(promptFilter?.column && promptFilter?.value ? [`page prompt: ${promptFilter.column} is ${promptFilter.value}`] : []),
-          ...drillPath.map(s => `drilled into ${s.column} = ${s.value}`),
+          ...translatedCrossFilters.map(f => describeFilter(f as FilterLikeLocal, t)),
+          ...(promptFilter?.column && promptFilter?.value ? [t('bc.canvas.why.prompt', { column: promptFilter.column, value: String(promptFilter.value) })] : []),
+          ...drillPath.map(s => t('bc.canvas.why.drilled', { column: s.column, value: String(s.value) })),
         ] },
-      ...(relNotes.length || partial ? [{ title: 'Date windows', empty: '', items: [
-        ...relNotes.map(n => n.error ? `${n.column}: ${n.error} — nothing matches` : `${n.column}: ${n.text ?? n.label}`),
+      ...(relNotes.length || partial ? [{ title: t('bc.canvas.why.datesTitle'), empty: '', items: [
+        ...relNotes.map(n => n.error ? t('bc.canvas.why.dateError', { column: n.column, error: n.error }) : `${n.column}: ${n.text ?? n.label}`),
         ...(partial ? [partial.text] : []),
       ] }] : []),
-      ...(brushRange || (data as { type?: string } | null)?.type === 'animated' ? [{ title: 'Your view of this chart', empty: '', items: [
-        ...(brushRange ? [brushRange.auto
-          ? `Showing ${brushRange.start} – ${brushRange.end} (${brushRange.endIndex - brushRange.startIndex + 1} of ${brushRange.of} points): too many to read at this size, so the chart opened on a window. Drag the slider under the chart to see the rest; nothing is filtered out of any total`
-          : `Zoomed with the overview axis to ${brushRange.start} – ${brushRange.end} (${brushRange.endIndex - brushRange.startIndex + 1} of ${brushRange.of} points); the rest is hidden, not filtered out of any total`] : []),
-        ...((data as { type?: string } | null)?.type === 'animated' && animFrame ? [`Showing the frame ${String((data as { animate_by?: string }).animate_by)} = ${animFrame} of an animation`] : []),
+      ...(brushRange || (data as { type?: string } | null)?.type === 'animated' ? [{ title: t('bc.canvas.why.viewTitle'), empty: '', items: [
+        ...(brushRange ? [t(brushRange.auto ? 'bc.canvas.why.brushAuto' : 'bc.canvas.why.brushZoom',
+          { start: String(brushRange.start), end: String(brushRange.end), n: shownN, of: brushRange.of })] : []),
+        ...((data as { type?: string } | null)?.type === 'animated' && animFrame
+          ? [t('bc.canvas.why.animFrame', { field: String((data as { animate_by?: string }).animate_by), frame: String(animFrame) })] : []),
       ] }] : []),
-      { title: 'Ranking and limits', empty: 'Every group is shown.', items: [
-        ...(rank?.n ? [`${rank.mode === 'bottom' ? 'Bottom' : 'Top'} ${rank.n}${rank.percent ? '%' : ''}${rank.other ? ', the rest as “All other”' : ''}`] : []),
-        ...(t?.applied ? [`Showing ${t.shown} of ${t.of} groups (${t.reason === 'limit' ? 'row limit' : t.reason})`] : []),
+      { title: t('bc.canvas.why.rankTitle'), empty: t('bc.canvas.why.rankEmpty'), items: [
+        ...(rank?.n ? [t(rank.mode === 'bottom'
+          ? (rank.other ? 'bc.canvas.why.rankBottomOther' : 'bc.canvas.why.rankBottom')
+          : (rank.other ? 'bc.canvas.why.rankTopOther' : 'bc.canvas.why.rankTop'), { n: rankN })] : []),
+        ...(trunc?.applied ? [trunc.reason === 'limit'
+          ? t('bc.canvas.why.truncLimit', { shown: String(trunc.shown), of: String(trunc.of) })
+          : t('bc.canvas.why.truncReason', { shown: String(trunc.shown), of: String(trunc.of), reason: String(trunc.reason) })] : []),
       ] },
-      { title: 'Display rules', empty: 'None.', items: rules.length ? [`${rules.length} rule${rules.length === 1 ? '' : 's'} colour or hide values here`] : [] },
+      { title: t('bc.canvas.why.rulesTitle'), empty: t('bc.canvas.why.rulesEmpty'),
+        items: rules.length ? [t(rules.length === 1 ? 'bc.canvas.why.rulesOne' : 'bc.canvas.why.rulesMany', { n: rules.length })] : [] },
     ]
   }
 
@@ -418,7 +650,12 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
         })
         return
       }
-      const result = await widgetDataApi.query(widgetDatasetId, mergedConfig, effectiveCalcCols, wt, { reportId, parameters, fresh, signal })
+      // A raw table asks for its first page only (see TABLE_PAGE / loadMore).
+      const queryConfig = !isStaticChart && isRawTable(wt, mergedConfig as Record<string, unknown>)
+        ? { ...mergedConfig, page: { offset: 0, size: TABLE_PAGE } }
+        : topN ? { ...mergedConfig, top_n: topN } : mergedConfig
+      moreCtl.current?.abort(); setLoadingMore(false)
+      const result = await widgetDataApi.query(widgetDatasetId, queryConfig, effectiveCalcCols, wt, { reportId, parameters, fresh, signal })
       if (signal.aborted) return
       setData(result)
       onFetchComplete?.(widget.id, {
@@ -426,10 +663,15 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
         // Count whatever the shape actually carries: matrix results (heatmap,
         // ribbon), waterfall bars, sankey links and forecasts have no `rows` key,
         // and counting only rows reported healthy widgets as empty -- the Review
-        // pane's first-ever finding was exactly that false positive.
+        // pane's first-ever finding was exactly that false positive. Trees (the
+        // slicer tree, tree/sunburst/icicle) carry nodes, not rows.
         rowCount: result?.rows?.length
+          || result?.nodes?.length || result?.root?.children?.length
           || result?.matrix?.length || result?.cells?.length || result?.bars?.length
           || result?.links?.length || result?.forecast?.length
+          // A range control has two bounds and never any rows: with its own
+          // range applied it was covered by "no rows match these filters".
+          || (result?.type === 'slicer_range' && (result?.min != null || result?.max != null) ? 1 : 0)
           || (result?.value != null ? 1 : 0) || 0,
         sampled: !!result?.sampled,
         ruleErrors: result?.rule_errors,
@@ -437,8 +679,8 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
     } catch (e: unknown) {
       if (signal.aborted || isCanceledRequest(e)) return
       setData(null)
-      // The backend's own message is the useful one -- "Dataset has 2,400,000
-      // rows, above the import row cap of 2,000,000. Raise `import_row_cap`, or
+      // The backend's own message is the useful one -- "Dataset has 240,000,000
+      // rows, above the import row cap of 200,000,000. Raise `import_row_cap`, or
       // use a DirectQuery data source..." names the limit, the actual size and
       // the two remedies. Discarding it left the widget rendering "Configure
       // widget to see data", which blames the author for a configuration
@@ -449,7 +691,7 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
     }
     finally { if (!signal.aborted) setLoading(false) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [widgetDatasetId, widget.widget_type, JSON.stringify(mergedConfig), JSON.stringify(parameters ?? {}), dataOverride, getReceiveMode(widget.id), JSON.stringify(translatedCrossFilters), refreshNonce])
+  }, [widgetDatasetId, widget.widget_type, JSON.stringify(mergedConfig), JSON.stringify(parameters ?? {}), dataOverride, getReceiveMode(widget.id), JSON.stringify(translatedCrossFilters), refreshNonce, isStaticChart, topN])
 
   // Opt-in periodic reload interval (used below and by the lazy-fetch gate).
   // Clamped to >= 5s: a sub-second interval is a typo that would hammer the
@@ -481,8 +723,21 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
   }, [lazyEligible, hasBeenVisible])
 
   // Refetch only when config content actually changes (or first visibility).
+  // The first load goes at once. A CHANGE (a filter clicked, a slicer ticked)
+  // waits FILTER_SETTLE_MS for the next one: three quick clicks used to send
+  // three rounds of queries for every chart on the page, two of them for
+  // selections the reader had already moved past.
+  const firstFetchDone = useRef(false)
   useEffect(() => {
-    if (!lazyEligible || hasBeenVisible) fetchData()
+    if (lazyEligible && !hasBeenVisible) return
+    if (!firstFetchDone.current || dataOverride !== undefined) {
+      firstFetchDone.current = true
+      fetchData()
+      return
+    }
+    const id = setTimeout(() => { fetchData() }, FILTER_SETTLE_MS)
+    return () => clearTimeout(id)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchData, lazyEligible, hasBeenVisible])
 
   useEffect(() => {
@@ -519,6 +774,10 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
       setDecompSplit(p.split_by ?? null)
       return
     }
+    // QA3 A6: while building, a click on a mark selects the widget and
+    // nothing else. It used to also pick the bar under the pointer and
+    // cross-filter the page. Readers (View, Present) still filter by clicking.
+    if (editMode) return
     // A map area: the extent of the sites a reader circled, as latitude and
     // longitude ranges. One filter per axis, each a `{ between }` value the
     // receiving widgets turn into >= and <= (see mergedPair). Two emits, so
@@ -552,6 +811,35 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
       emitMultiFilter(widget.id, widget.page_id, col, name, label)
       return
     }
+    // A grouped number range ("500 – 1,000") is not a value of the column:
+    // the other charts are filtered to the range it stands for. Date buckets
+    // need nothing here -- their labels are the ones the server already reads
+    // as a grain (infer_date_filter_grains).
+    const shownBin = (zoom?.data ?? data) as { binning?: Binning; rows?: StripRowLike[] } | null
+    // "All Other" is not a value of the column: filtering the page to it would
+    // blank every other chart. It stays a slice to read, not to click.
+    if (shownBin?.binning?.kind === 'text' && shownBin.rows?.some(r => r.name === name && (r as { other?: boolean }).other)) return
+    if (shownBin?.binning?.grouped && shownBin.binning.kind === 'number' && shownBin.binning.column === col) {
+      const row = shownBin.rows?.find(r => r.name === name)
+      if (row && typeof row.bin_start === 'number' && typeof row.bin_end === 'number') {
+        setLocalSelected(localSelected === name ? null : name)
+        emitFilter(widget.id, widget.page_id, col, { between: [row.bin_start, row.bin_end] }, `${col} ${String(name)}`)
+        return
+      }
+    }
+    // Expanded levels: the clicked label is the whole path ("North › Cairo"),
+    // built by the server from one value per level. Filtering one column on
+    // that joined text matched no row at all; each level's column is filtered
+    // on its own value instead (hierarchy plan, step 1).
+    if (hierarchyNodeId != null && expandDepth > 0 && expandLevels.length > 1) {
+      const levels = expandLevels.slice(0, expandDepth + 1)
+      const parts = String(name).split(PATH_SEP)
+      if (parts.length === levels.length) {
+        setLocalSelected(localSelected === name ? null : name)
+        levels.forEach((column, i) => emitFilter(widget.id, widget.page_id, column, parts[i], `${column} = ${parts[i]}`))
+        return
+      }
+    }
     // Toggle: clicking the same value clears the filter
     if (localSelected === name) {
       setLocalSelected(null)
@@ -563,11 +851,67 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
     if (hierarchyNodeId != null && hierarchy && currentNodeId != null && currentNode?.column_name) {
       const child = getChildNode(hierarchy, currentNodeId)
       if (child) {
-        setExpandDepth(0)
         setDrillPath(p => [...p, { column: currentNode.column_name!, granularity: currentNode.format, value: name, label: String(name) }])
       }
     }
-  }, [canBroadcast, widget.id, widget.config, localSelected, emitFilter, emitMultiFilter, hierarchyNodeId, hierarchy, currentNodeId, currentNode])
+  }, [canBroadcast, widget.id, widget.config, localSelected, emitFilter, emitMultiFilter, hierarchyNodeId, hierarchy, currentNodeId, currentNode, binning, baseRows, zoom, editMode, expandDepth, expandLevels.join('|')])
+
+  const commitZoom = useCallback((a: number, b: number) => {
+    zoomCtl.current?.abort()
+    if (!smartZoom || !baseRows || !widgetDatasetId) return
+    if (a <= 0 && b >= baseRows.length - 1) {
+      setZoomSel(null); setZoom(null); setZoomLoading(false); setBrushRange(null)
+      return
+    }
+    const ctl = new AbortController()
+    zoomCtl.current = ctl
+    setZoomLoading(true)
+    const bin_range = { start: baseRows[a].bin_start, end: baseRows[b].bin_end }
+    widgetDataApi.query(widgetDatasetId, { ...mergedConfig, bin_range }, effectiveCalcCols,
+      widget.widget_type, { reportId, parameters, signal: ctl.signal })
+      .then(res => { if (!ctl.signal.aborted) setZoom({ a, b, data: res }) })
+      .catch(() => { /* the coarse window stays on screen: nothing is lost */ })
+      .finally(() => { if (!ctl.signal.aborted) setZoomLoading(false) })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [smartZoom, baseRows, widgetDatasetId, JSON.stringify(mergedConfig), JSON.stringify(effectiveCalcCols), widget.widget_type, reportId, JSON.stringify(parameters ?? {})])
+
+  /** The next page of a paged raw table, appended when the reader scrolls
+   *  near the bottom. One request at a time; a new base fetch cancels it. */
+  const loadMore = useCallback(() => {
+    const d = data as { page?: unknown; rows?: unknown[]; total?: number } | null
+    if (!d?.page || loadingMore || !widgetDatasetId) return
+    const have = d.rows?.length ?? 0
+    if (have >= (d.total ?? 0)) return
+    const ctl = new AbortController()
+    moreCtl.current = ctl
+    setLoadingMore(true)
+    widgetDataApi.query(widgetDatasetId, { ...mergedConfig, page: { offset: have, size: TABLE_PAGE } },
+      effectiveCalcCols, 'table', { reportId, parameters, signal: ctl.signal })
+      .then(res => {
+        if (ctl.signal.aborted) return
+        setData((prev: any) => prev?.page && (prev.rows?.length ?? 0) === have ? mergeTablePage(prev, res, have) : prev)
+      })
+      .catch(() => { /* the rows already on screen stay; the next scroll retries */ })
+      .finally(() => { if (!ctl.signal.aborted) setLoadingMore(false) })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, loadingMore, widgetDatasetId, JSON.stringify(mergedConfig), JSON.stringify(effectiveCalcCols), reportId, JSON.stringify(parameters ?? {})])
+
+  const onZoomDrag = useCallback((a: number, b: number) => {
+    if (!baseRows) return
+    const whole = a <= 0 && b >= baseRows.length - 1
+    setZoomSel(whole ? null : { a, b })
+    setBrushRange(whole ? null : {
+      start: String(baseRows[a].name ?? a), end: String(baseRows[b].name ?? b),
+      startIndex: a, endIndex: b, of: baseRows.length,
+    })
+  }, [baseRows])
+
+  // The reset button on the "zoomed" chip clears the smart zoom too.
+  useEffect(() => {
+    if (!brushNonce) return
+    zoomCtl.current?.abort()
+    setZoomSel(null); setZoom(null); setZoomLoading(false)
+  }, [brushNonce])
 
   //: What a text control currently filters by. The input is uncontrolled and
   //: this is the mirror: re-rendering on every keystroke would move the caret.
@@ -582,6 +926,67 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
     if (value) emitFilter(widget.id, widget.page_id, column, value, `${column} = ${value}`)
     else clearFilter(column, widget.id)
   }, [widget.id, widget.page_id, emitFilter, clearFilter])
+
+  /** A range slicer's bounds, read back from the page's filters so a chip
+   *  cleared elsewhere empties the boxes too. */
+  const rangeFilter = useMemo((): RangeValue | null => {
+    const mine = activeFilters.find(f => f.sourceWidgetId === widget.id
+      && Array.isArray((f.value as { between?: unknown } | null)?.between))
+    return mine ? (mine.value as { between: RangeValue }).between : null
+  }, [activeFilters, widget.id])
+
+  /** Bounds become one `between` filter; an open end is null. Both empty
+   *  clears it, like an empty text box. */
+  const handleSubmitRangeFilter = useCallback((range: RangeValue | null, column: string) => {
+    if (!column) return
+    if (!range) { clearFilter(column, widget.id); return }
+    emitFilter(widget.id, widget.page_id, column, { between: range }, rangeLabel(column, range))
+  }, [widget.id, widget.page_id, emitFilter, clearFilter])
+
+  /** The tree slicer's ticks, read back from the page's filters, so a chip
+   *  cleared elsewhere (or a bookmark) unticks the boxes too. */
+  const treePaths = useMemo((): string[][] | null => {
+    const mine = activeFilters.find(f => f.sourceWidgetId === widget.id
+      && Array.isArray((f.value as { paths?: unknown } | null)?.paths))
+    return mine ? (mine.value as { paths: string[][] }).paths : null
+  }, [activeFilters, widget.id])
+
+  /** A hierarchical crosstab's open branches (in the page state, so bookmarks keep them). */
+  const gridOpen = drill.open ?? { rows: [], cols: [] }
+  const toggleGridBranch = useCallback((axis: 'rows' | 'cols', key: string) => {
+    const cur = drill.open ?? { rows: [], cols: [] }
+    const list = cur[axis].includes(key) ? cur[axis].filter(k => k !== key) : [...cur[axis], key]
+    setDrill(widget.id, { path: [], expand: 0, open: { ...cur, [axis]: list } })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [widget.id, JSON.stringify(drill.open ?? null), setDrill])
+  /** A value clicked in the hierarchical crosstab filters the page to its
+   *  exact row path and column path (op "paths"); a grand total filters nothing. */
+  const handleGridClick = useCallback((rowPath: string[], colPath: string[]) => {
+    if (editMode || !canBroadcast(widget.id)) return
+    const send = (levels: { column: string; granularity: string | null }[], path: string[]) => {
+      if (!levels.length) return
+      const column = levels[0].column
+      if (!path.length) { clearFilter(column, widget.id); return }
+      emitFilter(widget.id, widget.page_id, column,
+        { paths: [path], columns: levels.map(l => l.column), granularities: levels.map(l => l.granularity) },
+        describePaths([path]))
+    }
+    send(gridRows, rowPath)
+    send(gridCols, colPath)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editMode, canBroadcast, widget.id, widget.page_id, emitFilter, clearFilter, JSON.stringify(gridRows), JSON.stringify(gridCols)])
+
+  /** Ticks become ONE "paths" filter; nothing ticked, or everything, is no filter. */
+  const handleTreeChange = useCallback((paths: string[][] | null) => {
+    const levels = tickLevels
+    if (!levels.length) return
+    const column = levels[0].column
+    if (!paths || paths.length === 0) { clearFilter(column, widget.id); return }
+    const words = describePaths(paths)
+    emitFilter(widget.id, widget.page_id, column,
+      { paths, columns: levels.map(l => l.column), granularities: levels.map(l => l.granularity) }, words)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [widget.id, widget.page_id, emitFilter, clearFilter, JSON.stringify(tickLevels)])
 
   // Slicer: toggling a checkbox re-emits the full checked set as a multi-value filter.
   const handleToggleSlicerValue = useCallback((value: unknown) => {
@@ -637,6 +1042,8 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
   const [showContextMenu, setShowContextMenu] = useState(false)
   const [reconcileOpen, setReconcileOpen] = useState(false)
   const t = useT()
+  const L = usePanelLabel()
+  const { language } = useDirection()
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 })
   useEffect(() => {
     if (!showContextMenu) return
@@ -658,7 +1065,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
     try {
       await widgetDataApi.export(widgetDatasetId, mergedConfig, wt, format, effectiveCalcCols)
     } catch {
-      toast.error('Could not export this widget')
+      toast.error(t('bc.canvas.exportFailed'))
     }
   }
 
@@ -667,7 +1074,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
   const handleExportImage = async () => {
     setShowContextMenu(false)
     const svg = pickChartSvg(widgetRootRef.current)
-    if (!svg) { toast.error('This widget has no chart to export'); return }
+    if (!svg) { toast.error(t('bc.canvas.noChartToExport')); return }
     try {
       const { dataUrl, dropped } = await svgToPng(svg, 2)
       const a = document.createElement('a')
@@ -675,10 +1082,10 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
       a.download = `${(widget.title || wt).replace(/[^A-Za-z0-9 _-]/g, '').slice(0, 60) || 'widget'}.png`
       a.click()
       if (dropped > 0) {
-        toast('The map was saved without its background tiles: the tile server does not allow them to be copied.')
+        toast(t('bc.canvas.mapTilesDropped'))
       }
     } catch {
-      toast.error('Could not export this widget as an image')
+      toast.error(t('bc.canvas.exportImageFailed'))
     }
   }
 
@@ -868,7 +1275,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
               <div style={{ position: 'absolute', inset: 0, display: 'flex',
                 alignItems: 'center', justifyContent: 'center',
                 color: 'var(--muted)', fontSize: 11 }}>
-                Empty container — assign widgets to it from their settings
+                {t('bc.canvas.containerEmpty')}
               </div>
             )}
             {sorted.map(w => {
@@ -893,7 +1300,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
             {sorted.length === 0 && (
               <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
                 justifyContent: 'center', color: 'var(--muted)', fontSize: 11 }}>
-                Empty container — assign widgets to it from their settings
+                {t('bc.canvas.containerEmpty')}
               </div>
             )}
             {sorted.map(w => {
@@ -919,6 +1326,8 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
     <div
       ref={widgetRootRef}
       className={`dl-widget${selected ? ' dl-widget--selected' : ''}`}
+      // QA5 F1: legends follow the widget's own text colour (index.css)
+      data-contrast={Object.keys(contrastTokens(ruleStyles?.widget?.background ?? cfg.widget_background)).length ? '' : undefined}
       role="figure"
       aria-label={(cfg.alt_text as string) || widget.title || wt}
       tabIndex={isPreview ? undefined : 0}
@@ -939,14 +1348,26 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
           ? '2px solid var(--accent)'
           : cfg.transparent === true
             ? '0 solid transparent'
-            : `${cfg.widget_border_width ?? 1}px solid ${cfg.widget_border_color ?? 'var(--border)'}`,
-        borderRadius: cfg.widget_radius != null ? cfg.widget_radius : 'var(--radius)',
+            // The widget's own border, else the dashboard's style (lib/dashboardStyle), else the app's.
+            : cfg.widget_border_width != null || cfg.widget_border_color
+              ? `${cfg.widget_border_width ?? 1}px solid ${cfg.widget_border_color ?? 'var(--border)'}`
+              : 'var(--dl-s-border, 1px solid var(--border))',
+        borderRadius: cfg.widget_radius != null ? cfg.widget_radius : 'var(--dl-s-radius, var(--radius))',
+        fontFamily: 'var(--dl-s-font, inherit)',
         // A rule background beats a static one: the rule reacts to the data, which is
         // the entire point of phase 1's `background` target.
         background: ruleStyles?.widget?.background ?? cfg.widget_background
-          ?? (cfg.transparent === true ? 'transparent' : 'var(--surface)'),
+          ?? (cfg.transparent === true ? 'transparent' : 'var(--dl-s-card-bg, var(--surface))'),
+        // QA3 B4: the header controls paint on the widget's own colour, not a
+        // white (surface) box over a custom one. Transparent tiles keep surface.
+        ['--dl-wbg' as string]: (() => { const bg = ruleStyles?.widget?.background ?? cfg.widget_background
+          return bg && bg !== 'transparent' ? bg : 'var(--dl-s-card-bg, var(--surface))' })(),
+        // QA4 V1: text, icons, ticks and labels follow a custom background's
+        // contrast, not the theme (white on #fde68a in the dark theme).
+        ...contrastTokens(ruleStyles?.widget?.background ?? cfg.widget_background),
         overflow: 'hidden', cursor: 'default',
-        boxShadow: isDragging ? '0 8px 24px rgba(0,0,0,.25)' : selected ? '0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent)' : skinShadow(cfg.widget_skin),
+        boxShadow: isDragging ? '0 8px 24px rgba(0,0,0,.25)' : selected ? '0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent)'
+          : cfg.widget_skin || cfg.transparent === true ? skinShadow(cfg.widget_skin) : 'var(--dl-s-shadow, none)',
         outline: isMultiSelected ? '2px solid var(--success)' : undefined,
         opacity: isDragging ? 0.7 : 1,
         transition: isDragging ? 'none' : 'border-color .15s, box-shadow .15s',
@@ -990,9 +1411,11 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
             tooltip. Uppercase with tracking made "Revenue, cost and units"
             wrap to four lines in a quarter-width tile and pushed the chart
             below the fold of its own card. */}
-        <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <span className="dl-whead__title" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
           <span role="heading" aria-level={3} title={title} dir="auto"
-            style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.3, color: 'var(--text)', minWidth: 0,
+            style={{ fontWeight: 'var(--dl-s-title-weight, 600)' as never, fontSize: 'var(--dl-s-title-size, 14px)',
+              lineHeight: 1.3, color: 'var(--dl-s-title-color, var(--text))', minWidth: 0,
+              textAlign: 'var(--dl-s-title-align, start)' as never,
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span>
           {typeof cfg.subtitle === 'string' && cfg.subtitle && (
             <span data-testid="widget-subtitle" title={cfg.subtitle}
@@ -1000,23 +1423,54 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
                 overflow: 'hidden', textOverflow: 'ellipsis' }}>{cfg.subtitle}</span>
           )}
         </span>
+        {/* Pipeline phase 2: the data behind this chart stopped refreshing,
+            or is past its freshness target. The chart still draws the last
+            good data -- this says so, and since when. */}
+        {(data as { data_health?: { state: string; last_refreshed_at: string | null } } | null)?.data_health && (() => {
+          const h = (data as { data_health: { state: string; last_refreshed_at: string | null } }).data_health
+          const failing = h.state === 'failing'
+          const since = h.last_refreshed_at ? formatDate(h.last_refreshed_at) : null
+          return (
+            <span data-testid="data-health-chip" role="status"
+              title={t(failing ? 'health.tip.failing' : 'health.tip.stale')
+                + (since ? ` ${t('health.tip.since', { when: since })}` : '')}
+              style={{ fontSize: 9, padding: '1px 5px', borderRadius: 99, whiteSpace: 'nowrap',
+                background: failing ? 'rgba(226,96,108,.16)' : 'rgba(230,160,60,.18)',
+                color: failing ? 'color-mix(in oklab, #e2606c 75%, var(--text))' : 'color-mix(in oklab, #e6a03c 70%, var(--text))' }}>
+              {t(failing ? 'health.chip.failing' : 'health.chip.stale')}
+            </span>
+          )
+        })()}
         {data?.sampled && (
-          <span title={`Showing a sample of ${data.sample_size} out of ${data.total_rows} rows`}
+          <span title={t('bc.canvas.sampleTitle', { n: String(data.sample_size), total: String(data.total_rows) })}
             style={{ fontSize: 9, background: 'rgba(230,160,60,.18)', color: '#e6a03c', padding: '1px 5px', borderRadius: 99 }}>
-            sampled
+            {t('bc.canvas.sampled')}
+          </span>
+        )}
+        {binning?.grouped && (
+          <span data-testid="binning-chip" title={binningTitle(zoom?.data?.binning ?? binning, t)}
+            style={{ fontSize: 9, padding: '1px 5px', borderRadius: 99, whiteSpace: 'nowrap',
+              background: 'color-mix(in srgb, var(--accent) 14%, transparent)', color: 'var(--accent)' }}>
+            {binning.kind === 'text' && binning.top_n_choices?.length ? (
+              <select aria-label={t('bc.canvas.topNAria')} data-testid="top-n-select"
+                value={binning.top_n ?? ''} onClick={e => e.stopPropagation()}
+                onChange={e => setTopN(Number(e.target.value))}
+                style={{ font: 'inherit', color: 'inherit', background: 'transparent', border: 0, padding: 0, cursor: 'pointer' }}>
+                {binning.top_n_choices.map(n => <option key={n} value={n}>{t('bc.canvas.bin.topN', { n })}</option>)}
+              </select>
+            ) : binningLabel(zoom?.data?.binning ?? binning, t)}
           </span>
         )}
         {brushRange && (
-          <span data-testid="brush-chip" title={brushRange.auto
-            ? `Showing ${brushRange.start} – ${brushRange.end} of ${brushRange.of} points. Drag the slider under the chart to see the rest.`
-            : `Zoomed with the overview axis: ${brushRange.start} – ${brushRange.end} of ${brushRange.of} points`}
+          <span data-testid="brush-chip" title={t(brushRange.auto ? 'bc.canvas.brushTitleAuto' : 'bc.canvas.brushTitleZoom',
+              { start: String(brushRange.start), end: String(brushRange.end), of: brushRange.of })}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 9, padding: '1px 4px 1px 5px', borderRadius: 99,
               background: 'color-mix(in srgb, var(--accent) 14%, transparent)', color: 'var(--accent)', whiteSpace: 'nowrap' }}>
-            {brushRange.auto ? 'showing' : 'zoomed'} {brushRange.endIndex - brushRange.startIndex + 1}/{brushRange.of}
+            {t(brushRange.auto ? 'bc.canvas.chipShowing' : 'bc.canvas.chipZoomed')} <bdi dir="ltr">{brushRange.endIndex - brushRange.startIndex + 1}/{brushRange.of}</bdi>
             {/* An automatic window has nothing to reset: the slider is the
                 control. A dragged one goes back to how the chart opened. */}
             {!brushRange.auto && (
-            <button aria-label="Reset the overview zoom" title="Back to how the chart opened"
+            <button aria-label={t('bc.canvas.resetZoom')} title={t('bc.canvas.resetZoomTitle')}
               onClick={e => { e.stopPropagation(); setBrushRange(null); setBrushNonce(n => n + 1) }}
               style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', font: 'inherit', lineHeight: 1, padding: 0 }}>×</button>
             )}
@@ -1028,15 +1482,15 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
             style={{ fontSize: 9, padding: '1px 5px', borderRadius: 99, whiteSpace: 'nowrap',
               background: relNotes.some(n => n.error || n.incomplete) ? 'rgba(230,160,60,.18)' : 'color-mix(in srgb, var(--accent) 14%, transparent)',
               color: relNotes.some(n => n.error || n.incomplete) ? '#b7791f' : 'var(--accent)' }}>
-            {relNotes[0].error ? 'date filter error' : relNotes[0].label}
-            {relNotes.some(n => n.incomplete) ? ' · partial' : ''}
+            {relNotes[0].error ? t('bc.canvas.dateFilterError') : relNotes[0].label}
+            {relNotes.some(n => n.incomplete) ? ' · ' + t('bc.canvas.partial') : ''}
           </span>
         )}
         {incomingFilters.length > 0 && (
-          <span title={`Filtered by: ${incomingFilters.map(f => f.label).join(', ')}`}
+          <span title={t('bc.canvas.filteredBy', { list: incomingFilters.map(f => f.label).join(', ') })}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 9, background: 'color-mix(in srgb, var(--accent) 20%, transparent)', color: 'var(--accent)', padding: '1px 4px 1px 5px', borderRadius: 99 }}>
-            {incomingFilters.length} filter{incomingFilters.length > 1 ? 's' : ''}
-            <button aria-label="Clear this filter" title="Clear this filter"
+            {t(incomingFilters.length > 1 ? 'bc.canvas.chipFiltersN' : 'bc.canvas.chipFilters1', { n: incomingFilters.length })}
+            <button aria-label={t('bc.canvas.clearFilter')} title={t('bc.canvas.clearFilter')}
               style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', font: 'inherit', lineHeight: 1, padding: 0 }}
               onClick={e => {
                 e.stopPropagation()
@@ -1047,10 +1501,10 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
           </span>
         )}
         {!isPreview && drillthroughPageId != null && localSelected != null && (
-          <button title="Drill through with the selected value"
+          <button title={t('bc.canvas.drillThroughTitle')}
             style={{ fontSize: 9, background: 'color-mix(in srgb, var(--accent) 15%, transparent)', color: 'var(--accent)', border: 'none', borderRadius: 99, padding: '2px 7px', cursor: 'pointer' }}
             onClick={e => { e.stopPropagation(); handleDrillthrough() }}>
-            ⤷ Drill through
+            ⤷ {t('bc.canvas.drillThrough')}
           </button>
         )}
         {/* Pinning used to send a widget to a personal dashboard rendered on
@@ -1063,8 +1517,8 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
             width tile "Total revenue" printed as "Tot…"; now the title owns the
             row at rest. Touch screens get them outright (index.css). */}
         <span className="dl-whead__ctl">
-        {broadcasts && <span title="Emits cross-filters" style={{ fontSize: 9, color: 'var(--accent)', opacity: .7 }}>→</span>}
-        {receives && <span title="Receives cross-filters" style={{ fontSize: 9, color: 'var(--accent)', opacity: .7 }}>←</span>}
+        {broadcasts && <span className="dl-wmark" title={t('bc.canvas.emits')} style={{ fontSize: 9, color: 'var(--accent)', opacity: .7 }}>→</span>}
+        {receives && <span className="dl-wmark" title={t('bc.canvas.receives')} style={{ fontSize: 9, color: 'var(--accent)', opacity: .7 }}>←</span>}
         {!editMode && !isPreview && widgetDatasetId != null && !['text', 'button', 'image', 'shape', 'web_content', 'container', 'slicer'].includes(widget.widget_type) && (() => {
           const cfgAny = mergedConfig as Record<string, unknown>
           const cols = datasets?.[widgetDatasetId]?.columns ?? []
@@ -1080,42 +1534,49 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
           // that need no request -- the transparency pane and re-typing.
           const live = dataOverride === undefined
           const items = [
-            { key: 'why', label: 'Why am I seeing this?', onSelect: () => setKitDialog('why') },
-            ...(measure && live ? [{ key: 'explain', label: `Explain ${measure}`, onSelect: () => setKitDialog('explain') }] : []),
+            // QA2 T11: the menu's words in the reader's language (labels only).
+            { key: 'why', label: t('wr.menu.why'), onSelect: () => setKitDialog('why') },
+            ...(measure && live ? [{ key: 'explain', label: t('wr.menu.explain', { m: measure }), onSelect: () => setKitDialog('explain') }] : []),
             ...(live && DIFFERENCE_TYPES.includes(widget.widget_type) && typeof cfgAny.dimension === 'string'
                 && !cfgAny.dimension2 && rowsNow >= 2 && String(cfgAny.aggregation ?? 'sum') !== 'max'
                 && String(cfgAny.aggregation ?? 'sum') !== 'min' && !(measure && measureNames.has(measure))
-              ? [{ key: 'difference', label: 'Is this difference real?', onSelect: () => setKitDialog('difference') }] : []),
+              ? [{ key: 'difference', label: t('wr.menu.difference'), onSelect: () => setKitDialog('difference') }] : []),
             ...(live && widget.widget_type === 'forecast' && measure && numericCols.length
-              ? [{ key: 'whatif', label: 'What if…', onSelect: () => setKitDialog('scenario') }] : []),
-            ...options.map(o => ({ key: `as-${o.type}`, label: `View as ${o.label}${o.recommended ? ' (recommended)' : ''}`,
+              ? [{ key: 'whatif', label: t('wr.menu.whatif'), onSelect: () => setKitDialog('scenario') }] : []),
+            ...options.map(o => ({ key: `as-${o.type}`, label: t(o.recommended ? 'wr.menu.viewAsRec' : 'wr.menu.viewAs', { chart: (() => { const k = `gallery.tile.${o.type}` as MessageKey; const v = t(k); return v !== k ? v : o.label })() }),
                                    onSelect: () => setViewAs(o.type) })),
-            ...(viewAs ? [{ key: 'as-original', label: 'Show as designed', onSelect: () => setViewAs(null) }] : []),
+            ...(viewAs ? [{ key: 'as-original', label: t('wr.menu.original'), onSelect: () => setViewAs(null) }] : []),
+            // The data behind this chart, from the visible menu -- it used to be
+            // reachable only by right-clicking (HR evaluation, item 3.2).
+            ...(live && widgetDatasetId != null && allowExport ? [
+              { key: 'export-csv', label: t('wr.menu.csv'), onSelect: () => handleExport('csv') },
+              { key: 'export-xlsx', label: t('wr.menu.xlsx'), onSelect: () => handleExport('xlsx') },
+            ] : []),
           ]
           return (
             <span onMouseDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
-              <ActionMenu label={`Analyse ${title}`} items={items}
+              <ActionMenu portal label={t('wr.menu.aria', { title })} items={items}
                 trigger={<MoreVertical size={15} aria-hidden />} triggerClassName="dl-wicon" />
             </span>
           )
         })()}
         {editMode && onDelete && (
           <>
-            <button className="dl-wicon" aria-label={`Delete widget ${title}`} title="Delete"
+            <button className="dl-wicon dl-wdel" aria-label={t('bc.canvas.deleteWidgetAria', { title })} title={t('bc.canvas.delete')}
               onClick={e => { e.stopPropagation(); onDelete() }}><Trash2 size={15} aria-hidden /></button>
             <span onMouseDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
-              <ActionMenu
+              <ActionMenu portal
                 trigger={<MoreVertical size={15} aria-hidden />} triggerClassName="dl-wicon"
-                label={`More actions for widget ${title}`}
+                label={t('bc.canvas.moreActions', { title })}
                 items={[
                   // Offered only when the caller can act on it: every existing
                   // caller passes onDelete alone, and a menu item wired to
                   // nothing is worse than an absent one.
                   ...(onDuplicate
-                    ? [{ key: 'duplicate', label: 'Duplicate widget',
+                    ? [{ key: 'duplicate', label: t('bc.canvas.duplicateWidget'),
                          icon: <Copy size={12} />, onSelect: () => onDuplicate() }]
                     : []),
-                  { key: 'delete', label: 'Delete widget', danger: true, icon: <Trash2 size={12} />, onSelect: () => onDelete() },
+                  { key: 'delete', label: t('bc.canvas.deleteWidget'), danger: true, icon: <Trash2 size={12} />, onSelect: () => onDelete() },
                 ]}
               />
             </span>
@@ -1124,14 +1585,14 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
         </span>
         {hierarchyNodeId != null && expandLevels.length > 1 && (
           <span style={{ display: 'flex', gap: 2 }}>
-            <button aria-label="Expand hierarchy one level"
-              title="Show the next level alongside this one (Power BI's expand)"
+            <button aria-label={t('bc.canvas.expandLevel')}
+              title={t('bc.canvas.expandLevelTitle')}
               disabled={expandDepth >= expandLevels.length - 1}
-              onClick={e => { e.stopPropagation(); setDrillPath([]); setExpandDepth(d => Math.min(d + 1, expandLevels.length - 1)) }}
+              onClick={e => { e.stopPropagation(); setExpandDepth(d => Math.min(d + 1, expandLevels.length - 1)) }}
               style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11,
                 color: expandDepth >= expandLevels.length - 1 ? 'var(--border)' : 'var(--accent)', padding: '0 2px' }}>⊞</button>
             {expandDepth > 0 && (
-              <button aria-label="Collapse hierarchy one level"
+              <button aria-label={t('bc.canvas.collapseLevel')}
                 onClick={e => { e.stopPropagation(); setExpandDepth(d => Math.max(0, d - 1)) }}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--accent)', padding: '0 2px' }}>⊟</button>
             )}
@@ -1139,7 +1600,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
         )}
         {drillPath.length > 0 && (
           <div style={{ display:'flex', gap:4, alignItems:'center', fontSize:10, color:'var(--muted)' }}>
-            <button onClick={() => setDrillPath([])} style={{ background:'none', border:'none', color:'var(--accent)', cursor:'pointer', fontSize:10, padding:0 }}>All</button>
+            <button onClick={() => setDrillPath([])} style={{ background:'none', border:'none', color:'var(--accent)', cursor:'pointer', fontSize:10, padding:0 }}>{t('bc.canvas.drillAll')}</button>
             {drillPath.map((step, i) => (
               <span key={i} style={{ display:'flex', alignItems:'center', gap:4 }}>
                 <span>▸</span>
@@ -1164,15 +1625,41 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
             onDrillthrough?.(drillthroughPageId, last.value)
           }
         } : undefined}>
-        {loading && <EmptyState msg="Loading…" />}
+        {loading && <EmptyState msg={t('common.loading')} />}
         {!loading && hiddenByRule && editMode && (
           <div data-testid="widget-hidden-by-rule" style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12, textAlign: 'center', padding: 8 }}>
-            Hidden by a display rule
+            {t('bc.canvas.hiddenByRule')}
           </div>
         )}
-        {!loading && !hiddenByRule && (
-          <WidgetBody widget={viewAs && !editMode ? { ...widget, widget_type: viewAs as Widget['widget_type'] } : widget} data={data} fetchError={fetchError} onRetry={() => { void fetchData(true) }} localSelected={localSelected} onClickPoint={handleClick} broadcasts={broadcasts} allFormats={allFormats} checked={checked} onToggleSlicerValue={handleToggleSlicerValue} onButtonClick={handleButtonClick} ruleStyles={ruleStyles} parameters={parameters} geography={geography}
+        {!loading && !hiddenByRule && smartZoom && (
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+            <div style={{ flex: 1, minHeight: 0, position: 'relative', opacity: zoomLoading ? 0.55 : 1, transition: 'opacity .15s' }}>
+              <WidgetBody widget={{ ...(viewAs && !editMode ? { ...widget, widget_type: viewAs as Widget['widget_type'] } : widget),
+                  config: { ...(widget.config as object), overview_axis: false } } as Widget}
+                data={zoom && zoomSel && zoom.a === zoomSel.a && zoom.b === zoomSel.b ? zoom.data
+                  : zoomSel ? { ...data, rows: baseRows!.slice(zoomSel.a, zoomSel.b + 1) } : data}
+                fetchError={fetchError} onRetry={() => { void fetchData(true) }} localSelected={localSelected} onClickPoint={handleClick} broadcasts={broadcasts} allFormats={allFormats} checked={checked} onToggleSlicerValue={handleToggleSlicerValue} onButtonClick={handleButtonClick} ruleStyles={ruleStyles} parameters={parameters} geography={geography}
+                textFilter={textFilter} onSubmitTextFilter={handleSubmitTextFilter}
+            rangeFilter={rangeFilter} onSubmitRangeFilter={handleSubmitRangeFilter}
+            treePaths={treePaths} onTreeChange={tickLevels.length ? handleTreeChange : undefined}
+            gridOpen={gridOpen} onToggleGridBranch={toggleGridBranch} onGridClick={handleGridClick}
+                onBrushChange={undefined} brushNonce={brushNonce} onAnimationFrame={setAnimFrame} />
+              {zoomLoading && (
+                <span data-testid="zoom-loading" role="status" style={{ position: 'absolute', top: 2, insetInlineEnd: 4, fontSize: 10, color: 'var(--muted)' }}>
+                  {t('bc.canvas.loadingMore')}
+                </span>
+              )}
+            </div>
+            <OverviewStrip rows={baseRows!} start={zoomSel?.a ?? 0} end={zoomSel?.b ?? baseRows!.length - 1}
+              onChange={onZoomDrag} onCommit={commitZoom} resetNonce={brushNonce} />
+          </div>
+        )}
+        {!loading && !hiddenByRule && !smartZoom && (
+          <WidgetBody onLoadMore={loadMore} loadingMore={loadingMore} widget={viewAs && !editMode ? { ...widget, widget_type: viewAs as Widget['widget_type'] } : widget} data={data} fetchError={fetchError} onRetry={() => { void fetchData(true) }} localSelected={localSelected} onClickPoint={handleClick} broadcasts={broadcasts} allFormats={allFormats} checked={checked} onToggleSlicerValue={handleToggleSlicerValue} onButtonClick={handleButtonClick} ruleStyles={ruleStyles} parameters={parameters} geography={geography}
             textFilter={textFilter} onSubmitTextFilter={handleSubmitTextFilter}
+            rangeFilter={rangeFilter} onSubmitRangeFilter={handleSubmitRangeFilter}
+            treePaths={treePaths} onTreeChange={tickLevels.length ? handleTreeChange : undefined}
+            gridOpen={gridOpen} onToggleGridBranch={toggleGridBranch} onGridClick={handleGridClick}
             onBrushChange={setBrushRange} brushNonce={brushNonce} onAnimationFrame={setAnimFrame}
             onAssignData={editMode ? () => window.dispatchEvent(new CustomEvent(ASSIGN_DATA_EVENT, { detail: { widgetId: widget.id } })) : undefined}
             onApplyFix={editMode ? (patch, label) => window.dispatchEvent(new CustomEvent(PATCH_WIDGET_EVENT, { detail: { widgetId: widget.id, patch, label } })) : undefined} />
@@ -1209,7 +1696,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
         </Suspense>, document.body)}
       {kitDialog === 'why' && createPortal(
         <WhyDialog title={title} sections={whySections()} onClose={() => setKitDialog(null)}
-          footnote="Row-level security may also narrow the rows you can see; it is applied before everything above and is not shown here." />,
+          footnote={t('bc.canvas.why.footnote')} />,
         document.body)}
       {kitDialog === 'scenario' && widgetDatasetId != null && createPortal(
         <ScenarioDialog datasetId={widgetDatasetId}
@@ -1224,7 +1711,10 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
       {!loading && !hiddenByRule && data?.truncation?.applied && missingRequiredRoles(widget).length === 0 && (
         <TruncationNote t={data.truncation} dimension={data.dimension ?? data.category}
           onShowMore={editMode ? (limit: number) => window.dispatchEvent(new CustomEvent(PATCH_WIDGET_EVENT, {
-            detail: { widgetId: widget.id, patch: { limit }, label: `Show ${limit === data.truncation.of ? 'all ' : ''}${limit} ${(data.dimension ?? data.category) ? `${data.dimension ?? data.category} values` : 'groups'} in "${widget.title || widget.widget_type}"` },
+            detail: { widgetId: widget.id, patch: { limit }, label: t((data.dimension ?? data.category)
+              ? (limit === data.truncation.of ? 'bc.canvas.undo.showAllValues' : 'bc.canvas.undo.showValues')
+              : (limit === data.truncation.of ? 'bc.canvas.undo.showAllGroups' : 'bc.canvas.undo.showGroups'),
+              { n: limit, dim: String(data.dimension ?? data.category ?? ''), title: widget.title || widget.widget_type }) },
           })) : undefined} />
       )}
 
@@ -1233,6 +1723,27 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
           style={{ fontSize: 10.5, color: 'var(--muted)', padding: '2px 8px 4px', lineHeight: 1.3 }}>
           {missingCategorySentence(data.missing_category.rows,
             Array.isArray(data.missing_category.columns) ? data.missing_category.columns.join(' or ') : (data.dimension ?? data.category))}
+        </div>
+      )}
+
+      {/* Groups left out of a ranking of averages for holding too few rows (min_group_rows). */}
+      {!loading && !hiddenByRule && ((data as { small_groups?: { hidden?: number } } | undefined)?.small_groups?.hidden ?? 0) > 0 && (
+        <div data-testid="small-groups-note" role="note"
+          style={{ fontSize: 10.5, color: 'var(--muted)', padding: '2px 8px 4px', lineHeight: 1.3 }}>
+          {t('wr.smallGroups', {
+            n: ((data as { small_groups: { hidden: number } }).small_groups.hidden).toLocaleString(),
+            min: ((data as { small_groups: { min_rows: number } }).small_groups.min_rows).toLocaleString(),
+          })}
+        </div>
+      )}
+
+      {/* Every group under the floor (the data is small): drawn, but too few rows to rank. */}
+      {!loading && !hiddenByRule && ((data as { small_groups?: { too_few?: number } } | undefined)?.small_groups?.too_few ?? 0) > 0 && (
+        <div data-testid="too-few-to-rank-note" role="note"
+          style={{ fontSize: 10.5, color: 'var(--muted)', padding: '2px 8px 4px', lineHeight: 1.3 }}>
+          {t('wr.tooFewToRank', {
+            min: ((data as { small_groups: { min_rows: number } }).small_groups.min_rows).toLocaleString(),
+          })}
         </div>
       )}
 
@@ -1254,13 +1765,25 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
       {!loading && !hiddenByRule && partial && (
         <div data-testid="partial-period-note" role="note"
           style={{ fontSize: 10, color: '#b7791f', padding: '0 10px 4px', lineHeight: 1.3 }}>
-          ◔ {partial.text}
+          {/* QA2 T14: in Arabic the sentence is composed from the fields (the
+              server writes English); the period label is isolated so
+              "2025-12" keeps its order. English keeps the server's words. */}
+          {language === 'ar' && partialPeriodEnd(partial) ? (() => {
+            const f = (d: Date) => d.toLocaleDateString('ar-u-nu-latn', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+            return <span dir="rtl">◔ <bdi dir="ltr">{partial.label}</bdi> {t('wr.partial', {
+              through: f(new Date(partial.through + 'T00:00:00Z')), unit: t(`wr.unit.${partial.granularity}` as MessageKey), end: f(partialPeriodEnd(partial)!) })}</span>
+          })() : <>◔ {partial.text}</>}
         </div>
       )}
 
-      {/* Resize handle — bottom-right corner */}
+      {/* Resize handle — bottom-right corner, in BOTH directions. The canvas
+          places widgets from the left in Arabic too (layout x is a left
+          offset), so a resize always grows the widget rightward and down; a
+          handle mirrored to the bottom-left in RTL pointed the wrong way
+          (HR re-test 2026-10-01). Physical `right`, LTR-pinned contents. */}
       {editMode && onResizeStart && (
         <div
+          data-testid="widget-resize-handle"
           onMouseDown={e => { e.stopPropagation(); e.preventDefault(); onResizeStart(e) }}
           onPointerDown={e => {
             e.stopPropagation(); e.preventDefault()
@@ -1268,7 +1791,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
             onResizeStart(e)
           }}
           style={{
-            position: 'absolute', bottom: 0, insetInlineEnd: 0,
+            position: 'absolute', bottom: 0, right: 0, direction: 'ltr',
             width: 18, height: 18, cursor: 'nwse-resize',
             display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end',
             padding: '3px',
@@ -1317,7 +1840,9 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
             <button role="menuitem"
               onClick={e => { e.stopPropagation(); handleDrillthrough(); setShowContextMenu(false) }}
               style={menuItemStyle}>
-              ⤷ Drill through to {drillthroughTargetName ?? 'page'}
+              {drillthroughTargetName != null
+                ? t('bc.canvas.drillToPage', { page: drillthroughTargetName })
+                : t('bc.canvas.drillToAnyPage')}
             </button>
           )}
           {/* Data actions (SAS's mark menu): act on the selected mark, re-sort,
@@ -1326,7 +1851,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
           {editMode && (() => {
             const c = widget.config as Record<string, any>
             const dim = typeof c.dimension === 'string' ? c.dimension : ''
-            const name = `"${widget.title || widget.widget_type}"`
+            const name = widget.title || widget.widget_type
             const patch = (p: Record<string, unknown>, label: string) => {
               window.dispatchEvent(new CustomEvent(PATCH_WIDGET_EVENT, { detail: { widgetId: widget.id, patch: p, label } }))
               setShowContextMenu(false)
@@ -1340,50 +1865,50 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
                 <button key="keep" role="menuitem" style={menuItemStyle}
                   onClick={e => { e.stopPropagation(); setLocalSelected(null)
                     patch({ filters: [...filters.filter((f: any) => f?.column !== dim), { column: dim, op: 'eq', value: sel }] },
-                      `Keep only ${dim} = ${selText} in ${name}`) }}>
-                  ✓ Keep only “{selText}”
+                      t('bc.canvas.undo.keep', { dim, value: selText, title: name })) }}>
+                  {t('bc.canvas.keepOnly', { value: selText })}
                 </button>,
                 <button key="exclude" role="menuitem" style={menuItemStyle}
                   onClick={e => { e.stopPropagation(); setLocalSelected(null)
                     patch({ filters: [...filters, { column: dim, op: 'neq', value: sel }] },
-                      `Exclude ${dim} = ${selText} from ${name}`) }}>
-                  ✕ Exclude “{selText}”
+                      t('bc.canvas.undo.exclude', { dim, value: selText, title: name })) }}>
+                  {t('bc.canvas.exclude', { value: selText })}
                 </button>,
               )
             }
             if (filters.length) {
               items.push(
                 <button key="clearf" role="menuitem" style={menuItemStyle}
-                  onClick={e => { e.stopPropagation(); patch({ filters: [] }, `Remove ${filters.length} filter${filters.length === 1 ? '' : 's'} from ${name}`) }}>
-                  ⊘ Remove this widget’s filters ({filters.length})
+                  onClick={e => { e.stopPropagation(); patch({ filters: [] }, t(filters.length === 1 ? 'bc.canvas.undo.removeFilter1' : 'bc.canvas.undo.removeFiltersN', { n: filters.length, title: name })) }}>
+                  {t('bc.canvas.removeWidgetFilters', { n: filters.length })}
                 </button>,
               )
             }
             if (dim) {
               items.push(
                 <button key="sortv" role="menuitem" style={menuItemStyle}
-                  onClick={e => { e.stopPropagation(); patch({ sort_by: 'value', sort: 'desc' }, `Sort ${name} by value, high to low`) }}>
-                  ↓ Sort by value (high → low)
+                  onClick={e => { e.stopPropagation(); patch({ sort_by: 'value', sort: 'desc' }, t('bc.canvas.undo.sortValue', { title: name })) }}>
+                  {t('bc.canvas.sortByValue')}
                 </button>,
                 <button key="sortn" role="menuitem" style={menuItemStyle}
-                  onClick={e => { e.stopPropagation(); patch({ sort_by: 'name', sort: 'asc' }, `Sort ${name} by ${dim}, A to Z`) }}>
-                  ↑ Sort by {dim} (A → Z)
+                  onClick={e => { e.stopPropagation(); patch({ sort_by: 'name', sort: 'asc' }, t('bc.canvas.undo.sortName', { title: name, dim })) }}>
+                  {t('bc.canvas.sortByName', { dim })}
                 </button>,
               )
             }
             if (dim && typeof c.measure === 'string' && c.measure) {
               const aggs: [string, string][] = [['sum', 'Sum'], ['avg', 'Average'], ['min', 'Min'], ['max', 'Max'], ['count', 'Count']]
               items.push(
-                <div key="agg" role="group" aria-label="Aggregation" style={{ display: 'flex', gap: 2, flexWrap: 'wrap', padding: '4px 8px', fontSize: 11, color: 'var(--muted)', alignItems: 'center' }}>
+                <div key="agg" role="group" aria-label={t('bc.canvas.aggregation')} style={{ display: 'flex', gap: 2, flexWrap: 'wrap', padding: '4px 8px', fontSize: 11, color: 'var(--muted)', alignItems: 'center' }}>
                   <span style={{ marginInlineEnd: 4 }}>Σ</span>
                   {aggs.map(([v, l]) => (
                     <button key={v} role="menuitemradio" aria-checked={(c.aggregation ?? 'sum') === v} type="button"
-                      onClick={e => { e.stopPropagation(); if ((c.aggregation ?? 'sum') !== v) patch({ aggregation: v }, `Change aggregation of ${name} from ${c.aggregation ?? 'sum'} to ${v}`) }}
+                      onClick={e => { e.stopPropagation(); if ((c.aggregation ?? 'sum') !== v) patch({ aggregation: v }, t('bc.canvas.undo.aggregation', { title: name, from: String(c.aggregation ?? 'sum'), to: v })) }}
                       style={{ fontSize: 11, padding: '1px 6px', borderRadius: 4, cursor: 'pointer',
                         border: '1px solid ' + ((c.aggregation ?? 'sum') === v ? 'var(--accent)' : 'var(--border)'),
                         background: (c.aggregation ?? 'sum') === v ? 'var(--accent)' : 'transparent',
                         color: (c.aggregation ?? 'sum') === v ? 'var(--mc-accent-fg)' : 'var(--text)' }}>
-                      {l}
+                      {L(l)}
                     </button>
                   ))}
                 </div>,
@@ -1405,12 +1930,12 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
               url.searchParams.set('page', String(widget.page_id))
               url.searchParams.set('widget', String(widget.id))
               navigator.clipboard.writeText(url.toString())
-                .then(() => toast.success('Link to this visual copied'))
-                .catch(() => toast.error('Could not copy the link'))
+                .then(() => toast.success(t('bc.canvas.linkCopied')))
+                .catch(() => toast.error(t('bc.canvas.linkCopyFailed')))
               setShowContextMenu(false)
             }}
             style={menuItemStyle}>
-            <LinkIcon size={12} aria-hidden style={{ marginInlineEnd: 6, verticalAlign: '-2px' }} />Copy link to this visual
+            <LinkIcon size={12} aria-hidden style={{ marginInlineEnd: 6, verticalAlign: '-2px' }} />{t('bc.canvas.copyLink')}
           </button>
           {/* Export is offered on every widget with a dataset behind it, drill-through
               or not -- the previous menu rendered only when a drill-through target
@@ -1421,17 +1946,17 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
               <button role="menuitem"
                 onClick={e => { e.stopPropagation(); handleExport('csv') }}
                 style={menuItemStyle}>
-                ⤓ Export data as CSV
+                ⤓ {t('bc.canvas.exportCsv')}
               </button>
               <button role="menuitem"
                 onClick={e => { e.stopPropagation(); handleExport('xlsx') }}
                 style={menuItemStyle}>
-                ⤓ Export data as Excel
+                ⤓ {t('bc.canvas.exportXlsx')}
               </button>
               <button role="menuitem"
                 onClick={e => { e.stopPropagation(); handleExportImage() }}
                 style={menuItemStyle}>
-                ⤓ Export as image
+                ⤓ {t('bc.canvas.exportImage')}
               </button>
               {/* E17: the migration check -- beside the exports, because the
                   file it compares with is the old report's export. */}

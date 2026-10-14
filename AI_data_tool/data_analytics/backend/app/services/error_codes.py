@@ -22,17 +22,19 @@ looking rather than a new undocumented code in production.
 """
 from __future__ import annotations
 
-#: Retryable: `source_unavailable` and `quota` (after Retry-After). Everything
+#: Retryable: `source_unavailable`, `source_busy` and `quota` (after Retry-After). Everything
 #: else is a fact about the request or the data that will be the same fact a
 #: second later.
 WIDGET_ERROR_CODES = frozenset({
     "parameter",           # a report parameter is missing, unknown or the wrong type
+    "bad_filter",          # a filter that cannot be applied as written: a bad relative-date spec, a date column with no dates
     "unsupported",         # the feature does not exist here: a DirectQuery engine, an export format
     "forbidden_column",    # the widget references a column this role cannot see
     "forbidden",           # this role may not read the dataset at all
     "not_found",           # the dataset, or its file on disk
     "row_cap",             # the import row cap; names the size and the limit
     "source_unavailable",  # the customer's database could not be reached
+    "source_busy",         # it answered but ran short of memory twice; retryable
     "export_disabled",     # exports are switched off for this dataset
     "export_no_data",      # this widget has nothing tabular to export
     "measure_error",       # a measure expression could not be evaluated (200 channel)

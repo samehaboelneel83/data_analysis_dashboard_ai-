@@ -1,11 +1,16 @@
+import SaidItems, { saidOf } from '../analysis/SaidItems'
 import { useCallback, useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { Brain } from 'lucide-react'
 import EmptyState from '../ui/EmptyState'
-import { useT } from '../../i18n'
+import { useConfirm } from '../ui/ConfirmDialog'
+import { useT, type TranslateFn } from '../../i18n'
+import { familyLabel, rich } from '../../i18n/pages/modelsMaps'
 import { isJobActive, jobsApi, predictionModelsApi } from '../../services/api'
 import { Link } from 'react-router-dom'
+import '../../pages/datasetDetail/models.css'
 import type { DatasetColumn, DatasetSummaryForCard, DriftSnapshot, Job, ModelDrift, PredictionModelSummary, ScoreResult } from '../../services/api'
+import { formatDate } from '../../lib/dateFormat'
 
 /**
  * Models kept so they can score rows they have never seen.
@@ -29,12 +34,16 @@ const fmt = (v: number | null | undefined) => (v == null ? '—' : Number.isInte
 
 /** E13: how a saved model was chosen and on what, and whether the data has
  *  moved since. */
-const DRIFT_WORD: Record<ModelDrift['overall'], string> = {
-  stable: 'stable', moderate: 'moderate shift', major: 'major shift', missing: 'missing now',
-}
+const DRIFT_KEY = {
+  stable: 'pg.modelsMaps.drift.stable', moderate: 'pg.modelsMaps.drift.moderate',
+  major: 'pg.modelsMaps.drift.major', missing: 'pg.modelsMaps.drift.missing',
+} as const
+const driftWord = (t: TranslateFn, level: string) =>
+  level in DRIFT_KEY ? t(DRIFT_KEY[level as ModelDrift['overall']]) : level
 
 /** E13: today's rows against the version's training rows, per predictor. */
 function DriftCheck({ m, datasetId }: { m: PredictionModelSummary; datasetId: number }) {
+  const t = useT()
   const [drift, setDrift] = useState<ModelDrift | null>(null)
   const [history, setHistory] = useState<DriftSnapshot[]>([])
   const [err, setErr] = useState<string | null>(null)
@@ -48,9 +57,7 @@ function DriftCheck({ m, datasetId }: { m: PredictionModelSummary; datasetId: nu
     return () => { live = false }
   }, [datasetId, m.id, m.has_training_profile])
   if (!m.has_training_profile) {
-    return <p style={{ fontSize: 11, color: 'var(--muted)', margin: 0 }}>
-      This version was saved before training profiles were kept, so drift cannot be checked. Retrain it to compare.
-    </p>
+    return <p style={{ fontSize: 11, color: 'var(--muted)', margin: 0 }}>{t('pg.modelsMaps.pm.noProfile')}</p>
   }
   const check = async () => {
     setBusy(true); setErr(null)
@@ -58,7 +65,7 @@ function DriftCheck({ m, datasetId }: { m: PredictionModelSummary; datasetId: nu
       const r = await predictionModelsApi.checkDrift(datasetId, m.id)
       setDrift(r); setHistory(r.history ?? [])
     }
-    catch (e) { setErr((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Could not check drift') }
+    catch (e) { setErr((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || t('pg.modelsMaps.pm.driftFailed')) }
     finally { setBusy(false) }
   }
   const recent = [...history].reverse().slice(0, 10)
@@ -67,26 +74,26 @@ function DriftCheck({ m, datasetId }: { m: PredictionModelSummary; datasetId: nu
       <div>
         <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void check()}
           style={{ fontSize: 11, padding: '3px 8px' }}>
-          {busy ? 'Checking…' : 'Check drift against today\'s rows'}
+          {busy ? t('pg.modelsMaps.pm.checking') : t('pg.modelsMaps.pm.checkDrift')}
         </button>
       </div>
       {err && <p style={{ fontSize: 11, color: 'var(--danger)', margin: 0 }}>{err}</p>}
       {recent.length > 0 && (
         // E13: the checks kept -- the daily one for the champion, and each one
         // asked for -- newest first, so a creeping predictor shows as a trend.
-        <table aria-label={`Drift over time for ${m.name} v${m.version ?? 1}`} data-testid="drift-history"
+        <table aria-label={t('pg.modelsMaps.pm.driftHistoryAria', { name: m.name, v: m.version ?? 1 })} data-testid="drift-history"
           style={{ borderCollapse: 'collapse', maxWidth: 420, fontSize: 11 }}>
           <thead><tr>
-            <th style={{ textAlign: 'start', padding: '2px 8px' }}>Checked</th>
-            <th style={{ textAlign: 'start', padding: '2px 8px' }}>Overall</th>
-            <th style={{ textAlign: 'end', padding: '2px 8px' }}>Largest index</th>
-            <th style={{ textAlign: 'end', padding: '2px 8px' }}>Rows</th>
+            <th style={{ textAlign: 'start', padding: '2px 8px' }}>{t('pg.modelsMaps.pm.colChecked')}</th>
+            <th style={{ textAlign: 'start', padding: '2px 8px' }}>{t('pg.modelsMaps.pm.colOverall')}</th>
+            <th style={{ textAlign: 'end', padding: '2px 8px' }}>{t('pg.modelsMaps.pm.colLargest')}</th>
+            <th style={{ textAlign: 'end', padding: '2px 8px' }}>{t('pg.modelsMaps.pm.colRows')}</th>
           </tr></thead>
           <tbody>{recent.map(h => (
             <tr key={h.at}>
               <td style={{ padding: '2px 8px' }}>{new Date(h.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</td>
               <td style={{ padding: '2px 8px', color: h.overall === 'major' ? 'var(--danger)' : h.overall === 'moderate' ? '#b45309' : undefined }}>
-                {DRIFT_WORD[h.overall] ?? h.overall}</td>
+                {driftWord(t, h.overall)}</td>
               <td style={{ textAlign: 'end', padding: '2px 8px', fontVariantNumeric: 'tabular-nums' }}>{h.max_psi == null ? '—' : h.max_psi.toFixed(3)}</td>
               <td style={{ textAlign: 'end', padding: '2px 8px', fontVariantNumeric: 'tabular-nums' }}>{h.rows?.toLocaleString() ?? '—'}</td>
             </tr>
@@ -94,28 +101,32 @@ function DriftCheck({ m, datasetId }: { m: PredictionModelSummary; datasetId: nu
         </table>
       )}
       {m.status === 'champion' && (
-        <p style={{ fontSize: 10.5, color: 'var(--muted)', margin: 0 }}>The champion is checked every day; each check is kept.</p>
+        <p style={{ fontSize: 10.5, color: 'var(--muted)', margin: 0 }}>{t('pg.modelsMaps.pm.championDaily')}</p>
       )}
       {drift && (
         <>
           <div style={{ fontSize: 11.5 }}>
-            Overall: <b>{DRIFT_WORD[drift.overall]}</b> over {drift.rows.toLocaleString()} rows
-            {drift.trained_rows ? <> (trained on {drift.trained_rows.toLocaleString()})</> : null}.
-            {drift.overall === 'major' && ' The data has moved enough that the training score no longer describes it; retrain.'}
+            {rich(t, drift.trained_rows ? 'pg.modelsMaps.pm.overallTrained' : 'pg.modelsMaps.pm.overall', {
+              word: <b>{driftWord(t, drift.overall)}</b>,
+              rows: drift.rows.toLocaleString(), trained: drift.trained_rows?.toLocaleString() ?? '',
+            })}
+            {drift.overall === 'major' && <> {t('pg.modelsMaps.pm.driftMajor')}</>}
           </div>
-          <table aria-label={`Drift for ${m.name} v${m.version ?? 1}`} style={{ borderCollapse: 'collapse', maxWidth: 420 }}>
+          <table aria-label={t('pg.modelsMaps.pm.driftAria', { name: m.name, v: m.version ?? 1 })} style={{ borderCollapse: 'collapse', maxWidth: 420 }}>
             <thead><tr>
-              <th style={{ textAlign: 'start', padding: '2px 8px' }}>Predictor</th>
-              <th style={{ textAlign: 'end', padding: '2px 8px' }}>Stability index</th>
-              <th style={{ textAlign: 'start', padding: '2px 8px' }}>Reading</th>
+              <th style={{ textAlign: 'start', padding: '2px 8px' }}>{t('pg.modelsMaps.pm.colPredictor')}</th>
+              <th style={{ textAlign: 'end', padding: '2px 8px' }}>{t('pg.modelsMaps.pm.colStability')}</th>
+              <th style={{ textAlign: 'start', padding: '2px 8px' }}>{t('pg.modelsMaps.pm.colReading')}</th>
             </tr></thead>
             <tbody>
               {drift.features.map(f => (
                 <tr key={f.feature}>
-                  <td style={{ padding: '2px 8px' }}>{f.feature}</td>
+                  <td style={{ padding: '2px 8px' }}><bdi>{f.feature}</bdi></td>
                   <td style={{ textAlign: 'end', padding: '2px 8px', fontVariantNumeric: 'tabular-nums' }}>{f.psi == null ? '—' : f.psi.toFixed(3)}</td>
                   <td style={{ padding: '2px 8px', color: f.level === 'major' ? 'var(--danger)' : f.level === 'moderate' ? '#b45309' : undefined }}>
-                    {DRIFT_WORD[f.level]}{f.new_values?.length ? ` (new: ${f.new_values.join(', ')})` : ''}
+                    {f.new_values?.length
+                      ? t('pg.modelsMaps.pm.withNew', { word: driftWord(t, f.level), list: f.new_values.join(', ') })
+                      : driftWord(t, f.level)}
                   </td>
                 </tr>
               ))}
@@ -128,11 +139,10 @@ function DriftCheck({ m, datasetId }: { m: PredictionModelSummary; datasetId: nu
 }
 
 export function ModelCardView({ m, dataset, datasetId }: { m: PredictionModelSummary; dataset?: DatasetSummaryForCard; datasetId?: number }) {
+  const t = useT()
   const c = m.card
   if (!c) {
-    return <p style={{ fontSize: 11, color: 'var(--muted)', margin: 0 }}>
-      This model was saved before model cards were kept, so how it was chosen was not recorded.
-    </p>
+    return <p style={{ fontSize: 11, color: 'var(--muted)', margin: 0 }}>{t('pg.modelsMaps.pm.noCard')}</p>
   }
   const then = c.dataset
   const changed = !!(then && dataset && (
@@ -140,38 +150,51 @@ export function ModelCardView({ m, dataset, datasetId }: { m: PredictionModelSum
     || (then.row_count != null && dataset.row_count != null && then.row_count !== dataset.row_count)
     || (!!then.last_refreshed_at && !!dataset.last_refreshed_at
         && new Date(then.last_refreshed_at).getTime() !== new Date(dataset.last_refreshed_at).getTime())))
-  const split = c.split?.kind === 'partition' ? `the Training rows of ${c.split.column ?? c.partition}`
-    : c.split ? `a random ${Math.round((1 - (c.split.test_share ?? 0.25)) * 100)}% of rows` : '—'
+  const split = c.split?.kind === 'partition' ? t('pg.modelsMaps.pm.splitPartition', { col: c.split.column ?? c.partition ?? '' })
+    : c.split ? t('pg.modelsMaps.pm.splitRandom', { pct: Math.round((1 - (c.split.test_share ?? 0.25)) * 100) }) : '—'
   const skipped = (c.predictors_skipped ?? []).map(s => typeof s === 'string' ? s : `${s.column}${s.reason ? ` (${s.reason})` : ''}`)
   return (
     <div data-testid="model-card" style={{ fontSize: 11.5, display: 'grid', gap: 6 }}>
       {changed && (
         <p role="status" style={{ margin: 0, color: '#b45309' }}>
-          The dataset has changed since this model was trained ({then?.row_count ?? '?'} rows then,
-          {' '}{dataset?.row_count ?? '?'} now). Its score describes the data it saw; retrain to grade it on today's.
+          {t('pg.modelsMaps.pm.cardChanged', { then: then?.row_count ?? '?', now: dataset?.row_count ?? '?' })}
         </p>
       )}
-      <div>Trained by <b>{c.trained_by ?? 'unknown'}</b> on {c.trained_at?.replace('T', ' ') ?? '—'}, over {c.row_scope ?? 'every row'}.</div>
+      <div>{rich(t, 'pg.modelsMaps.pm.trainedBy', {
+        who: <b><bdi>{c.trained_by ?? t('pg.modelsMaps.pm.unknown')}</bdi></b>,
+        when: <bdi dir="ltr">{c.trained_at?.replace('T', ' ') ?? '—'}</bdi>,
+        // The server's default scope is a phrase; any other scope is the filter as written.
+        scope: c.row_scope && c.row_scope !== 'every row' ? <bdi>{c.row_scope}</bdi> : t('pg.modelsMaps.pm.everyRow'),
+      })}</div>
       <div>
-        Chosen on {split}: <b>{c.model_family}</b> scored {c.score_name} {fmt(c.score)} on {c.n_test ?? '?'} held-out rows,
-        against {fmt(c.baseline_score)} for a model that always guesses the usual answer
-        {c.beats_baseline === false ? <b> — it does not beat that guess.</b> : '.'} It was then refit on all {c.n_fitted ?? '?'} usable rows.
+        {rich(t, c.beats_baseline === false ? 'pg.modelsMaps.pm.chosenNoBeat' : 'pg.modelsMaps.pm.chosen', {
+          split,
+          family: <b><bdi>{familyLabel(t, c.model_family)}</bdi></b>,
+          metric: <bdi>{c.score_name}</bdi>,
+          score: <bdi dir="ltr">{fmt(c.score)}</bdi>,
+          n: c.n_test ?? '?',
+          baseline: <bdi dir="ltr">{fmt(c.baseline_score)}</bdi>,
+          warn: <b>{t('pg.modelsMaps.pm.noBeatGuess')}</b>,
+          fitted: c.n_fitted ?? '?',
+        })}
       </div>
       {(c.candidates?.length ?? 0) > 0 && (
-        <table aria-label={`Candidates compared for ${m.name} v${m.version ?? 1}`} style={{ borderCollapse: 'collapse', maxWidth: 360 }}>
-          <thead><tr><th style={{ textAlign: 'start', padding: '2px 8px' }}>Candidate</th>
-            <th style={{ textAlign: 'end', padding: '2px 8px' }}>{c.score_name || 'score'}</th></tr></thead>
+        <table aria-label={t('pg.modelsMaps.pm.candidatesAria', { name: m.name, v: m.version ?? 1 })} style={{ borderCollapse: 'collapse', maxWidth: 360 }}>
+          <thead><tr><th style={{ textAlign: 'start', padding: '2px 8px' }}>{t('pg.modelsMaps.pm.colCandidate')}</th>
+            <th style={{ textAlign: 'end', padding: '2px 8px' }}>{c.score_name || t('pg.modelsMaps.pm.score')}</th></tr></thead>
           <tbody>
             {c.candidates!.map(k => (
-              <tr key={k.model}><td style={{ padding: '2px 8px' }}>{k.model}{k.model === c.model_family ? ' ★' : ''}</td>
+              <tr key={k.model}><td style={{ padding: '2px 8px' }}><bdi>{familyLabel(t, k.model)}</bdi>{k.model === c.model_family ? ' ★' : ''}</td>
                 <td style={{ textAlign: 'end', padding: '2px 8px', fontVariantNumeric: 'tabular-nums' }}>{fmt(k.score)}</td></tr>
             ))}
           </tbody>
         </table>
       )}
-      <div>Predictors: {(c.predictors_used ?? m.features).join(', ') || '—'}
-        {skipped.length > 0 && <> · left out: {skipped.join(', ')}</>}</div>
-      {(c.caveats?.length ?? 0) > 0 && <ul style={{ margin: 0, paddingInlineStart: 18 }}>{c.caveats!.map(x => <li key={x}>{x}</li>)}</ul>}
+      <div>{rich(t, skipped.length > 0 ? 'pg.modelsMaps.pm.predictorsSkipped' : 'pg.modelsMaps.pm.predictors', {
+        list: <bdi>{(c.predictors_used ?? m.features).join(', ') || '—'}</bdi>,
+        skipped: <bdi>{skipped.join(', ')}</bdi>,
+      })}</div>
+      {(c.caveats?.length ?? 0) > 0 && <ul style={{ margin: 0, paddingInlineStart: 18 }}><SaidItems texts={c.caveats} i18n={saidOf(c)} /></ul>}
       {datasetId != null && <DriftCheck m={m} datasetId={datasetId} />}
     </div>
   )
@@ -188,6 +211,7 @@ export default function PredictionModelsPanel({ datasetId, columns, mode, datase
   dataset?: DatasetSummaryForCard
 }) {
   const t = useT()
+  const confirm = useConfirm()
   const [models, setModels] = useState<PredictionModelSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [target, setTarget] = useState('')
@@ -217,10 +241,10 @@ export default function PredictionModelsPanel({ datasetId, columns, mode, datase
     try {
       const j = await predictionModelsApi.scoreJob(datasetId, m.id)
       setScoreJobs(s => ({ ...s, [m.id]: { ...(j as unknown as Job), state: j.state as Job['state'] } }))
-      toast.success(`Predicting with ${m.name} v${m.version ?? 1}: the result will be a new dataset`)
+      toast.success(t('pg.modelsMaps.pm.queued', { name: m.name, v: m.version ?? 1 }))
     } catch (e) {
       const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      toast.error(detail || 'Could not start scoring')
+      toast.error(detail || t('pg.modelsMaps.pm.queueFailed'))
     }
   }
 
@@ -249,19 +273,35 @@ export default function PredictionModelsPanel({ datasetId, columns, mode, datase
     setTraining(true)
     try {
       const made = await predictionModelsApi.train(datasetId, {
-        name: name.trim() || `${target} model`, target,
+        name: name.trim() || t('pg.modelsMaps.pm.defaultName', { target }), target,
         ...(partition ? { partition } : {}),
       })
-      toast.success(`Saved "${made.name}"`)
+      toast.success(t('pg.modelsMaps.pm.saved', { name: made.name }))
       setName('')
       await load()
     } catch (e) {
       const detail = (e as { response?: { data?: { detail?: string } } })
         ?.response?.data?.detail
-      toast.error(detail || 'Could not train a model on this data')
+      toast.error(detail || t('pg.modelsMaps.pm.trainFailed'))
     } finally {
       setTraining(false)
     }
+  }
+
+  /** 9-polish: train this model again on today's rows -- the same name,
+   *  target and predictors, which the server keeps as the name's next
+   *  version (a candidate beside the champion). */
+  const [retraining, setRetraining] = useState<number | null>(null)
+  const retrain = async (m: PredictionModelSummary) => {
+    setRetraining(m.id)
+    try {
+      const made = await predictionModelsApi.train(datasetId, { name: m.name, target: m.target, predictors: m.features })
+      toast.success(t('pol.retrained', { name: made.name, v: String(made.version ?? '') }))
+      await load()
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      toast.error(detail || t('pg.modelsMaps.pm.trainFailed'))
+    } finally { setRetraining(null) }
   }
 
   const score = async (m: PredictionModelSummary) => {
@@ -274,7 +314,7 @@ export default function PredictionModelsPanel({ datasetId, columns, mode, datase
     } catch (e) {
       const detail = (e as { response?: { data?: { detail?: string } } })
         ?.response?.data?.detail
-      setScoreError(detail || 'Scoring failed')
+      setScoreError(detail || t('pg.modelsMaps.pm.scoreFailed'))
     } finally {
       setScoringId(null)
     }
@@ -283,11 +323,11 @@ export default function PredictionModelsPanel({ datasetId, columns, mode, datase
   const promote = async (m: PredictionModelSummary) => {
     try {
       await predictionModelsApi.promote(datasetId, m.id)
-      toast.success(`v${m.version ?? 1} of "${m.name}" is now the champion`)
+      toast.success(t('pg.modelsMaps.pm.promoted', { name: m.name, v: m.version ?? 1 }))
       await load()
     } catch (e) {
       const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      toast.error(detail || 'Could not make that version the champion')
+      toast.error(detail || t('pg.modelsMaps.pm.promoteFailed'))
     }
   }
 
@@ -297,166 +337,190 @@ export default function PredictionModelsPanel({ datasetId, columns, mode, datase
     || (b.version ?? 1) - (a.version ?? 1))
 
   const remove = async (m: PredictionModelSummary) => {
+    // QA5b S1: this deleted on one click, with no question at all.
+    if (!await confirm({ title: t('bc.dialogs.deleteNamed', { name: m.name }), body: t('bc.dialogs.cannotUndo') })) return
     try {
       await predictionModelsApi.remove(datasetId, m.id)
       await load()
     } catch {
-      toast.error('Could not delete that model')
+      toast.error(t('pg.modelsMaps.pm.deleteFailed'))
     }
   }
 
-  return (
-    <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div>
-        <h3 style={{ fontSize: 13, margin: '0 0 4px' }}>Saved models</h3>
-        <p style={{ fontSize: 11, color: 'var(--muted)', margin: 0, maxWidth: 640 }}>
-          A saved model can score rows whose outcome is not known yet. Every other
-          analysis here refits and throws the model away, which answers what
-          <em> could</em> be predicted rather than what a new row is likely to do.
-        </p>
-      </div>
+  /** "r2" as people write it. */
+  const scoreName = (n?: string | null) => (!n ? t('pg.modelsMaps.pm.score') : /^r2$/i.test(n) ? 'R²' : n)
+  /** The fit as a 0..1 bar when the score is one (R², accuracy, AUC). */
+  const fitShare = (m: PredictionModelSummary) =>
+    m.score != null && m.score >= 0 && m.score <= 1 ? m.score : null
+  const fitWords = (m: PredictionModelSummary) => {
+    const share = fitShare(m)
+    if (share == null) return null
+    const pct = Math.round(share * 100)
+    if (/r2|r²/i.test(m.score_name ?? '')) {
+      return t('mdl3.explains', { pct, target: m.target })
+        + (m.card?.beats_baseline === false ? ` ${t('mdl3.noBeatAvg')}` : '')
+    }
+    return m.card?.beats_baseline === false ? t('mdl3.noBeat') : null
+  }
 
-      {mode === 'directquery' ? (
-        // Said up front, not discovered after filling the form in. Existing
-        // models are still listed below: a dataset switched to DirectQuery
-        // later may carry some, and hiding them loses the work.
-        <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0,
-          border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px' }}>
-          Training needs to read every row, so it is available on
-          <strong> import-mode</strong> datasets only. This one queries its
-          source live.
-        </p>
-      ) : (
-      <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-        <div>
-          <label htmlFor="pm-target" style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)' }}>
-            Predict
-          </label>
-          <select id="pm-target" value={target} onChange={e => setTarget(e.target.value)}
-            style={{ fontSize: 12, padding: '4px 6px' }}>
-            <option value="">Choose a column…</option>
+  return (
+    <div className="dl-models">
+      {mode === 'directquery' && (
+        // HR re-test 2026-10-01: training used to be refused here while every
+        // model WIDGET fitted on the same live data. It now reads the rows
+        // live, secured as the reader, up to the analysis cap.
+        <p data-testid="models-dq-note" className="dl-models__note">{t('models.dqTrainNote')}</p>
+      )}
+      <section className="dl-models__card dl-models__train">
+        <div className="dl-models__train-row">
+          <strong>{t('mdl3.train')}</strong>
+          <label htmlFor="pm-target">{t('mdl3.predict')}</label>
+          <select id="pm-target" value={target} onChange={e => setTarget(e.target.value)}>
+            <option value="">{t('mdl3.chooseColumn')}</option>
             {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
           </select>
-        </div>
-        <div>
-          <label htmlFor="pm-name" style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)' }}>
-            Name
-          </label>
+          <span>{t('mdl3.fromAll')}</span>
+          {partitionCols.length > 0 && (
+            <>
+              <label htmlFor="pm-partition">{t('mdl3.trainOn')}</label>
+              <select id="pm-partition" value={partition} onChange={e => setPartition(e.target.value)}>
+                <option value="">{t('mdl3.allRows')}</option>
+                {partitionCols.map(c => <option key={c} value={c}>{t('mdl3.trainingRowsOf', { col: c })}</option>)}
+              </select>
+            </>
+          )}
+          <label htmlFor="pm-name" className="dl-sr-only">{t('mdl3.name')}</label>
           <input id="pm-name" value={name} onChange={e => setName(e.target.value)}
-            placeholder={target ? `${target} model` : 'Optional'}
-            style={{ fontSize: 12, padding: '4px 6px' }} />
+            placeholder={target ? t('pg.modelsMaps.pm.defaultName', { target }) : t('mdl3.nameOptional')} />
+          <button onClick={train} disabled={!target || training} title={!target ? t('pg.modelsMaps.pm.chooseTargetFirst') : undefined}
+            className="btn btn-primary btn-sm">
+            {training ? t('mdl3.training') : t('mdl3.trainSave')}
+          </button>
         </div>
-        {partitionCols.length > 0 && (
-          <div>
-            <label htmlFor="pm-partition" style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)' }}>
-              Train on
-            </label>
-            <select id="pm-partition" value={partition} onChange={e => setPartition(e.target.value)}
-              style={{ fontSize: 12, padding: '4px 6px' }}>
-              <option value="">All rows</option>
-              {partitionCols.map(c => <option key={c} value={c}>Training rows of {c}</option>)}
-            </select>
-          </div>
-        )}
-        <button onClick={train} disabled={!target || training} title={!target ? 'Choose what to predict first' : undefined} className="btn btn-sm"
-          style={{ fontSize: 11, padding: '5px 10px' }}>
-          {training ? 'Training…' : 'Train and save'}
-        </button>
-      </div>
-      )}
+        <p>{t('mdl3.trainNote')}</p>
+      </section>
 
       {loading ? (
-        <p style={{ fontSize: 12, color: 'var(--muted)' }}>Loading…</p>
+        <p className="dl-models__note">{t('pg.modelsMaps.loading')}</p>
       ) : models.length === 0 ? (
-        <EmptyState icon={Brain}
-          title={mode === 'directquery' ? t('models.emptyDq') : t('models.empty')}
-          description={mode === 'directquery' ? undefined
-            : t('models.emptyBody')} />
+        <section className="dl-models__card">
+          <EmptyState icon={Brain}
+            title={mode === 'directquery' ? t('models.emptyDq') : t('models.empty')}
+            description={mode === 'directquery' ? undefined : t('models.emptyBody')} />
+        </section>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {ordered.map(m => (
-            <div key={m.id} data-testid={`model-${m.id}`} style={{
-              border: '1px solid var(--border)', borderRadius: 8, padding: 10,
-              display: 'flex', flexDirection: 'column', gap: 6,
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <strong style={{ fontSize: 12 }}>{m.name}</strong>
-                <span style={{ fontSize: 11, color: 'var(--muted)' }}>v{m.version ?? 1}</span>
-                {m.status === 'champion'
-                  ? <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--accent)', border: '1px solid var(--accent)',
-                      borderRadius: 999, padding: '0 6px' }}>Champion</span>
-                  : <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>candidate</span>}
-                <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-                  predicts <code>{m.target}</code> from {m.features.join(', ')}
-                </span>
-                <span style={{ marginInlineStart: 'auto', display: 'flex', gap: 6 }}>
-                  {m.status !== 'champion' && (
-                    <button onClick={() => void promote(m)} className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '3px 8px' }}
-                      title="Dashboards that follow the champion score with this version from now on">
-                      Make champion
-                    </button>
-                  )}
-                  <button onClick={() => setCardFor(cardFor === m.id ? null : m.id)} aria-expanded={cardFor === m.id}
-                    className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '3px 8px' }}>
-                    Model card
+        ordered.map(m => {
+          const c = m.card
+          const share = fitShare(m)
+          const words = fitWords(m)
+          const then = c?.dataset
+          const changed = !!(then && dataset && then.row_count != null && dataset.row_count != null && then.row_count !== dataset.row_count)
+          return (
+            <section key={m.id} data-testid={`model-${m.id}`} className="dl-models__card dl-models__model">
+              <div className="dl-models__main">
+                <div className="dl-models__title">
+                  <h3 dir="auto">{m.name}</h3>
+                  <span className="dl-models__pill">v{m.version ?? 1}</span>
+                  {m.status === 'champion'
+                    ? <span className="dl-models__pill dl-models__pill--champ">{t('mdl3.champion')}</span>
+                    : <span className="dl-models__pill">{t('mdl3.candidate')}</span>}
+                </div>
+                <p className="dl-models__predicts">{t('mdl3.predicts', { target: m.target, from: m.features.join(', ') })}</p>
+                <div className="dl-models__fit">
+                  <div className="dl-models__fit-head">
+                    <strong>{t('mdl3.fit')}</strong>
+                    <span>{m.score != null ? <>{scoreName(m.score_name)} {m.score}</> : '—'}</span>
+                  </div>
+                  {share != null && <div className="dl-models__bar"><span style={{ inlineSize: `${share * 100}%` }} /></div>}
+                  {words && <p>{words}</p>}
+                </div>
+                {changed && (
+                  <p role="status" className="dl-models__warn">
+                    <strong>{t('mdl3.changed')}</strong>{' '}
+                    {t('mdl3.changedBody', { now: dataset?.row_count?.toLocaleString() ?? '?', then: then?.row_count?.toLocaleString() ?? '?' })}
+                  </p>
+                )}
+                {scoreJobs[m.id] && (
+                  <div data-testid={`score-job-${m.id}`} role="status" className="dl-models__note">
+                    {isJobActive(scoreJobs[m.id])
+                      ? t('pg.modelsMaps.pm.jobRunning', { stage: String(scoreJobs[m.id].progress?.stage ?? scoreJobs[m.id].state) })
+                      : scoreJobs[m.id].state === 'succeeded' && scoreJobs[m.id].result?.dataset_id ? rich(t, 'pg.modelsMaps.pm.jobDone', {
+                          n: Number((scoreJobs[m.id].result as { rows?: number } | null)?.rows ?? 0).toLocaleString(),
+                          link: <Link to={`/datasets/${scoreJobs[m.id].result!.dataset_id}`}>{t('pg.modelsMaps.pm.openScored')}</Link>,
+                        })
+                      : <span style={{ color: 'var(--danger)' }}>{t('pg.modelsMaps.pm.jobFailed', { error: String(scoreJobs[m.id].error ?? scoreJobs[m.id].state) })}</span>}
+                  </div>
+                )}
+                <div className="dl-models__actions">
+                  <button onClick={() => void score(m)} disabled={scoringId === m.id} className="btn btn-primary btn-sm">
+                    {scoringId === m.id ? t('mdl3.scoring') : t('mdl3.score')}
                   </button>
                   {mode !== 'directquery' && (
                     <button onClick={() => void queueScore(m)} disabled={!!scoreJobs[m.id] && isJobActive(scoreJobs[m.id])}
-                      className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '3px 8px' }}
-                      title="Predict every row you can see and keep the result as a new dataset">
-                      Save predictions as a dataset
+                      className="btn btn-sm" title={t('pg.modelsMaps.pm.saveAllTitle')}>
+                      {t('mdl3.savePredictions')}
                     </button>
                   )}
-                  <button onClick={() => void score(m)} disabled={scoringId === m.id}
-                    className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '3px 8px' }}>
-                    {scoringId === m.id ? 'Scoring…' : 'Score this dataset'}
+                  <button onClick={() => void retrain(m)} disabled={retraining !== null} className="btn btn-sm"
+                    title={t('pol.retrainTitle')}>
+                    {retraining === m.id ? t('pol.retraining') : t('pol.retrain')}
                   </button>
-                  <button onClick={() => void remove(m)}
-                    aria-label={`Delete ${m.name}`} title={`Delete ${m.name}`}
-                    className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '3px 8px' }}>
-                    Delete
+                  {m.status !== 'champion' && (
+                    <button onClick={() => void promote(m)} className="btn btn-sm"
+                      title={t('pg.modelsMaps.pm.championTitle')}>
+                      {t('mdl3.makeChampion')}
+                    </button>
+                  )}
+                  <button onClick={() => setCardFor(cardFor === m.id ? null : m.id)} aria-expanded={cardFor === m.id} className="btn btn-sm">
+                    {t('mdl3.card')}
                   </button>
-                </span>
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                {m.model_family}
-                {m.score != null && <> · {m.score_name || 'score'} {m.score}</>}
-              </div>
-              {scoreJobs[m.id] && (
-                <div data-testid={`score-job-${m.id}`} role="status" style={{ fontSize: 11.5 }}>
-                  {isJobActive(scoreJobs[m.id]) ? <>Scoring… ({String(scoreJobs[m.id].progress?.stage ?? scoreJobs[m.id].state)})</>
-                    : scoreJobs[m.id].state === 'succeeded' && scoreJobs[m.id].result?.dataset_id ? (
-                      <>Scored {Number((scoreJobs[m.id].result as { rows?: number } | null)?.rows ?? 0).toLocaleString()} rows:{' '}
-                        <Link to={`/datasets/${scoreJobs[m.id].result!.dataset_id}`}>open the scored dataset</Link></>
-                    ) : <span style={{ color: 'var(--danger)' }}>Scoring failed: {scoreJobs[m.id].error ?? scoreJobs[m.id].state}</span>}
+                  <button onClick={() => void remove(m)} aria-label={t('pg.modelsMaps.pm.deleteNamed', { name: m.name })} title={t('pg.modelsMaps.pm.deleteNamed', { name: m.name })}
+                    className="dl-ov__linkish dl-models__delete">
+                    {t('mdl3.delete')}
+                  </button>
                 </div>
-              )}
-              {cardFor === m.id && <ModelCardView m={m} dataset={dataset} datasetId={datasetId} />}
-            </div>
-          ))}
-        </div>
+                {cardFor === m.id && <ModelCardView m={m} dataset={dataset} datasetId={datasetId} />}
+              </div>
+              <aside className="dl-models__facts">
+                <dl>
+                  <div><dt>{t('mdl3.approach')}</dt><dd>{familyLabel(t, m.model_family)}</dd></div>
+                  {/* QAF 14: a fact the model has no record of is left out, not
+                      shown as a dash (a model trained before cards has none). */}
+                  {c?.baseline_score != null && <div><dt>{t('mdl3.baseline')}</dt><dd>{`${scoreName(m.score_name)} ${fmt(c.baseline_score)}`}</dd></div>}
+                  {c?.n_test != null && <div><dt>{t('mdl3.testedOn')}</dt><dd>{t('mdl3.heldOut', { n: c.n_test.toLocaleString() })}</dd></div>}
+                  {c?.n_fitted != null && <div><dt>{t('mdl3.trainedOn')}</dt><dd>{t('mdl3.rows', { n: c.n_fitted.toLocaleString() })}</dd></div>}
+                  <div><dt>{t('mdl3.drift')}</dt><dd>{m.last_drift ? driftWord(t, m.last_drift.overall) : t('mdl3.notChecked')}</dd></div>
+                  {(c?.trained_by || c?.trained_at) && <div><dt>{t('mdl3.trainedBy')}</dt><dd>{c?.trained_by ?? ''}{c?.trained_by && c?.trained_at ? ' · ' : ''}{c?.trained_at ? formatDate(c.trained_at, 'date') : ''}</dd></div>}
+                </dl>
+                {(c?.candidates?.length ?? 0) > 1 && (
+                  <p>{t('mdl3.alsoTried', { list: c!.candidates!.filter(k => k.model !== c!.model_family)
+                    .map(k => `${familyLabel(t, k.model)} (${scoreName(c!.score_name)} ${fmt(k.score)})`).join(', ') })}</p>
+                )}
+              </aside>
+            </section>
+          )
+        })
       )}
 
-      {scoreError && (
-        <p style={{ fontSize: 11, color: 'var(--danger)', margin: 0 }}>{scoreError}</p>
-      )}
+      {scoreError && <p className="dl-models__error">{scoreError}</p>}
 
       {result && (
-        <div style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 10 }}>
-          <div style={{ fontSize: 12 }}>
-            Scored <strong>{result.n_scored} rows</strong> for <code>{result.target}</code>
-            {result.model && <> with {result.model.name} v{result.model.version}</>}.
+        <section className="dl-models__card">
+          <div style={{ fontSize: 13 }}>
+            {rich(t, result.model ? 'pg.modelsMaps.pm.scoredForWith' : 'pg.modelsMaps.pm.scoredFor', {
+              rows: <strong>{t('pg.modelsMaps.rows', { n: result.n_scored })}</strong>,
+              target: <code>{result.target}</code>,
+              model: result.model ? `${result.model.name} v${result.model.version}` : '',
+            })}
           </div>
           {Object.keys(result.unseen_values).length > 0 && (
-            <p style={{ fontSize: 11, color: '#f59e0b', margin: '6px 0 0' }}>
-              The model never saw some of these values, so it has no opinion about
-              them and treated them as none of the categories it knows:{' '}
-              {Object.entries(result.unseen_values)
+            <p style={{ fontSize: 12, color: 'var(--mc-warning, #a46b16)', margin: '6px 0 0' }}>
+              {t('pg.modelsMaps.pm.unseen', { list: Object.entries(result.unseen_values)
                 .map(([col, vals]) => `${col}: ${vals.join(', ')}`)
-                .join(' · ')}
+                .join(' · ') })}
             </p>
           )}
-        </div>
+        </section>
       )}
     </div>
   )

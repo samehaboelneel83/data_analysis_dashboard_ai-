@@ -1,15 +1,17 @@
+import { useT } from '../../../i18n'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell, ResponsiveContainer, LabelList } from 'recharts'
 import { fmtStr, TT } from '../chartUtils'
 import type { ChartRendererProps } from './types'
-import { xAxisProps, yAxisProps, gridProps, labelListProps, chartMargin } from './axisOptions'
+import { xAxisProps, yAxisProps, gridProps, labelListProps, chartMargin, valueTick } from './axisOptions'
 
-interface Bar_ { name: string; start: number; delta: number; end: number }
+interface Bar_ { name: string; start: number; delta: number; end: number; total?: boolean }
 
 export default function WaterfallChartRenderer({ data, cfg, rtl, measureFmt, ruleStyles, plotW, plotH }: ChartRendererProps) {
+  const t9 = useT()
   const bars: Bar_[] = data?.bars ?? []
 
   if (bars.length === 0) {
-    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>Configure widget to see data</div>
+    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>{t9('cr.configure')}</div>
   }
 
   const chartData = bars.map(b => ({
@@ -17,7 +19,7 @@ export default function WaterfallChartRenderer({ data, cfg, rtl, measureFmt, rul
     base: Math.min(b.start, b.end),
     delta: Math.abs(b.end - b.start),
     isIncrease: b.end >= b.start,
-    start: b.start, end: b.end,
+    start: b.start, end: b.end, total: !!b.total,
   }))
 
   const grid = gridProps(cfg)
@@ -41,14 +43,14 @@ export default function WaterfallChartRenderer({ data, cfg, rtl, measureFmt, rul
         <YAxis {...yAxisProps(cfg, rtl, measureFmt, bars.flatMap(b => [b.start, b.end]), undefined, { height: plotH })}
           tick={{ fontSize: cfg.axis_tick_size ?? 11, ...(cfg.axis_tick_color ? { fill: cfg.axis_tick_color } : {}) }}
           axisLine={cfg.axis_line ?? true} tickLine={cfg.tick_line ?? true} allowDecimals
-          tickFormatter={v => fmtStr(v, measureFmt)} />
+          tickFormatter={valueTick(cfg, measureFmt)} />
         <Tooltip contentStyle={TT} formatter={(v: any, name: string, props: any) =>
           name === 'delta' ? [`${fmtStr(props.payload.start, measureFmt)} → ${fmtStr(props.payload.end, measureFmt)}`, 'Change'] : [v, name]
         } />
         <Bar dataKey="base" stackId="wf" fill="transparent" isAnimationActive={false} />
         <Bar dataKey="delta" stackId="wf" isAnimationActive={false} radius={2}>
           {chartData.map((d, i) => (
-            <Cell key={i} fill={ruleStyles?.rows?.[i]?.fill ?? (d.isIncrease ? '#34d399' : '#f87171')} />
+            <Cell key={i} fill={ruleStyles?.rows?.[i]?.fill ?? (d.total ? 'color-mix(in srgb, var(--muted) 60%, transparent)' : d.isIncrease ? '#34d399' : '#f87171')} />
           ))}
           {labels && <LabelList {...labels} />}
         </Bar>

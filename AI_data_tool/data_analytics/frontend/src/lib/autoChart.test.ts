@@ -17,6 +17,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { chartForFields, type AutoField } from './autoChart'
+import { translate, type MessageKey, type TranslateFn } from '../i18n'
 
 const cat = (name: string): AutoField => ({ name, dtype: 'categorical', numeric: false })
 const num = (name: string): AutoField => ({ name, dtype: 'numeric', numeric: true })
@@ -189,5 +190,56 @@ describe('a geography column', () => {
     const out = chartForFields([geo('governorate'),
       { name: 'ordered_at', dtype: 'datetime', numeric: false }])
     expect(out?.suggestion.widget_type).not.toBe('map_choropleth')
+  })
+})
+
+describe('the title is in the reader\'s language (QA5b S3)', () => {
+  const tAr = ((key: string, vars?: Record<string, string | number>) => translate('ar', key as MessageKey, vars)) as TranslateFn
+  const tEn = ((key: string, vars?: Record<string, string | number>) => translate('en', key as MessageKey, vars)) as TranslateFn
+  const product: AutoField = { name: 'product', dtype: 'categorical', numeric: false }
+  const region: AutoField = { name: 'region', dtype: 'categorical', numeric: false }
+  const revenue: AutoField = { name: 'revenue', dtype: 'numeric', numeric: true }
+  const units: AutoField = { name: 'units', dtype: 'numeric', numeric: true }
+  const date: AutoField = { name: 'date', dtype: 'datetime', numeric: false }
+  const sets: AutoField[][] = [[product], [date], [revenue], [region, revenue], [region, revenue, units],
+    [date, region, revenue], [region, product, revenue], [region, product], [revenue, units]]
+
+  it('"Count by product" is Arabic, with the field name isolated', () => {
+    expect(chartForFields([product], tAr)!.suggestion.title).toBe('العدد حسب ⁨product⁩')
+  })
+
+  it('every rule has an Arabic title and the English through the catalog is unchanged', () => {
+    for (const s of sets) {
+      expect(chartForFields(s, tEn)!.suggestion.title).toBe(chartForFields(s)!.suggestion.title)
+      expect(chartForFields(s, tAr)!.suggestion.title).not.toMatch(/\b(by|and|against|Count|Trend|Distribution)\b/)
+    }
+  })
+})
+
+describe('Fields plan F3/F4 — sensible summaries, and lists for links', () => {
+  it('a measure starts on its default summary, never a blind sum', () => {
+    const price: AutoField = { ...num('price_egp'), summary: 'avg' }
+    const r = chartForFields([cat('make'), price])!
+    expect(r.suggestion.config.aggregation).toBe('avg')
+    // ...and the title says so: "price_egp by make" read as a total.
+    expect(r.suggestion.title).toBe('Average price_egp by make')
+  })
+
+  it('without a summary it still sums', () => {
+    expect(chartForFields([cat('region'), num('revenue')])!.suggestion.config.aggregation).toBe('sum')
+  })
+
+  it('a link becomes a list, not thousands of bars of height 1', () => {
+    const link: AutoField = { ...cat('item_url'), listOnly: true }
+    const r = chartForFields([link])!
+    expect(r.suggestion.widget_type).toBe('table')
+    expect(r.suggestion.config.columns).toEqual(['item_url'])
+  })
+
+  it('a link with other fields lists them, the link last', () => {
+    const link: AutoField = { ...cat('item_url'), listOnly: true }
+    const r = chartForFields([link, cat('make'), num('price_egp')])!
+    expect(r.suggestion.widget_type).toBe('table')
+    expect((r.suggestion.config.columns as string[]).at(-1)).toBe('item_url')
   })
 })

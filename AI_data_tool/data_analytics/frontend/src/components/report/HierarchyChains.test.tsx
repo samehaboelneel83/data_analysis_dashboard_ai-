@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import HierarchyChains, { chainsOf, moved } from './HierarchyChains'
 import type { HierarchyNode } from '../../types/report'
+import { DirectionProvider } from '../../contexts/DirectionContext'
 
 const node = (id: number, parent_id: number | null, name: string, node_type: string, column_name: string | null, format: string | null = null, position = 0) =>
   ({ id, dataset_id: 1, parent_id, name, node_type, column_name, format, position }) as HierarchyNode
@@ -114,5 +115,19 @@ describe('the hierarchy tree', () => {
     setup({ onPick })
     fireEvent.click(screen.getByRole('button', { name: 'Month' }))
     expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ id: 5, format: 'month' }))
+  })
+})
+
+describe('the hierarchy tree in Arabic (QA5b S5)', () => {
+  it('says its screen-reader labels and tooltips in Arabic, with the names isolated', () => {
+    localStorage.setItem('datalytics.language', 'ar')
+    render(<DirectionProvider><HierarchyChains nodes={nodes} isChecked={() => false} onToggle={vi.fn()} onReorder={vi.fn()} onPick={vi.fn()} canEdit /></DirectionProvider>)
+    expect(screen.getByRole('list', { name: 'مستويات «⁨Geography⁩»' })).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: 'تحديد «⁨Country⁩» من «⁨Geography⁩»' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'نقل «⁨Country⁩» لأعلى' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'نقل «⁨Country⁩» لأسفل' })).toBeInTheDocument()
+    expect(screen.getByTitle('استخدام «⁨Country⁩» في العنصر المحدد')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Move|Select/ })).toBeNull()
+    localStorage.removeItem('datalytics.language')
   })
 })

@@ -1,8 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import toast from 'react-hot-toast'
 import ApiKeys from './ApiKeys'
 import { ConfirmProvider } from '../../components/ui/ConfirmDialog'
+import { DirectionProvider } from '../../contexts/DirectionContext'
 
 vi.mock('react-hot-toast', () => ({
   default: { success: vi.fn(), error: vi.fn() },
@@ -99,5 +100,33 @@ describe('ApiKeys', () => {
     await waitFor(() =>
       expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
     expect(apiKeysApi.revoke).not.toHaveBeenCalled()
+  })
+})
+
+describe('ApiKeys in Arabic (8-i18n)', () => {
+  afterEach(() => localStorage.removeItem('datalytics.language'))
+  const renderAr = () => {
+    localStorage.setItem('datalytics.language', 'ar')
+    return render(<DirectionProvider><ConfirmProvider><ApiKeys /></ConfirmProvider></DirectionProvider>)
+  }
+
+  it('reads in Arabic, with the key name and prefix isolated', async () => {
+    renderAr()
+    expect(await screen.findByText('existing')).toHaveProperty('tagName', 'BDI')
+    expect(screen.getByRole('button', { name: 'إنشاء مفتاح' })).toBeInTheDocument()
+    expect(screen.getByLabelText('اسم المفتاح')).toBeInTheDocument()
+    expect(screen.getByText('dk_abc123…')).toHaveAttribute('dir', 'ltr')
+    expect(screen.getByText('DATALYTICS_TOKEN')).toHaveAttribute('dir', 'ltr')
+    expect(screen.queryByText(/Durable bearer tokens/)).toBeNull()
+  })
+
+  it('asks before revoking, title and body in Arabic', async () => {
+    renderAr()
+    await screen.findByText('existing')
+    fireEvent.click(screen.getByRole('button', { name: 'إبطال' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent('إبطال «⁨existing⁩»؟')
+    expect(dialog).toHaveTextContent('يتوقف فورًا أي وكيل يستخدم هذا المفتاح')
+    expect(within(dialog).getByRole('button', { name: 'إبطال المفتاح' })).toBeInTheDocument()
   })
 })

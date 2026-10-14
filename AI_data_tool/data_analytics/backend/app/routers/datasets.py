@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from ..core.database import get_db
+from ..core.said_errors import refused
 from ..core.config import settings
 from ..core.org_scope import check_org
 from ..core.capability import (readable_dataset_ids, require_dataset_capability,
@@ -19,7 +20,7 @@ from pydantic import BaseModel, Field
 from ..models.models import (AnalysisResult, Dataset, DatasetColumn, DataSource,
                              SourceColumn, SourceObject, User)
 from sqlalchemy.orm.attributes import flag_modified
-from ..schemas.schemas import DataViewDefault, SuggestDashboardsRequest, DatasetOut, BatchUploadItem, BatchUploadOut, MaterializeRequest, CalcColumnDef, CalcColumnPreviewRequest, ColumnFormatRequest, DataPreviewRequest, FilterExprUpdate, FilterPreviewRequest, MeasureDef, MeasurePreviewRequest, ColumnMetaUpdate, RefreshScheduleUpdate, DatasetRefreshRequest, DatasetShareOut, CustomFunctionDef, CustomFunctionPreviewRequest, AggregateCreateRequest, AggregateUpdateRequest
+from ..schemas.schemas import DataViewDefault, SuggestDashboardsRequest, DatasetOut, BatchUploadItem, BatchUploadOut, MaterializeRequest, CalcColumnDef, CalcColumnPreviewRequest, ColumnFormatRequest, DataPreviewRequest, FilterExprUpdate, FilterPreviewRequest, MeasureDef, MeasurePreviewRequest, ColumnMetaUpdate, RefreshScheduleUpdate, PipelineWatchUpdate, IncrementalSettings, DatasetRefreshRequest, DatasetShareOut, CustomFunctionDef, CustomFunctionPreviewRequest, AggregateCreateRequest, AggregateUpdateRequest
 from ..services.analytics import load_file, detect_types
 from ..services.frame_cache import remove_parquet_sidecar, write_parquet_sidecar
 from ..services.widget_data import preview_expression, apply_filter_expr
@@ -143,8 +144,16 @@ async def _attach_catalog(db: AsyncSession, user: User, datasets: list, readable
     from ..models.models import DataSource
     from ..services.catalog import catalog_entry, origin_ids
     src_ids = {ds.data_source_id for ds in datasets if ds.data_source_id}
-    sources = dict((await db.execute(select(DataSource.id, DataSource.name).where(
-        DataSource.id.in_(src_ids or {-1}), DataSource.org_id == user.org_id))).all()) if src_ids else {}
+    src_rows = (await db.execute(select(DataSource.id, DataSource.name, DataSource.sensitivity).where(
+        DataSource.id.in_(src_ids or {-1}), DataSource.org_id == user.org_id))).all() if src_ids else []
+    sources = {i: n for i, n, _ in src_rows}
+    # Governance tour (2026-10-10): the list showed no sensitivity label, so
+    # "which datasets are Confidential, which are still unlabelled?" had no
+    # answer. The dataset's own label, raised to its connection's floor.
+    from ..services.sensitivity import higher, own_label
+    floors = {i: lab for i, _, lab in src_rows}
+    for ds in datasets:
+        ds.sensitivity_label = higher(own_label(ds), floors.get(ds.data_source_id))
     wanted = {i for ds in datasets for i in origin_ids(ds)}
     names = dict((await db.execute(select(Dataset.id, Dataset.name).where(
         Dataset.id.in_(wanted or {-1}), Dataset.org_id == user.org_id))).all()) if wanted else {}
@@ -170,6 +179,42 @@ async def get_dataset(dataset_id: int, db: AsyncSession = Depends(get_db), curre
         select(DatasetShare.id).where(DatasetShare.dataset_id == dataset_id, DatasetShare.user_id == current_user.id)
     )).scalar_one_or_none() is not None
     return await _without_denied_columns(db, current_user, ds, with_knowledge=True)
+
+
+@router.post("/{dataset_id}/certify")
+async def certify_dataset(dataset_id: int, body: dict | None = None, db: AsyncSession = Depends(get_db),
+                          current_user: User = Depends(require_org_admin)):
+    """Mark a dataset as the one to use (4.7). Pickers can then show
+    "Certified" only, so a newcomer sees "Current workforce" and not "13",
+    "2" or a keyboard-mash test import. `{"certified": false}` removes it."""
+    from sqlalchemy.orm.attributes import flag_modified
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    on = (body or {}).get("certified", True) is not False
+    meta = dict(ds.column_meta or {})
+    if on:
+        meta["__certified__"] = {"by": current_user.id, "by_email": current_user.email,
+                                 "at": datetime.utcnow().isoformat() + "Z",
+                                 "note": str((body or {}).get("note") or "")[:300] or None}
+    else:
+        meta.pop("__certified__", None)
+    ds.column_meta = meta
+    flag_modified(ds, "column_meta")
+    await db.commit()
+    return {"certified": on, "certification": meta.get("__certified__")}
+
+
+@router.post("/{dataset_id}/live-count")
+async def live_count(dataset_id: int, force: bool = False, db: AsyncSession = Depends(get_db),
+                     current_user: User = Depends(get_current_user)):
+    """A live dataset's row count, recounted when the cached one is over an
+    hour old (or `force`). 4.5: "Current workforce" showed "—" instead of
+    240,124 because a live dataset stores no rows to count."""
+    from ..services.live_counts import refresh_live_count
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
+    return await refresh_live_count(db, ds, force=force)
 
 
 def _copy_capped(stream, path: Path) -> str:
@@ -342,7 +387,7 @@ async def _ingest_upload_file(
     try:
         upload_store.allowed_suffix(source_filename)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
 
     file_path = upload_store.allocate_path(org_id, source_filename)
 
@@ -375,6 +420,11 @@ async def _ingest_upload_file(
     if file_path.suffix.lower() in EXCEL_SUFFIXES:
         file_path, content_sha256 = await asyncio.to_thread(
             _pick_sheet, file_path, org_id, sheet, content_sha256)
+
+    from ..services import upload_stream
+    if upload_stream.wanted(file_path, file_size):
+        return await _ingest_large_csv(db, org_id, file_path, name=name, description=description,
+                                       owner_id=owner_id, content_sha256=content_sha256)
 
     try:
         await asyncio.to_thread(_canonical_csv, file_path)
@@ -419,6 +469,50 @@ async def _ingest_upload_file(
     except Exception:
         file_path.unlink(missing_ok=True)
         remove_parquet_sidecar(str(file_path))
+        raise
+
+
+async def _ingest_large_csv(db: AsyncSession, org_id: int, csv_path: Path, *, name: str, description: str,
+                            owner_id: int | None, content_sha256: str) -> Dataset:
+    """A CSV too large to parse in memory: written to the dataset's parquet
+    file a chunk at a time (services/upload_stream.py). The uploaded CSV is
+    not kept. Types and personal-data kinds come from a random sample of the
+    rows; how many rows there are and how empty each column is, from all."""
+    import os
+    import shutil
+    import tempfile
+    from ..services import upload_stream
+    stream_dir = tempfile.mkdtemp(prefix="import_", dir=str(csv_path.parent))
+    target = upload_store.allocate_path(org_id, "upload.parquet")
+    try:
+        try:
+            got = await asyncio.to_thread(upload_stream.csv_to_parquet, csv_path, stream_dir)
+        except Exception as e:
+            raise HTTPException(400, f"Could not read file: {e}")
+        problem = "The file has no data rows" if not got.rows else _frame_problem(got.sample)
+        if problem:
+            raise HTTPException(400, problem)
+        os.replace(got.path, target)
+    finally:
+        shutil.rmtree(stream_dir, ignore_errors=True)
+        csv_path.unlink(missing_ok=True)
+    try:
+        type_map = await asyncio.to_thread(detect_types, got.sample)
+        ds = Dataset(last_refreshed_at=datetime.utcnow(),
+                     name=name, description=description or None, filename=str(target),
+                     row_count=int(got.rows), col_count=len(got.columns), file_size=target.stat().st_size,
+                     org_id=org_id, created_by=owner_id, content_sha256=content_sha256)
+        db.add(ds)
+        await db.flush()
+        for col_name, dtype in type_map.items():
+            db.add(DatasetColumn(
+                dataset_id=ds.id, name=col_name, dtype=dtype,
+                missing_pct=float(got.missing.get(col_name, 0.0)), stats={},
+                semantic_type=_semantic_type_of(got.sample[col_name])))
+        await _apply_default_data_view(db, ds, org_id)
+        return ds
+    except Exception:
+        target.unlink(missing_ok=True)
         raise
 
 
@@ -521,7 +615,7 @@ async def _ingest_access_file(
     try:
         upload_store.allowed_suffix(source_filename)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
 
     mdb_path = upload_store.allocate_path(org_id, source_filename)
     _copy_capped(stream, mdb_path)
@@ -536,7 +630,7 @@ async def _ingest_access_file(
         try:
             tables = await asyncio.to_thread(mdb.list_tables, str(mdb_path))
         except (mdb.MdbUnavailable, mdb.MdbReadError) as e:
-            raise HTTPException(400, str(e))
+            raise refused(400, e)
         if not tables:
             raise HTTPException(400, "This Access file contains no user tables")
 
@@ -1336,6 +1430,30 @@ async def _refuse_if_referenced(db: AsyncSession, ds: Dataset, name: str, force:
     return None
 
 
+@router.get("/{dataset_id}/column-lineage")
+async def column_lineage(dataset_id: int, name: str, db: AsyncSession = Depends(get_db),
+                         current_user: User = Depends(get_current_user)):
+    """One column's lineage (docs/pipeline/PLAN.md, P5): where it comes from
+    (a source table's column, a formula over other columns, an upload, the
+    dataset's query) and everything that uses it. Plus when the data was last
+    loaded, so "which data is this chart showing?" has an answer."""
+    from ..services.dependencies import column_origin, column_process, find_dependents
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
+    try:
+        await require_dataset_write(db, current_user, ds, "edit")
+        editor = True
+    except HTTPException:
+        editor = False          # the SQL and raw errors are for editors
+    used_by = await find_dependents(db, ds, name)
+    # Charts name the report they are on: the last stage of the journey.
+    return {"name": name, "origin": await column_origin(db, ds, name),
+            "process": await column_process(db, ds, name, editor=editor),
+            "used_by": used_by,
+            "dataset": {"id": ds.id, "name": ds.name, "last_refreshed_at": ds.last_refreshed_at}}
+
+
 @router.get("/{dataset_id}/dependents")
 async def dataset_dependents(dataset_id: int, name: str, db: AsyncSession = Depends(get_db),
                              current_user: User = Depends(get_current_user)):
@@ -1363,7 +1481,7 @@ async def _rename(dataset_id: int, kind: str, old: str, body: RenameRequest,
     try:
         rewritten = await rename_field(db, ds, kind, old, body.new_name)
     except RenameRefused as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     await db.commit()
     return {"old_name": old, "new_name": body.new_name.strip(), "rewritten": rewritten}
 
@@ -1430,7 +1548,7 @@ async def _validate_measure(measure: MeasureDef, ds: Dataset, db: AsyncSession) 
     try:
         _validate_expr_safety(measure.expression)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
 
     result = await db.execute(select(DatasetColumn.name).where(DatasetColumn.dataset_id == ds.id))
     column_names = {r[0] for r in result.all()}
@@ -1630,7 +1748,7 @@ async def save_custom_function(dataset_id: int, fn: CustomFunctionDef, db: Async
         validate_custom_function_def(fn.name, fn.params, fn.expression,
                                       column_names, calc_names, measure_names, existing)
     except CustomFunctionError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
 
     items = [f for f in (ds.custom_functions or []) if f.get("name") != fn.name]
     items.append(fn.model_dump())
@@ -1690,6 +1808,28 @@ async def set_refresh_schedule(dataset_id: int, req: RefreshScheduleUpdate, db: 
     check_org(ds, current_user, "Dataset not found")
     await require_dataset_write(db, current_user, ds, "edit")
 
+    if req.after_source is not None:
+        # Phase 4: a dataset rebuilt from another, run when that source refreshes.
+        from ..services.pipeline_alerts import get_watch
+        from ..services.pipeline_deps import would_loop
+        prov = derived_from_of(ds) or {}
+        if req.after_source:
+            if prov.get("dataflow_id") is not None:
+                raise HTTPException(400, "This dataset is a dataflow's output: set the dataflow "
+                                         "to run after its source instead")
+            if not isinstance(prov.get("source_dataset_id"), int):
+                raise HTTPException(400, "Only a dataset built from another dataset can run after its source")
+            if await would_loop(db, "dataset", ds.id, ds.org_id):
+                raise HTTPException(400, "This dataset feeds back into its own source, so running "
+                                         "it after the source would never stop")
+            ds.refresh_interval_minutes = None
+        watch = await get_watch(db, "dataset", ds.id, create=True, org_id=ds.org_id)
+        watch.run_after_source, watch.trigger_pending = bool(req.after_source), False
+        await db.commit()
+        result = await db.execute(
+            select(Dataset).options(selectinload(Dataset.columns)).where(Dataset.id == dataset_id))
+        return result.scalar_one()
+
     if req.interval_minutes is not None:
         if ds.mode == "directquery":
             raise HTTPException(400, "DirectQuery datasets read the live source on every query — there is nothing to schedule")
@@ -1703,6 +1843,12 @@ async def set_refresh_schedule(dataset_id: int, req: RefreshScheduleUpdate, db: 
             raise HTTPException(400, f"Minimum refresh interval is {MIN_INTERVAL_MINUTES} minutes")
 
     ds.refresh_interval_minutes = req.interval_minutes
+    if req.interval_minutes:
+        # A timer replaces following the source (phase 4): one trigger, not two.
+        from ..services.pipeline_alerts import get_watch
+        watch = await get_watch(db, "dataset", ds.id)
+        if watch is not None and watch.run_after_source:
+            watch.run_after_source, watch.trigger_pending = False, False
     await db.commit()
     # Re-select rather than db.refresh(): refresh expires the eagerly-loaded
     # `columns` relationship, and serializing DatasetOut would then try to lazy-load
@@ -1711,6 +1857,316 @@ async def set_refresh_schedule(dataset_id: int, req: RefreshScheduleUpdate, db: 
         select(Dataset).options(selectinload(Dataset.columns)).where(Dataset.id == dataset_id)
     )
     return result.scalar_one()
+
+
+@router.get("/{dataset_id}/pipeline-health")
+async def get_pipeline_health(dataset_id: int, db: AsyncSession = Depends(get_db),
+                              current_user: User = Depends(get_current_user)):
+    """Whether this dataset's refresh is working, and its freshness target
+    (pipeline plan, phase 2). The error text and the recipient list are for
+    the people who may edit the dataset: a reader may not be someone who
+    should see a connection's host or file path, or colleagues' addresses."""
+    from ..services.pipeline_alerts import FRESHNESS_CHOICES, get_watch, health, owner_emails
+    await require_dataset_read(db, current_user, dataset_id)
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    out = await health(db, ds)
+    try:
+        await require_dataset_write(db, current_user, ds, "edit")
+        out["can_edit"] = True
+        out["owners"] = await owner_emails(db, "dataset", ds.id)
+        watch = await get_watch(db, "dataset", ds.id)
+        out["following"] = current_user.id in ((watch.followers if watch else None) or [])
+        # Without a mail server, addresses in `recipients` get nothing; say so
+        # where they are typed rather than only in a server log.
+        out["email_ready"] = bool(settings.smtp_host)
+    except HTTPException:
+        out["can_edit"] = False
+        out["owners"] = []
+        out["following"] = False
+        out["recipients"] = []
+        if out["last_run"]:
+            out["last_run"] = {**out["last_run"], "error": None}
+    out["freshness_choices"] = list(FRESHNESS_CHOICES)
+    return out
+
+
+@router.patch("/{dataset_id}/pipeline-watch")
+async def set_pipeline_watch(dataset_id: int, req: PipelineWatchUpdate,
+                             db: AsyncSession = Depends(get_db),
+                             current_user: User = Depends(get_current_user)):
+    """Set a dataset's freshness target, extra alert recipients, and whether
+    the caller gets the in-app notices too (`follow`)."""
+    from ..services.delivery import valid_recipients
+    from ..services.pipeline_alerts import FRESHNESS_CHOICES, forget_brief, get_watch
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_write(db, current_user, ds, "edit")
+    if ds.mode == "directquery" and "freshness_hours" in req.model_fields_set and req.freshness_hours:
+        raise HTTPException(400, "A live (DirectQuery) dataset reads its source on every query, "
+                                 "so it has no refresh to go stale")
+    watch = await get_watch(db, "dataset", ds.id, create=True, org_id=ds.org_id)
+    if "freshness_hours" in req.model_fields_set:
+        h = req.freshness_hours
+        if h is not None and h not in FRESHNESS_CHOICES:
+            raise HTTPException(400, f"freshness_hours must be one of {', '.join(map(str, FRESHNESS_CHOICES))}, or null")
+        watch.freshness_hours = h
+        watch.stale_alerted_at = None      # a new target is judged afresh
+    if req.recipients is not None:
+        cleaned = [r.strip() for r in req.recipients if isinstance(r, str) and r.strip()]
+        bad = [r for r in cleaned if r not in valid_recipients(cleaned)]
+        if bad:
+            raise HTTPException(400, f"Not an email address or https:// webhook: {', '.join(bad[:3])}")
+        if len(cleaned) > 20:
+            raise HTTPException(400, "At most 20 recipients")
+        watch.recipients = cleaned
+    if req.follow is not None:
+        # Reassigned, not mutated: a JSON column only notices a new value.
+        others = [f for f in (watch.followers or []) if f != current_user.id]
+        watch.followers = others + [current_user.id] if req.follow else others
+    await audit(db, current_user, "dataset.pipeline_watch", "dataset", ds.id,
+                f"freshness {watch.freshness_hours or 'off'} h, {len(watch.recipients or [])} extra recipient(s)")
+    await db.commit()
+    forget_brief(ds.id)
+    return await get_pipeline_health(dataset_id, db, current_user)
+
+
+class DataCheckIn(BaseModel):
+    """Phase 3: one saved quality check (services/data_checks.py)."""
+    kind: str
+    column: str | None = None
+    params: dict = Field(default_factory=dict)
+    severity: str = "warn"
+    enabled: bool = True
+
+
+def _check_out(c) -> dict:
+    return {"id": c.id, "kind": c.kind, "column": c.column, "params": c.params or {},
+            "severity": c.severity, "enabled": bool(c.enabled), "created_at": c.created_at}
+
+
+async def _check_dataset(db, current_user, dataset_id: int, write: bool) -> Dataset:
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    if write:
+        await require_dataset_write(db, current_user, ds, "edit")
+    else:
+        await require_dataset_read(db, current_user, dataset_id)
+    return ds
+
+
+@router.get("/{dataset_id}/checks")
+async def list_data_checks(dataset_id: int, db: AsyncSession = Depends(get_db),
+                           current_user: User = Depends(get_current_user)):
+    """A dataset's saved quality checks (pipeline plan, phase 3)."""
+    from ..models.models import DataCheck
+    await _check_dataset(db, current_user, dataset_id, write=False)
+    rows = (await db.execute(select(DataCheck).where(DataCheck.dataset_id == dataset_id)
+                             .order_by(DataCheck.id))).scalars().all()
+    return [_check_out(c) for c in rows]
+
+
+async def _check_reference(db: AsyncSession, user: User, ds: Dataset, kind: str, params: dict) -> None:
+    """A `references` check may only point at a dataset of the same
+    organisation that the editor can read, and at a column it really has."""
+    if kind != "references":
+        return
+    other = await db.get(Dataset, params["dataset_id"])
+    if other is None or other.org_id != ds.org_id:
+        raise HTTPException(400, "That dataset does not exist")
+    await require_dataset_read(db, user, other.id)
+    cols = {c.name for c in (await db.execute(select(DatasetColumn).where(
+        DatasetColumn.dataset_id == other.id))).scalars().all()}
+    if params["column"] not in cols:
+        raise HTTPException(400, f"'{other.name}' has no column '{params['column']}'")
+
+
+@router.post("/{dataset_id}/checks", status_code=201)
+async def create_data_check(dataset_id: int, body: DataCheckIn, db: AsyncSession = Depends(get_db),
+                            current_user: User = Depends(get_current_user)):
+    from sqlalchemy import func as _func
+    from ..models.models import DataCheck
+    from ..services.data_checks import COLUMN_KINDS, MAX_CHECKS_PER_DATASET, InvalidCheck, validate_check
+    ds = await _check_dataset(db, current_user, dataset_id, write=True)
+    if ds.mode == "directquery":
+        raise HTTPException(400, "A live (DirectQuery) dataset is never refreshed into a file, "
+                                 "so there is no new data to check before it is published")
+    n = (await db.execute(select(_func.count()).select_from(DataCheck)
+                          .where(DataCheck.dataset_id == dataset_id))).scalar() or 0
+    if n >= MAX_CHECKS_PER_DATASET:
+        raise HTTPException(400, f"At most {MAX_CHECKS_PER_DATASET} checks per dataset")
+    try:
+        params = validate_check(body.kind, body.column, body.params, body.severity)
+    except InvalidCheck as e:
+        raise refused(400, e)
+    await _check_reference(db, current_user, ds, body.kind, params)
+    row = DataCheck(org_id=ds.org_id, dataset_id=ds.id, kind=body.kind,
+                    column=(body.column or None) if body.kind in COLUMN_KINDS else None,
+                    params=params, severity=body.severity, enabled=body.enabled,
+                    created_by=current_user.id)
+    db.add(row)
+    await db.flush()
+    await audit(db, current_user, "dataset.check_add", "dataset", ds.id,
+                f"{body.severity} {body.kind}{' on ' + body.column if row.column else ''}")
+    await db.commit()
+    return _check_out(row)
+
+
+@router.patch("/{dataset_id}/checks/{check_id}")
+async def update_data_check(dataset_id: int, check_id: int, body: DataCheckIn,
+                            db: AsyncSession = Depends(get_db),
+                            current_user: User = Depends(get_current_user)):
+    from ..models.models import DataCheck
+    from ..services.data_checks import COLUMN_KINDS, InvalidCheck, validate_check
+    ds = await _check_dataset(db, current_user, dataset_id, write=True)
+    row = await db.get(DataCheck, check_id)
+    if row is None or row.dataset_id != ds.id:
+        raise HTTPException(404, "Check not found")
+    try:
+        params = validate_check(body.kind, body.column, body.params, body.severity)
+    except InvalidCheck as e:
+        raise refused(400, e)
+    await _check_reference(db, current_user, ds, body.kind, params)
+    row.kind, row.params, row.severity, row.enabled = body.kind, params, body.severity, body.enabled
+    row.column = (body.column or None) if body.kind in COLUMN_KINDS else None
+    await audit(db, current_user, "dataset.check_edit", "dataset", ds.id, f"check {row.id}: {body.severity} {body.kind}")
+    await db.commit()
+    return _check_out(row)
+
+
+@router.delete("/{dataset_id}/checks/{check_id}", status_code=204)
+async def delete_data_check(dataset_id: int, check_id: int, db: AsyncSession = Depends(get_db),
+                            current_user: User = Depends(get_current_user)):
+    from ..models.models import DataCheck
+    ds = await _check_dataset(db, current_user, dataset_id, write=True)
+    row = await db.get(DataCheck, check_id)
+    if row is None or row.dataset_id != ds.id:
+        raise HTTPException(404, "Check not found")
+    await db.delete(row)
+    await audit(db, current_user, "dataset.check_delete", "dataset", ds.id, f"check {check_id}: {row.kind}")
+    await db.commit()
+
+
+@router.post("/{dataset_id}/checks/try")
+async def try_data_checks(dataset_id: int, db: AsyncSession = Depends(get_db),
+                          current_user: User = Depends(get_current_user)):
+    """Every saved check on the data the dataset holds NOW -- "would my
+    checks pass?" without waiting for a refresh. Read only."""
+    from ..services.data_checks import evaluate, load_checks
+    ds = await _check_dataset(db, current_user, dataset_id, write=True)
+    if not ds.filename:
+        raise HTTPException(400, "This dataset has no data file to check")
+    df = await asyncio.to_thread(load_file, ds.filename)
+    from ..services.data_checks import known_types
+    results = evaluate(df, await load_checks(db, ds.id), previous_rows=None,
+                       known_types=await known_types(db, ds.id))
+    import json as _json
+    return {"rows": int(len(df)), "results": _json.loads(_json.dumps(results, default=str))}
+
+
+@router.get("/{dataset_id}/refresh-runs")
+async def list_dataset_refresh_runs(dataset_id: int, limit: int = 30,
+                                    db: AsyncSession = Depends(get_db),
+                                    current_user: User = Depends(get_current_user)):
+    """This dataset's recent refreshes with their check results (editors:
+    error text and check details can describe the data and its source)."""
+    from ..models.models import RefreshRun
+    ds = await _check_dataset(db, current_user, dataset_id, write=True)
+    limit = max(1, min(int(limit or 30), 200))
+    runs = (await db.execute(select(RefreshRun).where(
+        RefreshRun.kind == "dataset", RefreshRun.item_id == ds.id
+    ).order_by(RefreshRun.id.desc()).limit(limit))).scalars().all()
+    return [{"id": r.id, "trigger": r.trigger, "status": r.status, "started_at": r.started_at,
+             "rows": r.rows, "duration_ms": r.duration_ms, "error": r.error,
+             "error_code": r.error_code, "checks": r.checks or [], "metrics": r.metrics or None} for r in runs]
+
+
+def _incremental_out(wm, after_source: bool) -> dict:
+    return {"strategy": (wm.strategy if wm else None) or "full",
+            "cursor_column": wm.cursor_column if wm else None,
+            "cursor_value": wm.cursor_value if wm else None,
+            "key_column": wm.key_column if wm else None,
+            "lookback_hours": wm.lookback_hours if wm else None,
+            "full_reload_days": wm.full_reload_days if wm else None,
+            "reconcile_deletes": bool(wm.reconcile_deletes) if wm else False,
+            "last_full_at": wm.last_full_at if wm else None,
+            "after_source": after_source}
+
+
+@router.get("/{dataset_id}/incremental")
+async def get_incremental(dataset_id: int, db: AsyncSession = Depends(get_db),
+                          current_user: User = Depends(get_current_user)):
+    """How scheduled refreshes load this dataset (pipeline plan, phase 4)."""
+    from ..models.models import Watermark
+    from ..services.pipeline_alerts import get_watch
+    await require_dataset_read(db, current_user, dataset_id)
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    wm = (await db.execute(select(Watermark).where(Watermark.dataset_id == ds.id))).scalar_one_or_none()
+    watch = await get_watch(db, "dataset", ds.id)
+    out = _incremental_out(wm, bool(watch and watch.run_after_source))
+    try:
+        await require_dataset_write(db, current_user, ds, "edit")
+    except HTTPException:
+        # The cursor is a value from the data (the newest date or id
+        # loaded), read before any row rule: editors only.
+        out["cursor_value"] = None
+    return out
+
+
+@router.put("/{dataset_id}/incremental")
+async def set_incremental(dataset_id: int, req: IncrementalSettings,
+                          db: AsyncSession = Depends(get_db),
+                          current_user: User = Depends(get_current_user)):
+    """Set how scheduled refreshes load this dataset: full each time, or
+    incremental -- past a cursor column, merged on a key, with an optional
+    look-back and a periodic full reload."""
+    from ..models.models import Watermark
+    from ..services.pipeline_alerts import get_watch
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_write(db, current_user, ds, "edit")
+    if not ds.data_source_id or ds.mode == "directquery":
+        raise HTTPException(400, "Only a dataset imported from a database connection loads incrementally")
+    if req.strategy not in ("full", "incremental"):
+        raise HTTPException(400, "strategy must be 'full' or 'incremental'")
+    known = {c.name for c in (await db.execute(
+        select(DatasetColumn).where(DatasetColumn.dataset_id == ds.id))).scalars().all()}
+    if req.strategy == "incremental":
+        if not req.cursor_column or req.cursor_column not in known:
+            raise HTTPException(400, "Choose the column that grows with new rows (a date or an increasing id)")
+        if req.key_column and req.key_column not in known:
+            raise HTTPException(400, f"'{req.key_column}' is not a column of this dataset")
+        if req.lookback_hours is not None and not (1 <= req.lookback_hours <= 24 * 31):
+            raise HTTPException(400, "lookback_hours must be between 1 and 744")
+        if req.lookback_hours and not req.key_column:
+            raise HTTPException(400, "A look-back re-reads rows already loaded; it needs a key "
+                                     "column to replace them instead of duplicating them")
+        if req.reconcile_deletes and not req.key_column:
+            raise HTTPException(400, "Removing rows deleted at the source needs a key column "
+                                     "to tell which rows are gone")
+        if req.full_reload_days is not None and not (1 <= req.full_reload_days <= 365):
+            raise HTTPException(400, "full_reload_days must be between 1 and 365")
+    wm = (await db.execute(select(Watermark).where(Watermark.dataset_id == ds.id))).scalar_one_or_none()
+    if wm is None:
+        wm = Watermark(dataset_id=ds.id)
+        db.add(wm)
+    if wm.cursor_column != req.cursor_column:
+        # A cursor measured on another column means nothing on this one.
+        wm.cursor_value = None
+    wm.strategy = req.strategy
+    wm.cursor_column = req.cursor_column if req.strategy == "incremental" else wm.cursor_column
+    wm.key_column = req.key_column if req.strategy == "incremental" else None
+    wm.lookback_hours = req.lookback_hours if req.strategy == "incremental" else None
+    wm.full_reload_days = req.full_reload_days if req.strategy == "incremental" else None
+    wm.reconcile_deletes = bool(req.reconcile_deletes and req.key_column and req.strategy == "incremental")
+    await audit(db, current_user, "dataset.incremental", "dataset", ds.id,
+                f"{req.strategy}" + (f" on {req.cursor_column}, key {req.key_column or '-'}"
+                                     + (", removing deleted rows" if wm.reconcile_deletes else "")
+                                     if req.strategy == "incremental" else ""))
+    await db.commit()
+    watch = await get_watch(db, "dataset", ds.id)
+    return _incremental_out(wm, bool(watch and watch.run_after_source))
 
 
 # ── Column metadata (data item properties) ────────────────────────────────────
@@ -1851,6 +2307,31 @@ async def get_column_meta(dataset_id: int, db: AsyncSession = Depends(get_db), c
     return ds.column_meta or {}
 
 
+@router.post("/{dataset_id}/column-meta/classify-again")
+async def classify_columns_again(dataset_id: int, db: AsyncSession = Depends(get_db),
+                                 current_user: User = Depends(get_current_user)):
+    """Ask the AI again what each number of this dataset is.
+
+    What a column is, is asked ONCE and kept (services/column_classes.py);
+    this is the button that asks again. Everything worked out automatically is
+    dropped and re-read; what a person set by hand is left exactly as it is."""
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_capability(db, current_user, dataset_id, "data")
+    from sqlalchemy.orm.attributes import flag_modified as _flag
+    from ..services import column_classes as _cc
+    from ..services import ai_policy as _ai_policy
+    if not await _ai_policy.enter(db, datasets=[ds]):
+        raise HTTPException(409, "AI is switched off for this data")
+    ds.column_meta = _cc.forget(ds.column_meta)
+    _flag(ds, "column_meta")
+    await db.commit()
+    denied = await resolve_denied_columns(db, current_user, dataset_id)
+    numbers = await _cc.model_hints(db, ds, denied=set(denied or []))
+    return {"asked": len(((ds.column_meta or {}).get(_cc.AI_KEY) or {}).get("asked") or []),
+            "classified": len(numbers), "column_meta": ds.column_meta or {}}
+
+
 @router.put("/{dataset_id}/column-meta")
 async def set_column_meta(dataset_id: int, req: ColumnMetaUpdate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Replaces the whole map. That is deliberate: it makes a bulk edit across many
@@ -1887,6 +2368,20 @@ async def set_column_meta(dataset_id: int, req: ColumnMetaUpdate, db: AsyncSessi
             raise HTTPException(400, "target_candidate_priority must be zero or more")
         if meta.boundary_set_id is not None and meta.boundary_set_id < 1:
             raise HTTPException(400, "boundary_set_id must be a positive id")
+        # The stored classification: only values the engines know how to read.
+        from ..services import semantic_guard as _sg
+        if meta.number is not None and meta.number not in _sg.NUMBER_KINDS:
+            raise HTTPException(400, f"number must be one of {list(_sg.NUMBER_KINDS)}, got '{meta.number}'")
+        if meta.direction is not None and meta.direction not in _sg.DIRECTIONS:
+            raise HTTPException(400, f"direction must be one of {list(_sg.DIRECTIONS)}")
+        if meta.level is not None and meta.level not in _sg.LEVELS:
+            raise HTTPException(400, f"level must be one of {list(_sg.LEVELS)}")
+        if meta.geo_level is not None and meta.geo_level not in _sg.GEO_LEVELS:
+            raise HTTPException(400, f"geo_level must be one of {list(_sg.GEO_LEVELS)}")
+        if meta.class_source is not None and meta.class_source not in ("measured", "ai", "confirmed"):
+            raise HTTPException(400, "class_source must be measured, ai or confirmed")
+        if meta.order is not None and len(meta.order) > 60:
+            raise HTTPException(400, "an ordered scale has at most 60 values")
         if meta.aggregation is not None and meta.aggregation not in _VALID_AGGREGATIONS:
             # A bad aggregation would be silently ignored at query time and render a
             # plausible-looking wrong number, so refuse it at write time.
@@ -1930,109 +2425,127 @@ async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
     await require_dataset_read(db, current_user, dataset_id)
-    if not ds.filename and ds.mode != "directquery":
-        raise HTTPException(400, "This dataset has no rows to suggest from yet")
-
-    denied = await resolve_denied_columns(db, current_user, dataset_id)
-    rls_expr = await resolve_rls_expr(db, current_user, dataset_id)
-    from ..services.prep import apply_prep_steps, prep_steps_of, resolve_join_frames
-    _steps = prep_steps_of(ds)
-    _aux = await resolve_join_frames(db, current_user, _steps) if _steps else {}
-
-    from ..services import analysis_frame as frames
-
-    live: "frames.AnalysisFrame | None" = None
-    if ds.mode == "directquery":
-        try:
-            live = await frames.load_directquery_frame(
-                db, ds, rls_filter_expr=rls_expr, denied=set(denied))
-        except frames.FrameUnavailable as exc:
-            raise HTTPException(400, str(exc))
-
-    def _load():
-        from ..services.widget_data import apply_calculated_columns, apply_rls_filter
-        if live is not None:
-            df = live.frame
-            if ds.calculated_columns:
-                df = apply_calculated_columns(df, ds.calculated_columns,
-                                              ds.custom_functions)
-            return df
-        df = load_file(ds.filename)
-        df = apply_rls_filter(df, rls_expr)
-        df = apply_prep_steps(df, _steps, _aux)
-        # Dropped BEFORE profiling, not filtered out of the answer: the
-        # profile is what goes to the model, and a column this role may not
-        # see must never be in it.
-        if denied:
-            df = df.drop(columns=[c for c in denied if c in df.columns])
-        if ds.calculated_columns:
-            df = apply_calculated_columns(df, ds.calculated_columns, ds.custom_functions)
-        return df
+    from ..services import suggest_inputs as sug
+    if req.mode == "panel" and req.background:
+        # Minutes of work: queued as a job the person can leave and come back
+        # to. Readability is checked here AND again when the job runs, as the
+        # person is then (services/suggest_jobs.py).
+        if not ds.filename and ds.mode != "directquery":
+            raise HTTPException(400, "This dataset has no rows to suggest from yet")
+        from ..services import jobs as job_service
+        from ..services.suggest_jobs import PANEL_JOB_KIND
+        from ..services import ai_context
+        goal = (await ai_context.for_dataset(db, current_user, ds, req.goal)
+                if (req.goal or "").strip() or req.use_profile else "")
+        job, _ = await job_service.enqueue(
+            db, user=current_user, kind=PANEL_JOB_KIND,
+            inputs={"dataset_id": dataset_id, "goal": goal, "size": req.size, "fresh": req.fresh},
+            subject=f"Analyst panel: {ds.name}", max_attempts=2)
+        return {"job_id": job.id, "state": job.state, "source": "panel"}
 
     try:
-        df = await asyncio.to_thread(_load)
-    except FileNotFoundError:
-        raise HTTPException(404, "Dataset file not found on server")
+        inputs = await sug.prepare(db, current_user, ds)
+    except sug.SuggestUnavailable as exc:
+        raise HTTPException(exc.status, exc.message)
+    df, type_map, profile = inputs.df, inputs.type_map, inputs.profile
+    probe, drawn, know = inputs.probe, inputs.drawn, inputs.knowledge
 
-    from ..services.analytics import detect_types
-    from ..services.dataset_profile import build_profile
-    from ..services.suggest_dataset_dashboard import suggest_for_dataset
-    from ..services.widget_data import get_widget_data_from_df
-
-    type_map = await asyncio.to_thread(detect_types, df)
-    profile = await asyncio.to_thread(
-        build_profile, df, type_map, ds.column_meta or {})
-
-    async def probe(widget_type: str, config: dict) -> dict:
-        """Run one proposed widget exactly as the browser will.
-
-        On the already-secured frame, so a probe can never see more than the
-        person asking would. Off the event loop: the shaping is pandas work.
-
-        For a DirectQuery dataset the browser does NOT go through this frame --
-        it goes through `direct_query`, which pushes the aggregate into SQL and
-        refuses anything that is not grain-safe. So the engine's own planner is
-        asked first. Without this the probe proves a widget draws in pandas and
-        the dashboard then renders "aggregation 'count' is not yet supported",
-        which is the promise "every widget has been executed" quietly becoming
-        false for half the datasets in the product.
-        """
-        if ds.mode == "directquery":
-            from ..services.direct_query import DirectQueryUnsupported, plan_query
-            try:
-                plan_query(config, widget_type)
-            except DirectQueryUnsupported as exc:
-                # Reported rather than returned empty: "nothing to draw" would
-                # blame the data for what is a property of this dataset's MODE,
-                # and the person would go looking in the wrong place.
-                return {"unsupported": str(exc)}
-            except Exception:                            # noqa: BLE001
-                # A planner that raised for any other reason has not proved the
-                # widget unusable; fall through and let the frame decide.
-                pass
-        return await asyncio.to_thread(
-            get_widget_data_from_df, df, config, widget_type,
-            ds.measures or [])
-
-    # What the platform KNOWS about these columns, resolved out of the source
-    # catalog through each column's provenance. Without it the designer sees
-    # `status (categorical, 3 distinct)` and picks a chart that is valid and
-    # meaningless; with it, it sees what the column is for and what 2 means.
-    # `denied` is passed so a column this role may not see cannot arrive in the
-    # prompt wearing a description -- the same rule that dropped it from the
-    # frame above.
-    from ..services import knowledge as knowledge_service
-    know = await knowledge_service.for_dataset(db, ds, denied=denied)
-
-    goal = (req.goal or "").strip()
+    # Their own words, then what they and others have written about them and
+    # this data (profile, connection, dataset) -- services/ai_context.py.
+    from ..services import ai_context
+    goal = (await ai_context.for_dataset(db, current_user, ds, req.goal)
+            if (req.goal or "").strip() or req.use_profile else "")
+    if req.mode == "panel":
+        return await sug.panel(inputs, goal, req.size, fresh=req.fresh)
+    fields: dict = {"facts": []}
+    from ..services.analyst_panel import selection_mode
+    if goal and selection_mode() == "cards":
+        # The validated set is the single source of truth: the model chooses
+        # among charts already built and drawn (the panel in "cards" mode --
+        # one question-reading call and one choosing call), instead of the
+        # quick designer inventing its own (settings.suggest_ai_selection).
+        out = await sug.panel(inputs, goal, 24, fresh=req.fresh)
+        return {**out, "question": None}
     if goal:
+        # Measured facts, not column shapes: the designer proposes for the
+        # differences that exist (HR analyst panel, 2026-10-02).
+        from ..services.fact_sheet import build_facts
+        from ..services.insights import effective_roles
+        roles = effective_roles(type_map, inputs.column_meta)
+        facts = await asyncio.to_thread(
+            build_facts, df, roles, inputs.column_meta, inputs.ineligible())
+        # The fields an analyst would add first (a rate of totals, a
+        # duration), as the panel offers them: drawn on a copy of the frame,
+        # created on the dataset only when the person accepts.
+        from ..services.suggest_inputs import _with_derived
+        inputs, fields, _ = await asyncio.to_thread(
+            _with_derived, inputs, roles, inputs.ineligible(), facts.get("mixed_units") or {})
+        if fields["calculated_columns"]:
+            facts = await asyncio.to_thread(
+                build_facts, inputs.df, effective_roles(inputs.type_map, inputs.column_meta),
+                inputs.column_meta, inputs.ineligible())
+        if fields["facts"]:
+            facts = {**facts, "text": (facts.get("text") or "") + "\n" + "\n".join(
+                f"- Derived field: {t}." for t in fields["facts"])}
+        # What the connection's Meaning map measured (what is counted against
+        # what, what became of a row), for the columns this dataset kept: the
+        # same reading the guided setup designs with (docs/suggestions/PLAN.md).
+        if ds.data_source_id:
+            try:
+                from ..services.guided_setup import meaning
+                _map = await meaning.load(db, ds.data_source_id)
+                _reading = meaning.prompt_text(_map, None, {str(c) for c in inputs.df.columns})
+                if _reading:
+                    facts = {**facts, "text": (facts.get("text") or "") + "\nHow to read this data:\n" + _reading
+                             + "\nNever rank groups by a count of an outcome alone when its share per group "
+                               "can be drawn."}
+            except Exception:                                # noqa: BLE001 -- a help, never a gate
+                pass
+        df, type_map, profile = inputs.df, inputs.type_map, inputs.profile
+        probe, drawn = inputs.probe, inputs.drawn
+        from ..services.suggest_dataset_dashboard import suggest_for_dataset
         proposals, reason = await suggest_for_dataset(
-            profile, goal, req.count, probe=probe, knowledge=know)
+            profile, goal, req.count, probe=probe, knowledge=know, facts=facts["text"],
+            column_meta=inputs.column_meta, mixed_units=facts.get("mixed_units"),
+            one_to_one=facts.get("one_to_one"), identical=facts.get("identical"),
+            edges=facts.get("edges"))
         source = "model"
     else:
-        proposals, reason = await _suggest_from_insights(
-            df, type_map, ds, probe)
-        source = "insights"
+        # No goal, no model: the panel's own statistics -- findings, the
+        # derived fields, whole periods, a page per section with filters, the
+        # records and a drill-through page -- rather than one page of findings
+        # (statistics engine 41% of the analysts' questions on one page,
+        # five-dataset review 2026-10-02). Same gate, same selection, no model.
+        out = await sug.panel(inputs, None, 24, client=None)
+        return {**out, "source": "insights", "question": None,
+                "proposals": [{**p, "source": "insights"} for p in out["proposals"]]}
+
+    # Each widget states what it actually drew. The proposal's own `why` (a
+    # model's expectation, or a finding's text) stays beside it, so a reader
+    # can see when the data disagreed with the idea.
+    from ..services.readback import as_i18n, takeaway
+    for proposal in proposals:
+        for w in proposal.get("widgets") or []:
+            said = takeaway(w.get("widget_type"), w.get("config") or {},
+                            drawn.get(_drawn_key(w.get("widget_type"), w.get("config") or {})))
+            if said:
+                w["takeaway"] = str(said)
+                w["takeaway_i18n"] = as_i18n(said)
+
+    # Filter controls first on each proposed page (analyst_panel.slicers_for):
+    # a dashboard a reader can narrow, not only read. The relations index the
+    # widgets, so they move along with them.
+    from ..services.analyst_panel import slicers_for
+    ineligible = inputs.ineligible()
+    for proposal in proposals:
+        widgets = proposal.get("widgets") or []
+        controls = slicers_for(widgets, profile, ineligible, limit=2)
+        if controls:
+            proposal["widgets"] = controls + widgets
+            n = len(controls)
+            proposal["relations"] = [{**r, "from": r["from"] + n, "to": r["to"] + n}
+                                     for r in proposal.get("relations") or []
+                                     if isinstance(r.get("from"), int) and isinstance(r.get("to"), int)]
 
     # Nothing to offer? Ask, rather than leaving the person rereading their own
     # sentence wondering which part of it was wrong. Same shape as the agent's
@@ -2042,21 +2555,26 @@ async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
         from ..services.suggest_dataset_dashboard import clarifying_question
         question = await clarifying_question(goal, reason, profile)
 
-    measured = (live or frames.imported_frame(df))
+    derived = {"measures": [], "calculated_columns": []}
+    if source == "model" and fields["facts"]:
+        from ..services.derived_fields import used_by
+        derived = used_by([w for p in proposals for w in p.get("widgets") or []], fields)
     return {"proposals": [{**p, "source": source} for p in proposals],
-            "reason": reason, "question": question,
+            "reason": reason, "question": question, "derived": derived,
             "profile": profile, "source": source,
             # Which rows the proposals were designed from. A dashboard proposed
             # off a sample is still a good dashboard; presenting it as though it
             # had seen everything is what would not be.
-            "measured": {"origin": measured.origin,
-                         "rows_analysed": measured.rows_analysed,
-                         "total_rows": measured.total_rows,
-                         "sampled": measured.sampled,
-                         "description": measured.describe()}}
+            "measured": inputs.measured}
 
 
-async def _suggest_from_insights(df, type_map: dict, ds: Dataset, probe) -> tuple[list[dict], str]:
+def _drawn_key(widget_type, config) -> str:
+    from ..services.suggest_inputs import drawn_key
+    return drawn_key(widget_type, config)
+
+
+async def _suggest_from_insights(df, type_map: dict, ds: Dataset, probe,
+                                 profile: dict | None = None) -> tuple[list[dict], str]:
     """One proposal, chosen by the statistics engine rather than a model.
 
     The findings are already ranked by how interesting they are and each
@@ -2079,18 +2597,29 @@ async def _suggest_from_insights(df, type_map: dict, ds: Dataset, probe) -> tupl
                   and entry.get("eligible_for_suggestion") is False}
     suggested = suggest_widgets_from_findings(
         result.get("findings") or [], roles, ds.description,
-        ineligible=ineligible)
+        ineligible=ineligible, column_meta=ds.column_meta or {}, frame=df)
 
+    # Whole periods only, as the panel and the designer draw them
+    # (fact_sheet.edge_periods); and the render path's veto before offering.
+    from ..services.analyst_panel import trim_edges
+    from ..services.fact_sheet import edge_periods
+    from ..services.suggest_dataset_dashboard import validate_widget
+    edges = await asyncio.to_thread(edge_periods, df, [c for c, t in roles.items() if t == "datetime"])
     widgets: list[dict] = []
     dropped: list[str] = []
     for suggestion in suggested:
-        widget = {"widget_type": suggestion.get("widget_type"),
-                  "title": suggestion.get("title") or "",
-                  "why": suggestion.get("reason") or "",
-                  "config": suggestion.get("config") or {}}
-        drew, rows, _why = await _probe(widget, probe)
+        widget = trim_edges({"widget_type": suggestion.get("widget_type"),
+                             "title": suggestion.get("title") or "",
+                             "why": suggestion.get("reason") or "",
+                             "config": suggestion.get("config") or {}}, edges)
+        if profile is not None:
+            ok, why = validate_widget(widget, profile, ds.column_meta or {})
+            if not ok:
+                dropped.append(why)
+                continue
+        drew, rows, why = await _probe(widget, probe)
         if not drew:
-            dropped.append("{}: returned nothing to draw".format(widget["title"]))
+            dropped.append("{}: {}".format(widget["title"], why or "returned nothing to draw"))
             continue
         widgets.append({**widget, "row_count": rows})
 
@@ -2123,6 +2652,10 @@ async def dataset_insights(dataset_id: int, db: AsyncSession = Depends(get_db),
     # neither -- no file and no connection is genuinely nothing to analyse.
     if not ds.filename and ds.mode != "directquery":
         raise HTTPException(400, "This dataset has no rows to analyse yet")
+    # "Allow AI" for this data, applied to every model call below
+    # (services/ai_policy.py).
+    from ..services import ai_policy as _ai_policy
+    await _ai_policy.enter(db, datasets=[ds])
     denied = await resolve_denied_columns(db, current_user, dataset_id)
     rls_expr = await resolve_rls_expr(db, current_user, dataset_id)
     from ..services.prep import apply_prep_steps, prep_steps_of, resolve_join_frames
@@ -2159,6 +2692,9 @@ async def dataset_insights(dataset_id: int, db: AsyncSession = Depends(get_db),
         except frames.FrameUnavailable as exc:
             raise HTTPException(400, str(exc))
 
+    from ..services import column_classes as _cc
+    _class_hints = await _cc.hints_for(db, ds, denied=set(denied or []))
+
     def _run():
         from ..services.analytics import detect_types
         from ..services.insights import generate_insights
@@ -2175,8 +2711,14 @@ async def dataset_insights(dataset_id: int, db: AsyncSession = Depends(get_db),
             provenance = frames.imported_frame(df)
         if ds.calculated_columns:
             df = apply_calculated_columns(df, ds.calculated_columns, ds.custom_functions)
-        result = generate_insights(df, detect_types(df), ds.column_meta or {},
+        # Each column classified once and kept (services/column_classes.py):
+        # the engine reads what a column IS from there, not from its name.
+        from ..services import column_classes
+        _meta, _changed = column_classes.classified(df, ds.column_meta or {}, *_class_hints)
+        result = generate_insights(df, detect_types(df), _meta,
                                    labels=_labels, value_labels=_value_labels)
+        if _changed:
+            result["_classes"] = _meta
         # Said, not implied. A reader comparing two datasets deserves to know
         # one was measured over every row and the other over a sample -- and
         # `insights.py` promises every number is computed rather than guessed,
@@ -2192,6 +2734,9 @@ async def dataset_insights(dataset_id: int, db: AsyncSession = Depends(get_db),
 
     try:
         result = await asyncio.to_thread(_run)
+        _classes = result.pop("_classes", None)
+        if _classes is not None:
+            await _cc.remember(db, ds, _classes)
     except FileNotFoundError:
         raise HTTPException(404, "Dataset file not found on server — please re-upload the file")
 
@@ -2238,7 +2783,8 @@ async def dataset_insights(dataset_id: int, db: AsyncSession = Depends(get_db),
     from ..services.insights import narrate_findings
     prose = await narrate_findings(result["findings"], row_count=result.get("row_count"))
     if prose:
-        result = {**result, "narrative": prose, "narrative_source": "llm"}
+        # The model's paragraph replaces the keyed one, so its key goes too.
+        result = {**result, "narrative": prose, "narrative_source": "llm", "narrative_i18n": None}
     else:
         result = {**result, "narrative_source": "template"}
 
@@ -2297,7 +2843,7 @@ async def goal_seek(dataset_id: int, x_column: str, y_column: str, target_y: flo
     except GoalSeekError as e:
         # The service raises ValueError subclasses; no service layer in this
         # codebase raises HTTP, so the translation happens here.
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     except FileNotFoundError:
         raise HTTPException(404, "Dataset file not found on server — please re-upload the file")
 
@@ -2316,6 +2862,10 @@ async def explain_column(dataset_id: int, column: str, body: dict | None = None,
     await require_dataset_read(db, current_user, dataset_id)
     if not ds.filename or ds.mode == "directquery":
         raise HTTPException(400, "Explanation is available for import-mode datasets only")
+    # "Allow AI" for this data, applied to every model call below
+    # (services/ai_policy.py).
+    from ..services import ai_policy as _ai_policy
+    await _ai_policy.enter(db, datasets=[ds])
     denied = await resolve_denied_columns(db, current_user, dataset_id)
     if column in (denied or []):
         raise HTTPException(404, f"Column '{column}' not found")
@@ -2476,7 +3026,7 @@ async def outlier_details(dataset_id: int, column: str, detector: str = "iqr",
         try:
             clean_mask, lo, hi = detect_anomalies(clean, detector)
         except AnomalyError as e:
-            raise HTTPException(400, str(e))
+            raise refused(400, e)
         mask = clean_mask.reindex(s.index, fill_value=False)
         out_vals = s[mask.fillna(False)]
         total = float(clean.sum())
@@ -2600,6 +3150,27 @@ async def lineage_graph(db: AsyncSession = Depends(get_db), current_user: User =
                     used.add(wid_ds)
         report_nodes.append({"id": r.id, "name": r.name, "dataset_ids": sorted(used)})
 
+    # Pipeline plan, phase 2: each node says whether its refresh is failing
+    # or its data is past its freshness target, so the graph can show which
+    # reports a broken refresh reaches.
+    from ..models.models import PipelineWatch as _PW
+    from ..services.pipeline_alerts import is_stale as _is_stale
+    from ..services.refresh_runs import latest_runs as _latest_runs
+    _ids = [d.id for d in datasets]
+    _last = await _latest_runs(db, "dataset", _ids)
+    _targets = {w.item_id: w.freshness_hours for w in (await db.execute(
+        select(_PW).where(_PW.kind == "dataset", _PW.item_id.in_(_ids or [-1])))).scalars().all()}
+    _now = datetime.utcnow()
+
+    def _health(d: Dataset) -> str | None:
+        run = _last.get(d.id)
+        if run is not None and run.status in ("failed", "blocked"):
+            return "failing"
+        if d.mode != "directquery" and _is_stale(d.last_refreshed_at or d.created_at,
+                                                 _targets.get(d.id), _now):
+            return "stale"
+        return "ok" if run is not None else None
+
     def _dataset_node(d: Dataset) -> dict:
         active_steps = [s for s in prep_steps_of(d) if not (isinstance(s, dict) and s.get("disabled"))]
         wm = watermark_by_ds.get(d.id)
@@ -2631,6 +3202,7 @@ async def lineage_graph(db: AsyncSession = Depends(get_db), current_user: User =
             # been uploaded, not refreshed from a connection).
             "materialized": mat is not None,
             "materialized_row_count": mat.row_count if mat else None,
+            "health": _health(d),
         }
 
     return {
@@ -2782,7 +3354,7 @@ async def set_prep_steps(dataset_id: int, steps: list[dict], db: AsyncSession = 
     try:
         validate_prep_steps(steps, known, join_columns)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
 
     meta = dict(ds.column_meta or {})
     if steps:
@@ -2893,9 +3465,213 @@ async def set_dataset_sensitivity(dataset_id: int, body: dict, db: AsyncSession 
         meta.pop(META_KEY, None)
     ds.column_meta = meta
     _flag(ds, "column_meta")
+    await db.flush()
+    from ..services.sensitivity import apply_confidential_export_default
+    await apply_confidential_export_default(db, ds)
     await audit(db, current_user, "dataset.classify", "dataset", dataset_id, label or "(cleared)")
     await db.commit()
     return await get_dataset_sensitivity(dataset_id, db, current_user)
+
+
+@router.get("/{dataset_id}/opportunities")
+async def dataset_opportunities(dataset_id: int, goal: str | None = None, depth: int = 1, limit: int = 24,
+                                fresh: bool = False, db: AsyncSession = Depends(get_db),
+                                current_user: User = Depends(get_current_user)):
+    """What is worth doing with this dataset, for this reader: the analyses
+    and charts its shape supports, and what its rows show -- decided without
+    a model (services/discovery, docs/discovery/PLAN.md).
+
+    `depth=0` answers from what is stored about the dataset (no row is read
+    once its profile is kept); `depth=1` also looks for evidence in the
+    reader's own rows. Each card says separately whether the data fits, how
+    strong the evidence is, what kind of claim it is and what it costs."""
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
+    if not ds.filename and ds.mode != "directquery":
+        raise HTTPException(400, "This dataset has no rows to analyse yet")
+    from ..services.discovery import engine as discovery
+    from ..services import analysis_frame as frames
+    try:
+        return await discovery.opportunities(db, current_user, ds, goal, depth=max(0, min(int(depth), 1)),
+                                             limit=max(1, min(int(limit), 60)), fresh=bool(fresh))
+    except frames.FrameUnavailable as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get("/{dataset_id}/profile")
+async def dataset_profile_cards(dataset_id: int, db: AsyncSession = Depends(get_db),
+                                current_user: User = Depends(get_current_user)):
+    """Each column's profile: how many values are valid, unique, mistyped or
+    missing; the most and least common value; text lengths; the shape values
+    share; how old the newest date is. Remembered per version of the data, so
+    it is measured once. A reader with hidden columns does not get them, and
+    a reader under a row rule gets counts but no value of any row."""
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
+    if not ds.filename and ds.mode != "directquery":
+        raise HTTPException(400, "This dataset has no rows to analyse yet")
+    from ..services import analysis_frame as frames
+    from ..services.discovery import engine as discovery
+    try:
+        return await discovery.column_profile(db, current_user, ds)
+    except frames.FrameUnavailable as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get("/{dataset_id}/health")
+async def dataset_health(dataset_id: int, db: AsyncSession = Depends(get_db),
+                         current_user: User = Depends(get_current_user)):
+    """The dataset's health: is it still arriving, is the latest month's
+    volume what its history made likely, did the columns change, are values
+    present and of the right kind, are rows copied -- each passed, worth a
+    look, or failed, with one sentence. Read off the stored profile."""
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
+    if not ds.filename and ds.mode != "directquery":
+        raise HTTPException(400, "This dataset has no rows to analyse yet")
+    from ..services import analysis_frame as frames
+    from ..services.discovery import engine as discovery
+    try:
+        return await discovery.dataset_health(db, current_user, ds)
+    except frames.FrameUnavailable as exc:
+        raise HTTPException(400, str(exc))
+
+
+class DecisionProblemIn(BaseModel):
+    """What the PERSON says about a decision recognised on a dataset: nothing
+    in it is inferred (services/discovery/decision.py)."""
+    problem: str
+    objective: str
+    direction: str
+    # choosing among options
+    key: str | None = None
+    limited: str | None = None
+    limit: float | None = None
+    at_most: int | None = None
+    # matching two sets
+    from_col: str | None = None
+    to_col: str | None = None
+    each_from: str | None = None
+    each_to_at_most: int | None = None
+    # levels to set, under the fitted what-if model
+    date_col: str | None = None
+    factors: list[str] | None = None
+    ranges: dict[str, list[float | None]] | None = None
+    granularity: str | None = None
+    periods: int | None = None
+
+
+@router.get("/{dataset_id}/decision-problems")
+async def decision_problems(dataset_id: int, db: AsyncSession = Depends(get_db),
+                            current_user: User = Depends(get_current_user)):
+    """The decisions this table has the SHAPE of -- options with amounts that
+    add up; every one of A against every one of B -- read off the stored
+    profile. Empty when it has neither. Nothing is solved here."""
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
+    if not ds.filename and ds.mode != "directquery":
+        raise HTTPException(400, "This dataset has no rows to analyse yet")
+    from ..services import analysis_frame as frames
+    from ..services.discovery import engine as discovery
+    try:
+        return await discovery.decision_problems(db, current_user, ds)
+    except frames.FrameUnavailable as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/{dataset_id}/decision-problems/specification")
+async def decision_problem_specification(dataset_id: int, body: DecisionProblemIn,
+                                         db: AsyncSession = Depends(get_db),
+                                         current_user: User = Depends(get_current_user)):
+    """The decision as the person described it, checked on the rows and
+    returned as a neutral, versioned document a solver elsewhere can read
+    (`schema: datalytics.decision-problem/1`). It is not solved, stored or
+    sent anywhere."""
+    import asyncio
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
+    from ..core.rls import resolve_denied_columns
+    from ..services import alerts
+    from ..services.discovery import decision
+    from ..services.discovery import profile as profile_store
+    try:
+        df = await alerts.alert_frame(db, ds, current_user)
+    except Exception:                                           # noqa: BLE001
+        raise HTTPException(400, "This dataset could not be read")
+    denied = {str(c).casefold() for c in await resolve_denied_columns(db, current_user, dataset_id) or []}
+    named = [c for c in (body.key, body.objective, body.limited, body.from_col, body.to_col, body.date_col,
+                         *(body.factors or [])) if c]
+    if any(c.casefold() in denied for c in named):
+        raise HTTPException(403, "One of those columns is not available to you")
+    choices = body.model_dump(exclude={"problem"}, exclude_none=True)
+    try:
+        return await asyncio.to_thread(
+            lambda: decision.specify(df, body.problem, dataset={"id": ds.id, "name": ds.name,
+                                                               "version": profile_store.fingerprint(ds)}, **choices))
+    except decision.DecisionProblemError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get("/capabilities/registry")
+async def capability_registry(current_user: User = Depends(get_current_user)):
+    """Every widget and analysis with what it needs of the data, what it costs
+    and what kind of claim its result is -- the one description the server,
+    the designers and the browser share (services/discovery/capabilities.py)."""
+    from ..services.discovery import capabilities as caps
+    return {"kinds": list(caps.KINDS), "claims": list(caps.CLAIMS),
+            "capabilities": [c.to_dict() for c in caps.all_capabilities().values()]}
+
+
+async def _allow_ai_state(db: AsyncSession, ds: Dataset) -> dict:
+    """Who decides "Allow AI" for this dataset, and what the answer is."""
+    from ..services import ai_policy
+    source = await db.get(DataSource, ds.data_source_id) if ds.data_source_id else None
+    return {
+        # The dataset's own choice: true / false, or null = not set here.
+        "own": ds.allow_ai,
+        "effective": await ai_policy.dataset_allows(db, ds),
+        # connection: the connection's switch decides unless this dataset says no;
+        # dataset: set here; default: an uploaded file nobody set a choice on.
+        "decided_by": ("dataset" if ds.allow_ai is False else "connection" if source is not None
+                       else "dataset" if ds.allow_ai is True else "default"),
+        "connection": source.name if source is not None else None,
+    }
+
+
+@router.get("/{dataset_id}/allow-ai")
+async def get_dataset_allow_ai(dataset_id: int, db: AsyncSession = Depends(get_db),
+                               current_user: User = Depends(get_current_user)):
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
+    return await _allow_ai_state(db, ds)
+
+
+@router.put("/{dataset_id}/allow-ai")
+async def set_dataset_allow_ai(dataset_id: int, body: dict, db: AsyncSession = Depends(get_db),
+                               current_user: User = Depends(get_current_user)):
+    """Whether AI may be used on this dataset: true, false, or null to follow
+    its connection (or, for an uploaded file, the installation default).
+    One switch for every AI feature (services/ai_policy.py). Needs data-level
+    access; audited. A dataset cannot switch on what its connection switched
+    off -- that is the connection owner's decision."""
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_write(db, current_user, ds, "data")
+    allow = body.get("allow")
+    if allow is not None and not isinstance(allow, bool):
+        raise HTTPException(400, "allow must be true, false or null")
+    ds.allow_ai = allow
+    await db.flush()
+    await audit(db, current_user, "dataset.allow_ai", "dataset", dataset_id,
+                "on" if allow is True else "off" if allow is False else "(follow)")
+    await db.commit()
+    return await _allow_ai_state(db, ds)
 
 
 @router.post("/{dataset_id}/join-check")
@@ -2977,7 +3753,7 @@ async def data_quality(dataset_id: int, body: QualityRequest = QualityRequest(),
         present = [c for c in (denied or []) if c in df.columns]
         if present:
             df = df.drop(columns=present)
-        report = quality_report(df, body.rules)
+        report = quality_report(df, body.rules, column_meta=ds.column_meta)
         # The example ROWS carry personal values; the column statistics do not.
         report["duplicate_examples"] = _mask_records(report["duplicate_examples"], personal)
         for check in report["rules"]:
@@ -3108,12 +3884,13 @@ async def _write_frame_as_dataset_file(db: AsyncSession, org_id: int, out):
 
     Returns (path, size, type_map). Raises after cleaning up its own bytes.
     """
-    from ..services.prep import MATERIALIZE_MAX_ROWS
+    from ..services.prep import materialize_limit
 
-    if len(out) > MATERIALIZE_MAX_ROWS:
+    limit = materialize_limit()
+    if limit is not None and len(out) > limit:
         raise HTTPException(
             400, f"The result has {len(out):,} rows, over the "
-                 f"{MATERIALIZE_MAX_ROWS:,} limit for a saved dataset. Add a "
+                 f"{limit:,} limit for a saved dataset. Add a "
                  f"filter or aggregate step, or use a narrower join.")
 
     path = upload_store.allocate_path(org_id, "joined.csv")
@@ -3173,7 +3950,7 @@ async def materialize_dataset(
     try:
         validate_prep_steps(steps, known, join_columns)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
 
     join_ids = collect_join_dataset_ids(steps)
     inherited = await _refuse_if_ungovernable(db, [dataset_id] + join_ids)
@@ -3280,7 +4057,7 @@ async def _build_aggregate_file(db: AsyncSession, current_user: User, ds: Datase
     from ..services.aggregates import (AggregateSpecError, compile_aggregate_sql,
                                        normalise_spec, rls_columns_outside_grain)
     from ..services.dataset_refresh import rewrite_dataset_file
-    from ..services.prep import MATERIALIZE_MAX_ROWS
+    from ..services.prep import materialize_limit
 
     if ds.default_filter_expr:
         raise HTTPException(400, "The source has a report-level filter expression; an aggregate "
@@ -3289,7 +4066,7 @@ async def _build_aggregate_file(db: AsyncSession, current_user: User, ds: Datase
     try:
         spec = normalise_spec({"grain": grain, "measures": measures}, known)
     except AggregateSpecError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     rules = await _source_rules(db, ds.id)
     bad = rls_columns_outside_grain([r for r, _ in rules], spec["grain"], known)
     if bad:
@@ -3310,12 +4087,13 @@ async def _build_aggregate_file(db: AsyncSession, current_user: User, ds: Datase
         path.unlink(missing_ok=True)
         remove_parquet_sidecar(str(path))
         raise HTTPException(400, f"The source rejected the aggregate query: {type(e).__name__}")
-    if len(df) > MATERIALIZE_MAX_ROWS:
+    limit = materialize_limit()
+    if limit is not None and len(df) > limit:
         path.unlink(missing_ok=True)
         remove_parquet_sidecar(str(path))
         raise HTTPException(
             400, f"The grain is too fine: this aggregate has {len(df):,} rows, over the "
-                 f"{MATERIALIZE_MAX_ROWS:,} limit for a saved dataset. Add a coarser grain "
+                 f"{limit:,} limit for a saved dataset. Add a coarser grain "
                  "column or fewer measures.")
     size = path.stat().st_size
     try:
@@ -3678,7 +4456,7 @@ async def data_preview(dataset_id: int, req: DataPreviewRequest, db: AsyncSessio
                 org_id=current_user.org_id,
             )
         except DirectQueryUnsupported as e:
-            raise HTTPException(400, str(e))
+            raise refused(400, e)
         cols = result.get("columns", [])
         rows = result.get("rows", [])
         if denied:
@@ -3845,7 +4623,7 @@ async def refresh_dataset(
     file at once is what the queue exists to prevent.
     """
     from fastapi.responses import JSONResponse
-    from ..services.refresh_jobs import (RefreshRefused, SchemaBreakRefused,
+    from ..services.refresh_jobs import (ChecksRefused, RefreshRefused, SchemaBreakRefused,
                                          active_refresh_job, refresh_now)
 
     if await active_refresh_job(db, current_user.org_id, dataset_id) is not None:
@@ -3854,9 +4632,11 @@ async def refresh_dataset(
     try:
         _dataset, warning = await refresh_now(
             db, current_user, dataset_id, mode=body.mode, cursor_column=body.cursor_column,
-            column_map=body.column_map, force=body.force)
-    except SchemaBreakRefused as e:
-        return JSONResponse(status_code=409, content=e.payload)
+            column_map=body.column_map, force=body.force,
+            publish_anyway=body.publish_anyway)
+    except (SchemaBreakRefused, ChecksRefused) as e:
+        import json as _json
+        return JSONResponse(status_code=409, content=_json.loads(_json.dumps(e.payload, default=str)))
     except RefreshRefused as e:
         raise HTTPException(e.status_code, str(e))
 
@@ -3911,11 +4691,11 @@ async def queue_refresh(
         job, _created = await job_service.enqueue(
             db, user=current_user, kind=REFRESH_JOB_KIND,
             inputs=job_inputs(dataset_id, body.mode, body.cursor_column,
-                              body.column_map, body.force),
+                              body.column_map, body.force, body.publish_anyway),
             subject=f"{dataset.name} · {what} from {src.name}",
             idempotency_key=idempotency_key)
     except job_service.IdempotencyConflict as e:
-        raise HTTPException(409, str(e))
+        raise refused(409, e)
     return JobOut.model_validate(job)
 
 
@@ -3959,7 +4739,64 @@ async def list_alerts(dataset_id: int, db: AsyncSession = Depends(get_db), curre
     return [{"id": a.id, "name": a.name, "expression": a.expression,
              "interval_minutes": a.interval_minutes, "recipients": a.recipients,
              "last_state": a.last_state, "last_status": a.last_status,
-             "last_checked_at": a.last_checked_at} for a in rows]
+             "last_checked_at": a.last_checked_at, "last_value": a.last_value,
+             "change_pct": a.change_pct, "change_direction": a.change_direction,
+             "webhook_url": a.webhook_url} for a in rows]
+
+
+def _alert_change_fields(body: dict) -> tuple[float | None, str | None, str | None]:
+    """(change_pct, direction, webhook) from a request, validated."""
+    pct = body.get("change_pct")
+    if pct in (None, "", 0):
+        pct = None
+    else:
+        try:
+            pct = float(pct)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "change_pct must be a number")
+        if not 0 < pct <= 1000:
+            raise HTTPException(400, "change_pct must be between 0 and 1000")
+    direction = (body.get("change_direction") or ("any" if pct else None))
+    if direction is not None and direction not in ("up", "down", "any"):
+        raise HTTPException(400, "change_direction must be up, down or any")
+    hook = (body.get("webhook_url") or "").strip() or None
+    if hook and not hook.lower().startswith("https://"):
+        raise HTTPException(400, "The webhook must be an https:// URL")
+    return pct, direction, hook
+
+
+@router.post("/{dataset_id}/alerts/test")
+async def test_alert(dataset_id: int, body: dict, db: AsyncSession = Depends(get_db),
+                     current_user: User = Depends(get_current_user)):
+    """Evaluate an alert NOW, as the caller, without saving it: "COUNT(emp_no)
+    is 240,124 now -- it would not fire" (HR evaluation, item 3.1)."""
+    from types import SimpleNamespace
+    from ..services.alerts import alert_frame, evaluate
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
+    expression = str(body.get("expression") or "").strip()
+    if not expression:
+        raise HTTPException(400, "expression is required")
+    try:
+        _validate_expr_safety(expression)
+    except Exception as e:
+        raise HTTPException(400, f"expression rejected: {e}")
+    pct, direction, _ = _alert_change_fields(body)
+    prev = None
+    if body.get("alert_id"):
+        saved = await db.get(DataAlert, int(body["alert_id"]))
+        if saved is not None and saved.dataset_id == dataset_id:
+            prev = saved.last_value
+    probe = SimpleNamespace(expression=expression, change_pct=pct,
+                            change_direction=direction, last_value=prev)
+    try:
+        df = await alert_frame(db, ds, current_user)
+        return await asyncio.to_thread(evaluate, df, probe)
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, f"Could not evaluate: {e}")
 
 
 @router.post("/{dataset_id}/alerts", status_code=201)
@@ -3981,12 +4818,14 @@ async def create_alert(dataset_id: int, body: dict, db: AsyncSession = Depends(g
         raise HTTPException(400, f"expression rejected: {e}")
     interval = max(15, int(body.get("interval_minutes") or 60))
     recipients = _valid_recipients(body.get("recipients"))
-    if not recipients:
-        raise HTTPException(400, "At least one valid recipient email is required")
+    pct, direction, hook = _alert_change_fields(body)
+    if not recipients and not hook:
+        raise HTTPException(400, "At least one valid recipient email (or a webhook) is required")
 
     alert = DataAlert(org_id=current_user.org_id, dataset_id=dataset_id,
                       creator_user_id=current_user.id, name=name, expression=expression,
-                      interval_minutes=interval, recipients=recipients)
+                      interval_minutes=interval, recipients=recipients,
+                      change_pct=pct, change_direction=direction, webhook_url=hook)
     db.add(alert)
     await db.commit()
     return {"id": alert.id, "name": alert.name}
@@ -4021,6 +4860,7 @@ from ..schemas.schemas import DatasetShareCreate  # noqa: E402
 @router.get("/{dataset_id}/shares", response_model=list[DatasetShareOut])
 async def list_dataset_shares(dataset_id: int, db: AsyncSession = Depends(get_db),
                               current_user: User = Depends(require_org_admin)):
+    from ..models.models import DatasetGroupShare, OrgUnit, Role
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
     rows = (await db.execute(
@@ -4028,32 +4868,96 @@ async def list_dataset_shares(dataset_id: int, db: AsyncSession = Depends(get_db
         .where(DatasetShare.dataset_id == dataset_id)
         .order_by(DatasetShare.created_at.desc())
     )).all()
-    return [{"id": s.id, "user_id": s.user_id, "email": email, "created_at": s.created_at} for s, email in rows]
+    out = [{"id": s.id, "kind": "user", "user_id": s.user_id, "email": email, "name": email,
+            "level": s.level or "edit", "created_at": s.created_at} for s, email in rows]
+    groups = (await db.execute(
+        select(DatasetGroupShare).where(DatasetGroupShare.dataset_id == dataset_id)
+        .order_by(DatasetGroupShare.created_at.desc()))).scalars().all()
+    for g in groups:
+        if g.role_id is not None:
+            r = await db.get(Role, g.role_id)
+            out.append({"id": g.id, "kind": "role", "role_id": g.role_id,
+                        "name": r.name if r else f"role {g.role_id}", "level": g.level,
+                        "created_at": g.created_at})
+        else:
+            u = await db.get(OrgUnit, g.org_unit_id)
+            out.append({"id": g.id, "kind": "org_unit", "org_unit_id": g.org_unit_id,
+                        "name": u.name if u else f"unit {g.org_unit_id}", "level": g.level,
+                        "created_at": g.created_at})
+    return out
 
 
 @router.post("/{dataset_id}/shares", response_model=DatasetShareOut, status_code=201)
 async def create_dataset_share(dataset_id: int, body: DatasetShareCreate, db: AsyncSession = Depends(get_db),
                                current_user: User = Depends(require_org_admin)):
+    from ..models.models import DatasetGroupShare, OrgUnit, Role
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
-    target = await db.get(User, body.user_id)
-    # 404-never-403: a cross-org user id reads identically to a nonexistent one.
-    check_org(target, current_user, "User not found")
-
-    existing = (await db.execute(
-        select(DatasetShare).where(DatasetShare.dataset_id == dataset_id, DatasetShare.user_id == body.user_id)
-    )).scalar_one_or_none()
-    if existing is not None:
-        raise HTTPException(400, "Dataset already shared with this user")
-
-    share = DatasetShare(dataset_id=dataset_id, user_id=body.user_id)
-    db.add(share)
-    await audit(db, current_user, "dataset.share_created", "dataset", dataset_id, target.email)
+    level = (body.level or "view").lower()
+    if level not in ("view", "edit"):
+        raise HTTPException(422, "level must be 'view' or 'edit'")
+    given = [x for x in (body.user_id, body.role_id, body.org_unit_id) if x is not None]
+    if len(given) != 1:
+        raise HTTPException(422, "Share with exactly one user, role or org unit")
     from ..services import admin_audit
-    await admin_audit.record(db, current_user, "dataset_share.create", f"dataset:{dataset_id}", target.email)
+
+    if body.user_id is not None:
+        target = await db.get(User, body.user_id)
+        # 404-never-403: a cross-org user id reads identically to a nonexistent one.
+        check_org(target, current_user, "User not found")
+        existing = (await db.execute(
+            select(DatasetShare).where(DatasetShare.dataset_id == dataset_id, DatasetShare.user_id == body.user_id)
+        )).scalar_one_or_none()
+        if existing is not None:
+            raise HTTPException(400, "Dataset already shared with this user")
+        share = DatasetShare(dataset_id=dataset_id, user_id=body.user_id, level=level)
+        db.add(share)
+        await audit(db, current_user, "dataset.share_created", "dataset", dataset_id, f"{target.email} ({level})")
+        await admin_audit.record(db, current_user, "dataset_share.create", f"dataset:{dataset_id}", target.email)
+        await db.commit()
+        await db.refresh(share)
+        return {"id": share.id, "kind": "user", "user_id": share.user_id, "email": target.email,
+                "name": target.email, "level": share.level, "created_at": share.created_at}
+
+    if body.role_id is not None:
+        target = await db.get(Role, body.role_id)
+        if target is None or getattr(target, "org_id", current_user.org_id) != current_user.org_id:
+            raise HTTPException(404, "Role not found")
+        name, kind = target.name, "role"
+        dup = DatasetGroupShare.role_id == body.role_id
+    else:
+        target = await db.get(OrgUnit, body.org_unit_id)
+        if target is None or target.org_id != current_user.org_id:
+            raise HTTPException(404, "Org unit not found")
+        name, kind = target.name, "org_unit"
+        dup = DatasetGroupShare.org_unit_id == body.org_unit_id
+    if (await db.execute(select(DatasetGroupShare.id).where(
+            DatasetGroupShare.dataset_id == dataset_id, dup))).scalar_one_or_none() is not None:
+        raise HTTPException(400, f"Dataset already shared with {name}")
+    g = DatasetGroupShare(org_id=current_user.org_id, dataset_id=dataset_id,
+                          role_id=body.role_id, org_unit_id=body.org_unit_id, level=level)
+    db.add(g)
+    await audit(db, current_user, "dataset.share_created", "dataset", dataset_id, f"{kind} {name} ({level})")
+    await admin_audit.record(db, current_user, "dataset_share.create", f"dataset:{dataset_id}", f"{kind}:{name}")
     await db.commit()
-    await db.refresh(share)
-    return {"id": share.id, "user_id": share.user_id, "email": target.email, "created_at": share.created_at}
+    await db.refresh(g)
+    return {"id": g.id, "kind": kind, "role_id": g.role_id, "org_unit_id": g.org_unit_id,
+            "name": name, "level": g.level, "created_at": g.created_at}
+
+
+@router.delete("/{dataset_id}/group-shares/{share_id}", status_code=204)
+async def delete_dataset_group_share(dataset_id: int, share_id: int, db: AsyncSession = Depends(get_db),
+                                     current_user: User = Depends(require_org_admin)):
+    from ..models.models import DatasetGroupShare
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    g = await db.get(DatasetGroupShare, share_id)
+    if g is None or g.dataset_id != dataset_id:
+        raise HTTPException(404, "Share not found")
+    await audit(db, current_user, "dataset.share_revoked", "dataset", dataset_id,
+                f"role {g.role_id}" if g.role_id else f"unit {g.org_unit_id}")
+    await db.delete(g)
+    await db.commit()
 
 
 @router.delete("/{dataset_id}/shares/{share_id}", status_code=204)

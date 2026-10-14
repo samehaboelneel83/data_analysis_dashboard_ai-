@@ -27,6 +27,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.capability import require_dataset_capability, require_dataset_read
+from ..core.said_errors import refused
 from ..core.database import get_db
 from ..core.org_scope import check_org
 from ..core.rls import resolve_denied_columns, resolve_rls_expr
@@ -38,6 +39,24 @@ from ..services.model_access import ModelAccessError, secured_frame, usable_mode
 from ..services.analytics import load_file
 from ..services.prep import apply_prep_steps, prep_steps_of, resolve_join_frames
 from ..services.widget_data import apply_calculated_columns, apply_rls_filter
+
+def _computed_from(calculated: list, target: str) -> set[str]:
+    """Calculated columns whose formula uses `target`, directly or through
+    another calculated column."""
+    from ..services.dependencies import _identifier_in
+    exprs = {c.get("name"): c.get("expression") or "" for c in calculated or [] if isinstance(c, dict)}
+    out: set[str] = set()
+    grew = True
+    while grew:
+        grew = False
+        for name, expr in exprs.items():
+            if name in out or name == target:
+                continue
+            if any(_identifier_in(expr, t) for t in {target, *out}):
+                out.add(name)
+                grew = True
+    return out
+
 
 router = APIRouter(prefix="/datasets", tags=["prediction-models"])
 
@@ -123,8 +142,26 @@ async def train_model(
     """
     ds = await _dataset_for_read(dataset_id, db, current_user)
     await require_dataset_capability(db, current_user, dataset_id, "data")
-    if not ds.filename or ds.mode == "directquery":
-        raise HTTPException(400, "Training is available for import-mode datasets only")
+    live_frame = None
+    live_note = None
+    if ds.mode == "directquery" and ds.data_source_id:
+        # HR re-test 2026-10-01: every model WIDGET fitted on the live
+        # workforce dataset, but saving a model for the Score widget was
+        # refused. Read through the same secured live frame the widgets and
+        # analyses use (row rule pushed into the SQL, denied columns dropped).
+        from ..services.analysis_frame import FrameUnavailable, load_directquery_frame
+        try:
+            got = await load_directquery_frame(
+                db, ds, rls_filter_expr=await resolve_rls_expr(db, current_user, dataset_id),
+                denied=set(await resolve_denied_columns(db, current_user, dataset_id) or ()))
+        except FrameUnavailable as e:
+            raise refused(400, e)
+        live_frame = got.frame
+        if got.sampled:
+            live_note = (f"Trained on a sample of {got.rows_analysed:,} of "
+                         f"{got.total_rows:,} rows read live from the source.")
+    elif not ds.filename:
+        raise HTTPException(400, "This dataset has no data behind it to train on")
 
     denied = await resolve_denied_columns(db, current_user, dataset_id)
     if req.target in (denied or []):
@@ -140,8 +177,11 @@ async def train_model(
         # the raw file instead would fit a model to columns the dataset does
         # not actually have -- a joined or derived column would be missing,
         # and a renamed one would be the old name.
-        df = load_file(ds.filename)
-        df = apply_rls_filter(df, rls_expr)
+        if live_frame is not None:
+            df = live_frame                      # already row-secured at the source
+        else:
+            df = load_file(ds.filename)
+            df = apply_rls_filter(df, rls_expr)
         # A denied column must not become a predictor: the resulting model
         # would carry it, and every future caller would inherit the leak.
         # Dropped BEFORE prep and calculated columns, as every other read
@@ -153,6 +193,10 @@ async def train_model(
         df = apply_prep_steps(df, _steps, _aux)
         if ds.calculated_columns:
             df = apply_calculated_columns(df, ds.calculated_columns, ds.custom_functions)
+            # A calculated column built FROM the outcome (a copy, price bands,
+            # price / 1000) gives the answer away: never an input.
+            leaked = _computed_from(ds.calculated_columns, req.target)
+            df = df.drop(columns=[c for c in leaked if c in df.columns and c != req.target])
         if req.partition:
             if req.partition not in df.columns:
                 raise ModelStoreError(f"Partition column '{req.partition}' is not in this dataset.")
@@ -170,7 +214,7 @@ async def train_model(
     try:
         pkg = await asyncio.to_thread(_run)
     except ModelStoreError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     except FileNotFoundError:
         raise HTTPException(404, "Dataset file not found on server — please re-upload the file")
 
@@ -188,6 +232,7 @@ async def train_model(
         # Whether a row rule narrowed what it saw -- the rule itself stays
         # with the administrators who wrote it.
         "row_scope": "restricted by a row rule" if rls_expr else "every row",
+        **({"sample_note": live_note} if live_note else {}),
         # The data as it was: a later refresh makes these differ, which is
         # how a reader tells the model is older than the dataset.
         "dataset": {"id": ds.id, "name": ds.name, "row_count": ds.row_count,
@@ -322,7 +367,7 @@ async def score_model(
     try:
         out = await asyncio.to_thread(score_frame, pkg, frame)
     except ModelStoreError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     return {**out, "model": {"id": model.id, "name": model.name, "version": model.version or 1,
                              "status": model.status or CHAMPION}}
 

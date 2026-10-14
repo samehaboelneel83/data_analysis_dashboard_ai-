@@ -65,6 +65,15 @@ async def dataset_effective(db, dataset_id: int, _seen: set[int] | None = None) 
         if up and rank(up) > rank(label):
             label = up
             reasons = [f"{ds.name} is built from or joins data labelled {up}"] + up_reasons
+    # The connection's label is a floor for everything read from it -- live,
+    # Query builder or a Browse import alike (HR evaluation, item 2.2).
+    if getattr(ds, "data_source_id", None):
+        from ..models.models import DataSource
+        src = await db.get(DataSource, ds.data_source_id)
+        src_label = getattr(src, "sensitivity", None) if src is not None else None
+        if src_label in LEVELS and rank(src_label) > rank(label):
+            label = src_label
+            reasons = [f"{ds.name} is read from the connection '{src.name}', labelled {src_label}"]
     # After the lineage, so a stated or inherited label is named first.
     # Personal data sets the floor at Confidential whatever the label says:
     # that is what turns on redaction for share links, embeds and exports. A
@@ -144,3 +153,28 @@ async def personal_columns(db, dataset_id: int) -> dict[str, str]:
             out[name] = kind
     return out
 
+
+
+
+EXPORT_POLICY_KEY = "__exports_disabled__"   # mirrors routers.datasets.EXPORT_DISABLED_KEY
+
+
+async def apply_confidential_export_default(db, dataset) -> bool:
+    """A Confidential (or Restricted) dataset with no export policy yet gets
+    "Auto when private": exports switch off for as long as a row or column
+    rule governs it (HR evaluation, item 2.4). An explicit policy -- even an
+    empty one an admin saved -- is never overwritten. Returns True when set."""
+    meta = dict(getattr(dataset, "column_meta", None) or {})
+    if EXPORT_POLICY_KEY in meta:
+        return False
+    label, _ = await dataset_effective(db, dataset.id)
+    if rank(label) < rank("Confidential"):
+        return False
+    meta[EXPORT_POLICY_KEY] = {"formats": [], "auto_private": True}
+    dataset.column_meta = meta
+    try:
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(dataset, "column_meta")
+    except Exception:  # noqa: BLE001 -- a plain object in tests
+        pass
+    return True

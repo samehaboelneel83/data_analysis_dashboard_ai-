@@ -101,18 +101,21 @@ async def suggest_from_insights(df, profile: dict, probe=None,
     )
 
     try:
-        insights = generate_insights(df, detect_types(df), None)
+        from . import column_classes
+        _classed, _ = column_classes.classified(df, None)
+        insights = generate_insights(df, detect_types(df), _classed)
     except Exception as exc:                                 # noqa: BLE001
         return [], "the data could not be analysed: {}".format(exc)
 
     findings = insights.get("findings") or []
-    if not findings:
+    roles = effective_roles(detect_types(df), None)
+    # The basics (headcount by category, count per year, ...) do not need a
+    # finding, so an empty scan no longer means an empty proposal.
+    suggestions = suggest_widgets_from_findings(findings, roles, description,
+                                                limit=MAX_WIDGETS, frame=df)
+    if not suggestions and not findings:
         return [], (insights.get("narrative")
                     or "there is not enough data here to say anything with confidence")
-
-    roles = effective_roles(detect_types(df), None)
-    suggestions = suggest_widgets_from_findings(findings, roles, description,
-                                                limit=MAX_WIDGETS)
     if not suggestions:
         return [], "nothing in this data suggested a chart"
 
@@ -129,7 +132,8 @@ async def suggest_from_insights(df, profile: dict, probe=None,
         # days of daily data draws four points and calls itself a trend.
         # `polish_widget` deliberately keeps a granularity it is given, because
         # from a model that IS a choice; from here it is a placeholder.
-        config.pop("dimension_granularity", None)
+        if not s.get("keep_granularity"):
+            config.pop("dimension_granularity", None)
         widget = {
             "widget_type": s["widget_type"],
             "title": (s.get("title") or "")[:120],

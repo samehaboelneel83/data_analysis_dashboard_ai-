@@ -1,6 +1,7 @@
+import { AxiosHeaders } from 'axios'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
-  setUnauthorizedHandler, handleResponseError, takeLegacyToken, api,
+  setUnauthorizedHandler, handleResponseError, takeLegacyToken, api, LLM_USED_EVENT,
 } from '../services/api'
 
 /**
@@ -20,7 +21,15 @@ describe('auth-aware API client', () => {
   })
 
   it('attaches no Authorization header of its own', () => {
-    expect((api as any).interceptors.request.handlers.filter(Boolean)).toHaveLength(0)
+    // The one request interceptor adds the person's LLM pick (X-LLM-Endpoint)
+    // and nothing else: the session still rides only in the httpOnly cookie.
+    const handlers = (api as any).interceptors.request.handlers.filter(Boolean)
+    expect(handlers).toHaveLength(1)
+    localStorage.setItem('datalytics.llmEndpoint', 'auto')
+    const config = handlers[0].fulfilled({ headers: new AxiosHeaders() })
+    localStorage.removeItem('datalytics.llmEndpoint')
+    expect(config.headers.get('X-LLM-Endpoint')).toBe('auto')
+    expect(config.headers.get('Authorization')).toBeUndefined()
     expect((api.defaults.headers as any).Authorization).toBeUndefined()
   })
 
@@ -68,5 +77,18 @@ describe('auth-aware API client', () => {
     expect(responseHandlers.length).toBeGreaterThan(0)
     await expect(responseHandlers[0].rejected({ response: { status: 401 } })).rejects.toBeTruthy()
     expect(handler).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('X-LLM-Used', () => {
+  it('a response that used models announces which ones', () => {
+    const seen: unknown[] = []
+    const on = (e: Event) => seen.push((e as CustomEvent).detail)
+    window.addEventListener(LLM_USED_EVENT, on)
+    const handlers = (api as any).interceptors.response.handlers.filter(Boolean)
+    for (const h of handlers) h.fulfilled?.({ headers: new AxiosHeaders({ 'X-LLM-Used': 'small=light,big=heavy' }) })
+    for (const h of handlers) h.fulfilled?.({ headers: new AxiosHeaders() })
+    window.removeEventListener(LLM_USED_EVENT, on)
+    expect(seen).toEqual([[{ id: 'small', weight: 'light' }, { id: 'big', weight: 'heavy' }]])
   })
 })

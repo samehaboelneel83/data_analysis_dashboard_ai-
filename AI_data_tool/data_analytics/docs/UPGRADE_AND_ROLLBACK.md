@@ -111,7 +111,7 @@ steps; the image build was not part of it.
 | 8. Restart mid-refresh | A queued incremental refresh adding 100,000 rows; `kill -9` while it ran; restart | Nothing written before the kill (file, row count and watermark unchanged); attempt 2 appended once: 2,100,000 rows, all ids distinct, watermark advanced once |
 
 Also seen: an incremental refresh that would take a dataset past `IMPORT_ROW_CAP`
-(2,000,000 by default) is refused and writes nothing; step 8 ran with the cap
+(200,000,000 by default; 2,000,000 when this was run) is refused and writes nothing; step 8 ran with the cap
 raised to 3,000,000.
 
 **Recovery point and time.** Not yet agreed with the owner (plan E02). What the

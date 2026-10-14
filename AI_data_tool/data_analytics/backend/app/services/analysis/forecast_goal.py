@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..forecast_goal import ForecastGoalError, forecast_goal
+from ..readback import _s
 
 __all__ = ["ForecastGoalError", "forecast_goal", "forecast_goal_over"]
 
@@ -33,7 +34,7 @@ def forecast_goal_over(df, date_column: str, measure: str, target: Any,
 
     for column in (date_column, measure):
         if column not in getattr(df, "columns", []):
-            raise ForecastGoalError(f"Column '{column}' not found")
+            raise ForecastGoalError(_s("no.automated_prediction.1", "Column '{a}' not found", cap=False, a=column))
 
     config: dict[str, Any] = {
         "dimension": date_column, "measure": measure,

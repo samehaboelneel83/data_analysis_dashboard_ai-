@@ -8,9 +8,16 @@
  * verdict. The shaper (backend services/model_widgets.py) supplies every
  * number; this file only draws them, and draws the refusals in words.
  */
+import SaidItems, { saidOf } from '../../analysis/SaidItems'
+import { kiSentence } from '../../analysis/KeyInfluencersResult'
+import { sayText } from '../../../lib/readbackText'
 import { useState } from 'react'
 import { seriesColor } from '../chartUtils'
+import RuleRoles, { RULE_VIEWS, type RuleView } from './RuleRoles'
+import { useT, type MessageKey, type TranslateFn } from '../../../i18n'
+import { useDirection, navArrows } from '../../../contexts/DirectionContext'
 import type { ChartRendererProps } from './types'
+import { familyLabel, rich } from '../../../i18n/pages/modelsMaps'
 
 type Tab = { key: string; label: string }
 
@@ -21,35 +28,149 @@ const fmt = (v: unknown, digits = 3) => {
   const a = Math.abs(n)
   return a !== 0 && (a < 0.001 || a >= 1e6) ? n.toExponential(2) : n.toLocaleString(undefined, { maximumFractionDigits: digits })
 }
+/** An odds ratio per unit of a large-scale predictor (salary per dollar) sits
+ *  a hair from 1; three decimals showed "1" and an interval of "1 – 1"
+ *  (HR re-test 2026-10-01). Near 1, six decimals keep the effect visible. */
+const ofmt = (v: unknown) => (Math.abs(Number(v) - 1) < 0.01 ? fmt(v, 6) : fmt(v))
 const pfmt = (p: unknown) => (p == null ? '—' : Number(p) < 0.001 ? '< 0.001' : fmt(p, 3))
 
-const MODEL_NAMES: Record<string, string> = {
-  linear: 'Linear regression', logistic: 'Logistic regression', tree: 'Decision tree',
-  cluster: 'Clustering', compare: 'Model comparison', score: 'Scoring',
+// Fixed text in the reader's language (HR re-test 2026-10-01: every model
+// widget was English in Arabic mode). Sentences the statistics engine writes
+// (the interpretation, caveats) still arrive in English from the server.
+const MODEL_NAMES: Record<string, MessageKey> = {
+  linear: 'mdl.linear', logistic: 'mdl.logistic', tree: 'mdl.tree',
+  cluster: 'mdl.cluster', compare: 'mdl.compare', score: 'mdl.score', rules: 'mdl.rules', influencers: 'mdl.influencers',
 }
 
 function Population({ pop }: { pop: any }) {
+  const tr = useT()
   if (!pop) return null
   const dropped = Object.entries(pop.dropped_by ?? {}) as [string, number][]
   return (
     <div data-testid="model-population" style={{ fontSize: 11, color: 'var(--muted)' }}>
-      Rows used: <b style={{ color: 'var(--text)' }}>{Number(pop.rows_used ?? 0).toLocaleString()}</b> of {Number(pop.rows_total ?? 0).toLocaleString()}
-      {pop.rows_dropped > 0 && <> — {Number(pop.rows_dropped).toLocaleString()} dropped{dropped.length > 0 && <> (missing: {dropped.map(([c, n]) => `${c} ${n.toLocaleString()}`).join(', ')})</>}</>}
-      {pop.rows_before_filters != null && <> · re-fitted on the filtered rows ({Number(pop.rows_before_filters).toLocaleString()} before filters)</>}
-      {pop.sampled_from && <> · clustered a sample of {Number(pop.sampled_from).toLocaleString()} rows</>}
+      {tr('mdl.rowsUsed')} <b style={{ color: 'var(--text)' }}>{Number(pop.rows_used ?? 0).toLocaleString()}</b> {tr('mdl.of')} {Number(pop.rows_total ?? 0).toLocaleString()}
+      {pop.rows_dropped > 0 && <> — {tr('mdl.dropped', { n: Number(pop.rows_dropped).toLocaleString() })}{dropped.length > 0 && <> ({tr('mdl.missing')} {dropped.map(([c, n]) => `${c} ${n.toLocaleString()}`).join(', ')})</>}</>}
+      {pop.rows_before_filters != null && <> · {tr('mdl.refitted', { n: Number(pop.rows_before_filters).toLocaleString() })}</>}
+      {pop.sampled_from && <> · {tr('mdl.sampleFrom', { n: Number(pop.sampled_from).toLocaleString() })}</>}
+      {pop.sampled_of && <> · {tr('mdl.sampleOf', { n: Number(pop.sampled_of).toLocaleString() })}</>}
       {pop.partition
-        ? <> · partition <b style={{ color: 'var(--text)' }}>{pop.partition.column}</b>: trained on {Number(pop.partition.train_rows).toLocaleString()}, validated on {Number(pop.partition.validation_rows).toLocaleString()}</>
-        : pop.test_rows != null && <> · scored on {Number(pop.test_rows).toLocaleString()} held-out rows</>}
+        ? <> · {tr('mdl.partition')} <b style={{ color: 'var(--text)' }}>{pop.partition.column}</b>: {tr('mdl.trainedValidated', { a: Number(pop.partition.train_rows).toLocaleString(), b: Number(pop.partition.validation_rows).toLocaleString() })}</>
+        : pop.test_rows != null && <> · {tr('mdl.heldOut', { n: Number(pop.test_rows).toLocaleString() })}</>}
     </div>
   )
 }
 
 /** A small scatter drawn in SVG (≤ 400 points), with an optional reference line. */
+/** The groups as a picture: each row placed on the two directions along which
+ *  the rows differ most, coloured by its group (server: analysis/segment.py
+ *  `_projection`). Each axis says how much of the variation it carries and
+ *  which variables weigh most on it. */
+function ClusterMap({ projection, tr }: {
+  projection: { points: [number, number, number][]; centers: [number, number, number][]
+    axes: { share: number; variables: { name: string; weight: number }[] }[]; shown: number; of: number }
+  tr: ReturnType<typeof useT>
+}) {
+  const pts = projection.points
+  if (!pts.length) return <p style={{ fontSize: 12, color: 'var(--muted)' }}>{tr('pg.modelsMaps.mr.nothing')}</p>
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1])
+  const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)]
+  const W = 320, H = 200, P = 8
+  const sx = (v: number) => P + ((v - x0) / ((x1 - x0) || 1)) * (W - 2 * P)
+  const sy = (v: number) => H - P - ((v - y0) / ((y1 - y0) || 1)) * (H - 2 * P)
+  const groups = [...new Set(pts.map(p => p[2]))].sort((a, b) => a - b)
+  const axis = (i: number) => {
+    const a = projection.axes[i]
+    return a ? tr('mdl.map.axis', { pct: Math.round(a.share * 100), cols: a.variables.map(v => v.name).join(', ') }) : ''
+  }
+  return (
+    <div data-testid="cluster-map">
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={tr('mdl.map.aria', { n: pts.length, k: groups.length })}
+        style={{ width: '100%', maxHeight: 260, border: '1px solid var(--border)', borderRadius: 6 }}>
+        {pts.map((p, i) => <circle key={i} cx={sx(p[0])} cy={sy(p[1])} r={1.8} fill={seriesColor(p[2])} fillOpacity={0.55} />)}
+        {projection.centers.map(c => (
+          <circle key={`c${c[2]}`} cx={sx(c[0])} cy={sy(c[1])} r={5} fill={seriesColor(c[2])} stroke="var(--panel, #fff)" strokeWidth={1.5} />
+        ))}
+      </svg>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 11, margin: '4px 0' }}>
+        {groups.map(g => (
+          <span key={g} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <span aria-hidden style={{ width: 9, height: 9, borderRadius: 9, background: seriesColor(g), display: 'inline-block' }} />
+            {tr('pg.modelsMaps.mr.segmentN', { n: g + 1 })}
+          </span>
+        ))}
+      </div>
+      <p style={{ fontSize: 10.5, color: 'var(--muted)', margin: 0 }} dir="auto">
+        {tr('mdl.map.across')} {axis(0)} · {tr('mdl.map.up')} {axis(1)}
+        {projection.shown < projection.of ? ` · ${tr('mdl.map.sample', { n: projection.shown.toLocaleString(), of: projection.of.toLocaleString() })}` : ''}
+      </p>
+    </div>
+  )
+}
+
+/** The rules as a network: each value that takes part in a rule is a node
+ *  (larger when more rules touch it), each rule a line from what it starts
+ *  with to what it concludes, thicker the further above chance it is
+ *  (server: analysis/patterns.py `rules_network`). Values sit on a circle, so
+ *  the picture is the same every time. */
+function RuleNetwork({ network, tr }: {
+  network: { nodes: { id: string; column: string; label: string; rules: number }[]
+    edges: { source: string; target: string; lift: number; confidence: number; support_rows?: number }[] }
+  tr: ReturnType<typeof useT>
+}) {
+  const nodes = [...network.nodes].sort((a, b) => a.column.localeCompare(b.column) || a.label.localeCompare(b.label))
+  const W = 340, H = 260, R = 92, cx = W / 2, cy = H / 2
+  const at = new Map(nodes.map((n, i) => {
+    const a = (2 * Math.PI * i) / Math.max(nodes.length, 1) - Math.PI / 2
+    return [n.id, { x: cx + R * Math.cos(a), y: cy + R * Math.sin(a), a }]
+  }))
+  const columns = [...new Set(nodes.map(n => n.column))]
+  const top = Math.max(...network.edges.map(e => e.lift || 1), 1.0001)
+  const most = Math.max(...nodes.map(n => n.rules), 1)
+  return (
+    <div data-testid="rule-network">
+      <svg viewBox={`0 0 ${W} ${H}`} role="img"
+        aria-label={tr('mdl.net.aria', { n: nodes.length, k: network.edges.length })} style={{ width: '100%', maxHeight: 320 }}>
+        {network.edges.map((e, i) => {
+          const a = at.get(e.source), b = at.get(e.target)
+          if (!a || !b) return null
+          return <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="var(--muted)" strokeOpacity={0.55}
+            strokeWidth={0.8 + 3 * ((e.lift - 1) / (top - 1 || 1))}>
+            <title>{`${e.source} → ${e.target} · ${tr('mdl.net.lift', { x: Number(e.lift).toFixed(2) })}`}</title>
+          </line>
+        })}
+        {nodes.map(n => {
+          const p = at.get(n.id)!
+          const out = Math.cos(p.a) >= 0
+          return (
+            <g key={n.id}>
+              <circle cx={p.x} cy={p.y} r={4 + 6 * (n.rules / most)} fill={seriesColor(columns.indexOf(n.column))} />
+              <text x={p.x + (out ? 10 : -10)} y={p.y + 3} fontSize={9} textAnchor={out ? 'start' : 'end'} fill="currentColor">
+                {n.label.length > 16 ? `${n.label.slice(0, 15)}…` : n.label}
+              </text>
+            </g>
+          )
+        })}
+      </svg>
+      {columns.length > 1 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 11 }}>
+          {columns.map((c, i) => (
+            <span key={c} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <span aria-hidden style={{ width: 9, height: 9, borderRadius: 9, background: seriesColor(i), display: 'inline-block' }} />{c}
+            </span>
+          ))}
+        </div>
+      )}
+      <p style={{ fontSize: 10.5, color: 'var(--muted)', margin: '4px 0 0' }}>{tr('mdl.net.note')}</p>
+    </div>
+  )
+}
+
 function MiniScatter({ points, xLabel, yLabel, refLine }: {
   points: [number | null, number | null][]; xLabel: string; yLabel: string; refLine?: 'zero' | 'identity'
 }) {
+  const tr = useT()
   const pts = points.filter(([x, y]) => x != null && y != null) as [number, number][]
-  if (!pts.length) return <p style={{ fontSize: 12, color: 'var(--muted)' }}>Nothing to plot.</p>
+  if (!pts.length) return <p style={{ fontSize: 12, color: 'var(--muted)' }}>{tr('pg.modelsMaps.mr.nothing')}</p>
   const xs = pts.map(p => p[0]), ys = pts.map(p => p[1])
   let [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)]
   if (refLine === 'identity') { x0 = y0 = Math.min(x0, y0); x1 = y1 = Math.max(x1, y1) }
@@ -58,7 +179,7 @@ function MiniScatter({ points, xLabel, yLabel, refLine }: {
   const sx = (v: number) => P + ((v - x0) / ((x1 - x0) || 1)) * (W - P - 6)
   const sy = (v: number) => H - P + 6 - ((v - y0) / ((y1 - y0) || 1)) * (H - P)
   return (
-    <svg viewBox={`0 0 ${W} ${H + 12}`} role="img" aria-label={`${yLabel} against ${xLabel}, ${pts.length} points`}
+    <svg viewBox={`0 0 ${W} ${H + 12}`} role="img" aria-label={tr('pg.modelsMaps.mr.scatterAria', { y: yLabel, x: xLabel, n: pts.length })}
       style={{ width: '100%', maxHeight: 220, color: seriesColor(0) }}>
       <line x1={P} y1={H - P + 6} x2={W - 6} y2={H - P + 6} stroke="var(--border)" />
       <line x1={P} y1={6} x2={P} y2={H - P + 6} stroke="var(--border)" />
@@ -81,13 +202,14 @@ function MiniScatter({ points, xLabel, yLabel, refLine }: {
  *  verdict bars cannot show (two models can tie on AUC and differ where the
  *  threshold will actually be set). */
 function RocOverlay({ models, winner }: { models: any[]; winner?: unknown }) {
+  const tr = useT()
   const W = 300, H = 180, P = 30
   const sx = (v: number) => P + v * (W - P - 6)
   const sy = (v: number) => H - P + 6 - v * (H - P)
   return (
     <div data-testid="roc-overlay">
       <svg viewBox={`0 0 ${W} ${H + 12}`} role="img"
-        aria-label={`ROC curves: ${models.map(m => `${m.title} AUC ${fmt(m.score, 3)}`).join('; ')}`}
+        aria-label={tr('pg.modelsMaps.mr.rocAria', { list: models.map(m => `${m.title} AUC ${fmt(m.score, 3)}`).join('; ') })}
         style={{ width: '100%', maxHeight: 230 }}>
         <line x1={P} y1={H - P + 6} x2={W - 6} y2={H - P + 6} stroke="var(--border)" />
         <line x1={P} y1={6} x2={P} y2={H - P + 6} stroke="var(--border)" />
@@ -98,18 +220,18 @@ function RocOverlay({ models, winner }: { models: any[]; winner?: unknown }) {
             points={(m.roc as [number, number][]).filter(p => p[0] != null && p[1] != null)
               .map(([x, y]) => `${sx(x)},${sy(y)}`).join(' ')} />
         ))}
-        <text x={W / 2} y={H + 10} textAnchor="middle" fontSize="9" fill="var(--muted)">false positive rate</text>
-        <text x={8} y={H / 2} textAnchor="middle" fontSize="9" fill="var(--muted)" transform={`rotate(-90 8 ${H / 2})`}>true positive rate</text>
+        <text x={W / 2} y={H + 10} textAnchor="middle" fontSize="9" fill="var(--muted)">{tr('pg.modelsMaps.mr.fpr')}</text>
+        <text x={8} y={H / 2} textAnchor="middle" fontSize="9" fill="var(--muted)" transform={`rotate(-90 8 ${H / 2})`}>{tr('pg.modelsMaps.mr.tpr')}</text>
       </svg>
       <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 11 }}>
         {models.map((m, i) => (
           <li key={m.id ?? i} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: m.id === winner ? 700 : 400 }}>
             <span aria-hidden style={{ width: 14, height: 3, background: seriesColor(i), display: 'inline-block' }} />
-            {m.title} — AUC {fmt(m.score, 3)}
+            <bdi>{m.title}</bdi> — AUC <bdi dir="ltr">{fmt(m.score, 3)}</bdi>{/* // i18n-ok: AUC */}
           </li>
         ))}
       </ul>
-      <p style={{ fontSize: 10, color: 'var(--muted)', margin: '4px 0 0' }}>Same held-out rows for every curve; the dashed diagonal is a coin toss (AUC 0.5).</p>
+      <p style={{ fontSize: 10, color: 'var(--muted)', margin: '4px 0 0' }}>{tr('pg.modelsMaps.mr.sameRows')}</p>
     </div>
   )
 }
@@ -119,32 +241,34 @@ const td: React.CSSProperties = { padding: '3px 6px', fontSize: 12, borderBottom
 const tdn: React.CSSProperties = { ...td, textAlign: 'end', fontVariantNumeric: 'tabular-nums' }
 
 function Coefficients({ coefs, odds }: { coefs: any[]; odds?: boolean }) {
+  const tr = useT()
   return (
     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
       <thead><tr>
-        <th style={th}>Term</th>
-        <th style={{ ...th, textAlign: 'end' }}>{odds ? 'Odds ratio' : 'Coefficient'}</th>
-        <th style={{ ...th, textAlign: 'end' }}>95% CI</th>
+        <th style={th}>{tr('mdl.term')}</th>
+        <th style={{ ...th, textAlign: 'end' }}>{odds ? tr('mdl.oddsRatio') : tr('mdl.coefficient')}</th>
+        <th style={{ ...th, textAlign: 'end' }}>{tr('pg.modelsMaps.mr.ci')}</th>
         <th style={{ ...th, textAlign: 'end' }}>p</th>
       </tr></thead>
       <tbody>
         {coefs.map(c => (
           <tr key={c.term} style={{ fontWeight: c.significant && c.term !== 'const' ? 600 : 400 }}>
-            <td style={td}>{c.term === 'const' ? '(intercept)' : c.term}{c.significant && c.term !== 'const' ? ' ✱' : ''}</td>
-            <td style={tdn}>{fmt(odds ? c.odds_ratio : c.coefficient)}</td>
-            <td style={tdn}>{odds ? `${fmt(c.or_ci_low)} – ${fmt(c.or_ci_high)}` : `${fmt(c.ci_low)} – ${fmt(c.ci_high)}`}</td>
+            <td style={td}>{c.term === 'const' ? tr('mdl.intercept') : c.term}{c.significant && c.term !== 'const' ? ' ✱' : ''}</td>
+            <td style={tdn}>{odds ? ofmt(c.odds_ratio) : fmt(c.coefficient)}</td>
+            <td style={tdn}>{odds ? `${ofmt(c.or_ci_low)} – ${ofmt(c.or_ci_high)}` : `${fmt(c.ci_low)} – ${fmt(c.ci_high)}`}</td>
             <td style={tdn}>{pfmt(c.p_value)}</td>
           </tr>
         ))}
       </tbody>
       <caption style={{ captionSide: 'bottom', textAlign: 'start', fontSize: 10, color: 'var(--muted)', paddingTop: 4 }}>
-        ✱ significant at 5%.{odds ? ' An odds ratio of 1.4 means 40% higher odds of the event per unit.' : ''}
+        {tr('mdl.sig5')}{odds ? ' ' + tr('mdl.oddsHint') : ''}
       </caption>
     </table>
   )
 }
 
 function Confusion({ c }: { c: any }) {
+  const tr = useT()
   const cell = (label: string, n: number, good: boolean) => (
     <div style={{ padding: 8, borderRadius: 6, textAlign: 'center',
       background: good ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : 'var(--surface2)' }}>
@@ -155,32 +279,129 @@ function Confusion({ c }: { c: any }) {
   return (
     <div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, maxWidth: 320 }}>
-        {cell('predicted event, was event', c.tp, true)}{cell('predicted event, was not', c.fp, false)}
-        {cell('predicted not, was event', c.fn, false)}{cell('predicted not, was not', c.tn, true)}
+        {cell(tr('pg.modelsMaps.mr.tp'), c.tp, true)}{cell(tr('pg.modelsMaps.mr.fp'), c.fp, false)}
+        {cell(tr('pg.modelsMaps.mr.fn'), c.fn, false)}{cell(tr('pg.modelsMaps.mr.tn'), c.tn, true)}
       </div>
-      <p style={{ fontSize: 10, color: 'var(--muted)', marginTop: 6 }}>Rows classified at a probability threshold of {c.threshold}.</p>
+      <p style={{ fontSize: 10, color: 'var(--muted)', marginTop: 6 }}>{tr('pg.modelsMaps.mr.threshold', { t: String(c.threshold) })}</p>
     </div>
   )
 }
 
 function TreeOutline({ node, depth = 0 }: { node: any; depth?: number }) {
+  const tr = useT()
+  const { rtl } = useDirection()
   if (!node) return null
   const pad = { paddingInlineStart: depth * 14, fontSize: 12, lineHeight: 1.6 }
   if (!node.children?.length) {
-    return <div style={{ ...pad, color: 'var(--accent)' }}>→ {String(node.prediction)} <span style={{ color: 'var(--muted)' }}>({Number(node.samples).toLocaleString()} rows{node.confidence != null ? `, ${Math.round(node.confidence * 100)}%` : ''})</span></div>
+    const n = Number(node.samples).toLocaleString()
+    return <div style={{ ...pad, color: 'var(--accent)' }}>{navArrows(rtl).forward} <bdi>{String(node.prediction)}</bdi> <span style={{ color: 'var(--muted)' }}>{node.confidence != null
+      ? tr('pg.modelsMaps.mr.leafPct', { n, pct: Math.round(node.confidence * 100) }) : tr('pg.modelsMaps.mr.leaf', { n })}</span></div>
   }
   return (
     <div>
-      <div style={pad}>If <b>{node.label}</b>:</div>
+      <div style={pad}>{rich(tr, 'pg.modelsMaps.mr.if', { cond: <b><bdi>{node.label}</bdi></b> })}</div>
       <TreeOutline node={node.children[0]} depth={depth + 1} />
-      <div style={pad}>Otherwise:</div>
+      <div style={pad}>{tr('pg.modelsMaps.mr.otherwise')}</div>
       <TreeOutline node={node.children[1]} depth={depth + 1} />
     </div>
   )
 }
 
+/** Key influencers: each group, what it shows, and how far that is from usual. */
+type Influencer = { factor: string; group: string; value: number; lift: number; rows: number }
+type InflDirection = 'both' | 'higher' | 'lower'
+
+/** Which influencers to show: those that go with a higher value, a lower one, or both; then the first `limit`. */
+export function chosenInfluencers(rows: Influencer[], direction: InflDirection, limit?: number): Influencer[] {
+  const kept = rows.filter(r => direction === 'both' || (direction === 'higher' ? r.lift >= 1 : r.lift < 1))
+  return limit && limit > 0 ? kept.slice(0, limit) : kept
+}
+
+type InflFormat = 'change' | 'times' | 'value'
+
+/** An influencer's figure as the author asked for it: how far from usual
+ *  ("+23.5%"), how many times the usual ("1.24×"), or the group's own value. */
+export function influencerFigure(r: Influencer, percent: boolean, format: InflFormat, decimals?: number): string {
+  if (format === 'times') return `${r.lift.toFixed(decimals ?? 2)}×`
+  if (format === 'value') {
+    return percent ? `${(r.value * 100).toFixed(decimals ?? 1)}%` : fmt(r.value, decimals ?? (Math.abs(r.value) >= 100 ? 0 : 2))
+  }
+  const diff = (r.lift - 1) * 100
+  return `${diff >= 0 ? '+' : '−'}${Math.abs(diff).toFixed(decimals ?? (Math.abs(diff) >= 100 ? 0 : 1))}%`
+}
+
+/** Key influencers as a line to a bubble: the further from usual, the longer
+ *  the line and the larger the bubble, which says how far ("+23.5%"). The
+ *  same figures as the bars; the value itself is in the tooltip. */
+function InfluencerBubbles({ rows, percent, format = 'change', decimals }: { rows: Influencer[]; percent: boolean; format?: InflFormat; decimals?: number }) {
+  const tr = useT()
+  const far = Math.max(...rows.map(r => Math.abs(r.lift - 1)), 0) || 1
+  const show = (v: number) => percent ? `${(v * 100).toFixed(1)}%` : fmt(v, Math.abs(v) >= 100 ? 0 : 2)
+  return (
+    <div data-testid="influencers" data-style="bubbles" style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '4px 2px' }}>
+      {rows.map((r, i) => {
+        const share = Math.abs(r.lift - 1) / far
+        const up = r.lift >= 1
+        const said = influencerFigure(r, percent, format, decimals)
+        // Room for what it says: a long figure gets a wider bubble, never a cut one.
+        const size = Math.max(Math.round(34 + share * 18), said.length * 7 + 14)
+        // The dashboard's palette: its first colour for what goes with a higher value, its second for a lower one.
+        const tone = seriesColor(up ? 0 : 1)
+        return (
+          <div key={i} data-testid="influencer" title={`${r.factor}: ${r.group} — ${show(r.value)} · ${tr('mdl.infl.rows', { n: r.rows.toLocaleString() })}`}
+            style={{ display: 'grid', gridTemplateColumns: 'minmax(96px, 46%) 1fr max-content', gap: 8, alignItems: 'center', fontSize: 12.5 }}>
+            <span style={{ minWidth: 0, lineHeight: 1.25 }}>
+              <span style={{ color: 'var(--muted)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.factor}</span>
+              <bdi style={{ fontWeight: 600, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.group}</bdi>
+            </span>
+            <span aria-hidden style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+              <span style={{ height: 3, borderRadius: 2, background: tone, width: `${Math.max(8, share * 100)}%` }} />
+            </span>
+            <span data-testid="influencer-bubble" dir="ltr" style={{ width: size, height: size, borderRadius: '50%', background: tone, color: '#fff',
+              display: 'grid', placeItems: 'center', fontSize: size >= 44 ? 11.5 : 10.5, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+              {said}
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function Influencers({ rows, percent, format, decimals }: { rows: Influencer[]; percent: boolean; format?: InflFormat; decimals?: number }) {
+  const tr = useT()
+  const far = Math.max(...rows.map(r => Math.abs(r.lift - 1)), 0) || 1
+  return (
+    <div data-testid="influencers" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {rows.map((r, i) => (
+        <div key={i} data-testid="influencer" style={{ display: 'grid', gridTemplateColumns: 'minmax(110px, 40%) 1fr max-content', gap: 6, alignItems: 'center', fontSize: 12 }}>
+          <span title={`${r.factor}: ${r.group}`} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span style={{ color: 'var(--muted)' }}>{r.factor}</span> <bdi><b>{r.group}</b></bdi>
+          </span>
+          <div style={{ background: 'var(--surface2)', borderRadius: 4, height: 14 }}>
+            <div style={{ width: `${(Math.abs(r.lift - 1) / far) * 100}%`, height: '100%', borderRadius: 4,
+              background: 'color-mix(in srgb, var(--muted) 45%, transparent)' }} />
+          </div>
+          <span style={{ textAlign: 'end', fontVariantNumeric: 'tabular-nums' }}
+            title={tr('mdl.infl.rows', { n: r.rows.toLocaleString() })}>
+            {/* By default the value and, beside it, how many times the usual; a chosen format shows that one figure. */}
+            {format ? influencerFigure(r, percent, format, decimals) : <>
+              {influencerFigure(r, percent, 'value', decimals)}
+              <span style={{ color: 'var(--muted)' }}> · {tr(r.lift >= 1 ? 'mdl.infl.above' : 'mdl.infl.below', { x: fmt(r.lift, 2) })}</span>
+            </>}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function Bars({ rows, accentId, baseline, percent }: { rows: { id?: unknown; name: string; value: number | null }[]; accentId?: unknown; baseline?: { label: string; value: number }; percent?: boolean }) {
-  const show = (v: number | null) => percent && v != null ? `${(v * 100).toFixed(1)}%` : fmt(v)
+  const tr = useT()
+  // Whole units from 100 up: a predicted salary read "88,851.211" -- and the
+  // fixed 56px column then cut it to ",851.211" (HR re-test 2026-10-01).
+  const show = (v: number | null) => percent && v != null ? `${(v * 100).toFixed(1)}%`
+    : fmt(v, v != null && Math.abs(v) >= 100 ? 0 : 3)
   const vals = rows.map(r => r.value ?? 0).concat(baseline ? [baseline.value] : [])
   const max = Math.max(...vals, 0) || 1
   const min = Math.min(...vals, 0)
@@ -188,7 +409,7 @@ function Bars({ rows, accentId, baseline, percent }: { rows: { id?: unknown; nam
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       {rows.map((r, i) => (
-        <div key={i} style={{ display: 'grid', gridTemplateColumns: 'minmax(80px, 30%) 1fr 56px', gap: 6, alignItems: 'center', fontSize: 12 }}>
+        <div key={i} style={{ display: 'grid', gridTemplateColumns: 'minmax(80px, 30%) 1fr minmax(56px, max-content)', gap: 6, alignItems: 'center', fontSize: 12 }}>
           <span title={r.name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
           <div style={{ background: 'var(--surface2)', borderRadius: 4, height: 14, position: 'relative' }}>
             <div style={{ position: 'absolute', insetInlineStart: `${((Math.min(0, r.value ?? 0) - min) / span) * 100}%`, width: `${(Math.abs(r.value ?? 0) / span) * 100}%`, height: '100%', borderRadius: 4,
@@ -198,14 +419,87 @@ function Bars({ rows, accentId, baseline, percent }: { rows: { id?: unknown; nam
         </div>
       ))}
       {baseline && (
-        <div style={{ fontSize: 11, color: 'var(--muted)' }}>Baseline — {baseline.label}: {fmt(baseline.value)}</div>
+        <div style={{ fontSize: 11, color: 'var(--muted)' }}>{tr('mdl.baseline')} — {baseline.label}: {fmt(baseline.value)}</div>
       )}
     </div>
   )
 }
 
-export default function ModelRenderer({ data }: ChartRendererProps) {
+type Item = [string, string]
+const sideText = (items: Item[] | undefined, fallback: string) =>
+  items?.length ? items.map(([c, v]) => `${c} = ${v}`).join(', ') : fallback
+
+/** One side of a rule: each value as "column = value", the column muted so the
+ *  values read first. `dir="auto"` keeps an English value whole in Arabic. */
+function Side({ items, fallback }: { items?: Item[]; fallback: string }) {
+  if (!items?.length) return <span dir="auto">{fallback}</span>
+  return (
+    <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 4 }}>
+      {items.map(([c, v], i) => (
+        <span key={i} dir="auto" style={{ padding: '1px 6px', borderRadius: 10, background: 'var(--surface2)', whiteSpace: 'nowrap' }}>
+          <span style={{ color: 'var(--muted)' }}>{c}</span> = <b style={{ fontWeight: 600 }}>{v}</b>
+        </span>
+      ))}
+    </span>
+  )
+}
+
+/** Association rules: If / Then / Lift, with the base rate beside every
+ *  confidence -- "90% confident" means nothing for a conclusion true of 90%
+ *  of rows anyway. */
+const num: React.CSSProperties = { textAlign: 'end', whiteSpace: 'nowrap', width: '1%', verticalAlign: 'top' }
+const lead: React.CSSProperties = { display: 'inline-block', minWidth: 34, color: 'var(--muted)', fontSize: 11 }
+
+function RuleTable({ rules }: { rules: any[] }) {
+  const tr = useT()
+  const pct = (v: unknown) => (v == null ? '—' : `${(Number(v) * 100).toFixed(1)}%`)
+  return (
+    <table data-testid="rule-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <thead><tr>
+        <th style={th}>{tr('mdl.r.rule')}</th>
+        <th style={{ ...th, ...num }}>{tr('mdl.r.lift')}</th>
+        <th style={{ ...th, ...num }}>{tr('mdl.r.conf')}</th>
+        <th style={{ ...th, ...num }}>{tr('mdl.r.base')}</th>
+        <th style={{ ...th, ...num }}>{tr('mdl.r.rows')}</th>
+      </tr></thead>
+      <tbody>
+        {rules.map((x, i) => (
+          <tr key={i}>
+            {/* If over Then in ONE cell: as two columns the numbers were
+                pushed out of an ordinary-width widget. */}
+            <td style={{ ...td, lineHeight: 1.9 }}>
+              <div><span style={lead}>{tr('mdl.r.if')}</span><Side items={x.if_items} fallback={x.if} /></div>
+              <div><span style={lead}>{tr('mdl.r.then')}</span><Side items={x.then_items} fallback={x.then} /></div>
+            </td>
+            <td style={{ ...tdn, ...num, fontWeight: 700 }}>{fmt(x.lift, 2)}×</td>
+            <td style={{ ...tdn, ...num }}>{pct(x.confidence)}</td>
+            <td style={{ ...tdn, ...num, color: 'var(--muted)' }}>{pct(x.base_rate)}</td>
+            <td style={{ ...tdn, ...num }}>{Number(x.support_rows).toLocaleString()}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+/** The headline's name as the shapers write it, in the reader's language. */
+const FIT_NAMES: Record<string, MessageKey> = {
+  'Overall rate': 'mdl.fit.overallRate', 'Overall average': 'mdl.fit.overallAverage',
+  'strongest lift': 'mdl.fit.strongestLift', score: 'mdl.fit.score',
+}
+function fitName(tr: TranslateFn, name: string): string {
+  const key = FIT_NAMES[name]
+  return key ? tr(key) : name
+}
+
+export default function ModelRenderer({ data, cfg }: ChartRendererProps) {
   const [tab, setTab] = useState<string | null>(null)
+  // Key influencers: which way to look, chosen in the settings and changeable by the reader.
+  const opts = (cfg ?? {}) as { influencer_style?: string; influencer_direction?: InflDirection; influencer_limit?: number; influencer_details?: boolean
+    influencer_format?: InflFormat; influencer_decimals?: number; rules_view?: string; rules_items?: number; model_tab?: string }
+  const [direction, setDirection] = useState<InflDirection | null>(null)
+  const tr = useT()
+  const { rtl } = useDirection()
   if (!data || data.type !== 'model') return null
   if (data.status === 'refused') {
     // A widget that is simply not set up yet (a comparison with no models to
@@ -214,7 +508,7 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
     const notSetUp = /needs at least|choose|pick|select .* first|no models?/i.test(String(data.reason ?? ''))
     return (
       <div role="note" style={{ padding: 12, fontSize: 13, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <b>{notSetUp ? 'Not set up yet' : 'This model could not be fitted'}</b>
+        <b>{notSetUp ? tr('mdl.notSetUp') : tr('mdl.notFitted')}</b>
         <span>{data.reason}</span>
         <Population pop={data.population} />
       </div>
@@ -224,19 +518,40 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
 
   const r = data.result ?? {}
   const kind: string = data.model
-  const tabs: Tab[] = kind === 'linear' ? [{ key: 'coef', label: 'Coefficients' }, { key: 'resid', label: 'Residuals' }, { key: 'ap', label: 'Actual vs predicted' }, { key: 'fit', label: 'Fit' }]
-    : kind === 'logistic' ? [{ key: 'coef', label: 'Odds ratios' }, { key: 'cm', label: 'Confusion matrix' }, { key: 'roc', label: 'ROC' }, { key: 'fit', label: 'Fit' }]
-    : kind === 'tree' ? [{ key: 'imp', label: 'Importance' }, { key: 'rules', label: 'Rules' }, { key: 'fit', label: 'Fit' }]
-    : kind === 'cluster' ? [{ key: 'seg', label: 'Segments' }, { key: 'fit', label: 'Fit' }]
-    : kind === 'score' ? [{ key: 'pred', label: 'Predictions' }, { key: 'fit', label: 'Check' }]
+  const tabs: Tab[] = kind === 'linear' ? [{ key: 'coef', label: tr('mdl.tab.coef') }, { key: 'resid', label: tr('mdl.tab.resid') }, { key: 'ap', label: tr('mdl.tab.ap') }, { key: 'fit', label: tr('mdl.tab.fit') }]
+    : kind === 'logistic' ? [{ key: 'coef', label: tr('mdl.tab.odds') }, { key: 'cm', label: tr('mdl.tab.cm') }, { key: 'roc', label: 'ROC' }, { key: 'fit', label: tr('mdl.tab.fit') }] // i18n-ok: ROC
+    : kind === 'tree' ? [{ key: 'imp', label: tr('mdl.tab.imp') }, { key: 'rules', label: tr('mdl.tab.rules') }, { key: 'fit', label: tr('mdl.tab.fit') }]
+    : kind === 'cluster' ? [{ key: 'seg', label: tr('mdl.tab.seg') },
+      // The groups as a picture, when the server could place the rows in two dimensions.
+      ...(data.result?.meta?.projection ? [{ key: 'map', label: tr('mdl.tab.map') }] : []),
+      { key: 'fit', label: tr('mdl.tab.fit') }]
+    : kind === 'influencers' ? [{ key: 'infl', label: tr('mdl.tab.infl') }, { key: 'fit', label: tr('mdl.tab.fit') }]
+    : kind === 'score' ? [{ key: 'pred', label: tr('mdl.tab.pred') }, { key: 'fit', label: tr('mdl.tab.check') }]
+    : kind === 'rules' ? [{ key: 'rlist', label: tr('mdl.tab.rules') },
+      // The rules as a network of values, when there is more than one to connect.
+      ...((data.network?.edges ?? []).length > 1 ? [{ key: 'net', label: tr('mdl.tab.net') }] : []),
+      { key: 'lift', label: tr('mdl.tab.lift') }, { key: 'rfit', label: tr('mdl.tab.fit') }]
     : (data.models ?? []).some((m: any) => Array.isArray(m.roc))
-      ? [{ key: 'verdict', label: 'Verdict' }, { key: 'rocs', label: 'ROC' }]
-      : [{ key: 'verdict', label: 'Verdict' }]
-  const active = tab && tabs.some(t => t.key === tab) ? tab : tabs[0].key
+      ? [{ key: 'verdict', label: tr('mdl.tab.verdict') }, { key: 'rocs', label: 'ROC' }] // i18n-ok
+      : [{ key: 'verdict', label: tr('mdl.tab.verdict') }]
+  // One of the model's views as a tile of its own (`model_tab`): a page can
+  // then lay a confusion matrix beside its ROC curve, or residuals beside
+  // actual-against-predicted, instead of hiding all but one behind tabs.
+  const fixedTab = opts.model_tab && tabs.some(t => t.key === opts.model_tab) ? opts.model_tab : null
+  const active = fixedTab ?? (tab && tabs.some(t => t.key === tab) ? tab : tabs[0].key)
+  // Only the influencers, when the author switched the model's own lines off.
+  // The rules read one way only -- by the role each value plays (RuleRoles): a
+  // tile of a page of such views, with no model line and no tabs.
+  const ruleView = kind === 'rules' && RULE_VIEWS.includes(opts.rules_view as RuleView) ? (opts.rules_view as RuleView) : null
+  const compact = (kind === 'influencers' && opts.influencer_details === false) || ruleView != null || fixedTab != null
   const formula = kind === 'cluster' ? (data.variables ?? []).join(', ')
-    : kind === 'compare' ? `${(data.models ?? []).length} models of ${data.target}`
-    : kind === 'score' ? `saved model “${data.saved?.name}” (${data.saved?.family}) predicts ${data.target}`
-    : `${data.target}${data.event != null ? ` = ${data.event}` : ''} ~ ${(data.predictors ?? []).join(' + ') || 'all usable columns'}`
+    : kind === 'rules' ? <>
+        {data.focus && <>{tr('mdl.r.about')} <bdi><b>{data.focus}</b></bdi> · </>}
+        <bdi>{(data.variables ?? []).filter((v: string) => v !== data.focus).join(', ') || tr('mdl.r.all')}</bdi>
+      </>
+    : kind === 'compare' ? tr('pg.modelsMaps.mr.compareOf', { n: (data.models ?? []).length, target: String(data.target) })
+    : kind === 'score' ? tr('pg.modelsMaps.mr.savedPredicts', { name: String(data.saved?.name), family: familyLabel(tr, data.saved?.family), target: String(data.target) })
+    : <bdi dir="ltr">{`${data.target}${data.event != null ? ` = ${data.event}` : ''} ~ ${(data.predictors ?? []).join(' + ') || tr('pg.modelsMaps.mr.allUsable')}`}</bdi>
   const fit = data.fit
   const effect = r.effect_label ? ` (${r.effect_label})` : ''
   const held = !!data.population?.partition
@@ -247,24 +562,32 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
 
   return (
     <div data-testid="model-widget" style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 6, padding: '2px 4px', overflow: 'hidden' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <div data-testid="model-header" style={{ display: compact ? 'none' : 'flex', flexDirection: 'column', gap: 2 }}>
         <div style={{ fontSize: 12 }}>
-          <b>{MODEL_NAMES[kind] ?? 'Model'}</b> <span style={{ color: 'var(--muted)' }}>· {formula}</span>
+          <b>{MODEL_NAMES[kind] ? tr(MODEL_NAMES[kind]) : tr('mdl.model')}</b> <span style={{ color: 'var(--muted)' }}>· {formula}</span>
         </div>
-        {fit && kind !== 'compare' && (
+        {kind === 'rules' && (
           <div style={{ fontSize: 12 }}>
-            {fit.name}: <b style={{ color: 'var(--accent)' }}>{fmt(fit.value)}</b>{held ? '' : effect}
+            {(data.rules ?? []).length > 0
+              ? <>{tr('mdl.r.strongest')}: <b style={{ color: 'var(--accent)' }}>{fmt(fit?.value, 2)}×</b>
+                  <span style={{ color: 'var(--muted)' }}> · {tr('mdl.r.found', { n: (data.rules ?? []).length })}</span></>
+              : <span style={{ color: 'var(--muted)' }}>{tr('mdl.r.none')}</span>}
+          </div>
+        )}
+        {fit && kind !== 'compare' && kind !== 'rules' && (
+          <div style={{ fontSize: 12 }}>
+            {fitName(tr, fit.name)}: <b style={{ color: 'var(--accent)' }}>{fmt(fit.value)}</b>{held ? '' : effect}
             {/* With a partition the headline is the held-out score; the
                 registry's sentence describes the TRAINING fit, so it says so. */}
-            {r.interpretation && <span style={{ color: 'var(--muted)' }}> — {held ? `On the training rows: ${r.interpretation}` : r.interpretation}</span>}
+            {r.interpretation && <span style={{ color: 'var(--muted)' }}> — {held ? tr('pg.modelsMaps.mr.onTraining', { text: sayText(tr, String(r.interpretation), r.interpretation_i18n) }) : sayText(tr, String(r.interpretation), r.interpretation_i18n)}</span>}
           </div>
         )}
         {kind === 'compare' && (
           <div style={{ fontSize: 12 }}>
             {data.winner != null
-              ? <>Winner: <b style={{ color: 'var(--accent)' }}>{(data.models ?? []).find((m: any) => m.id === data.winner)?.title}</b>
-                  {data.winner_beats_baseline ? '' : <span style={{ color: 'var(--danger, #c0392b)' }}> — but it does not beat just guessing</span>}</>
-              : 'No model could be scored.'}
+              ? <>{tr('mdl.winner')} <b style={{ color: 'var(--accent)' }}>{(data.models ?? []).find((m: any) => m.id === data.winner)?.title}</b>
+                  {data.winner_beats_baseline ? '' : <span style={{ color: 'var(--danger, #c0392b)' }}> — {tr('mdl.notBeatGuess')}</span>}</>
+              : tr('mdl.noneScored')}
             <span style={{ color: 'var(--muted)' }}> · {data.metric}</span>
           </div>
         )}
@@ -272,13 +595,13 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
         {warnings.map((w, i) => (
           <div key={i} role="alert" style={{ fontSize: 11, padding: '4px 8px', borderRadius: 6,
             border: '1px solid var(--warning, #d68910)', background: 'color-mix(in srgb, var(--warning, #d68910) 10%, transparent)' }}>
-            ⚠ {w}
+            ⚠ {sayText(tr, w, saidOf(data, 'warnings')?.[i])}
           </div>
         ))}
       </div>
 
-      {tabs.length > 1 && (
-        <div role="tablist" aria-label="Model views" style={{ display: 'flex', gap: 2, flexWrap: 'wrap', borderBottom: '1px solid var(--border)' }}>
+      {tabs.length > 1 && !compact && (
+        <div role="tablist" aria-label={tr('pg.modelsMaps.mr.views')} style={{ display: 'flex', gap: 2, flexWrap: 'wrap', borderBottom: '1px solid var(--border)' }}>
           {tabs.map(t => (
             <button key={t.key} type="button" role="tab" aria-selected={active === t.key}
               onMouseDown={e => e.stopPropagation()}
@@ -293,48 +616,79 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
       )}
 
       {/* Focusable: it scrolls, and a keyboard user must be able to (E10). */}
-      <div role="tabpanel" tabIndex={0} style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+      {ruleView && (
+        <div data-testid="rule-roles" tabIndex={0} style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+          <RuleRoles rules={data.rules ?? []} view={ruleView} limit={opts.rules_items} />
+        </div>
+      )}
+      <div role="tabpanel" tabIndex={0} style={{ flex: 1, minHeight: 0, overflow: 'auto', display: ruleView ? 'none' : undefined }}>
         {active === 'coef' && <Coefficients coefs={r.detail?.coefficients ?? []} odds={kind === 'logistic'} />}
         {active === 'coef' && data.encodings && Object.keys(data.encodings).length > 0 && (
           <p style={{ fontSize: 10, color: 'var(--muted)', margin: '4px 0 0' }}>
             {Object.entries(data.encodings as Record<string, { reference: string }>).map(([col, e]) =>
-              `Each ${col}= row is compared with ${col} = ${e.reference}`).join('. ')}.
+              tr('pg.modelsMaps.mr.encoding', { col, ref: e.reference })).join('. ')}.
           </p>
         )}
-        {active === 'resid' && <MiniScatter points={data.diagnostics?.residuals ?? []} xLabel="fitted" yLabel="residual" refLine="zero" />}
-        {active === 'ap' && <MiniScatter points={data.diagnostics?.actual_predicted ?? []} xLabel={`actual ${data.target}`} yLabel="predicted" refLine="identity" />}
+        {active === 'resid' && <MiniScatter points={data.diagnostics?.residuals ?? []} xLabel={tr('pg.modelsMaps.mr.fitted')} yLabel={tr('pg.modelsMaps.mr.residual')} refLine="zero" />}
+        {active === 'ap' && <MiniScatter points={data.diagnostics?.actual_predicted ?? []} xLabel={tr('pg.modelsMaps.mr.actual', { target: String(data.target) })} yLabel={tr('pg.modelsMaps.mr.predicted')} refLine="identity" />}
         {active === 'cm' && data.diagnostics?.confusion && <Confusion c={data.diagnostics.confusion} />}
         {active === 'roc' && <>
-          <MiniScatter points={data.diagnostics?.roc ?? []} xLabel="false positive rate" yLabel="true positive rate" refLine="identity" />
-          <p style={{ fontSize: 10, color: 'var(--muted)' }}>The dashed diagonal is a coin toss (AUC 0.5).</p>
+          <MiniScatter points={data.diagnostics?.roc ?? []} xLabel={tr('pg.modelsMaps.mr.fpr')} yLabel={tr('pg.modelsMaps.mr.tpr')} refLine="identity" />
+          <p style={{ fontSize: 10, color: 'var(--muted)' }}>{tr('pg.modelsMaps.mr.coinToss')}</p>
         </>}
         {active === 'rocs' && <RocOverlay models={(data.models ?? []).filter((m: any) => Array.isArray(m.roc))} winner={data.winner} />}
+        {active === 'infl' && (() => {
+          const way: InflDirection = direction ?? opts.influencer_direction ?? 'both'
+          const shown = chosenInfluencers(data.influencers ?? [], way, opts.influencer_limit)
+          const percent = data.value_format === 'percent'
+          return (
+            <>
+              <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 11.5, color: 'var(--muted)', margin: '2px 0 6px' }}>
+                {tr('mdl.infl.o.show')}
+                <select data-testid="influencer-direction" value={way} onMouseDown={e => e.stopPropagation()}
+                  onChange={e => setDirection(e.target.value as InflDirection)} style={{ fontSize: 11.5, padding: '1px 4px' }}>
+                  <option value="both">{tr('mdl.infl.o.both')}</option>
+                  <option value="higher">{tr('mdl.infl.o.higher')}</option>
+                  <option value="lower">{tr('mdl.infl.o.lower')}</option>
+                </select>
+              </label>
+              {shown.length === 0
+                ? <p style={{ fontSize: 12, color: 'var(--muted)' }}>{tr('mdl.infl.o.none')}</p>
+                : opts.influencer_style === 'bubbles'
+                  ? <InfluencerBubbles rows={shown} percent={percent} format={opts.influencer_format ?? 'change'} decimals={opts.influencer_decimals} />
+                  : <Influencers rows={shown} percent={percent} format={opts.influencer_format} decimals={opts.influencer_decimals} />}
+            </>
+          )
+        })()}
+        {active === 'infl' && caveats[0] && <p role="note" style={{ fontSize: 10.5, color: 'var(--muted)', margin: '6px 0 0' }}>{kiSentence(caveats[0], tr)}</p>}
         {active === 'imp' && <Bars rows={(data.rows ?? []).map((x: any) => ({ name: x.name, value: x.value }))} />}
         {active === 'rules' && <TreeOutline node={r.tree} />}
         {active === 'pred' && <>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>
-            {data.measure}{data.breakdown ? ` by ${data.breakdown}` : ''}
+            {data.breakdown ? tr('pg.modelsMaps.mr.by', { measure: String(data.measure), by: String(data.breakdown) }) : data.measure}
           </div>
           <Bars rows={(data.rows ?? []).map((x: any) => ({ name: x.name, value: x.value }))} percent={data.value_format === 'percent'} />
           {data.unseen_values && Object.keys(data.unseen_values).length > 0 && (
             <p role="note" style={{ fontSize: 10.5, color: 'var(--muted)', margin: '6px 0 0' }}>
-              Values the model never saw in training (scored as if absent): {Object.entries(data.unseen_values as Record<string, string[]>)
-                .map(([c, v]) => `${c}: ${v.slice(0, 5).join(', ')}${v.length > 5 ? '…' : ''}`).join('; ')}
+              {tr('pg.modelsMaps.mr.unseen', { list: Object.entries(data.unseen_values as Record<string, string[]>)
+                .map(([c, v]) => `${c}: ${v.slice(0, 5).join(', ')}${v.length > 5 ? '…' : ''}`).join('; ') })}
             </p>
           )}
         </>}
         {active === 'seg' && (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><th style={th}>Segment</th><th style={{ ...th, textAlign: 'end' }}>Rows</th>
-              {(data.variables ?? []).map((v: string) => <th key={v} style={{ ...th, textAlign: 'end' }}>avg {v}</th>)}</tr></thead>
+            <thead><tr><th style={th}>{tr('pg.modelsMaps.mr.segment')}</th><th style={{ ...th, textAlign: 'end' }}>{tr('pg.modelsMaps.pm.colRows')}</th>
+              {(data.variables ?? []).map((v: string) => <th key={v} style={{ ...th, textAlign: 'end' }}>{tr('pg.modelsMaps.mr.avg', { col: v })}</th>)}</tr></thead>
             <tbody>
               {(r.meta?.centroids ?? []).map((c: any) => (
-                <tr key={c.cluster}><td style={td}>Segment {c.cluster + 1}</td><td style={tdn}>{Number(c.size).toLocaleString()}</td>
+                <tr key={c.cluster}><td style={td}>{tr('pg.modelsMaps.mr.segmentN', { n: c.cluster + 1 })}</td><td style={tdn}>{Number(c.size).toLocaleString()}</td>
                   {(data.variables ?? []).map((v: string) => <td key={v} style={tdn}>{fmt(c[v])}</td>)}</tr>
               ))}
             </tbody>
           </table>
         )}
+        {active === 'net' && data.network && <RuleNetwork network={data.network} tr={tr} />}
+        {active === 'map' && r.meta?.projection && <ClusterMap projection={r.meta.projection} tr={tr} />}
         {active === 'verdict' && (
           <Bars rows={(data.models ?? []).map((m: any) => ({ id: m.id, name: m.title, value: m.score }))}
             accentId={data.winner}
@@ -347,17 +701,62 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
         )}
         {active === 'verdict' && data.population?.test_rows != null && (
           <p style={{ fontSize: 10, color: 'var(--muted)', margin: '6px 0 0' }}>
-            Every model refitted on the same {Number(data.population.train_rows).toLocaleString()} rows and scored on the
-            same {Number(data.population.test_rows).toLocaleString()} rows it never saw.
+            {tr('pg.modelsMaps.mr.sameSplit', {
+              train: Number(data.population.train_rows).toLocaleString(), test: Number(data.population.test_rows).toLocaleString(),
+            })}
           </p>
+        )}
+        {active === 'rlist' && ((data.rules ?? []).length
+          ? <RuleTable rules={data.rules} />
+          : <p style={{ fontSize: 12, color: 'var(--muted)' }}>{tr('mdl.r.none')}</p>)}
+        {active === 'lift' && (
+          <div data-testid="lift-chart" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {(() => {
+              const rules: any[] = data.rules ?? []
+              const max = Math.max(...rules.map(x => Number(x.lift) || 0), 1)
+              // The rule on its own line above its bar: beside it, a third of
+              // the width cut every rule to "…rketing ← title = Staff".
+              return rules.map((x, i) => (
+                <div key={i} style={{ fontSize: 11.5 }}>
+                  {/* Three pieces in the PAGE's direction, each side isolated:
+                      as one dir="auto" string an English rule ran left to
+                      right and the RTL arrow pointed from Then back to If. */}
+                  <div style={{ marginBottom: 2, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    <bdi>{sideText(x.if_items, x.if)}</bdi>
+                    <b aria-hidden>{navArrows(rtl).forward}</b>
+                    <bdi>{sideText(x.then_items, x.then)}</bdi>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr max-content', gap: 6, alignItems: 'center' }}>
+                    <div style={{ background: 'var(--surface2)', borderRadius: 4, height: 10 }}>
+                      <div style={{ width: `${(Number(x.lift) / max) * 100}%`, height: '100%', borderRadius: 4,
+                        background: 'color-mix(in srgb, var(--muted) 45%, transparent)' }} />
+                    </div>
+                    <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{fmt(x.lift, 2)}×</span>
+                  </div>
+                </div>
+              ))
+            })()}
+          </div>
+        )}
+        {active === 'rfit' && (
+          <div style={{ fontSize: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div>{tr('mdl.r.strongest')}: <b>{fit?.value != null ? `${fmt(fit.value, 2)}×` : '—'}</b> · {tr('mdl.r.found', { n: (data.rules ?? []).length })}</div>
+            {data.banded && Object.keys(data.banded).length > 0 && (
+              <div>{tr('mdl.r.bands')} {Object.keys(data.banded).join(', ')}</div>
+            )}
+            <div style={{ color: 'var(--muted)', fontSize: 11 }}>
+              {tr('mdl.r.limits', { s: String(r.meta?.params?.min_support_rows ?? 20), l: String(r.meta?.params?.min_lift ?? 1.2) })}
+            </div>
+            <div style={{ color: 'var(--muted)', fontSize: 11 }}>{tr('mdl.r.hint')}</div>
+          </div>
         )}
         {active === 'fit' && fit && (
           <div style={{ fontSize: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div>{fit.name}: <b>{fmt(fit.value)}</b>{effect}</div>
+            <div>{fitName(tr, fit.name)}: <b>{fmt(fit.value)}</b>{effect}</div>
             {Object.entries(fit.secondary ?? {}).map(([k, v]) => <div key={k}>{k}: <b>{fmt(v)}</b></div>)}
             {caveats.length > 0 && (
               <ul style={{ margin: '6px 0 0', paddingInlineStart: 18, color: 'var(--muted)', fontSize: 11 }}>
-                {caveats.map((c, i) => <li key={i}>{c}</li>)}
+                <SaidItems texts={caveats} i18n={saidOf(r, r.caveats ? 'caveats' : 'warnings')} />
               </ul>
             )}
           </div>

@@ -1,11 +1,15 @@
 import { semanticAggregationWarning, nonAdditiveKind, SAFE_AGGREGATION } from '../../lib/semanticGuard'
+import { CellLink, isWebAddress } from '../../lib/cellLink'
 import PivotTable, { type PivotData } from './PivotTable'
-import { Suspense, useMemo, useState, type ReactNode } from 'react'
+import { Suspense, useEffect, useMemo, useState, useId } from 'react'
+import { renderTextWithLinks } from '../../lib/inlineMarkup'
 import { useDirection, widgetIsRtl } from '../../contexts/DirectionContext'
+import { useT, type MessageKey, type TranslateFn } from '../../i18n'
+import { MapLoading } from './geo/MapDataTable'
 import type { CalcColumnFormat } from '../../services/api'
 import type { Widget, WidgetType } from '../../types/report'
 import type { RuleStyles } from '../../lib/displayRules'
-import { fmtStr, formatValue, EmptyState } from './chartUtils'
+import { fmtStr, formatValue, EmptyState, seriesColor } from './chartUtils'
 import { CHART_RENDERERS } from './chartRenderers'
 import LatticeRenderer from './chartRenderers/LatticeRenderer'
 import AnimatedRenderer from './chartRenderers/AnimatedRenderer'
@@ -15,17 +19,14 @@ import { CustomVisual } from './CustomVisual'
 import { seriesName } from './chartRenderers/axisOptions'
 import { WidgetPlaceholder, missingRequiredRoles, missingWidgetOptions, familyOf } from './WidgetPlaceholder'
 import { MeasuredChart } from './MeasuredChart'
+import SlicerRange, { type RangeValue } from './SlicerRange'
+import SlicerTree from './SlicerTree'
+import HierPivot from './HierPivot'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // WidgetBody — pure rendering, receives onClick callback
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Render markdown-style [label](https://url) links inside a text block.
-
-    Built by splitting rather than by innerHTML: the content is author input, and this
-    way it stays text except for the explicit link syntax -- there is no HTML parsing
-    to escape from. Only http(s) targets become anchors; any other scheme renders as
-    the literal text it was, so a `javascript:` "link" is inert. */
 /**
  * The type size a big single number can take without spilling out of its card.
  *
@@ -65,6 +66,7 @@ function SlicerList({ rows, rtl, checked, onToggle, searchable }: {
   onToggle?: (v: unknown) => void
   searchable: boolean
 }) {
+  const tw = useT()
   const [query, setQuery] = useState('')
   const visible = searchable && query
     ? rows.filter(r => String(r.name).toLowerCase().includes(query.toLowerCase()))
@@ -72,8 +74,8 @@ function SlicerList({ rows, rtl, checked, onToggle, searchable }: {
   return (
     <div dir={rtl ? 'rtl' : undefined} style={{ overflow: 'auto', height: '100%', padding: 6 }}>
       {searchable && (
-        <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search values…"
-          aria-label="Search slicer values"
+        <input value={query} onChange={e => setQuery(e.target.value)} placeholder={tw('wb.searchValues')}
+          aria-label={tw('wb.searchSlicer')}
           style={{ width: '100%', fontSize: 12, marginBottom: 6 }} />
       )}
       {visible.map((row, i) => (
@@ -87,30 +89,52 @@ function SlicerList({ rows, rtl, checked, onToggle, searchable }: {
   )
 }
 
-function renderTextWithLinks(content: string): ReactNode {
-  const parts = content.split(/(\[[^\]]+\]\((?:https?:)\/\/[^\s)]+\))/g)
-  if (parts.length === 1) return content
-  return parts.map((part, i) => {
-    const m = /^\[([^\]]+)\]\(((?:https?:)\/\/[^\s)]+)\)$/.exec(part)
-    if (!m) return part
-    return (
-      <a key={i} href={m[2]} target="_blank" rel="noopener noreferrer"
-        style={{ color: 'var(--accent)' }}>
-        {m[1]}
-      </a>
-    )
-  })
+/** An image widget that says so when its picture does not load: a broken
+ *  URL used to leave a blank 0x0 box with nothing to tell the author why. */
+function ImageWidget({ url, alt, fit }: { url: string; alt: string; fit?: string }) {
+  const t = useT()
+  const [failed, setFailed] = useState(false)
+  useEffect(() => setFailed(false), [url])
+  if (failed) return <EmptyState msg={t('widget.image.failed')} />
+  return <img src={url} alt={alt} onError={() => setFailed(true)}
+    style={{ width: '100%', height: '100%', objectFit: (fit || 'contain') as any }} />
 }
 
-export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, onClickPoint, broadcasts, allFormats, checked, onToggleSlicerValue, onButtonClick, ruleStyles, parameters, geography, textFilter, onSubmitTextFilter, onAssignData, onBrushChange, brushNonce, onAnimationFrame, onApplyFix }:
+/** A widget's fetch error, in the reader's language where the code says what
+ *  it is. The server's sentence is English; for the two source states it is
+ *  replaced (the source's name carried over), for anything else it is shown
+ *  as written -- laid out by its OWN direction, so an English sentence in the
+ *  Arabic layout no longer reads ".Refresh in a moment" (HR re-test). */
+function FetchErrorState({ err, onRetry }: { err: { detail: string; code?: string }; onRetry?: () => void }) {
+  const t = useT()
+  const name = /'([^']+)'/.exec(err.detail ?? '')?.[1] ?? ''
+  const msg = err.code === 'source_busy' ? t('widget.err.busy', { name })
+    : err.code === 'source_unavailable' ? t('widget.err.unreachable', { name })
+    : err.detail
+  const retry = (err.code === 'source_unavailable' || err.code === 'source_busy' || err.code === 'quota') && onRetry
+  return <EmptyState msg={msg} action={retry ? { label: t('widget.err.retry'), onClick: onRetry! } : undefined} />
+}
+
+export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, onClickPoint, broadcasts, allFormats, checked, onToggleSlicerValue, onButtonClick, ruleStyles, parameters, geography, textFilter, onSubmitTextFilter, rangeFilter, onSubmitRangeFilter, treePaths, onTreeChange, gridOpen, onToggleGridBranch, onGridClick, onAssignData, onBrushChange, brushNonce, onAnimationFrame, onApplyFix, onLoadMore, loadingMore }:
   { widget: Widget; data: any; fetchError?: { detail: string; code?: string } | null; onRetry?: () => void; localSelected: unknown; onClickPoint: (v: unknown) => void; broadcasts: boolean; allFormats?: Record<string, CalcColumnFormat | undefined>; checked?: Set<unknown>; onToggleSlicerValue?: (v: unknown) => void; onButtonClick?: () => void; ruleStyles?: RuleStyles; parameters?: Record<string, unknown>; geography?: Record<string, number>;
     textFilter?: string; onSubmitTextFilter?: (value: string, column: string) => void
+    /** A range slicer's current bounds, and how it applies new ones. */
+    rangeFilter?: RangeValue | null; onSubmitRangeFilter?: (range: RangeValue | null, column: string) => void
+    /** A hierarchy slicer (hierarchy plan, step 2): the ticked paths, and where changes go. */
+    treePaths?: string[][] | null; onTreeChange?: (paths: string[][] | null) => void
+    /** A hierarchical crosstab (step 3): open branches, toggling them, a value clicked. */
+    gridOpen?: { rows: string[]; cols: string[] }
+    onToggleGridBranch?: (axis: 'rows' | 'cols', key: string) => void
+    onGridClick?: (rowPath: string[], colPath: string[]) => void
     /** Edit mode only: select this widget and open its Data roles. */
     onAssignData?: () => void
     /** Overview-axis zoom reports; bumping brushNonce remounts the chart to reset it. */
     onBrushChange?: (range: BrushRange | null) => void
     brushNonce?: number
-    onAnimationFrame?: (label: string | null) => void ; onApplyFix?: (patch: Record<string, unknown>, label: string) => void }) {
+    onAnimationFrame?: (label: string | null) => void ; onApplyFix?: (patch: Record<string, unknown>, label: string) => void
+    /** A paged raw table: fetch the next page (the reader scrolled near the end). */
+    onLoadMore?: () => void; loadingMore?: boolean }) {
+  const tw = useT()
 
   const wt = widget.widget_type
   const cfg = widget.config as any
@@ -159,7 +183,8 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
         : <span key={i}>{text}</span>
     })
     return (
-      <div dir={rtl ? 'rtl' : undefined} style={{ padding: 12, fontSize: 13, whiteSpace: 'pre-wrap' }}>{rendered}</div>
+      // dir="auto": Arabic text reads right-to-left even when the app is in English.
+      <div dir={rtl ? 'rtl' : 'auto'} style={{ padding: 12, fontSize: 13, whiteSpace: 'pre-wrap' }}>{rendered}</div>
     )
   }
   if (wt === 'button') return (
@@ -168,7 +193,7 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
     </div>
   )
   if (wt === 'image') return cfg.url ? (
-    <img src={cfg.url} alt={cfg.alt || ''} style={{ width: '100%', height: '100%', objectFit: cfg.fit || 'contain' }} />
+    <ImageWidget url={cfg.url} alt={cfg.alt || ''} fit={cfg.fit} />
   ) : (
     <EmptyState msg="No image URL set" />
   )
@@ -226,7 +251,7 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
                   <tr key={i}>{(row as unknown[]).map((v, j) => (
                     <td key={j} style={{ fontFamily: typeof v === 'number' ? 'var(--mono)' : undefined }}>
                       {v == null ? <span style={{ color: 'var(--muted)' }}>—</span>
-                        : typeof v === 'number' ? v.toLocaleString() : String(v)}
+                        : typeof v === 'number' ? v.toLocaleString() : isWebAddress(v) ? <CellLink url={v} /> : String(v)}
                     </td>))}</tr>
                 ))}
               </tbody>
@@ -236,16 +261,15 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
         {payload.truncated && (
           <div style={{ padding: '4px 10px', fontSize: 10.5, color: 'var(--muted)',
             borderTop: '1px solid var(--border)' }}>
-            Showing the first {rows.length.toLocaleString()} rows
-            {payload.row_count ? ` of ${payload.row_count.toLocaleString()}` : ''} —
-            the rest were truncated.
+            {payload.row_count
+              ? tw('wb.firstOf', { n: rows.length.toLocaleString(), total: payload.row_count.toLocaleString() })
+              : tw('wb.first', { n: rows.length.toLocaleString() })}
           </div>
         )}
         {payload.input_truncated && (
           <div style={{ padding: '4px 10px', fontSize: 10.5, color: 'var(--warning, var(--muted))',
             borderTop: '1px solid var(--border)' }}>
-            The script only saw the first {(payload.rows_in ?? 0).toLocaleString()} rows
-            of this data — any total below is of those rows, not of everything.
+            {tw('wb.scriptSaw', { n: (payload.rows_in ?? 0).toLocaleString() })}
           </div>
         )}
         {payload.stdout ? (
@@ -314,22 +338,23 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
   if (!data && fetchError) {
     // A refused aggregation (a summed year, an averaged id) comes with its
     // fix: one click switches to the aggregation that means something.
-    const fix = fetchError.code === 'semantic_veto' && onApplyFix ? semanticFix(widget.config as Record<string, unknown>) : null
+    const fix = fetchError.code === 'semantic_veto' && onApplyFix ? semanticFix(widget.config as Record<string, unknown>, tw) : null
     if (fix) {
       return <EmptyState msg={fetchError.detail}
         action={{ label: fix.label, onClick: () => onApplyFix!(fix.patch, fix.label) }} />
     }
-    return (
-      <EmptyState msg={fetchError.detail}
-        action={(fetchError.code === 'source_unavailable' || fetchError.code === 'quota') && onRetry
-          ? { label: 'Try again', onClick: onRetry } : undefined} />
-    )
+    return <FetchErrorState err={fetchError} onRetry={onRetry} />
   }
   if (!data) return <EmptyState msg="Configure widget to see data" />
   // The second channel: a 200 whose body says it failed. A measure that
   // could not be evaluated arrives this way, and until the widget read it
   // the chart renderer got empty rows and drew nothing -- the message lost.
   if (data?.type === 'error') return <EmptyState msg={String(data.message || 'This widget could not be computed')} />
+
+  if (data?.type === 'hier_pivot') {
+    return <HierPivot data={data} open={gridOpen ?? { rows: [], cols: [] }} rtl={rtl}
+      onToggle={onToggleGridBranch} onCellClick={onGridClick} />
+  }
 
   // Slicer
   if (wt === 'slicer') {
@@ -347,6 +372,14 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
     // `auto` never resolves to text: a reader who CAN see their options should
     // be shown them, and a control that silently stopped listing reads as
     // broken rather than deliberate. Text is always a deliberate choice.
+    // A range comes from the server: chosen, or picked by `auto` for a number
+    // column with many values. It carries bounds, not a value list.
+    if (data?.type === 'slicer_tree') {
+      return <SlicerTree data={data} paths={treePaths ?? null} rtl={rtl} onChange={onTreeChange} />
+    }
+    if (data?.type === 'slicer_range') {
+      return <SlicerRange data={data} value={rangeFilter ?? null} rtl={rtl} onApply={onSubmitRangeFilter} />
+    }
     const effective = mode !== 'auto' ? mode
       : rows.length < 5 ? 'buttons' : rows.length <= 10 ? 'list' : 'search'
     if (effective === 'text') {
@@ -357,8 +390,8 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
       const col = String(cfg.dimension ?? cfg.column ?? data?.column ?? '')
       return (
         <div dir={rtl ? 'rtl' : undefined} style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <input type="text" aria-label={`Filter by ${col}`} defaultValue={textFilter}
-            placeholder={col ? `Type a ${col}…` : 'Type a value…'}
+          <input type="text" aria-label={tw('wb.filterBy', { c: col })} defaultValue={textFilter}
+            placeholder={col ? tw('wb.typeA', { c: col }) : tw('wb.typeValue')}
             onKeyDown={e => {
               if (e.key !== 'Enter') return
               onSubmitTextFilter?.((e.target as HTMLInputElement).value.trim(), col)
@@ -367,7 +400,7 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
               border: '1px solid var(--border)', borderRadius: 6,
               background: 'var(--surface)', color: 'var(--text)' }} />
           <span style={{ fontSize: 10, color: 'var(--muted)' }}>
-            Press Enter to filter. Leave empty to clear.
+            {tw('wb.enterToFilter')}
           </span>
         </div>
       )
@@ -394,7 +427,7 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
       const selected = rows.filter(r => checked?.has(r.name)).map(r => r.name)
       return (
         <div dir={rtl ? 'rtl' : undefined} style={{ padding: 8 }}>
-          <select multiple aria-label="Slicer values" value={selected.map(String)}
+          <select multiple aria-label={tw('wb.slicerValues')} value={selected.map(String)}
             onChange={e => {
               const next = new Set([...e.target.selectedOptions].map(o => o.value))
               for (const r of rows) {
@@ -419,24 +452,114 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
       ? (first.value ?? '—')
       : (Array.isArray(first) ? first[first.length - 1] : '—')
     const kpiIcon = ruleStyles?.rows?.[0]?.icon
-    const kpiText = fmtStr(val, measureFmt)
+    // A level's change over the period (`change_over`, server period_change.py):
+    // the percent is the number; both ends, in the column's own format, beneath.
+    const change = (data as { change?: { pct: number; from: unknown; to: unknown; first: unknown; last: unknown } }).change
+    const kpiText = change ? `${change.pct > 0 ? '+' : ''}${change.pct.toFixed(1)}%` : fmtStr(val, measureFmt)
+    // Its recent history, when the widget asks for one (`sparkline_date`): the
+    // change of the last complete period against the one before, and the
+    // shape of the periods before that (server: widget_data.kpi_trend).
+    const trend = (data as { trend?: KpiTrend }).trend
+    const pct = trend && typeof trend.change_pct === 'number' ? trend.change_pct : null
+    const up = pct != null && pct > 0, flat = pct != null && Math.abs(pct) < 0.05
+    // Which way is good is the column's stored direction; with none, no colour.
+    const good = cfg.trend_good === 'up' ? up : cfg.trend_good === 'down' ? !up : null
+    const trendColor = flat || good == null ? 'var(--muted)' : good ? 'var(--ok, #16a34a)' : 'var(--danger, #dc2626)'
+    // With a history the card is laid out to be read at a glance: the number
+    // at the start, its change as a pill at the end, and the history as a
+    // filled line across the whole width underneath. Without one it stays
+    // centred, as it always was.
+    const withTrend = !!trend && trend.series.length >= 2
+    const pill = pct != null && (
+      <span data-testid="kpi-change" dir="ltr"
+        // A pill tinted with its own colour: the change is read before the line beside it.
+        style={{ fontSize: 12, fontWeight: 600, color: trendColor, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', flex: '0 0 auto',
+          padding: '2px 8px', borderRadius: 999, background: `color-mix(in srgb, ${trendColor} 14%, transparent)` }}>
+        {flat ? '→' : up ? '▲' : '▼'} {Math.abs(pct).toFixed(1)}%
+      </span>
+    )
     return (
-      <div dir={rtl ? 'rtl' : undefined} style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '0 10px', minWidth: 0, containerType: 'inline-size' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, maxWidth: '100%', minWidth: 0 }}>
+      // `safe center`: when the card is shorter than its content, the overflow
+      // goes below, never above -- a plain `center` cut the top of the number off
+      // on every KPI with a trend line (persona test 2026-10-12).
+      <div dir={rtl ? 'rtl' : undefined} style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: withTrend ? 'stretch' : 'center', justifyContent: 'safe center', gap: 4, padding: withTrend ? '2px 12px 0' : '0 10px', minWidth: 0, containerType: 'inline-size' }}>
+        {/* In a narrow card the change drops under the number instead of cutting it short. */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: withTrend ? 'space-between' : 'center', gap: withTrend ? '2px 8px' : 8, maxWidth: '100%', minWidth: 0, flexWrap: withTrend ? 'wrap' : undefined }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
           {kpiIcon && <span aria-hidden="true" style={{ fontSize: 28, flex: '0 0 auto' }}>{kpiIcon}</span>}
           <div title={kpiText}
-            style={{ fontSize: fitFigureSize(kpiText, 36), fontWeight: 650, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.02em', color: ruleStyles?.rows?.[0]?.fill ?? 'var(--accent)',
+            // The dashboard's style may set the headline number's size (lib/dashboardStyle); else it is fitted to the text.
+            style={{ fontSize: `var(--dl-s-number-size, ${fitFigureSize(kpiText, 36)})`, fontWeight: 650, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.02em', color: ruleStyles?.rows?.[0]?.fill ?? 'var(--accent)',
               minWidth: 0, maxWidth: '100%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: 1.15 }}>
             {kpiText}
           </div>
+          </div>
+          {withTrend && pill}
         </div>
-        <div style={{ fontSize: 12, color: 'var(--muted)', maxWidth: '100%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        <div style={{ fontSize: 12, color: 'var(--muted)', maxWidth: '100%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textAlign: withTrend ? 'start' : 'center' }}>
           {/* A count or an average is not the column itself: "Records" read
               3,576 over the subtitle RATED_AMOUNT (live QA 2026-09-28). A sum
               keeps the column's name, as it always has. */}
-          {cfg.measure && cfg.aggregation && String(cfg.aggregation).toLowerCase() !== 'sum'
-            ? seriesName(cfg) : (cfg.measure || cfg.dimension || 'Value')}
+          {/* A caption written for the reader (the guided setup's "why")
+              instead of "avg(is_late_pct)". */}
+          {typeof cfg.caption === 'string' && cfg.caption.trim() ? cfg.caption
+            : cfg.measure && cfg.aggregation && String(cfg.aggregation).toLowerCase() !== 'sum'
+              ? seriesName(cfg) : (cfg.measure || cfg.dimension || 'Value')}
         </div>
+        {change && (
+          <div data-testid="kpi-period-change" dir="ltr" style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {fmtStr(change.from, measureFmt)} → {fmtStr(change.to, measureFmt)} ({String(change.first).slice(0, 10)} – {String(change.last).slice(0, 10)})
+          </div>
+        )}
+        {trend && withTrend && (
+          <div data-testid="kpi-trend" style={{ flex: '1 1 auto', minHeight: 0, maxHeight: 72, display: 'flex', flexDirection: 'column', minWidth: 0, margin: '0 -12px' }}
+            title={`${trend.period}: ${fmtStr(trend.current, measureFmt)} · ${trend.previous_period}: ${fmtStr(trend.previous, measureFmt)}`}>
+            <Sparkline values={trend.series.map(p => p.value)} fluid filled color={seriesColor(Number(widget.id) || 0)} />
+          </div>
+        )}
+        {withTrend && (
+          <div style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {trend!.period}
+          </div>
+        )}
+        {/* Against the target its author stored (server: widget_data.kpi_target). */}
+        {(() => {
+          const tg = (data as { target?: KpiTarget }).target
+          if (!tg) return null
+          if (!tg.applies) {
+            return <div data-testid="kpi-target" style={{ fontSize: 10.5, color: 'var(--muted)', textAlign: 'center' }}>{tg.reason}</div>
+          }
+          const pctOf = typeof tg.pct === 'number' ? tg.pct : null
+          const tone = tg.met ? 'var(--ok, #16a34a)' : 'var(--muted)'
+          return (
+            <div data-testid="kpi-target" data-met={tg.met ? 'yes' : 'no'} style={{ width: 'min(180px, 90%)' }}
+              title={tg.label ? `${tg.label}: ${fmtStr(tg.against, measureFmt)}` : undefined}>
+              <div dir="ltr" style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+                {pctOf != null && <b style={{ color: tone }}>{pctOf.toFixed(0)}%</b>} {tw('wb.of')} {fmtStr(tg.value, measureFmt)}
+                {tg.period ? ` · ${tg.label ?? tg.period}` : ''}
+              </div>
+              <div aria-hidden="true" style={{ height: 4, borderRadius: 2, background: 'var(--surface2)', marginTop: 2, overflow: 'hidden' }}>
+                <div style={{ width: `${Math.max(0, Math.min(pctOf ?? 0, 100))}%`, height: '100%', background: tone }} />
+              </div>
+            </div>
+          )
+        })()}
+        {/* Against the same period a year before -- beside, not instead of,
+            the change on the previous period. Same rule for its colour. */}
+        {trend?.year_ago && typeof trend.year_ago.change_pct === 'number' && (() => {
+          const y = trend.year_ago!.change_pct as number
+          const yUp = y > 0, yFlat = Math.abs(y) < 0.05
+          const yGood = cfg.trend_good === 'up' ? yUp : cfg.trend_good === 'down' ? !yUp : null
+          return (
+            <div data-testid="kpi-year-ago" dir="ltr"
+              title={`${trend.year_ago!.period}: ${fmtStr(trend.year_ago!.value, measureFmt)}`}
+              style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+              <span style={{ fontWeight: 600, color: yFlat || yGood == null ? 'var(--muted)' : yGood ? 'var(--ok, #16a34a)' : 'var(--danger, #dc2626)' }}>
+                {yFlat ? '→' : yUp ? '▲' : '▼'} {Math.abs(y).toFixed(1)}%
+              </span>{' '}{tw('wb.vs')} {trend.year_ago!.period}
+            </div>
+          )
+        })()}
       </div>
     )
   }
@@ -446,7 +569,7 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
     const rows: any[] = data.rows ?? []
     return (
       // Focusable: a card with more figures than its tile scrolls (E10).
-      <div dir={rtl ? 'rtl' : undefined} tabIndex={0} role="region" aria-label="Values"
+      <div dir={rtl ? 'rtl' : undefined} tabIndex={0} role="region" aria-label={tw('wb.values')}
         style={{ height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 10, padding: 8, containerType: 'inline-size' }}>
         {rows.map((row, i) => (
           <div key={i} style={{ textAlign: 'center', minWidth: 0 }}>
@@ -481,6 +604,7 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
       : rawRows
     return (
       <WindowedTable rtl={rtl} cfg={cfg} data={data} cols={cols} rows={rows}
+        onLoadMore={onLoadMore} loadingMore={loadingMore}
         ruleStyles={ruleStyles} allFormats={allFormats} broadcasts={broadcasts}
         onClickPoint={onClickPoint} grouped={isObjRows && cols.includes('name') && cols.includes('value')} />
     )
@@ -548,14 +672,15 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
       /* Boundary for the lazily-loaded renderers (the map family): while their chunk
          downloads, only this tile shows the placeholder -- without a boundary here the
          suspend would bubble to the route-level fallback and blank the whole page. */
-      <Suspense fallback={<EmptyState msg="Loading map…" />}>
+      <Suspense fallback={<MapLoading />}>
         <MeasuredChart>
           {(plotW, plotH) => (
             <ChartRenderer key={brushNonce ?? 0} onBrushChange={onBrushChange}
               rows={rows} data={data} cfg={cfg} rtl={rtl} broadcasts={broadcasts}
               localSelected={localSelected} onClickPoint={onClickPoint}
               measureFmt={measureFmt} measure2Fmt={measure2Fmt} allFormats={allFormats}
-              ruleStyles={ruleStyles} geography={geography} plotW={plotW} plotH={plotH} />
+              ruleStyles={ruleStyles} geography={geography} plotW={plotW} plotH={plotH}
+              treePaths={treePaths} onTreeChange={onTreeChange} />
           )}
         </MeasuredChart>
       </Suspense>
@@ -565,11 +690,32 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
   return <EmptyState msg={`Unknown widget: ${wt}`} />
 }
 
+/** A KPI against its stored target (server: services/widget_data.kpi_target). */
+interface KpiTarget {
+  value: number; period: string | null; applies: boolean; reason?: string
+  against?: number; label?: string | null; pct?: number | null; remaining?: number; met?: boolean; lower_is_better?: boolean
+}
+
+/** A KPI's recent history (server: services/widget_data.kpi_trend). */
+interface KpiTrend {
+  granularity: string; date: string; series: { period: string; value: number }[]
+  current: number; previous: number; change: number; change_pct: number | null
+  period: string; previous_period: string; partial_dropped: boolean
+  /** The same period one year before, when the history reaches that far. */
+  year_ago?: { period: string; value: number; change: number; change_pct: number | null } | null
+}
+
 /** An inline row sparkline: the row's numeric cells across the (time-ordered)
  *  crosstab columns, drawn as a mini trend line. Scaled to the row's OWN min/max
  *  so the shape reads at a glance -- a sparkline shows movement, not magnitude.
  *  Fewer than two points is not a trend, so it renders nothing. */
-function Sparkline({ values, width = 76, height = 20 }: { values: number[]; width?: number; height?: number }) {
+function Sparkline({ values, width = 76, height = 20, filled = false, fluid = false, color = 'var(--accent)' }: {
+  values: number[]; width?: number; height?: number; filled?: boolean
+  /** Fill whatever box it is given (a headline number's history across its card). */
+  fluid?: boolean; color?: string }) {
+  const gradient = `spark${useId().replace(/:/g, '')}`
+  if (fluid) { width = 100; height = 32 }
+  const tw = useT()
   const nums = values.filter(v => typeof v === 'number' && isFinite(v))
   if (nums.length < 2) return null
   const min = Math.min(...nums), max = Math.max(...nums)
@@ -578,10 +724,24 @@ function Sparkline({ values, width = 76, height = 20 }: { values: number[]; widt
   const y = (v: number) => (height - 2 - ((v - min) / span) * (height - 4))
   const pts = nums.map((v, i) => `${(i * stepX).toFixed(1)},${y(v).toFixed(1)}`).join(' ')
   return (
-    <svg width={width} height={height} style={{ display: 'block' }} role="img" aria-label="trend sparkline">
-      <polyline points={pts} fill="none" stroke="var(--accent)" strokeWidth={1.5}
-        strokeLinejoin="round" strokeLinecap="round" />
-      <circle cx={(nums.length - 1) * stepX} cy={y(nums[nums.length - 1])} r={1.8} fill="var(--accent)" />
+    <svg {...(fluid ? { width: '100%', height: '100%', viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: 'none' } : { width, height })}
+      style={{ display: 'block', flex: fluid ? '1 1 auto' : undefined, minHeight: 0 }} role="img" aria-label={tw('wb.sparkline')}>
+      {filled && (
+        <>
+          <defs>
+            <linearGradient id={gradient} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity={0.34} />
+              <stop offset="100%" stopColor={color} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <polygon data-testid="sparkline-fill" points={`0,${height} ${pts} ${((nums.length - 1) * stepX).toFixed(1)},${height}`}
+            fill={`url(#${gradient})`} stroke="none" />
+        </>
+      )}
+      <polyline points={pts} fill="none" stroke={color} strokeWidth={fluid ? 2 : 1.5}
+        strokeLinejoin="round" strokeLinecap="round" vectorEffect={fluid ? 'non-scaling-stroke' : undefined} />
+      {/* The end dot would be stretched into an oval in a box of any shape. */}
+      {!fluid && <circle cx={(nums.length - 1) * stepX} cy={y(nums[nums.length - 1])} r={1.8} fill={color} />}
     </svg>
   )
 }
@@ -598,7 +758,9 @@ const TOTALS_UNAVAILABLE_REASON: Record<string, string> = {
  *  WINDOW_THRESHOLD rows, only the slice near the viewport renders, with
  *  spacer rows standing in for the rest; banding, rule styles, row numbers
  *  and cross-filter clicks all index off the ABSOLUTE row index. */
-function WindowedTable({ rtl, cfg, data, cols: inCols, rows: inRows, ruleStyles, allFormats, broadcasts, onClickPoint, grouped = false }: {
+function WindowedTable({ rtl, cfg, data, cols: inCols, rows: inRows, ruleStyles, allFormats, broadcasts, onClickPoint, grouped = false, onLoadMore, loadingMore }: {
+  onLoadMore?: () => void
+  loadingMore?: boolean
   /** Rows are groups of a dimension (a series), not the data's own rows. */
   grouped?: boolean
   rtl: boolean
@@ -611,6 +773,7 @@ function WindowedTable({ rtl, cfg, data, cols: inCols, rows: inRows, ruleStyles,
   broadcasts: boolean
   onClickPoint: (name: unknown) => void
 }) {
+  const tw = useT()
   // Totals placement. 'before' draws the totals row above the data and the row
   // subtotal column (`__total__`) ahead of the value columns, right after the row
   // label. Absent means 'after': how every table saved before placement existed
@@ -648,6 +811,20 @@ function WindowedTable({ rtl, cfg, data, cols: inCols, rows: inRows, ruleStyles,
   const cellPad = cfg.table_condensed ? '2px 6px' : undefined
   const estRowH = cfg.table_condensed ? 24 : 31
   const win = useWindowedRows(rows.length, estRowH, rows.length > WINDOW_THRESHOLD)
+  // Paged: more rows on the server than here. Asked for when the reader is
+  // within a few screens of the bottom, and again whenever the table is too
+  // short to scroll at all (a tall tile over a small first page).
+  const morePending = !!data.page && !grouped && Number(data.total) > rows.length
+  const nearEnd = (el: HTMLElement) => el.scrollTop + el.clientHeight > el.scrollHeight - 400
+  const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    win.onScroll()
+    if (morePending && nearEnd(e.currentTarget)) onLoadMore?.()
+  }
+  useEffect(() => {
+    const el = win.containerRef.current as HTMLElement | null
+    if (morePending && el && el.scrollHeight <= el.clientHeight + 400) onLoadMore?.()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [morePending, rows.length])
   // Per-row trend column: the numeric cells across the crosstab's value columns form
   // the series (the first column is the row's category label, __total__ is a summary,
   // so both are excluded). Needs at least two points to be a trend.
@@ -693,16 +870,16 @@ function WindowedTable({ rtl, cfg, data, cols: inCols, rows: inRows, ruleStyles,
   return (
     // Focusable, so a keyboard user can scroll a table wider or longer than
     // its tile (axe scrollable-region-focusable, E10).
-    <div dir={rtl ? 'rtl' : undefined} ref={win.containerRef} onScroll={win.onScroll}
-      tabIndex={0} role="region" aria-label="Table"
+    <div dir={rtl ? 'rtl' : undefined} ref={win.containerRef} onScroll={onScroll}
+      tabIndex={0} role="region" aria-label={tw('wb.table')}
       style={{ overflow: 'auto', height: '100%' }}>
       <table style={{ fontSize: 12 }}>
         <thead>
           <tr>
             {rowNumbers && <th>#</th>}
             {/* `__total__` is the grid's row subtotal: its name on screen is "Total". */}
-            {cols.map((c: string) => <th key={c} style={{ padding: cellPad }}>{c === '__total__' ? 'Total' : headerOf(c)}</th>)}
-            {showSpark && <th style={{ padding: cellPad }}>Trend</th>}
+            {cols.map((c: string) => <th key={c} style={{ padding: cellPad }}>{c === '__total__' ? tw('wb.total') : headerOf(c)}</th>)}
+            {showSpark && <th style={{ padding: cellPad }}>{tw('wb.trend')}</th>}
           </tr>
           {totalsBefore && totalsRowEl}
         </thead>
@@ -741,7 +918,7 @@ function WindowedTable({ rtl, cfg, data, cols: inCols, rows: inRows, ruleStyles,
                       )}
                       <span style={{ position: 'relative', zIndex: 1, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                         {painted?.icon && <span aria-hidden="true">{painted.icon}</span>}
-                        {formatValue(v, allFormats?.[cols[j]])}
+                        {isWebAddress(v) ? <CellLink url={v} /> : formatValue(v, allFormats?.[cols[j]])}
                       </span>
                     </td>
                   )
@@ -763,12 +940,13 @@ function WindowedTable({ rtl, cfg, data, cols: inCols, rows: inRows, ruleStyles,
         // groups it left out: "Showing 6 of 3576" read as a cut table (live QA
         // 2026-09-28). A left-out group is the truncation note's to say.
         <div data-testid="table-footer" style={{ padding: '6px 12px', color: 'var(--muted)', fontSize: 11, borderTop: '1px solid var(--border)' }}>
-          {rows.length.toLocaleString()} {rows.length === 1 ? 'group' : 'groups'} from {Number(data.total).toLocaleString()} rows
+          {tw(rows.length === 1 ? 'wb.groupFrom' : 'wb.groupsFrom', { n: rows.length.toLocaleString(), total: Number(data.total).toLocaleString() })}
         </div>
       )}
       {!grouped && data.total > rows.length && (
         <div data-testid="table-footer" style={{ padding: '6px 12px', color: 'var(--muted)', fontSize: 11, borderTop: '1px solid var(--border)' }}>
-          Showing {rows.length.toLocaleString()} of {Number(data.total).toLocaleString()} rows
+          {tw('wb.showing', { n: rows.length.toLocaleString(), total: Number(data.total).toLocaleString() })}
+          {morePending && (loadingMore ? ` — ${tw('wb.loadingMore')}` : ` — ${tw('wb.scrollMore')}`)}
         </div>
       )}
       {/* The server sets this when "Show totals" was on but the only number it could
@@ -795,12 +973,13 @@ function WindowedList({ rtl, rows, ruleStyles, localSelected, broadcasts, onClic
   onClickPoint: (name: unknown) => void
   measureFmt: CalcColumnFormat | undefined
 }) {
+  const tw = useT()
   const win = useWindowedRows(rows.length, 33, rows.length > WINDOW_THRESHOLD)
   return (
     // Focusable, so a keyboard user can scroll a table wider or longer than
     // its tile (axe scrollable-region-focusable, E10).
     <div dir={rtl ? 'rtl' : undefined} ref={win.containerRef} onScroll={win.onScroll}
-      tabIndex={0} role="region" aria-label="Table"
+      tabIndex={0} role="region" aria-label={tw('wb.table')}
       style={{ overflow: 'auto', height: '100%' }}>
       {win.padTop > 0 && <div aria-hidden="true" style={{ height: win.padTop }} />}
       {rows.slice(win.start, win.end).map((row: any, idx: number) => {
@@ -854,7 +1033,7 @@ function WindowedList({ rtl, rows, ruleStyles, localSelected, broadcasts, onClic
 
 /** The one-click fix for a refused aggregation: the first measure whose
  *  aggregation is meaningless for what it is, switched to the one that is. */
-export function semanticFix(cfg: Record<string, unknown>): { patch: Record<string, unknown>; label: string } | null {
+export function semanticFix(cfg: Record<string, unknown>, t?: TranslateFn): { patch: Record<string, unknown>; label: string } | null {
   const agg = (cfg.aggregation as string) || (cfg.agg as string) || 'sum'
   const pairs: [string, string, string][] = [
     [String(cfg.measure ?? ''), agg, 'aggregation'],
@@ -862,8 +1041,11 @@ export function semanticFix(cfg: Record<string, unknown>): { patch: Record<strin
   ]
   for (const [col, a, key] of pairs) {
     if (!col || !semanticAggregationWarning(col, a)) continue
-    const safe = SAFE_AGGREGATION[nonAdditiveKind(col)!]
-    return { patch: { [key]: safe.value }, label: `Use ${safe.label} of ${col}` }
+    const kind = nonAdditiveKind(col)!
+    const safe = SAFE_AGGREGATION[kind]
+    const label = t ? t('wb.useAggOf', { agg: t(`wb.safeAgg.${kind}` as MessageKey), col })
+      : `Use ${safe.label} of ${col}`  // i18n-ok: only without a translator (tests)
+    return { patch: { [key]: safe.value }, label }
   }
   return null
 }

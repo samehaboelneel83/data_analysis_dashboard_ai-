@@ -1,5 +1,7 @@
 import { useCallback, useContext, useEffect, useMemo, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
+import { useT } from '../i18n'
+import SourceSummary from '../components/setup/SourceSummary'
 import { dataSourcesApi, type IndexAdvice } from '../services/api'
 import toast from 'react-hot-toast'
 import {
@@ -15,6 +17,10 @@ import { AuthContext } from '../contexts/AuthContext'
 import SuggestFromSourceDialog from '../components/review/SuggestFromSourceDialog'
 import LoadError from '../components/ui/LoadError'
 import LoadingState from '../components/ui/LoadingState'
+import ActionMenu from '../components/ActionMenu'
+import { localDigits } from '../lib/arabicFormats'
+import { Activity, BookOpen, Boxes, ChevronRight, Columns3, Database, GitCompare, RefreshCw, Search, Sparkles, Waypoints } from 'lucide-react'
+import './connections/connections.css'
 import {
   RelationshipRow, ColumnReview, EntityReview, DriftPanel, SourceHealthPanel,
 } from './sourceReview/ReviewPanels'
@@ -40,6 +46,7 @@ import {
 export default function SourceReview() {
   const { id } = useParams<{ id: string }>()
   const sourceId = Number(id)
+  const tr = useT()
 
   const [queue, setQueue] = useState<ReviewQueue | null>(null)
   const [loadError, setLoadError] = useState<unknown>(null)
@@ -74,14 +81,14 @@ export default function SourceReview() {
     if (tab !== 'health' || advice !== null) return
     dataSourcesApi.indexAdvice(sourceId)
       .then(setAdvice)
-      .catch(() => setAdviceError('Could not load index advice'))
+      .catch(() => setAdviceError(tr('pg.dataPages.sr.adviceError')))
   }, [tab, advice, sourceId])
 
   useEffect(() => {
     if (tab !== 'drift' || drift !== null) return
     metadataApi.drift(sourceId)
       .then(setDrift)
-      .catch(() => setDriftError('Could not load drift history'))
+      .catch(() => setDriftError(tr('pg.dataPages.sr.driftError')))
   }, [tab, drift, sourceId])
   const [pollTimer, setPollTimer] = useState<number | null>(null)
   // One search term across both tabs. At 82 tables and 1,354 columns, finding
@@ -182,18 +189,18 @@ export default function SourceReview() {
           setSyncing(false)
           await load()
           const failed = latest.stages.filter(st => st.status === 'failed').length
-          if (latest.status === 'ok') toast.success('Sync finished')
-          else if (failed) toast.error(`Sync finished with ${failed} failed stage(s)`)
-          else toast.error(`Sync ${latest.status}`)
+          if (latest.status === 'ok') toast.success(tr('pg.dataPages.sr.syncFinished'))
+          else if (failed) toast.error(tr('pg.dataPages.sr.syncFailedStages', { n: failed }))
+          else toast.error(tr('pg.dataPages.sr.syncStatus', { status: latest.status }))
         }
       } catch {
         window.clearInterval(timer)
         setSyncing(false)
-        toast.error('Lost track of the sync — reload to see where it got to')
+        toast.error(tr('pg.dataPages.sr.lostSync'))
       }
     }, 1500)
     setPollTimer(timer)
-  }, [sourceId, load])
+  }, [sourceId, load, tr])
 
   // A sync started somewhere ELSE -- by creating the connection, which now sends
   // the user straight here -- must be followed like one started from this page.
@@ -231,8 +238,8 @@ export default function SourceReview() {
       setSyncing(false)
       // 409 means one is already in flight — a normal outcome, not a fault.
       toast.error(err?.response?.status === 409
-        ? 'A sync is already running for this source'
-        : 'Could not start the sync')
+        ? tr('pg.dataPages.sr.syncRunning')
+        : tr('pg.dataPages.sr.syncStartFailed'))
     }
   }
 
@@ -240,7 +247,7 @@ export default function SourceReview() {
   const confirmSelected = async () => {
     if (!selected.size) return
     await metadataApi.confirm(sourceId, { relationship_ids: [...selected] })
-    toast.success(`Confirmed ${selected.size} relationship${selected.size === 1 ? '' : 's'}`)
+    toast.success(tr('pg.dataPages.sr.confirmedN', { n: selected.size }))
     await load()
   }
 
@@ -251,13 +258,13 @@ export default function SourceReview() {
 
   const saveDescription = async (columnId: number, description: string) => {
     await metadataApi.confirm(sourceId, { column_updates: [{ id: columnId, description }] })
-    toast.success('Saved')
+    toast.success(tr('pg.dataPages.sr.saved'))
     await load()
   }
 
   const saveEnumLabels = async (columnId: number, labels: Record<string, string>) => {
     await metadataApi.confirm(sourceId, { column_updates: [{ id: columnId, enum_labels: labels }] })
-    toast.success('Saved')
+    toast.success(tr('pg.dataPages.sr.saved'))
     await load()
   }
 
@@ -265,20 +272,20 @@ export default function SourceReview() {
     business_name?: string; grain?: string; description?: string
   }) => {
     await metadataApi.confirmEntities(sourceId, { updates: [{ id: entityId, ...fields }] })
-    toast.success('Saved')
+    toast.success(tr('pg.dataPages.sr.saved'))
     await load()
   }
 
   const confirmEntity = async (entityId: number) => {
     await metadataApi.confirmEntities(sourceId, { updates: [{ id: entityId, confirm: true }] })
-    toast.success('Confirmed')
+    toast.success(tr('pg.dataPages.rev.confirmed'))
     await load()
   }
 
   if (!queue && loadError != null) {
     return (
       <div style={{ padding: 24 }}>
-        <LoadError what="the review queue" error={loadError} onRetry={load} />
+        <LoadError what="the review queue" title={tr('pg.dataPages.sr.loadError')} error={loadError} onRetry={load} />
       </div>
     )
   }
@@ -287,84 +294,92 @@ export default function SourceReview() {
   return (
     // Full width, like every other page: a 1200px cap left half of a wide
     // screen empty beside the join graph (reported 2026-09-28).
-    <div style={{ padding: '24px 32px', width: '100%', boxSizing: 'border-box' }}>
-      {/* Title+stats grouped on the start side, the action on the end side --
-          matching the space-between header every other list page uses. The
-          stats line reads as this page's subtitle (what the numbers below
-          mean), so it belongs with the title, not stranded after the button. */}
-      <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
-        <div>
-          <h1 className="dl-page-title" style={{ margin: 0, marginBottom: 4 }}>Review data source</h1>
-          <span style={{ color: 'var(--muted)', fontSize: 13 }}>
-            {queue.datasets.length} tables · {queue.columns.length} columns ·{' '}
-            {pending.length} awaiting review · {settled.length} settled
-          </span>
+    <div className="dl-srv">
+      {/* Autopilot 7B (design `Connections Redesign.html`, Review): a
+          breadcrumb, the source itself as the heading with its sync status and
+          counts, the actions on the end side; then what it is (the AI's
+          description) beside the last sync; then the tabs, kept in view. */}
+      <nav className="dl-srv__crumbs" aria-label={tr('cn2.h.conn')}>
+        <Link to="/connections">{tr('nav.connections')}</Link>
+        <ChevronRight size={14} aria-hidden className="dl-flip" />
+        <span dir="auto">{queue.source.name}</span>
+      </nav>
+      <header className="dl-srv__head">
+        <span className={`dl-cn-logo dl-cn-logo--${queue.source.type} dl-srv__logo`} aria-hidden><Database size={22} /></span>
+        <div className="dl-srv__id">
+          <span className="dl-srv__eyebrow">{tr('pg.dataPages.sr.title')}</span>
+          <h1 className="dl-srv__title">
+            <span dir="auto">{queue.source.name}</span>
+            {run && run.status !== 'never_run' && (
+              <span className={`dl-cn-pill dl-cn-pill--${run.status === 'running' ? 'run' : run.status === 'failed' ? 'err' : 'ok'}`}>
+                <span className="dl-cn-pill__dot" aria-hidden />
+                {tr(run.status === 'running' ? 'cn2.st.syncing' : run.status === 'failed' ? 'cn2.st.syncFailed' : 'cn2.st.synced')}
+              </span>
+            )}
+          </h1>
+          <p className="dl-srv__stats">
+            <span className="dl-srv__type" dir="ltr">{queue.source.type}</span>
+            <span>{tr('pg.dataPages.sr.stats', { tables: queue.datasets.length, columns: queue.columns.length, pending: pending.length, settled: settled.length })}</span>
+          </p>
         </div>
-        <button type="button" className="btn btn-primary" onClick={runSync} disabled={syncing}>
-          {syncing
-            ? `Syncing… ${run?.stages?.length ?? 0}/6`
-            : 'Run sync'}
-        </button>
+        <div className="dl-srv__acts">
+          <button type="button" className="btn btn-ghost" onClick={runSync} disabled={syncing}>
+            <RefreshCw size={15} aria-hidden className={syncing ? 'dl-cn-spin' : undefined} />
+            {syncing
+              ? tr('pg.dataPages.sr.syncing', { n: run?.stages?.length ?? 0, total: 6 })
+              : tr('pg.dataPages.sr.runSync')}
+          </button>
+          {/* Guided setup 4c: the setup is this source's door to a dashboard. */}
+          <Link to={`/setup/${sourceId}`} className="btn btn-primary">{tr('setup.review.cta')}</Link>
+          <ActionMenu label={tr('connections.more', { name: queue.source.name })} align="end" portal
+            items={[{ key: 'quick', label: tr('setup.review.quick'), icon: <Sparkles size={16} />, onSelect: () => setSuggesting(true) }]} />
+        </div>
       </header>
 
-      <input
-        className="input"
-        type="search"
-        aria-label="Search tables, columns and descriptions"
-        value={search}
-        onChange={e => setSearch(e.target.value)}
-        placeholder="Search tables, columns and descriptions…"
-        style={{ width: '100%', marginBottom: 16, boxSizing: 'border-box' }}
-      />
+      {/* Guided setup phase 5c: plain first; the full review is below. */}
+      <SourceSummary sourceId={sourceId} />
 
-      <SourceOverview
-        source={queue.source}
-        datasets={queue.datasets}
-        busy={syncing}
-        onToggleLlm={async (on) => {
-          await metadataApi.settings(sourceId, { allow_llm_sampling: on })
-          toast.success(on
-            ? 'The model will describe this source on the next sync'
-            : 'Model descriptions switched off for this source')
-          await load()
-        }}
-        onSaveDescription={async (text) => {
-          await metadataApi.settings(sourceId, { description: text })
-          toast.success('Description saved')
-          await load()
-        }}
-        onRetrySample={async (objectId) => {
-          // Clears the flag only. Deliberately not a sync trigger: one object
-          // is not worth a whole run, and someone clearing these usually
-          // clears several before starting one.
-          await metadataApi.confirm(sourceId, {
-            object_updates: [{ id: objectId, retry_sample: true }],
-          })
-          toast.success('It will be sampled again on the next sync')
-          await load()
-        }}
-        onToggleCanonical={async (objectId, canonical) => {
-          await metadataApi.confirm(sourceId, {
-            object_updates: [{ id: objectId, is_canonical: canonical }],
-          })
-          toast.success(canonical
-            ? 'Marked as the source of truth for what it describes'
-            : 'No longer marked canonical')
-          await load()
-        }}
-      />
-
-      <section className="card" style={{ marginBottom: 20, padding: 12,
-        display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ flex: 1 }}><SyncProgress run={run} /></div>
-        {/* The step BEFORE a dataset exists: someone has connected a database,
-            has no dataset, and does not know which of its tables to join. The
-            backend has answered this since it shipped and nothing called it. */}
-        <button type="button" className="btn btn-primary" onClick={() => setSuggesting(true)}
-          style={{ whiteSpace: 'nowrap', alignSelf: 'flex-start' }}>
-          Suggest a dashboard
-        </button>
-      </section>
+      <div className="dl-srv__cards">
+        <div className="dl-srv__about">
+          <SourceOverview
+            source={queue.source}
+            datasets={queue.datasets}
+            busy={syncing}
+            onToggleLlm={async (on) => {
+              await metadataApi.settings(sourceId, { allow_llm_sampling: on })
+              toast.success(on
+                ? tr('pg.dataPages.sr.llmOn')
+                : tr('pg.dataPages.sr.llmOff'))
+              await load()
+            }}
+            onSaveDescription={async (text) => {
+              await metadataApi.settings(sourceId, { description: text })
+              toast.success(tr('pg.dataPages.sr.descSaved'))
+              await load()
+            }}
+            onRetrySample={async (objectId) => {
+              // Clears the flag only. Deliberately not a sync trigger: one object
+              // is not worth a whole run, and someone clearing these usually
+              // clears several before starting one.
+              await metadataApi.confirm(sourceId, {
+                object_updates: [{ id: objectId, retry_sample: true }],
+              })
+              toast.success(tr('pg.dataPages.sr.resample'))
+              await load()
+            }}
+            onToggleCanonical={async (objectId, canonical) => {
+              await metadataApi.confirm(sourceId, {
+                object_updates: [{ id: objectId, is_canonical: canonical }],
+              })
+              toast.success(canonical
+                ? tr('pg.dataPages.sr.canonicalOn')
+                : tr('pg.dataPages.sr.canonicalOff'))
+              await load()
+            }}
+          />
+        </div>
+        <section className="dl-srv__sync"><SyncProgress run={run} /></section>
+      </div>
 
       {suggesting && (
         <SuggestFromSourceDialog sourceId={sourceId} sourceName={queue.source.name}
@@ -372,27 +387,28 @@ export default function SourceReview() {
                                  onClose={() => setSuggesting(false)} />
       )}
 
-      {/* A tab strip, the current tab marked as selected -- they were plain
-          browser buttons, the current one shown only by being disabled. */}
-      <div role="tablist" aria-label="Review sections" className="dl-review-tabs"
-        style={{ display: 'flex', gap: 4, marginBottom: 12, flexWrap: 'wrap',
-          borderBottom: '1px solid var(--border)' }}>
-        {([
-          ['graph', `Relationships (${pending.length})`],
-          ['columns', `Columns (${columnsShown})`],
-          ['entities', `Entities (${entities.length})`],
-          ['glossary', 'Business terms'],
-          ['drift', 'Schema drift'],
-          ['health', 'Source health'],
-        ] as const).map(([key, label]) => (
-          <button key={key} type="button" role="tab" aria-selected={tab === key}
-            className="btn btn-ghost btn-sm" onClick={() => setTab(key)}
-            style={{ borderRadius: '6px 6px 0 0', marginBottom: -1,
-              borderBottom: tab === key ? '2px solid var(--accent)' : '2px solid transparent',
-              color: tab === key ? 'var(--accent)' : undefined, fontWeight: tab === key ? 600 : undefined }}>
-            {label}
-          </button>
-        ))}
+      {/* A tab strip, the current tab marked as selected; kept in view while
+          the tab's content scrolls, with the search on its end side. */}
+      <div className="dl-srv__tabbar">
+        <div role="tablist" aria-label={tr('pg.dataPages.sr.tabsAria')} className="dl-review-tabs dl-srv__tabs">
+          {([
+            ['graph', tr('pg.dataPages.sr.tabRelationships', { n: pending.length }), Waypoints],
+            ['columns', tr('pg.dataPages.sr.tabColumns', { n: columnsShown }), Columns3],
+            ['entities', tr('pg.dataPages.sr.tabEntities', { n: entities.length }), Boxes],
+            ['glossary', tr('pg.dataPages.sr.tabGlossary'), BookOpen],
+            ['drift', tr('pg.dataPages.sr.tabDrift'), GitCompare],
+            ['health', tr('pg.dataPages.sr.tabHealth'), Activity],
+          ] as const).map(([key, label, Icon]) => (
+            <button key={key} type="button" role="tab" aria-selected={tab === key} onClick={() => setTab(key)}>
+              <Icon size={15} aria-hidden /> {localDigits(label)}
+            </button>
+          ))}
+        </div>
+        <label className="dl-cn-search dl-srv__search">
+          <Search size={16} aria-hidden />
+          <input type="search" aria-label={tr('pg.dataPages.sr.searchAria')} value={search} autoComplete="off"
+            onChange={e => setSearch(e.target.value)} placeholder={tr('pg.dataPages.sr.searchPlaceholder')} />
+        </label>
       </div>
 
       {tab === 'graph' ? (
@@ -401,11 +417,11 @@ export default function SourceReview() {
                      filter={search} />
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '12px 0' }}>
-            <button type="button" className="btn btn-primary" onClick={confirmSelected} disabled={!selected.size} title={!selected.size ? 'Tick at least one suggestion first' : undefined}>
-              Confirm {selected.size} selected
+            <button type="button" className="btn btn-primary" onClick={confirmSelected} disabled={!selected.size} title={!selected.size ? tr('pg.dataPages.sr.tickFirst') : undefined}>
+              {tr('pg.dataPages.sr.confirmSelected', { n: selected.size })}
             </button>
             <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-              High-confidence proposals are pre-selected.
+              {tr('pg.dataPages.sr.preselected')}
             </span>
           </div>
 
@@ -420,7 +436,7 @@ export default function SourceReview() {
           ))}
           {!pending.length && (
             <p style={{ color: '#16785a', fontSize: 14 }}>
-              Nothing awaiting review. Every proposed relationship has been decided.
+              {tr('pg.dataPages.sr.nothingPending')}
             </p>
           )}
         </>

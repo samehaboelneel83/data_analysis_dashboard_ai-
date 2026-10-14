@@ -48,7 +48,7 @@ describe('Lineage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/could not load/i)
     // THE assertion. "No connections — uploads only" is a factual claim about
     // the user's estate, and it must not appear when we never got an answer.
-    expect(screen.queryByText(/uploads only/i)).toBeNull()
+    expect(screen.queryByText(/uploads only|Lineage appears when/i)).toBeNull()
   })
 
   it('still shows the genuine empty state when the server says empty', async () => {
@@ -57,7 +57,8 @@ describe('Lineage', () => {
       { sources: [], datasets: [], reports: [] } as never)
     wrap(<Lineage />)
 
-    expect(await screen.findByText(/uploads only/i)).toBeInTheDocument()
+    // Step 11: the design's empty state, which says what will appear and how to start.
+    expect(await screen.findByText(/Lineage appears when you connect data/i)).toBeInTheDocument()
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
@@ -84,7 +85,7 @@ describe('Reports', () => {
     vi.mocked(datasetsApi.list).mockResolvedValue([] as never)
     wrap(<Reports />)
 
-    expect(await screen.findByText(/no dashboards yet/i)).toBeInTheDocument()
+    expect(await screen.findByText(/build your first dashboard/i)).toBeInTheDocument()
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
@@ -108,14 +109,14 @@ describe('Dashboard', () => {
     vi.mocked(datasetsApi.list).mockRejectedValue(new Error('boom'))
     wrap(<Dashboard />)
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/could not load/i)
-    expect(screen.queryByText(/no datasets yet/i)).toBeNull()
+    expect(await screen.findByRole('alert')).toHaveTextContent(/couldn.t load your datasets/i)
+    expect(screen.queryByText(/add your first dataset/i)).toBeNull()
   })
 
   it('still shows the genuine empty state when the server says empty', async () => {
     vi.mocked(datasetsApi.list).mockResolvedValue([])
     wrap(<Dashboard />)
-    expect(await screen.findByText(/no datasets yet/i)).toBeInTheDocument()
+    expect(await screen.findByText(/add your first dataset/i)).toBeInTheDocument()
   })
 })
 

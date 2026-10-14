@@ -60,7 +60,6 @@ export default function LanguageSwitcher() {
           {LANGUAGES.map(l => (
             <button key={l} type="button" role="menuitemradio" aria-checked={l === language}
               onClick={() => { setLanguage(l); setOpen(false) }}
-              lang={l} dir={LANGUAGE_DIRECTION[l]}
               style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%',
                 background: l === language ? 'var(--accent-soft)' : 'none', border: 'none',
                 cursor: 'pointer', textAlign: 'start', padding: '8px 10px', borderRadius: 7,
@@ -69,7 +68,9 @@ export default function LanguageSwitcher() {
               <span aria-hidden style={{ width: 14, display: 'inline-flex', flexShrink: 0 }}>
                 {l === language && <Check size={13} />}
               </span>
-              <span style={{ flex: 1 }}>{LANGUAGE_LABEL[l]}</span>
+              {/* Script and direction on the label only, so every row follows
+                  the menu's direction (QA V10: the Arabic row was mirrored). */}
+              <span style={{ flex: 1 }}><bdi lang={l} dir={LANGUAGE_DIRECTION[l]}>{LANGUAGE_LABEL[l]}</bdi></span>
               <span style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase' }}>
                 {LANGUAGE_DIRECTION[l]}
               </span>
@@ -77,12 +78,12 @@ export default function LanguageSwitcher() {
           ))}
           {/* Digits are a reader preference, separate from the language:
               the Gulf mostly reads 123, Egypt ١٢٣ (Phase 7.5). */}
-          <div role="group" aria-label="Digits" style={{ display: 'flex', alignItems: 'center', gap: 6,
+          <div role="group" aria-label={t('lang.digits')} style={{ display: 'flex', alignItems: 'center', gap: 6,
             margin: '6px 8px 0', borderTop: '1px solid var(--border)', paddingTop: 6, fontSize: 12 }}>
-            <span style={{ color: 'var(--muted)', flex: 1 }}>{language === 'ar' ? 'الأرقام' : 'Digits'}</span>
+            <span style={{ color: 'var(--muted)', flex: 1 }}>{t('lang.digits')}</span>
             {(['latn', 'arab'] as const).map(d => (
               <button key={d} type="button" role="menuitemradio" aria-checked={getDigits() === d}
-                title={d === 'arab' ? 'Arabic-Indic digits (reloads the page)' : 'Western digits (reloads the page)'}
+                title={d === 'arab' ? t('lang.digitsArab') : t('lang.digitsLatn')}
                 onClick={() => { if (getDigits() !== d) { setDigits(d); window.location.reload() } }}
                 style={{ border: '1px solid var(--border)', borderRadius: 6, padding: '2px 8px', cursor: 'pointer',
                   background: getDigits() === d ? 'var(--accent-soft)' : 'none',

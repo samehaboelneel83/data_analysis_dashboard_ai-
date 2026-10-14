@@ -1,0 +1,47 @@
+{
+  "scores": {
+    "H1": {
+      "id": "H1",
+      "connection": "Held-out H1 — ratings",
+      "score": 2.0,
+      "out_of": 3.0,
+      "questions": {
+        "H1.1": 1.0,
+        "H1.2": 1.0,
+        "H1.3": 0.0
+      },
+      "flow_id": 94
+    },
+    "H2": {
+      "id": "H2",
+      "connection": "Held-out H2 — ledger",
+      "score": 3.0,
+      "out_of": 3.0,
+      "questions": {
+        "H2.1": 1.0,
+        "H2.2": 1.0,
+        "H2.3": 1.0
+      },
+      "flow_id": 92
+    },
+    "H3": {
+      "id": "H3",
+      "connection": "Held-out H3 — الشحنات",
+      "score": 1.0,
+      "out_of": 3.0,
+      "questions": {
+        "H3.1": 0.0,
+        "H3.2": 0.0,
+        "H3.3": 1.0
+      },
+      "flow_id": 93
+    }
+  },
+  "gate": {
+    "ok": true,
+    "lowered": [],
+    "lowest": "H3",
+    "total": 6.0,
+    "out_of": 9.0
+  }
+}

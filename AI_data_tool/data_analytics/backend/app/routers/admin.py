@@ -2,7 +2,7 @@ import asyncio
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -38,6 +38,10 @@ async def list_roles(db: AsyncSession = Depends(get_db), current_user: User = De
 async def create_role(body: RoleCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_org_admin)):
     role = Role(org_id=current_user.org_id, name=body.name, is_org_admin=body.is_org_admin)
     db.add(role)
+    # Who can do what is the first thing an audit is asked (governance tour,
+    # 2026-10-10): role and user changes were not recorded at all.
+    await admin_audit.record(db, current_user, "role.create", f"role:{body.name}",
+                             "org admin" if body.is_org_admin else None)
     await db.commit()
     await db.refresh(role)
     return role
@@ -47,10 +51,15 @@ async def create_role(body: RoleCreate, db: AsyncSession = Depends(get_db), curr
 async def update_role(role_id: int, body: RoleUpdate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_org_admin)):
     role = await db.get(Role, role_id)
     check_org(role, current_user, "Role not found")
-    if body.name is not None:
+    changes = []
+    if body.name is not None and body.name != role.name:
+        changes.append(f"renamed from {role.name}")
         role.name = body.name
-    if body.is_org_admin is not None:
+    if body.is_org_admin is not None and bool(body.is_org_admin) != bool(role.is_org_admin):
+        changes.append("now org admin" if body.is_org_admin else "no longer org admin")
         role.is_org_admin = body.is_org_admin
+    if changes:
+        await admin_audit.record(db, current_user, "role.update", f"role:{role.name}", "; ".join(changes))
     await db.commit()
     await db.refresh(role)
     return role
@@ -63,6 +72,7 @@ async def delete_role(role_id: int, db: AsyncSession = Depends(get_db), current_
     result = await db.execute(select(User).where(User.role_id == role_id).limit(1))
     if result.scalars().first() is not None:
         raise HTTPException(400, "Cannot delete a role that still has users assigned")
+    await admin_audit.record(db, current_user, "role.delete", f"role:{role.name}", None)
     await db.delete(role)
     await db.commit()
 
@@ -97,6 +107,7 @@ async def create_user(body: UserCreate, db: AsyncSession = Depends(get_db), curr
         email=body.email, password_hash=hash_password(body.password),
     )
     db.add(user)
+    await admin_audit.record(db, current_user, "user.create", f"user:{body.email}", f"role:{role.name}")
     await db.commit()
     return await _load_user_out(db, user.id)
 
@@ -145,6 +156,8 @@ async def bulk_create_users(body: BulkUserCreate, db: AsyncSession = Depends(get
     for email, role_id, pw_hash in hashed:
         db.add(User(org_id=current_user.org_id, role_id=role_id, email=email, password_hash=pw_hash))
     if hashed:
+        await admin_audit.record(db, current_user, "user.bulk_create", f"{len(hashed)} users",
+                                 ", ".join(e for e, _, _ in hashed)[:400])
         await db.commit()
     return {"created_count": len(hashed), "created": [e for e, _, _ in hashed], "errors": errors}
 
@@ -153,12 +166,17 @@ async def bulk_create_users(body: BulkUserCreate, db: AsyncSession = Depends(get
 async def update_user(user_id: int, body: UserUpdate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_org_admin)):
     user = await db.get(User, user_id)
     check_org(user, current_user, "User not found")
+    changes: list[str] = []
+    was_email = user.email
     if body.email is not None:
         existing = await db.execute(select(User).where(User.email == body.email, User.id != user_id))
         if existing.scalar_one_or_none() is not None:
             raise HTTPException(400, "Email already in use")
+        if body.email != user.email:
+            changes.append(f"email from {user.email}")
         user.email = body.email
     if body.password is not None:
+        changes.append("password reset")
         user.password_hash = hash_password(body.password)
         # A reset is the moment a revocation is certainly wanted (a leaked or
         # shared password): every login token issued before now stops working.
@@ -167,9 +185,16 @@ async def update_user(user_id: int, body: UserUpdate, db: AsyncSession = Depends
     if body.role_id is not None:
         role = await db.get(Role, body.role_id)
         check_org(role, current_user, "Role not found")
+        if body.role_id != user.role_id:
+            changes.append(f"role to {role.name}" + (" (org admin)" if role.is_org_admin else ""))
         user.role_id = body.role_id
     if body.is_active is not None:
+        if bool(body.is_active) != bool(user.is_active):
+            changes.append("activated" if body.is_active else "deactivated")
         user.is_active = body.is_active
+    if changes:
+        # Never the password itself: only that it was reset.
+        await admin_audit.record(db, current_user, "user.update", f"user:{was_email}", "; ".join(changes))
     await db.commit()
     return await _load_user_out(db, user.id)
 
@@ -180,6 +205,7 @@ async def delete_user(user_id: int, db: AsyncSession = Depends(get_db), current_
     check_org(user, current_user, "User not found")
     if user.id == current_user.id:
         raise HTTPException(400, "Cannot delete your own account")
+    await admin_audit.record(db, current_user, "user.delete", f"user:{user.email}", None)
     await db.delete(user)
     await db.commit()
 
@@ -561,6 +587,22 @@ async def list_admin_audit(
 # "what runs in this org, and when did it last work" was previously answerable
 # only by opening every report and every dataset one at a time.
 
+async def _latest_runs(db: AsyncSession, kind: str, ids: list[int]) -> dict:
+    """The newest RefreshRun per item, by item id."""
+    from ..services.refresh_runs import latest_runs
+    return await latest_runs(db, kind, ids)
+
+
+async def _next_retries(db: AsyncSession, kind: str, ids: list[int]) -> dict:
+    """When each failing item will next be tried (its backoff), by item id."""
+    from ..models.models import ScheduleFailure
+    if not ids:
+        return {}
+    rows = (await db.execute(select(ScheduleFailure).where(
+        ScheduleFailure.kind == kind, ScheduleFailure.item_id.in_(ids)))).scalars().all()
+    return {r.item_id: r.next_attempt_at for r in rows}
+
+
 @router.get("/monitoring/jobs")
 async def list_monitoring_jobs(
     db: AsyncSession = Depends(get_db),
@@ -582,24 +624,32 @@ async def list_monitoring_jobs(
         select(Dataset).where(Dataset.org_id == admin.org_id,
                               Dataset.refresh_interval_minutes.isnot(None))
     )).scalars().all()
+    # Pipeline plan, phase 1: every refresh now leaves a RefreshRun, so a
+    # dataset's row says how its LAST ATTEMPT went -- and a failing one when
+    # it will be retried -- instead of no status at all.
+    latest = await _latest_runs(db, "dataset", [d.id for d in ds_rows])
+    retry = await _next_retries(db, "dataset", [d.id for d in ds_rows])
     for d in ds_rows:
+        run = latest.get(d.id)
         jobs.append({"kind": "dataset_refresh", "id": d.id, "name": d.name,
                      "interval_minutes": d.refresh_interval_minutes,
-                     "last_run_at": d.last_refreshed_at,
-                     # The refresh loop advances last_refreshed_at on failure too
-                     # (retry on schedule, not every tick) and keeps no status
-                     # column -- so none is invented here.
-                     "status": None, "error": None})
+                     "last_run_at": (run.started_at if run else None) or d.last_refreshed_at,
+                     "last_refreshed_at": d.last_refreshed_at,
+                     "status": run.status if run else None,
+                     "error": run.error if run and run.status != "ok" else None,
+                     "next_retry_at": retry.get(d.id)})
 
     df_rows = (await db.execute(
         select(Dataflow).where(Dataflow.org_id == admin.org_id,
                                Dataflow.refresh_interval_minutes.isnot(None))
     )).scalars().all()
+    flow_retry = await _next_retries(db, "dataflow", [f.id for f in df_rows])
     for f in df_rows:
         jobs.append({"kind": "dataflow", "id": f.id, "name": f.name,
                      "interval_minutes": f.refresh_interval_minutes,
                      "last_run_at": f.last_run_at,
-                     "status": f.last_run_status, "error": f.last_run_error})
+                     "status": f.last_run_status, "error": f.last_run_error,
+                     "next_retry_at": flow_retry.get(f.id)})
 
     sched_rows = (await db.execute(
         select(ReportSchedule, Report.name)
@@ -636,6 +686,50 @@ async def list_monitoring_jobs(
     return jobs
 
 
+@router.get("/monitoring/refresh-runs")
+async def list_refresh_runs(
+    status: str | None = None,
+    kind: str | None = None,
+    item_id: int | None = None,
+    limit: int = 200,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_org_admin),
+):
+    """The org's refresh history -- every dataset refresh and dataflow run,
+    scheduled or manual -- newest first (pipeline plan, phase 1).
+
+    `status=failed` answers "what broke"; `kind` + `item_id` narrow it to one
+    dataset or dataflow. Names are joined here so a deleted item still shows
+    its runs, labelled as gone, rather than vanishing from the history."""
+    from ..models.models import Dataflow, RefreshRun
+    limit = max(1, min(int(limit or 200), 1000))
+    q = select(RefreshRun).where(RefreshRun.org_id == admin.org_id)
+    if status:
+        q = q.where(RefreshRun.status == status)
+    if kind in ("dataset", "dataflow"):
+        q = q.where(RefreshRun.kind == kind)
+    if item_id is not None:
+        q = q.where(RefreshRun.item_id == item_id)
+    runs = (await db.execute(q.order_by(RefreshRun.id.desc()).limit(limit))).scalars().all()
+    ds_ids = {r.item_id for r in runs if r.kind == "dataset"}
+    flow_ids = {r.item_id for r in runs if r.kind == "dataflow"}
+    names: dict = {}
+    if ds_ids:
+        for i, n in (await db.execute(select(Dataset.id, Dataset.name).where(
+                Dataset.id.in_(ds_ids), Dataset.org_id == admin.org_id))).all():
+            names[("dataset", i)] = n
+    if flow_ids:
+        for i, n in (await db.execute(select(Dataflow.id, Dataflow.name).where(
+                Dataflow.id.in_(flow_ids), Dataflow.org_id == admin.org_id))).all():
+            names[("dataflow", i)] = n
+    return [{"id": r.id, "kind": r.kind, "item_id": r.item_id,
+             "name": names.get((r.kind, r.item_id)),
+             "trigger": r.trigger, "status": r.status,
+             "started_at": r.started_at, "finished_at": r.finished_at,
+             "rows": r.rows, "duration_ms": r.duration_ms,
+             "error": r.error, "error_code": r.error_code} for r in runs]
+
+
 @router.get("/monitoring/deliveries")
 async def list_monitoring_deliveries(
     limit: int = 200,
@@ -659,7 +753,8 @@ async def list_monitoring_deliveries(
         {"id": d.id, "kind": d.kind, "status": d.status, "error": d.error,
          "artifact_kind": d.artifact_kind, "duration_ms": d.duration_ms,
          "created_at": d.created_at, "report_id": d.report_id,
-         "report_name": report_name, "schedule_id": d.schedule_id}
+         "report_name": report_name, "schedule_id": d.schedule_id,
+         "subject": d.subject, "recipients": d.recipients, "file_name": d.file_name}
         for d, report_name in rows
     ]
 

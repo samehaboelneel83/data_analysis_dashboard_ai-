@@ -58,7 +58,7 @@ export default function AdminExportPolicy() {
       }
       toast.success(t('export.saved'))
     } catch (e: unknown) {
-      toast.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Save failed')
+      toast.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? t('pg.adminSecurity.c.saveFailed'))
     }
   }
 
@@ -78,7 +78,7 @@ export default function AdminExportPolicy() {
       {loading && <LoadingState />}
 
       {!loading && loadError != null && (
-        <LoadError what="datasets" error={loadError} onRetry={load} />
+        <LoadError what="datasets" title={t('pg.adminSecurity.exp.loadErr')} retryLabel={t('pg.adminSecurity.c.retry')} error={loadError} onRetry={load} />
       )}
 
       {!loading && loadError == null && datasets.length === 0 && (
@@ -105,24 +105,24 @@ export default function AdminExportPolicy() {
             const { all, formats, auto } = parts(entry.policy)
             return (
               <tr key={ds.id}>
-                <td style={{ fontWeight: 600 }}>{ds.name}</td>
+                <td style={{ fontWeight: 600 }}><bdi>{ds.name}</bdi></td>
                 <td>
-                  <input type="checkbox" checked={all} aria-label={`All exports off for ${ds.name}`}
+                  <input type="checkbox" checked={all} aria-label={t('pg.adminSecurity.exp.allOffAria', { name: ds.name })}
                     onChange={e => e.target.checked
                       ? save(ds.id, { all: true, formats: [], auto_private: false })
                       : save(ds.id, { all: false, formats: [], auto_private: false })} />
                 </td>
                 {FORMATS.map(f => (
                   <td key={f}>
-                    <input type="checkbox" checked={all || formats.includes(f)} disabled={all} title={all ? 'Everything is allowed: untick "All" to choose' : undefined}
-                      aria-label={`${f} export off for ${ds.name}`}
+                    <input type="checkbox" checked={all || formats.includes(f)} disabled={all} title={all ? t('pg.adminSecurity.exp.untickAll') : undefined}
+                      aria-label={t('pg.adminSecurity.exp.formatOffAria', { f, name: ds.name })}
                       onChange={e => save(ds.id, { all: false, auto_private: auto,
                         formats: e.target.checked ? [...formats, f] : formats.filter(x => x !== f) })} />
                   </td>
                 ))}
                 <td>
-                  <input type="checkbox" checked={auto} disabled={all} title={all ? 'Everything is allowed: untick "All" to choose' : undefined}
-                    aria-label={`Auto-disable when private for ${ds.name}`}
+                  <input type="checkbox" checked={auto} disabled={all} title={all ? t('pg.adminSecurity.exp.untickAll') : undefined}
+                    aria-label={t('pg.adminSecurity.exp.autoAria', { name: ds.name })}
                     onChange={e => save(ds.id, { all: false, formats, auto_private: e.target.checked })} />
                 </td>
                 <td>

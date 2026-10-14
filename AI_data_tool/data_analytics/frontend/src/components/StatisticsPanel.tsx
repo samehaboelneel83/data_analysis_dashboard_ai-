@@ -4,7 +4,7 @@ import {
 } from '../services/api'
 import LoadError from './ui/LoadError'
 import { FlaskConical } from 'lucide-react'
-import { useT } from '../i18n'
+import { useT, type MessageKey } from '../i18n'
 import { ResultFor } from './analysis/analysisResults'
 
 /**
@@ -62,9 +62,45 @@ function answered(v: Value | undefined) {
   return v !== undefined && v !== ''
 }
 
-export default function StatisticsPanel({ datasetId, columns, mode }: {
+/** HR re-test: the form read "value col", "group col" -- the parameter's
+ *  code name. Known parameters get plain words; anything else drops a trailing
+ *  "col" and its underscores, so a new analysis never shows worse than before. */
+const PARAM_LABEL: Record<string, MessageKey> = {
+  value_col: 'stat.param.valueCol', group_col: 'stat.param.groupCol',
+  col_a: 'stat.param.colA', col_b: 'stat.param.colB', columns: 'stat.param.columns',
+  target: 'stat.param.target', target_value: 'stat.param.targetValue',
+  target_y: 'stat.param.targetY', duration_col: 'stat.param.durationCol',
+  event_col: 'stat.param.eventCol',
+  entity: 'stat.param.entity', change_pct: 'stat.param.changePct', floor: 'stat.param.floor',
+  date_column: 'stat.param.dateColumn', measure: 'stat.param.measure', factors: 'stat.param.factors',
+  granularity: 'stat.param.granularity', periods: 'stat.param.periods',
+}
+/** An analysis by the name a person would give it, and one plain line on what
+ *  it does -- from the catalogue when it knows the analysis, else the
+ *  registry's own words (a newly registered one still shows). */
+export function analysisName(name: string, t: (k: MessageKey) => string): string {
+  const key = `an.name.${name}` as MessageKey
+  const said = t(key)
+  return !said || said === key ? name.replace(/_/g, ' ') : said
+}
+export function analysisDescription(name: string, fallback: string, t: (k: MessageKey) => string): string {
+  const key = `an.desc.${name}` as MessageKey
+  const said = t(key)
+  return !said || said === key ? fallback : said
+}
+
+export function paramLabel(key: string, t: (k: MessageKey) => string): string {
+  const k = PARAM_LABEL[key]
+  if (k) return t(k)
+  return key.replace(/_cols?$/, '').replace(/_/g, ' ').trim()
+}
+
+export default function StatisticsPanel({ datasetId, columns, mode, only }: {
   datasetId: number
   columns: DatasetColumn[]
+  /** Limit the picker to these analyses (the Analysis tab's questions); with
+   *  one, it is chosen straight away. Omitted: every runnable analysis. */
+  only?: string[]
   /** The dataset's mode. These analyses read the whole frame, so they are
    *  import-only — and a picker that cannot run anything must say so rather
    *  than refuse after the parameters are filled in. */
@@ -85,10 +121,15 @@ export default function StatisticsPanel({ datasetId, columns, mode }: {
     analysisCatalogueApi.registry()
       // `runnable`, not a result kind: an entry with no handler behind it is
       // real and documented, but choosing it could only ever produce a 400.
-      .then(all => setSpecs(all.filter(a => a.runnable)))
+      .then(all => setSpecs(all.filter(a => a.runnable && (!only || only.includes(a.name)))))
       .catch(e => setSpecError(e ?? new Error('failed')))
   }
-  useEffect(loadSpecs, [])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(loadSpecs, [only?.join(',')])
+  // A question with a single analysis opens straight onto its form.
+  useEffect(() => {
+    setChosen(only?.length === 1 ? only[0] : ''); setParams({}); setRan(null); setRunError(null)
+  }, [only?.join(',')])
 
   const spec = useMemo(
     () => specs?.find(s => s.name === chosen) ?? null, [specs, chosen])
@@ -118,7 +159,7 @@ export default function StatisticsPanel({ datasetId, columns, mode }: {
       // Cox regression needs about 10 per predictor"), which is far more
       // useful than anything generic.
       setRunError((e as { response?: { data?: { detail?: string } } })
-        ?.response?.data?.detail ?? 'The analysis could not be run')
+        ?.response?.data?.detail ?? t('i2d.stat.runFailed'))
     } finally {
       setRunning(false)
     }
@@ -127,7 +168,7 @@ export default function StatisticsPanel({ datasetId, columns, mode }: {
   if (specError) {
     return <LoadError what="the analysis catalogue" error={specError} onRetry={loadSpecs} />
   }
-  if (!specs) return <p style={{ color: 'var(--muted)' }}>Loading…</p>
+  if (!specs) return <p style={{ color: 'var(--muted)' }}>{t('common.loading')}</p>
 
   return (
     <>
@@ -140,9 +181,7 @@ export default function StatisticsPanel({ datasetId, columns, mode }: {
       <p data-testid="directquery-analysis-notice"
         style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 12px', maxWidth: 680,
           border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px' }}>
-        This dataset is queried at its source. Analyses read it live, up to a
-        row limit, and each result says how many rows it measured — so a figure
-        drawn from a sample is never presented as if it came from everything.
+        {t('i2d.stat.dqNotice')}
       </p>
     )}
     <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
@@ -152,13 +191,13 @@ export default function StatisticsPanel({ datasetId, columns, mode }: {
           display: 'block', fontSize: 12, fontWeight: 600,
           color: 'var(--muted)', marginBottom: 4,
         }}>
-          Analysis
+          {t('i2d.stat.analysis')}
         </label>
         <select id="stat-analysis" value={chosen} onChange={e => pick(e.target.value)}
           style={{ width: '100%' }}>
-          <option value="">— choose —</option>
+          <option value="">{t('i2d.c.choose')}</option>
           {specs.map(s => (
-            <option key={s.name} value={s.name}>{s.name.replace(/_/g, ' ')}</option>
+            <option key={s.name} value={s.name}>{analysisName(s.name, t)}</option>
           ))}
         </select>
 
@@ -166,20 +205,20 @@ export default function StatisticsPanel({ datasetId, columns, mode }: {
             would ask, so they are used verbatim rather than paraphrased. */}
         {spec && (
           <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>
-            {spec.description}
+            {analysisDescription(spec.name, spec.description, t)}
           </p>
         )}
 
         {spec && Object.entries(spec.params_schema.properties).map(([key, prop]) => {
           const kind = fieldKind(prop)
-          const label = key.replace(/_/g, ' ')
+          const label = paramLabel(key, t)
           const isRequired = required.includes(key)
           return (
             <div key={key} style={{ marginTop: 10 }}>
               <label htmlFor={`stat-${key}`} style={{
                 display: 'block', fontSize: 12, color: 'var(--muted)', marginBottom: 2,
               }}>
-                {label}{isRequired ? '' : ' (optional)'}
+                {isRequired ? label : t('i2d.stat.optional', { label })}
               </label>
 
               {kind === 'enum' ? (
@@ -221,7 +260,7 @@ export default function StatisticsPanel({ datasetId, columns, mode }: {
                 <select id={`stat-${key}`} value={(params[key] as string) ?? ''}
                   onChange={e => setParams(p => ({ ...p, [key]: e.target.value }))}
                   style={{ width: '100%' }}>
-                  <option value="">— choose —</option>
+                  <option value="">{t('i2d.c.choose')}</option>
                   {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
                 </select>
               ) : kind === 'number' ? (
@@ -250,9 +289,9 @@ export default function StatisticsPanel({ datasetId, columns, mode }: {
         })}
 
         {spec && (
-          <button className="btn btn-primary btn-sm" disabled={!complete || running} title={!complete ? 'Choose every required column first' : undefined}
+          <button className="btn btn-primary btn-sm" disabled={!complete || running} title={!complete ? t('i2d.stat.needColumns') : undefined}
             onClick={() => void run()} style={{ marginTop: 12, width: '100%' }}>
-            {running ? 'Running…' : 'Run'}
+            {running ? t('dataset.running') : t('dataset.run')}
           </button>
         )}
       </div>
@@ -273,7 +312,7 @@ export default function StatisticsPanel({ datasetId, columns, mode }: {
               {specs.slice(0, 8).map(sp => (
                 <button key={sp.name} type="button" className="btn btn-sm" onClick={() => pick(sp.name)}
                   title={sp.description}>
-                  {sp.name.replace(/_/g, ' ')}
+                  {analysisName(sp.name, t)}
                 </button>
               ))}
             </div>

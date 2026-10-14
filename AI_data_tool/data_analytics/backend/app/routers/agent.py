@@ -45,11 +45,15 @@ def _reject_directquery(ds: Dataset) -> None:
     DirectQuery path, so the refusal points at it rather than just saying no.
     Called on BOTH the create and the ask path: conversations stored before
     this guard existed are still bound to these datasets."""
-    if ds.mode == "directquery" or not ds.filename:
+    # Live datasets are read through their own SQL now (graph.dataset_frames):
+    # asking about "Current workforce" must answer from Current workforce, not
+    # from the raw tables behind it. Only a dataset with neither a file nor a
+    # connection has nothing to read.
+    if not ds.filename and not (ds.mode == "directquery" and ds.data_source_id):
         raise HTTPException(
             400,
-            f"'{ds.name}' is a DirectQuery dataset, which Ask AI cannot read "
-            "as a table. Pick its connection instead to ask about live data.")
+            f"'{ds.name}' has no data file and no connection behind it, so there "
+            "is nothing for Ask AI to read.")
 
 
 class ConversationIn(BaseModel):
@@ -121,6 +125,13 @@ def _run_payload(run: AgentRun, steps: list[AgentStep]) -> dict:
     # conversation reopened later is traced exactly as it was when asked.
     evidence = (trace_claims(run.answer, run.question, results, sql)
                 if run.status == "ok" and run.intent != "chat" else None)
+    if evidence and evidence.get("untraced"):
+        from ..services.agent.evidence import set_aside_untraced
+        checked, aside = set_aside_untraced(run.answer or "", evidence)
+        if aside:
+            # The answer shown is the checked part; its numbers traced afresh.
+            evidence = {**trace_claims(checked, run.question, results, sql),
+                        "text": checked, "set_aside": aside}
     return {"results": results,
             "sql": sql,
             "presentation": run.presentation,
@@ -160,6 +171,9 @@ async def _history(db: AsyncSession, conv: Conversation) -> list[dict]:
         entry = {"role": m.role, "content": m.content, "sql": [], "results": []}
         run = runs.get(m.agent_run_id) if m.agent_run_id is not None else None
         if run is not None:
+            # The graph needs to know a turn was a clarifying question, so the
+            # reply to it is read WITH the question it clarifies (3.8).
+            entry["status"] = run.status
             payload = _run_payload(run, steps.get(run.id, []))
             entry["sql"], entry["results"] = payload["sql"], payload["results"]
         out.append(entry)
@@ -307,6 +321,7 @@ async def ask(cid: int, body: AskIn, db: AsyncSession = Depends(get_db),
     db.add(AgentMessage(conversation_id=conv.id, role="user",
                         content=body.question))
 
+    from ..services import ai_policy
     async with quotas.concurrent_ask_slot(db, user.org_id):
         if conv.dataset_ids:
             datasets = []
@@ -315,12 +330,16 @@ async def ask(cid: int, body: AskIn, db: AsyncSession = Depends(get_db),
                 check_org(ds, user, "Conversation not found")
                 _reject_directquery(ds)
                 datasets.append(ds)
+            # "Allow AI" for this data (services/ai_policy.py): when it is off
+            # the run answers without a model (agent/without_model.py).
+            await ai_policy.enter(db, datasets=datasets)
             run = await run_agent(db, question=body.question, datasets=datasets,
                                   user=user, client=llm_service.get_client(),
                                   conversation_id=conv.id, history=history)
         else:
             source = await db.get(DataSource, conv.data_source_id)
             check_org(source, user, "Conversation not found")
+            await ai_policy.enter(db, source=source)
             run = await run_agent(db, question=body.question, source=source,
                                   user=user, client=llm_service.get_client(),
                                   conversation_id=conv.id, history=history)
@@ -445,6 +464,15 @@ async def submit_feedback(cid: int, body: FeedbackIn,
                            conversation_id=conv.id, run_id=body.run_id,
                            rating=body.rating, comment=body.comment)
         db.add(fb)
+    if body.rating == "down" and body.run_id is not None:
+        # A 👎 answer must not live on as a few-shot example for the next one.
+        from ..services.agent import memory
+        from ..models.models import AgentStep
+        steps = (await db.execute(select(AgentStep).where(
+            AgentStep.agent_run_id == body.run_id))).scalars().all()
+        for st in steps:
+            if st.sql:
+                await memory.forget(db, user.org_id, sql=st.sql)
     await db.commit()
     await db.refresh(fb)
     return {"id": fb.id, "run_id": fb.run_id, "rating": fb.rating,

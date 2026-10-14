@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import StatisticsPanel from './StatisticsPanel'
+import { analysisDescription, analysisName } from './StatisticsPanel'
 import { analysisCatalogueApi } from '../services/api'
 import type { DatasetColumn } from '../services/api'
 
@@ -145,11 +146,15 @@ describe('the picker comes from the registry', () => {
     expect(values).not.toContain('forecast_ets')
   })
 
-  it('shows the registry’s own description as help text', async () => {
-    // Written as the question a user would ask, so it is used verbatim.
+  it('says in the reader’s language what an analysis does, and falls back to the registry’s own words', async () => {
+    // A known analysis has its plain line in the catalogue (so an Arabic
+    // reader is not handed the registry's English)...
     panel()
     fireEvent.change(await picker(), { target: { value: 'compare_groups' } })
-    expect(await screen.findByText(/genuinely different across groups/i)).toBeInTheDocument()
+    expect(await screen.findByText(/differs between groups by more than chance/i)).toBeInTheDocument()
+    // ...and one the catalogue has never heard of still shows, in the registry's words.
+    expect(analysisDescription('brand_new_analysis', 'Does something new.', k => k)).toBe('Does something new.')
+    expect(analysisName('brand_new_analysis', k => k)).toBe('brand new analysis')
   })
 
   it('reports a failure to load the catalogue instead of an empty picker', async () => {
@@ -163,8 +168,8 @@ describe('the form is built from the schema', () => {
   it('renders a column select per column-valued string field', async () => {
     panel()
     fireEvent.change(await picker(), { target: { value: 'compare_groups' } })
-    expect(await screen.findByLabelText(/^value col/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/^group col/i)).toBeInTheDocument()
+    expect(await screen.findByLabelText(/^measure to compare/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/^split into groups by/i)).toBeInTheDocument()
   })
 
   it('renders a multi-select for an array of columns', async () => {
@@ -190,7 +195,7 @@ describe('the form is built from the schema', () => {
      */
     panel()
     fireEvent.change(await picker(), { target: { value: 'goal_seek' } })
-    const field = await screen.findByLabelText(/^target y/i) as HTMLInputElement
+    const field = await screen.findByLabelText(/^outcome/i) as HTMLInputElement
     expect(field.tagName).toBe('INPUT')
     expect(field.type).toBe('number')
   })
@@ -207,9 +212,9 @@ describe('the form is built from the schema', () => {
     const run = await screen.findByRole('button', { name: /run/i })
     expect(run).toBeDisabled()
 
-    fireEvent.change(screen.getByLabelText(/^value col/i), { target: { value: 'revenue' } })
+    fireEvent.change(screen.getByLabelText(/^measure to compare/i), { target: { value: 'revenue' } })
     expect(run).toBeDisabled()          // one of two
-    fireEvent.change(screen.getByLabelText(/^group col/i), { target: { value: 'region' } })
+    fireEvent.change(screen.getByLabelText(/^split into groups by/i), { target: { value: 'region' } })
     await waitFor(() => expect(run).toBeEnabled())
   })
 
@@ -220,7 +225,7 @@ describe('the form is built from the schema', () => {
     fireEvent.change(await picker(), { target: { value: 'goal_seek' } })
     fireEvent.change(await screen.findByLabelText(/^x column/i), { target: { value: 'cost' } })
     fireEvent.change(screen.getByLabelText(/^y column/i), { target: { value: 'revenue' } })
-    fireEvent.change(screen.getByLabelText(/^target y/i), { target: { value: '0' } })
+    fireEvent.change(screen.getByLabelText(/^outcome/i), { target: { value: '0' } })
     await waitFor(() =>
       expect(screen.getByRole('button', { name: /run/i })).toBeEnabled())
   })
@@ -244,8 +249,8 @@ describe('running an analysis', () => {
   const runCompareGroups = async () => {
     panel()
     fireEvent.change(await picker(), { target: { value: 'compare_groups' } })
-    fireEvent.change(await screen.findByLabelText(/^value col/i), { target: { value: 'revenue' } })
-    fireEvent.change(screen.getByLabelText(/^group col/i), { target: { value: 'region' } })
+    fireEvent.change(await screen.findByLabelText(/^measure to compare/i), { target: { value: 'revenue' } })
+    fireEvent.change(screen.getByLabelText(/^split into groups by/i), { target: { value: 'region' } })
     fireEvent.click(screen.getByRole('button', { name: /run/i }))
   }
 
@@ -262,7 +267,7 @@ describe('running an analysis', () => {
     fireEvent.change(await picker(), { target: { value: 'goal_seek' } })
     fireEvent.change(await screen.findByLabelText(/^x column/i), { target: { value: 'cost' } })
     fireEvent.change(screen.getByLabelText(/^y column/i), { target: { value: 'revenue' } })
-    fireEvent.change(screen.getByLabelText(/^target y/i), { target: { value: '500' } })
+    fireEvent.change(screen.getByLabelText(/^outcome/i), { target: { value: '500' } })
     fireEvent.click(screen.getByRole('button', { name: /run/i }))
     await waitFor(() => expect(analysisCatalogueApi.run).toHaveBeenCalledWith(
       1, 'goal_seek', { x_column: 'cost', y_column: 'revenue', target_y: 500 }))
@@ -275,7 +280,7 @@ describe('running an analysis', () => {
     fireEvent.change(await picker(), { target: { value: 'goal_seek' } })
     fireEvent.change(await screen.findByLabelText(/^x column/i), { target: { value: 'cost' } })
     fireEvent.change(screen.getByLabelText(/^y column/i), { target: { value: 'revenue' } })
-    fireEvent.change(screen.getByLabelText(/^target y/i), { target: { value: '500' } })
+    fireEvent.change(screen.getByLabelText(/^outcome/i), { target: { value: '500' } })
     fireEvent.click(screen.getByRole('button', { name: /run/i }))
     await waitFor(() => expect(analysisCatalogueApi.run).toHaveBeenCalled())
     const [, , params] = vi.mocked(analysisCatalogueApi.run).mock.calls[0]
@@ -341,7 +346,7 @@ describe('a result kind picks its own view', () => {
     }, () => {
       fireEvent.change(screen.getByLabelText(/^x column/i), { target: { value: 'cost' } })
       fireEvent.change(screen.getByLabelText(/^y column/i), { target: { value: 'revenue' } })
-      fireEvent.change(screen.getByLabelText(/^target y/i), { target: { value: '1625' } })
+      fireEvent.change(screen.getByLabelText(/^outcome/i), { target: { value: '1625' } })
     })
     // Through `toLocaleString`, so the expectation goes through it too: under
     // an Arabic locale the panel renders ٨١٢, which is correct for a reader
@@ -358,7 +363,7 @@ describe('a result kind picks its own view', () => {
     }, () => {
       fireEvent.change(screen.getByLabelText(/^x column/i), { target: { value: 'cost' } })
       fireEvent.change(screen.getByLabelText(/^y column/i), { target: { value: 'revenue' } })
-      fireEvent.change(screen.getByLabelText(/^target y/i), { target: { value: '1625' } })
+      fireEvent.change(screen.getByLabelText(/^outcome/i), { target: { value: '1625' } })
     })
     expect(await screen.findByTestId('goal-result')).toHaveTextContent(/cost/)
   })
@@ -374,8 +379,8 @@ describe('a result kind picks its own view', () => {
       clusters: 4, silhouette: 0.61,
       rows: [{ label: 'a', size: 10 }, { label: 'b', size: 12 }],
     }, () => {
-      fireEvent.change(screen.getByLabelText(/^value col/i), { target: { value: 'revenue' } })
-      fireEvent.change(screen.getByLabelText(/^group col/i), { target: { value: 'region' } })
+      fireEvent.change(screen.getByLabelText(/^measure to compare/i), { target: { value: 'revenue' } })
+      fireEvent.change(screen.getByLabelText(/^split into groups by/i), { target: { value: 'region' } })
     })
     expect(await screen.findByText('silhouette')).toBeInTheDocument()
     expect(screen.getByText('0.61')).toBeInTheDocument()
@@ -398,8 +403,8 @@ describe('the fallback shows an answer, not an inventory', () => {
       { analysis: 'segment', result_kind: 'segment', params: {}, result } as never)
     panel()
     fireEvent.change(await picker(), { target: { value: 'compare_groups' } })
-    fireEvent.change(await screen.findByLabelText(/^value col/i), { target: { value: 'revenue' } })
-    fireEvent.change(screen.getByLabelText(/^group col/i), { target: { value: 'region' } })
+    fireEvent.change(await screen.findByLabelText(/^measure to compare/i), { target: { value: 'revenue' } })
+    fireEvent.change(screen.getByLabelText(/^split into groups by/i), { target: { value: 'region' } })
     fireEvent.click(screen.getByRole('button', { name: /run/i }))
   }
 
@@ -463,8 +468,8 @@ describe('a decision tree', () => {
       envelope('decision_tree', TREE, 'decision_tree') as never)
     panel()
     fireEvent.change(await picker(), { target: { value: 'compare_groups' } })
-    fireEvent.change(await screen.findByLabelText(/^value col/i), { target: { value: 'revenue' } })
-    fireEvent.change(screen.getByLabelText(/^group col/i), { target: { value: 'region' } })
+    fireEvent.change(await screen.findByLabelText(/^measure to compare/i), { target: { value: 'revenue' } })
+    fireEvent.change(screen.getByLabelText(/^split into groups by/i), { target: { value: 'region' } })
     fireEvent.click(screen.getByRole('button', { name: /run/i }))
   }
 
@@ -556,8 +561,8 @@ describe('automated prediction', () => {
       envelope('automated_prediction', result(over), 'automated_prediction') as never)
     panel()
     fireEvent.change(await picker(), { target: { value: 'compare_groups' } })
-    fireEvent.change(await screen.findByLabelText(/^value col/i), { target: { value: 'revenue' } })
-    fireEvent.change(screen.getByLabelText(/^group col/i), { target: { value: 'region' } })
+    fireEvent.change(await screen.findByLabelText(/^measure to compare/i), { target: { value: 'revenue' } })
+    fireEvent.change(screen.getByLabelText(/^split into groups by/i), { target: { value: 'region' } })
     fireEvent.click(screen.getByRole('button', { name: /run/i }))
   }
 
@@ -632,8 +637,8 @@ describe('text topics', () => {
       envelope('text_topics', TOPICS, 'text_topics') as never)
     panel()
     fireEvent.change(await picker(), { target: { value: 'compare_groups' } })
-    fireEvent.change(await screen.findByLabelText(/^value col/i), { target: { value: 'revenue' } })
-    fireEvent.change(screen.getByLabelText(/^group col/i), { target: { value: 'region' } })
+    fireEvent.change(await screen.findByLabelText(/^measure to compare/i), { target: { value: 'revenue' } })
+    fireEvent.change(screen.getByLabelText(/^split into groups by/i), { target: { value: 'region' } })
     fireEvent.click(screen.getByRole('button', { name: /run/i }))
   }
 
@@ -702,8 +707,8 @@ describe('a what-if scenario', () => {
       envelope('forecast_scenario', SCENARIO(over), 'forecast_scenario') as never)
     panel()
     fireEvent.change(await picker(), { target: { value: 'compare_groups' } })
-    fireEvent.change(await screen.findByLabelText(/^value col/i), { target: { value: 'revenue' } })
-    fireEvent.change(screen.getByLabelText(/^group col/i), { target: { value: 'region' } })
+    fireEvent.change(await screen.findByLabelText(/^measure to compare/i), { target: { value: 'revenue' } })
+    fireEvent.change(screen.getByLabelText(/^split into groups by/i), { target: { value: 'region' } })
     fireEvent.click(screen.getByRole('button', { name: /run/i }))
   }
 

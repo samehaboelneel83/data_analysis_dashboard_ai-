@@ -268,3 +268,18 @@ class TestItRespectsSecurity:
 
         assert resp.status_code == 400
         assert "not available to you" in resp.json()["detail"]
+
+
+class TestReadableBins:
+    """Data-scientist tour (2026-10-10): numeric groups read "(2014.999, 2019.0]"."""
+
+    def test_a_numeric_bin_is_named_by_the_values_in_it(self):
+        year = np.repeat(np.arange(2015, 2025), 100)
+        price = (year - 2014) * 1000.0
+        r = key_influencers(pd.DataFrame({"model_year": year, "price": price}), target="price").to_dict()
+        groups = [x["group"] for x in r["rows"] if x["factor"] == "model_year"]
+        assert groups, "model_year should be binned"
+        for g in groups:
+            assert "(" not in g and "]" not in g and ".0" not in g and ".999" not in g
+            lo, _, hi = g.partition(" – ")
+            assert 2015 <= int(lo) <= int(hi or lo) <= 2024

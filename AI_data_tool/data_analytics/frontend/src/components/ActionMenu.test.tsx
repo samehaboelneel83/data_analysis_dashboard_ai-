@@ -151,3 +151,36 @@ describe('ActionMenu', () => {
     })
   })
 })
+describe('ActionMenu portal (5.10)', () => {
+  it('renders the popup on document.body so a clipping tile cannot hide it', async () => {
+    const { container } = render(
+      <div style={{ overflow: 'hidden', width: 40 }}>
+        <ActionMenu portal label="More" items={[{ key: 'a', label: 'Duplicate widget', onSelect: () => {} }]} />
+      </div>)
+    fireEvent.click(screen.getByRole('button', { name: 'More' }))
+    const menu = await screen.findByRole('menu', { name: 'More' })
+    expect(container.contains(menu)).toBe(false)
+    expect(document.body.contains(menu)).toBe(true)
+    expect(menu.style.position).toBe('fixed')
+  })
+})
+
+describe('a portalled menu and scrolling (autopilot step 3)', () => {
+  it('follows its button while it stays in the window, and closes once it has left', () => {
+    const { getByRole, queryByRole } = render(
+      <ActionMenu portal label="Export" items={[{ key: 'a', label: 'Download CSV', onSelect: () => {} }]} />)
+    const trigger = getByRole('button', { name: 'Export' })
+    let top = 100
+    trigger.getBoundingClientRect = () => ({ top, bottom: top + 30, left: 50, right: 150, width: 100, height: 30, x: 50, y: top, toJSON: () => ({}) })
+    fireEvent.click(trigger)
+    const menu = getByRole('menu')
+    const before = parseFloat(menu.style.top)
+    top = 60
+    fireEvent.scroll(window)
+    expect(getByRole('menu')).toBeInTheDocument()
+    expect(parseFloat(getByRole('menu').style.top)).toBe(before - 40)
+    top = -200
+    fireEvent.scroll(window)
+    expect(queryByRole('menu')).toBeNull()
+  })
+})

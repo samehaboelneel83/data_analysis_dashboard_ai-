@@ -31,13 +31,14 @@ beforeEach(() => {
 })
 
 describe('Automations (E12)', () => {
-  it('says what an automated analysis is when there are none, and offers only imported datasets', async () => {
+  it('says what an automated analysis is when there are none, and offers live datasets too, marked', async () => {
+    // HR evaluation, item 3.5: live datasets are analysed through their SQL.
     vi.mocked(automationApi.list).mockResolvedValue([])
     page()
     expect(await screen.findByText('No automated analyses yet')).toBeInTheDocument()
+    await waitFor(() => expect(within(screen.getByRole('combobox')).getAllByRole('option')).toHaveLength(3))
     const options = within(screen.getByRole('combobox')).getAllByRole('option').map(o => o.textContent)
-    await waitFor(() => expect(within(screen.getByRole('combobox')).getAllByRole('option')).toHaveLength(2))
-    expect(options).not.toContain('Live orders')
+    expect(options).toContain('Live orders · live')
   })
 
   it('starts a run on the chosen dataset', async () => {
@@ -45,7 +46,7 @@ describe('Automations (E12)', () => {
     vi.mocked(automationApi.start).mockResolvedValue(run() as never)
     page()
     await screen.findByText('No automated analyses yet')
-    await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(2))
+    await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(3))
     fireEvent.change(screen.getByRole('combobox'), { target: { value: '3' } })
     fireEvent.click(screen.getByRole('button', { name: 'Start automated analysis' }))
     await waitFor(() => expect(automationApi.start).toHaveBeenCalledWith(3))
@@ -58,7 +59,7 @@ describe('Automations (E12)', () => {
     page()
     const row = await screen.findByTestId('run-5')
     expect(within(row).getByTestId('run-status')).toHaveTextContent('Failed, will retry')
-    expect(within(row).getByLabelText('Describe the columns: failed')).toBeInTheDocument()
+    expect(within(row).getByLabelText('Describe the columns: Failed')).toBeInTheDocument()
     fireEvent.click(within(row).getByRole('button', { name: 'Retry now' }))
     await waitFor(() => expect(automationApi.retry).toHaveBeenCalledWith(5))
     expect(within(row).getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
@@ -115,5 +116,35 @@ describe('Automations (E12)', () => {
     page('/automation?run=5')
     expect(await screen.findByTestId('run-steps')).toHaveTextContent('Scan for findings')
     expect(screen.getByRole('button', { name: 'Details' })).toHaveAttribute('aria-expanded', 'true')
+  })
+})
+
+describe('Automations polish (5.15, 5.21)', () => {
+  it('shows the first unfinished step of a moving run as running', async () => {
+    const { shownStepStatus } = await import('./Automations')
+    const run = { status: 'running', steps: [
+      { name: 'profile', status: 'ok' }, { name: 'describe', status: 'pending' }, { name: 'scan', status: 'pending' }] } as never
+    expect(shownStepStatus(run, 1)).toBe('running')
+    expect(shownStepStatus(run, 2)).toBe('pending')
+    const done = { status: 'failed', steps: [{ name: 'profile', status: 'pending' }] } as never
+    expect(shownStepStatus(done, 0)).toBe('pending')
+  })
+
+  it('estimates the duration from the rows', async () => {
+    const { estimateMinutes } = await import('./Automations')
+    expect(estimateMinutes(240_124)).toBe(2)
+    expect(estimateMinutes(2_844_047)).toBe(13)
+    expect(estimateMinutes(0)).toBe(1)
+  })
+})
+
+describe('run summary in the reader\'s language', () => {
+  it('builds the sentence from the counts', async () => {
+    const { runSummary } = await import('./Automations')
+    const tt = (k: string, v?: Record<string, string | number>) => `${k}:${JSON.stringify(v ?? {})}`
+    const base = { status: 'done', result_report: { id: 1, name: 'HR overview' }, dataset: null, error: null } as never
+    expect(runSummary({ ...(base as object), widgets_accepted: 5, widgets_rejected: 0 } as never, tt as never)).toContain('auto.sum.all')
+    expect(runSummary({ ...(base as object), widgets_accepted: 0, widgets_rejected: 2 } as never, tt as never)).toContain('auto.sum.nothing')
+    expect(runSummary({ ...(base as object) } as never, tt as never)).toBeNull()
   })
 })

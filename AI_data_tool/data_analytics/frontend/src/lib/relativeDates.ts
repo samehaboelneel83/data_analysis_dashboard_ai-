@@ -115,3 +115,19 @@ export function presetOf(s: RelativeSpec): string {
     && (!usesN(s.mode) || p.spec.n === Number(s.n)) && !s.include_current)
   return p?.id ?? 'custom'
 }
+
+/** The last day of a partial period, from its label and granularity (QA2
+ *  T14: the note is composed in the reader's language from these fields;
+ *  the server's sentence is English). Null when the label is not one we read. */
+export function partialPeriodEnd(p: PartialPeriod): Date | null {
+  const utc = (y: number, m: number, d: number) => new Date(Date.UTC(y, m, d))
+  let m: RegExpExecArray | null
+  if (p.granularity === 'month' && (m = /^(\d{4})-(\d{2})$/.exec(p.label))) return utc(+m[1], +m[2], 0)
+  if (p.granularity === 'quarter' && (m = /^(\d{4})-Q([1-4])$/.exec(p.label))) return utc(+m[1], +m[2] * 3, 0)
+  if (p.granularity === 'year' && (m = /^(\d{4})$/.exec(p.label))) return utc(+m[1], 12, 0)
+  if (p.granularity === 'week' && /^\d{4}-\d{2}-\d{2}$/.test(p.through)) {
+    const d = new Date(p.through + 'T00:00:00Z'); const iso = (d.getUTCDay() + 6) % 7
+    return utc(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + (6 - iso))
+  }
+  return null
+}

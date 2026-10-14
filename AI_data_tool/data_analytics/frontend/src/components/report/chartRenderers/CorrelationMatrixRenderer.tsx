@@ -1,3 +1,4 @@
+import { useT } from '../../../i18n'
 import type { ChartRendererProps } from './types'
 import { seriesColor } from '../chartUtils'
 
@@ -15,11 +16,12 @@ function cellColor(v: number): string {
 }
 
 export default function CorrelationMatrixRenderer({ data, rtl }: ChartRendererProps) {
+  const t9 = useT()
   const measures: string[] = data?.measures ?? []
   const matrix: number[][] = data?.matrix ?? []
 
   if (measures.length < 2) {
-    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>Select at least 2 measures</div>
+    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>{t9('cr.twoMeasures')}</div>
   }
 
   return (

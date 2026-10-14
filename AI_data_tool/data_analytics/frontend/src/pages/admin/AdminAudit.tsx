@@ -1,10 +1,26 @@
 import { useEffect, useState } from 'react'
 import { inlineFieldStyle } from '../../components/ui/fieldStyle'
 import { useT } from '../../i18n'
+import { activityActionName } from '../../i18n/pages/dataPages'
 import { adminAuditApi } from '../../services/api'
 import type { AdminAuditRow } from '../../services/api'
 import LoadError from '../../components/ui/LoadError'
 import LoadingState from '../../components/ui/LoadingState'
+import { formatDate } from '../../lib/dateFormat'
+import { localDigits } from '../../lib/arabicFormats'
+import type { TranslateFn } from '../../i18n'
+
+/** QAF 26: the server stores a bare string whose meaning depends on the
+ *  action. The shapes known here get words; anything else stays as sent,
+ *  with a tooltip saying so (structured details are a backend row). */
+export function auditDetail(r: Pick<AdminAuditRow, 'action' | 'detail'>, t: TranslateFn): React.ReactNode {
+  const d = r.detail
+  if (d == null || d === '') return '—'
+  const days = /^(\d+)d$/.exec(d)
+  if (r.action === 'share_link.create' && days) return localDigits(t('qaf.audit.expires', { n: Number(days[1]) }))
+  if (r.action === 'share_link.revoke' && /^\d+$/.test(d)) return localDigits(t('qaf.audit.link', { id: d }))
+  return <bdi dir="ltr" title={t('qaf.audit.raw')}>{d}</bdi>
+}
 
 /**
  * S5: read-only trail of security-relevant admin mutations -- row/column
@@ -36,6 +52,9 @@ export default function AdminAudit() {
   useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const actions = Array.from(new Set(rows.map(r => r.action))).sort()
+  // QA5b S4: the same codes the Activity page writes, so the same words; the
+  // filter still sends the code.
+  const actionName = (code: string) => activityActionName(t, code)
 
   const inp = { style: inlineFieldStyle }
 
@@ -49,7 +68,7 @@ export default function AdminAudit() {
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
         <select value={action} onChange={e => setAction(e.target.value)} aria-label={t('audit.byAction')} {...inp}>
           <option value="">{t('audit.allActions')}</option>
-          {actions.map(a => <option key={a} value={a}>{a}</option>)}
+          {actions.map(a => <option key={a} value={a}>{actionName(a)}</option>)}
         </select>
         <input
           placeholder={t('audit.byTargetPh')}
@@ -66,7 +85,7 @@ export default function AdminAudit() {
       {loading && <LoadingState />}
 
       {!loading && loadError != null && (
-        <LoadError what="the audit trail" error={loadError} onRetry={load} />
+        <LoadError what={t('audit.loadWhat')} error={loadError} onRetry={load} />
       )}
 
       {!loading && loadError == null && rows.length === 0 && (
@@ -90,11 +109,15 @@ export default function AdminAudit() {
           <tbody>
             {rows.map(r => (
               <tr key={r.id}>
-                <td style={{ whiteSpace: 'nowrap' }}>{new Date(r.created_at).toLocaleString()}</td>
+                <td style={{ whiteSpace: 'nowrap' }}>{formatDate(r.created_at)}</td>
                 <td>{r.actor_email ?? '—'}</td>
-                <td style={{ fontWeight: 600 }}>{r.action}</td>
+                <td style={{ fontWeight: 600 }}>
+                  {actionName(r.action) === r.action
+                    ? <bdi dir="ltr">{r.action}</bdi>
+                    : <span title={r.action}>{actionName(r.action)}</span>}
+                </td>
                 <td>{r.target ?? '—'}</td>
-                <td style={{ color: 'var(--muted)' }}>{r.detail ?? '—'}</td>
+                <td style={{ color: 'var(--muted)' }}>{auditDetail(r, t)}</td>
               </tr>
             ))}
           </tbody>

@@ -1,7 +1,7 @@
 import { ScatterChart, Scatter, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList } from 'recharts'
 import { TT, fmtStr, seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
-import { xAxisProps, yAxisProps, gridProps, labelListProps, chartMargin } from './axisOptions'
+import { xAxisProps, yAxisProps, gridProps, labelListProps, chartMargin, valueTick } from './axisOptions'
 import { thinPoints, ANIMATE_MAX_POINTS } from '../../../lib/pointThinning'
 
 export default function ScatterChartRenderer({ rows, cfg, rtl, broadcasts, onClickPoint, measureFmt, allFormats, ruleStyles, plotW, plotH }: ChartRendererProps) {
@@ -19,10 +19,10 @@ export default function ScatterChartRenderer({ rows, cfg, rtl, broadcasts, onCli
     <ResponsiveContainer width="100%" height="100%">
       <ScatterChart margin={chartMargin(rtl, { top: 4, right: 8, bottom: 4, left: 0 })}>
         {grid && <CartesianGrid {...grid} />}
-        <XAxis dataKey="x" type="number" {...xAxisProps(cfg, rtl)} tickFormatter={v => fmtStr(v, xFmt)} />
+        <XAxis dataKey="x" type="number" {...xAxisProps(cfg, rtl)} tickFormatter={valueTick(cfg, xFmt)} />
         {/* allowDecimals forced true after the spread: this axis never set it before, so
             Recharts' own default (true) applied, unlike the builder's false default. */}
-        <YAxis dataKey="y" type="number" {...yAxisProps(cfg, rtl, yFmt, allPoints.map(d => d.y), undefined, { height: plotH })} allowDecimals tickFormatter={v => fmtStr(v, yFmt)} />
+        <YAxis dataKey="y" type="number" {...yAxisProps(cfg, rtl, yFmt, allPoints.map(d => d.y), undefined, { height: plotH })} allowDecimals tickFormatter={valueTick(cfg, yFmt)} />
         <Tooltip contentStyle={TT} formatter={(v: unknown, name: string) => [fmtStr(v, name === 'x' ? xFmt : yFmt), name]} />
         <Scatter data={scatterData} isAnimationActive={animate} fill={seriesColor(0)}
           onClick={broadcasts ? (d: any) => onClickPoint(d.x) : undefined}

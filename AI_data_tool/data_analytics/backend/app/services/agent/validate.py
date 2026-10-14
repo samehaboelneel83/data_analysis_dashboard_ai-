@@ -23,7 +23,10 @@ class ValidationFailure:
 
 
 _DIALECTS = {"postgresql": "postgres", "mysql": "mysql", "mssql": "tsql",
-             "oracle": "oracle", "sqlite": "sqlite", "duckdb": "duckdb"}
+             "oracle": "oracle", "sqlite": "sqlite", "duckdb": "duckdb",
+             # connectors.sql_family_of says "sqlserver" (and "clickhouse"):
+             # without these a SQL Server query was parsed as PostgreSQL.
+             "sqlserver": "tsql", "mariadb": "mysql", "clickhouse": "clickhouse"}
 
 
 def _dialect(family: str) -> str:
@@ -40,6 +43,15 @@ def validate_sql(sql: str, context: SchemaContext) -> ValidationFailure | None:
     if tree is None or not isinstance(tree, (exp.Select, exp.Union)):
         return ValidationFailure(
             "V1", "only SELECT statements are allowed; the agent reads, never writes")
+    # A SELECT at the top can still write: `WITH d AS (DELETE ... RETURNING *)
+    # SELECT ...` deletes on PostgreSQL, and `SELECT ... INTO t` creates a
+    # table. The model's SQL can be steered by text in the data itself, so the
+    # whole tree is checked, with the same gate as hand-written SQL.
+    from ..sql_safety import UnsafeQuery, ensure_read_only
+    try:
+        ensure_read_only(sql, context.family)
+    except UnsafeQuery as exc:
+        return ValidationFailure("V1", f"{exc} The agent reads, never writes.")
 
     # Still V1, and for the same reason: an answer about the data has to come
     # FROM the data. A query that references no table returns whatever the
@@ -120,8 +132,22 @@ def validate_sql(sql: str, context: SchemaContext) -> ValidationFailure | None:
         for cte in tree.find_all(exp.CTE) if cte.alias
     }
 
+    # Derived tables -- `FROM (SELECT ...) AS latest` -- are named result sets
+    # exactly like CTEs: their alias is a valid qualifier and their projection
+    # is their column list. Without this, "step s1: unknown alias: latest"
+    # refused the leaver question the HR evaluation asked (blocker 3, item
+    # 1.10). Their INNER select is still validated table-by-table below.
+    for sq in tree.find_all(exp.Subquery):
+        if sq.alias and isinstance(sq.this, exp.Select):
+            cte_names.add(sq.alias)
+            cte_output_columns[sq.alias] = _cte_output_columns(sq)
+
     alias_to_table: dict[str, str] = {}
     cte_aliases: set[str] = set()
+    for sq in tree.find_all(exp.Subquery):
+        if sq.alias and sq.alias in cte_names:
+            alias_to_table[sq.alias] = sq.alias
+            cte_aliases.add(sq.alias)
     for table in tree.find_all(exp.Table):
         name = table.name
         ref = table.alias or name
@@ -150,6 +176,9 @@ def validate_sql(sql: str, context: SchemaContext) -> ValidationFailure | None:
             if t.find_ancestor(exp.Select) is not select:
                 continue
             scope[t.alias or t.name] = t.name
+        for sq in select.find_all(exp.Subquery):
+            if sq.alias and sq.alias in cte_names and sq.find_ancestor(exp.Select) is select:
+                scope[sq.alias] = sq.alias
         return scope
 
     select_scopes = {id(s): _select_scope(s) for s in tree.find_all(exp.Select)}
@@ -199,6 +228,11 @@ def validate_sql(sql: str, context: SchemaContext) -> ValidationFailure | None:
         for eq in on.find_all(exp.EQ):
             left, right = eq.left, eq.right
             if isinstance(left, exp.Column) and isinstance(right, exp.Column):
+                # A join onto a CTE or derived table: its columns come from
+                # tables the inner query already joined under these rules,
+                # so the edge to check is inside it, not here.
+                if left.table in cte_aliases or right.table in cte_aliases:
+                    continue
                 lt, rt = _resolve(left), _resolve(right)
                 if lt is None or rt is None:
                     return ValidationFailure("V3", f"cannot resolve join: {eq.sql()}")
@@ -217,8 +251,12 @@ def validate_sql(sql: str, context: SchemaContext) -> ValidationFailure | None:
 import re as _re  # noqa: E402
 
 #: Words that ask HOW MANY rows, not how much of a column.
-_COUNTING = _re.compile(r"\b(activity|activities|how many|number of|traffic|busiest|"
-                        r"most active|handled the most)\b", _re.I)
+_COUNTING = _re.compile(r"\b(activity|activities|how many|number of|count of|busiest|"
+                        r"most active|most frequent)\b", _re.I)
+
+
+#: A column that already holds a count: summing it IS counting.
+_COUNT_NAME = _re.compile(r"(^|_)(count|counts|cnt|num|number|n)(_|$)|_count$|^count_|^n_|_n$", _re.I)
 
 
 def measure_fit(question: str, sql: str, family: str) -> ValidationFailure | None:
@@ -249,6 +287,8 @@ def measure_fit(question: str, sql: str, family: str) -> ValidationFailure | Non
     for total in tree.find_all(exp.Sum):
         for col in total.find_all(exp.Column):
             name = col.name or ""
+            if name and _COUNT_NAME.search(name):
+                continue        # a count already made (a summary table's "order_count"): adding it counts
             if name and name.lower().replace("_", " ") not in asked and name.lower() not in asked:
                 return ValidationFailure(
                     "V7", f"the question asks about activity -- how many rows -- but this query "

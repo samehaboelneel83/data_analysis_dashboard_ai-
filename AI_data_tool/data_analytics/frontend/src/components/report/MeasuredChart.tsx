@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { startTransition, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { watchDeclutter } from '../../lib/chartDeclutter'
 
 /**
@@ -31,15 +31,35 @@ export function MeasuredChart({ children }: {
     // page (QA 2026-09-26), so the first size lands at once and later ones
     // settle: the chart keeps its last drawn size (clipped or with room to
     // spare) until the drag pauses for RESIZE_SETTLE_MS, then redraws once.
+    //
+    // A ONE-OFF change -- a side panel opened or closed, the window snapped
+    // to a new size -- lands at once (leading edge): waiting for a "settle"
+    // that is already over only made the chart lag its tile. Only a change
+    // that follows another within RESIZE_SETTLE_MS (a drag in progress)
+    // waits, and the drag's last size still lands when it pauses.
     let timer: ReturnType<typeof setTimeout> | undefined
-    const commit = (w: number, h: number) =>
+    const apply = (w: number, h: number) =>
       setSize(p => (p && Math.abs(p.w - w) < 1 && Math.abs(p.h - h) < 1) ? p : { w, h })
-    let first = true
+    // A redraw at a new size is a TRANSITION: when a panel toggles, every
+    // chart on the page redraws at once, and as one urgent update that was a
+    // single 450ms frame (nine charts, Call activity). As a transition React
+    // draws them in slices and lets the browser paint between, and each chart
+    // keeps showing its last drawing until its new one is ready. The first
+    // size is urgent: there is no drawing to keep yet.
+    let drawn = false
+    const commit = (w: number, h: number) => {
+      if (!drawn) { drawn = true; apply(w, h); return }
+      startTransition(() => apply(w, h))
+    }
+    let lastChange = -Infinity
     const measure = () => {
       const r = el.getBoundingClientRect()
       if (!(r.width > 8 && r.height > 8)) return
-      if (first) { first = false; commit(r.width, r.height); return }
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
+      const busy = now - lastChange < RESIZE_SETTLE_MS
+      lastChange = now
       clearTimeout(timer)
+      if (!busy) { commit(r.width, r.height); return }
       timer = setTimeout(() => commit(r.width, r.height), RESIZE_SETTLE_MS)
     }
     measure()

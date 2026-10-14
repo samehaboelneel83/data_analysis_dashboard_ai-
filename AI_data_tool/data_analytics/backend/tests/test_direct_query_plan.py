@@ -72,7 +72,7 @@ def test_plan_query_rejects_non_grain_safe_aggregations(agg):
 def test_plan_query_rejects_unsupported_filter_operator():
     config = {
         "dimension": "region", "measure": "revenue",
-        "filters": [{"column": "region", "op": "like", "value": "east"}],
+        "filters": [{"column": "region", "op": "regex", "value": "east"}],
     }
     with pytest.raises(DirectQueryUnsupported):
         plan_query(config, "bar")

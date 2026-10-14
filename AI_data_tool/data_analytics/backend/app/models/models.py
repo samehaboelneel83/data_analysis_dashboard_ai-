@@ -10,6 +10,10 @@ class Dataset(Base):
     name        = Column(String(255), nullable=False)
     description = Column(Text)
     filename    = Column(String(500))
+    #: "Allow AI" for this dataset. None = follow the connection it was built
+    #: from, or the installation default for an upload; False always wins
+    #: (services/ai_policy.py).
+    allow_ai    = Column(Boolean, nullable=True)
     row_count   = Column(Integer, default=0)
     col_count   = Column(Integer, default=0)
     file_size   = Column(BigInteger, default=0)
@@ -42,8 +46,9 @@ class Dataset(Base):
     # one-way -- see QueryBuilderDialog).
     query_model         = Column(JSON, nullable=True)
     mode                = Column(String(20), nullable=False, default="import", server_default="import")
-    # Scheduled refresh. NULL means unscheduled; last_refreshed_at is advanced even on
-    # a failed attempt so a broken source retries on its schedule, not every tick.
+    # Scheduled refresh. NULL means unscheduled. last_refreshed_at is when the data
+    # last actually changed: a failed attempt leaves it (pipeline plan, phase 1);
+    # backoff in ScheduleFailure, not this stamp, spaces out the retries.
     refresh_interval_minutes = Column(Integer, nullable=True)
     last_refreshed_at        = Column(DateTime(timezone=True), nullable=True)
     # E07: SHA-256 of the file as uploaded, so a second upload of the same bytes
@@ -94,11 +99,45 @@ class DatasetShare(Base):
     id          = Column(Integer, primary_key=True)
     dataset_id  = Column(Integer, ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False)
     user_id     = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    #: 'view' (read only) or 'edit' (may also author the data model). 'edit'
+    #: is what every share meant before levels existed.
+    level       = Column(String(10), nullable=False, default="edit", server_default="edit")
     created_at  = Column(DateTime(timezone=True), default=datetime.utcnow)
     __table_args__ = (UniqueConstraint("dataset_id", "user_id", name="uq_dataset_share"),)
 
     dataset = relationship("Dataset")
     user    = relationship("User")
+
+
+class SavedQuery(Base):
+    """A SQL statement kept for a connection's Browse dialog (4.2): either a
+    named query someone saved, or one of their last runs (`name` is NULL --
+    the history, trimmed to the newest HISTORY_KEEP per user and connection).
+    New table, so create_all provisions it; alembic 0051 for existing DBs."""
+    __tablename__ = "saved_queries"
+    id             = Column(Integer, primary_key=True)
+    org_id         = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id        = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    data_source_id = Column(Integer, ForeignKey("data_sources.id", ondelete="CASCADE"), nullable=False, index=True)
+    name           = Column(String(255), nullable=True)
+    sql            = Column(Text, nullable=False)
+    created_at     = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class DatasetGroupShare(Base):
+    """A dataset shared with a whole ROLE or ORG UNIT (and everyone placed
+    under that unit), at 'view' or 'edit'. HR evaluation, item 2.5: sharing
+    "Current workforce" with nine department managers one user at a time was
+    the only way. Exactly one of role_id / org_unit_id is set. New table, so
+    create_all provisions it; alembic 0049 for existing databases."""
+    __tablename__ = "dataset_group_shares"
+    id          = Column(Integer, primary_key=True)
+    org_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    dataset_id  = Column(Integer, ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False, index=True)
+    role_id     = Column(Integer, ForeignKey("roles.id", ondelete="CASCADE"), nullable=True)
+    org_unit_id = Column(Integer, ForeignKey("org_units.id", ondelete="CASCADE"), nullable=True)
+    level       = Column(String(10), nullable=False, default="view", server_default="view")
+    created_at  = Column(DateTime(timezone=True), default=datetime.utcnow)
 
 
 class DatasetColumn(Base):
@@ -161,6 +200,10 @@ class Report(Base):
     # Report-level display rules: applied to every object on every page, ahead of any
     # widget-level rules, which override them by list order. See services/display_rules.py.
     display_rules          = Column(JSON, default=list)
+    #: The dashboard's look beyond its palette: fonts, card borders, corners,
+    #: shadows, backgrounds (services/dashboard_templates/spec.STYLE_KEYS).
+    #: Empty = the app's own look.
+    style                  = Column(JSON, default=dict)
     # Monotonic counter bumped by every mutation to this report or anything nested
     # under it. Every edit here persists immediately with no explicit save, so this
     # is what lets a client notice another session moved the report underneath it.
@@ -189,6 +232,29 @@ class Report(Base):
     #: rather than a second column.
     origin                 = Column(String(20), nullable=False, default="user",
                                     server_default="user", index=True)
+    # ── Publication details (docs/publishing/PLAN.md) ────────────────────────
+    #: How a reader finds it in the portal: one category, any number of tags.
+    category               = Column(String(60), nullable=True, index=True)
+    tags                   = Column(JSON, default=list)
+    #: When it last went out, and who sent it (publish or release).
+    published_at           = Column(DateTime(timezone=True), nullable=True)
+    published_by           = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    #: Set = archived: kept, restorable, but closed to everyone except its
+    #: owner and administrators; its guest links and schedules stop.
+    archived_at            = Column(DateTime(timezone=True), nullable=True, index=True)
+    #: May someone who can only VIEW it take the data away (PDF, Excel, CSV,
+    #: a scheduled copy)? True keeps what the product always did. A grant can
+    #: narrow it for one person or team (ReportUserGrant.can_export).
+    viewers_may_export     = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    #: Approval, where the organisation asks for one (OrgReviewSettings.
+    #: require_approval): none | requested | approved | rejected, the revision
+    #: it was asked or decided at (an edit after approval needs a new one),
+    #: who asked, who decided, and the reviewer's note.
+    review_state           = Column(String(12), nullable=False, default="none", server_default="none")
+    review_revision        = Column(Integer, nullable=True)
+    review_requested_by    = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    review_decided_by      = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    review_note            = Column(String(500), nullable=True)
     org_id                 = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True)
     created_at             = Column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at             = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -324,6 +390,11 @@ class DataSource(Base):
     # the model? Default off, per source, deliberately. Even a self-hosted endpoint
     # is a disclosure, and some sources must never be described by an LLM.
     allow_llm_sampling = Column(Boolean, nullable=False, default=False, server_default="0")
+    #: Sensitivity label for everything read from this connection (Public /
+    #: Internal / Confidential / Restricted). Every dataset built from it --
+    #: live, Query builder or Browse import -- inherits it as a floor (HR
+    #: evaluation, item 2.2: the imported copy of the salaries was Unlabelled).
+    sensitivity = Column(String(20), nullable=True)
     # A plain-language account of what this database holds, written by Stage 5
     # from the tables, their columns and the relationships between them. This is
     # the artefact a person actually reads after a sync -- the column-level
@@ -472,6 +543,9 @@ class OrgReviewSettings(Base):
     id           = Column(Integer, primary_key=True)
     org_id       = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
     publish_gate = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    #: Publishing (and releasing changes to something already published) needs
+    #: an administrator's approval of that exact revision. Off = as before.
+    require_approval = Column(Boolean, nullable=False, default=False, server_default=text("false"))
     updated_by   = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     updated_at   = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -529,6 +603,10 @@ class User(Base):
     email         = Column(String(255), nullable=False, unique=True)
     password_hash = Column(String(255), nullable=False)
     is_active     = Column(Boolean, nullable=False, default=True)
+    #: What the person wrote about themselves: their work and what they look
+    #: at data for. Read by the designers that tailor a dashboard to them
+    #: (services/ai_context.py), and by nothing else.
+    about         = Column(Text, nullable=True)
     created_at    = Column(DateTime(timezone=True), default=datetime.utcnow)
     #: Login tokens issued before this instant are refused (migration 0038).
     #: Set when a password is reset, so a token minted with the old password
@@ -757,6 +835,11 @@ class Delivery(Base):
     artifact_kind = Column(String(10), nullable=False, default="none")  # pdf | csv | xlsx | none
     duration_ms   = Column(Integer, nullable=True)
     created_at    = Column(DateTime(timezone=True), default=datetime.utcnow, index=True)
+    # 5.18: what the row is ABOUT, so the log is not a column of dashes: the
+    # alert's or schedule's name, who it went to, and the file it carried.
+    subject       = Column(String(255), nullable=True)
+    recipients    = Column(Text, nullable=True)
+    file_name     = Column(String(255), nullable=True)
 
 
 class DataAlert(Base):
@@ -779,6 +862,16 @@ class DataAlert(Base):
     last_checked_at  = Column(DateTime(timezone=True), nullable=True)
     last_state       = Column(String(10), nullable=False, default="clear")   # clear | firing
     last_status      = Column(String(200))
+    #: CHANGE alerts (HR evaluation, item 3.1): when `change_pct` is set,
+    #: `expression` is a metric ("COUNT(emp_no)") and the alert fires when it
+    #: moves by at least that percentage since the previous check, in
+    #: `change_direction` ('up' | 'down' | 'any'). `last_value` is the metric
+    #: at the previous check (also shown for condition alerts).
+    last_value       = Column(Float, nullable=True)
+    change_pct       = Column(Float, nullable=True)
+    change_direction = Column(String(5), nullable=True)
+    #: Also post to a Teams / Slack / generic incoming webhook (https only).
+    webhook_url      = Column(String(500), nullable=True)
     created_at       = Column(DateTime(timezone=True), default=datetime.utcnow)
 
 
@@ -797,6 +890,54 @@ class PageTemplate(Base):
     kind       = Column(String(20), nullable=False, default="page")   # page | object
     payload    = Column(JSON, nullable=False, default=dict)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class DashboardTemplate(Base):
+    """A dashboard as a reusable specification (services/dashboard_templates).
+
+    `spec` holds pages, layouts, widget settings, metric definitions, filters
+    and style with the columns replaced by named slots; using it on a dataset
+    maps each slot to a column. `visibility` is personal (its author only) or
+    org (everyone in the organisation). Every saved change keeps the version
+    before it in `dashboard_template_versions`.
+    """
+    __tablename__ = "dashboard_templates"
+    id          = Column(Integer, primary_key=True)
+    org_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    name        = Column(String(120), nullable=False)
+    description = Column(Text)
+    category    = Column(String(30), nullable=False, default="overview")
+    tags        = Column(JSON, default=list)
+    spec        = Column(JSON, nullable=False, default=dict)
+    visibility  = Column(String(20), nullable=False, default="personal")   # personal | org
+    version     = Column(Integer, nullable=False, default=1)
+    uses        = Column(Integer, nullable=False, default=0)
+    created_by  = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at  = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at  = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class DashboardTemplateVersion(Base):
+    """A template as it was before a change: restoring one makes a new version."""
+    __tablename__ = "dashboard_template_versions"
+    id          = Column(Integer, primary_key=True)
+    template_id = Column(Integer, ForeignKey("dashboard_templates.id", ondelete="CASCADE"), nullable=False, index=True)
+    version     = Column(Integer, nullable=False)
+    name        = Column(String(120), nullable=False)
+    spec        = Column(JSON, nullable=False, default=dict)
+    note        = Column(String(300))
+    created_by  = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at  = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class TemplateFavorite(Base):
+    """One person's starred template: `template_ref` is "builtin:<key>" or "t:<id>"."""
+    __tablename__ = "template_favorites"
+    __table_args__ = (UniqueConstraint("user_id", "template_ref", name="uq_template_favorite"),)
+    id           = Column(Integer, primary_key=True)
+    user_id      = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    template_ref = Column(String(80), nullable=False)
+    created_at   = Column(DateTime(timezone=True), default=datetime.utcnow)
 
 
 class RecentView(Base):
@@ -899,16 +1040,44 @@ class ReportUserGrant(Base):
 
     Levels reuse the capability vocabulary: 'view' (see a draft), 'edit'
     (design: move widgets, add pages), 'data' (edit plus dataset authoring).
+
+    Since the publishing work (docs/publishing/PLAN.md) a grant may name a
+    ROLE or a TEAM (org unit) instead of a person -- exactly one of the three,
+    router-enforced like WorkspaceFolderGrant -- and carries what a level
+    alone cannot say: when it ends, whether its holder may take the data
+    away, and whether they may pass the dashboard on. It stays ONE table: a
+    second one for teams would be a second place for the same permission.
     """
     __tablename__ = "report_user_grants"
     id         = Column(Integer, primary_key=True)
     report_id  = Column(Integer, ForeignKey("reports.id", ondelete="CASCADE"), nullable=False, index=True)
-    user_id    = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id    = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    role_id    = Column(Integer, ForeignKey("roles.id", ondelete="CASCADE"), nullable=True, index=True)
+    org_unit_id = Column(Integer, ForeignKey("org_units.id", ondelete="CASCADE"), nullable=True, index=True)
     level      = Column(String(5), nullable=False, default="edit")
+    #: After this moment the grant gives nothing (kept, so its owner sees it lapsed).
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    #: May the holder download or schedule what they can see? Only narrows:
+    #: never more than the dataset's own export policy and sensitivity allow.
+    can_export = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    #: May the holder share it on -- to people, view-only, never above their own level?
+    can_share  = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     __table_args__ = (
         UniqueConstraint("report_id", "user_id", name="uq_report_user_grant"),
     )
+
+
+class ReportFavorite(Base):
+    """A dashboard one person marked to find again (the portal's Favourites).
+    One row per (user, report); gone with either."""
+    __tablename__ = "report_favorites"
+    __table_args__ = (UniqueConstraint("user_id", "report_id", name="uq_report_favorite"),)
+    id         = Column(Integer, primary_key=True)
+    user_id    = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    report_id  = Column(Integer, ForeignKey("reports.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
 
 
 class ReportCapability(Base):
@@ -1379,6 +1548,21 @@ class Watermark(Base):
     cursor_column = Column(String(255), nullable=True)
     cursor_value  = Column(Text, nullable=True)
     updated_at    = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+    # Pipeline plan, phase 4 (2026-10-03). `key_column`: an incremental load
+    # MERGES on it -- a row whose key is already held replaces the old one
+    # instead of being appended as a duplicate. `lookback_hours`: re-read
+    # that far behind a date cursor, to catch rows updated late (needs a key,
+    # or the re-read rows would duplicate). `full_reload_days`: every N days
+    # the scheduled refresh does a full load instead, to correct any drift an
+    # incremental table builds up (deletes it cannot see). `last_full_at`:
+    # when the last full load ran.
+    key_column       = Column(String(255), nullable=True)
+    lookback_hours   = Column(Integer, nullable=True)
+    #: 2026-10-10: with a key, also drop rows whose key the source no longer
+    #: has -- an incremental merge otherwise keeps deleted rows forever.
+    reconcile_deletes = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    full_reload_days = Column(Integer, nullable=True)
+    last_full_at     = Column(DateTime(timezone=True), nullable=True)
 
 
 class Materialization(Base):
@@ -1692,6 +1876,15 @@ class GlossaryTerm(Base):
     synonyms       = Column(JSON, nullable=False, default=list)   # ["GMV", "إجمالي المبيعات"]
     maps_to_object = Column(String(255), nullable=True)
     maps_to_column = Column(String(255), nullable=True)
+    #: A business RULE the AI must follow whenever this term is meant -- a SQL
+    #: predicate ("dept_emp.to_date = '9999-01-01'") or a one-line instruction.
+    #: HR evaluation, blocker 3: the agent did not know that "current" means
+    #: an open-ended to_date, and answered with every salary a person ever had.
+    rule           = Column(Text, nullable=True)
+    #: Apply the rule to EVERY question on this source, not only when the term
+    #: is named: "employees per department" means current employees even
+    #: though nobody typed "current".
+    always         = Column(Boolean, nullable=False, default=False, server_default="0")
     created_at     = Column(DateTime(timezone=True), default=datetime.utcnow)
 
 
@@ -1977,6 +2170,110 @@ class ScheduleFailure(Base):
                         onupdate=datetime.utcnow)
 
 
+class RefreshRun(Base):
+    """One attempt to refresh a dataset or run a dataflow: its history.
+
+    `ScheduleFailure` holds only the CURRENT failure streak and is deleted on
+    success, and `Dataflow.last_run_*` holds one run. Neither answers "did
+    last night's refresh run, how long did it take, how many rows, and why
+    did Tuesday's fail?" (pipeline plan, phase 1, 2026-10-03). Every refresh
+    path -- the scheduler and a manual refresh -- writes one row here.
+    """
+    __tablename__ = "refresh_runs"
+    id         = Column(Integer, primary_key=True)
+    org_id     = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"),
+                        nullable=True, index=True)
+    #: dataset | dataflow
+    kind       = Column(String(20), nullable=False)
+    item_id    = Column(Integer, nullable=False, index=True)
+    #: schedule | manual
+    trigger    = Column(String(20), nullable=False, default="schedule")
+    #: running | ok | failed | skipped | blocked (a blocking check failed;
+    #: the previous data stayed live -- pipeline plan, phase 3)
+    status     = Column(String(20), nullable=False, default="running")
+    started_at = Column(DateTime(timezone=True), default=datetime.utcnow, index=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    rows       = Column(Integer, nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+    error      = Column(Text, nullable=True)
+    error_code = Column(String(40), nullable=True)
+    #: Phase 3: each saved check's result on the data this run fetched, and
+    #: schema notes -- [{id, kind, column, severity, passed, detail}, ...].
+    checks     = Column(JSON, nullable=True)
+    #: 2026-10-10: {rows_per_sec, file_mb, slow: {median_ms, times}} -- how
+    #: fast the run went and whether it was far slower than this item's usual.
+    metrics    = Column(JSON, nullable=True)
+
+
+class DataCheck(Base):
+    """A saved quality check on a dataset, run on every refresh BEFORE the new
+    data replaces the old (pipeline plan, phase 3).
+
+    `kind` is one of not_null | unique | accepted_values | row_count |
+    row_drop | rule; `params` holds what the kind needs (values, min/max,
+    max_drop_pct, expression). A `block` check that fails keeps the previous
+    data live and records the run as blocked; a `warn` check only records.
+    """
+    __tablename__ = "data_checks"
+    id         = Column(Integer, primary_key=True)
+    org_id     = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"),
+                        nullable=True, index=True)
+    dataset_id = Column(Integer, ForeignKey("datasets.id", ondelete="CASCADE"),
+                        nullable=False, index=True)
+    kind       = Column(String(30), nullable=False)
+    column     = Column(String(255), nullable=True)
+    params     = Column(JSON, default=dict)
+    #: warn | block
+    severity   = Column(String(10), nullable=False, default="warn")
+    enabled    = Column(Boolean, nullable=False, default=True)
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class PipelineWatch(Base):
+    """Who hears about a dataset's or dataflow's refresh health, and when.
+
+    Pipeline plan, phase 2 (2026-10-03). The owner (the item's creator, or the
+    org admins when there is none) always gets an in-app notice; `recipients`
+    adds emails and https webhooks, the same one list report schedules use.
+    `freshness_hours` is the age past which the data counts as stale.
+
+    `state` remembers what was last SAID, so one failure streak is one notice
+    and one recovery notice -- never one per retry. A new table, not columns
+    on datasets and dataflows, for the reason ScheduleFailure gives: create_all
+    provisions a table on every install, while a column needs an ALTER. A row
+    exists only once something was configured or went wrong.
+    """
+    __tablename__ = "pipeline_watches"
+    __table_args__ = (UniqueConstraint("kind", "item_id", name="uq_pipeline_watch_item"),)
+    id         = Column(Integer, primary_key=True)
+    org_id     = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"),
+                        nullable=True, index=True)
+    #: dataset | dataflow
+    kind       = Column(String(20), nullable=False)
+    item_id    = Column(Integer, nullable=False)
+    #: Data older than this many hours is stale. NULL: no freshness target.
+    freshness_hours = Column(Integer, nullable=True)
+    #: Emails and https:// webhook URLs told as well as the owner.
+    recipients = Column(JSON, default=list)
+    #: User ids who asked for the in-app notices too ("Notify me"), besides
+    #: the owner. Only active members of the item's org are told.
+    followers  = Column(JSON, default=list)
+    #: ok | failing -- the last state announced.
+    state      = Column(String(20), nullable=False, default="ok")
+    state_since = Column(DateTime(timezone=True), nullable=True)
+    #: When staleness was announced; cleared by the next successful refresh.
+    stale_alerted_at = Column(DateTime(timezone=True), nullable=True)
+    #: Phase 4: a dataflow, or a dataset rebuilt from another, that runs when
+    #: its SOURCE refreshes successfully instead of on its own timer.
+    run_after_source = Column(Boolean, nullable=False, default=False)
+    #: Set when the source has refreshed since this item last ran; the
+    #: scheduler runs the item on its next tick and clears it.
+    trigger_pending  = Column(Boolean, nullable=False, default=False)
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow,
+                        onupdate=datetime.utcnow)
+
+
 class WorkspaceFolderGrant(Base):
     """Shares one workspace folder — live and interactive — with a person, a
     role, or a team (org unit), at a capability level.
@@ -2063,6 +2360,10 @@ class Dataflow(Base):
     # Its OWN schedule. One interval drives every output, so the set refreshes
     # together rather than each output drifting to its own cadence.
     refresh_interval_minutes = Column(Integer, nullable=True)
+    # 4.6: a SNAPSHOT dataflow appends one row per period (and group) each
+    # run instead of replacing its output, so a live source -- which only
+    # ever shows today -- builds a history. Shape: services/snapshot_flow.py.
+    snapshot = Column(JSON, nullable=True)
 
     # A scheduled run has nobody at the keyboard, so it resolves row-level
     # security as this user -- the same stance ReportSchedule takes with its
@@ -2354,3 +2655,157 @@ class AppSetting(Base):
     value      = Column(JSON, nullable=True)
     updated_by = Column(String(255))           # email, denormalised like the audit log
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class SetupJourney(Base):
+    """Where one person is in the guided setup of one connection
+    (docs/guided-setup/PLAN.md, step 0c).
+
+    A guide, not a store: everything the setup makes is an ordinary object
+    (the connection's description, datasets, a dashboard) found later on its
+    usual page. This row only remembers the step reached, the answers to
+    "About you" -- asked once, reused by every later step -- and what the
+    setup made, so Home can say "Continue: cars, step 2 of 4".
+    """
+    __tablename__ = "setup_journeys"
+    __table_args__ = (UniqueConstraint("user_id", "data_source_id", name="uq_setup_journeys_user_source"),)
+    id             = Column(Integer, primary_key=True)
+    org_id         = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id        = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    data_source_id = Column(Integer, ForeignKey("data_sources.id", ondelete="CASCADE"), nullable=False, index=True)
+    #: understand | data | check | dashboard | done
+    step           = Column(String(20), nullable=False, default="understand", server_default="understand")
+    #: {"work", "focus", "questions", "exclude"} -- hints for the model, never rules
+    brief          = Column(JSON, nullable=True)
+    #: ids of the datasets this setup created or adopted
+    dataset_ids    = Column(JSON, nullable=True)
+    report_id      = Column(Integer, ForeignKey("reports.id", ondelete="SET NULL"), nullable=True)
+    #: The model's words for the Understand step, one entry per language:
+    #: {"en": {"attempt", "words", ...}, "ar": {...}}. Asked once and kept until
+    #: the user presses "Ask AI again" (routers/guided_setup.py `_entries`).
+    summary        = Column(JSON, nullable=True)
+    #: Choose data: the proposed datasets, kept until "Suggest again"
+    #: {"lang", "attempt", "pending", "failed", "items": [...], "at"}.
+    proposals      = Column(JSON, nullable=True)
+    #: Check & discover: the plain health notes and insights per dataset,
+    #: {"<dataset id>": {...}} -- kept until "Check again".
+    findings       = Column(JSON, nullable=True)
+    #: Dashboard: the proposed dashboards, kept until "Suggest again".
+    designs        = Column(JSON, nullable=True)
+    created_at     = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at     = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class DatasetProfile(Base):
+    """What is remembered about a dataset so it is not read again
+    (services/discovery/profile.py): each column's kind, counts, ranges,
+    category labels, date coverage -- measured once per version of the data.
+
+    A TABLE OF ITS OWN, deliberately. The first version kept this in
+    `DatasetColumn.stats` and `Dataset.column_meta`, which are returned with
+    every dataset payload: a reader under a row rule would have been handed
+    the ranges and labels of rows they may not see. Nothing serialises this
+    table; it is read only through `profile.for_reader`, which removes hidden
+    columns and withholds every value-level figure from a restricted reader.
+    """
+    __tablename__ = "dataset_profiles"
+    dataset_id  = Column(Integer, ForeignKey("datasets.id", ondelete="CASCADE"), primary_key=True)
+    #: The data's fingerprint when this was measured (profile.fingerprint).
+    version     = Column(String(120), nullable=False)
+    #: {"table": {...}, "columns": {name: stats}}
+    body        = Column(JSON, nullable=False, default=dict)
+    measured_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class SuggestionFeedback(Base):
+    """What a person did with a suggested chart (docs/suggestions/PLAN.md,
+    phase 4): dismissed it, or added it to a dashboard.
+
+    A dismissal used to live in one browser's storage: it came back on the
+    next device, and nothing anywhere knew which kinds of suggestion people
+    keep or throw away. Kept here per person and dataset, a dismissed idea
+    stays dismissed everywhere, and the counts per kind of chart rank what is
+    offered next -- counts only, no model.
+    """
+    __tablename__ = "suggestion_feedback"
+    __table_args__ = (UniqueConstraint("user_id", "dataset_id", "signature", name="uq_suggestion_feedback_sig"),)
+    id          = Column(Integer, primary_key=True)
+    org_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id     = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    dataset_id  = Column(Integer, ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False, index=True)
+    #: The chart's identity as the pane computes it (type + what it measures by what).
+    signature   = Column(String(600), nullable=False)
+    widget_type = Column(String(50), nullable=False)
+    #: dismissed | added -- the LAST thing the person did with it.
+    action      = Column(String(20), nullable=False)
+    created_at  = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class MeaningFact(Base):
+    """One checked fact about what a connection's data MEANS
+    (docs/meaning-map/PLAN.md) -- beside the catalog, which says what shape
+    it has.
+
+    A count says nothing until it is read against its base: 1,000 complaints
+    out of 1,000,000 shipments is nothing. No engine could know that from
+    tables and joins, so it is written down once per connection -- measured on
+    the database, named by the model, corrected by a person -- and read by
+    every step.
+
+    kind:  grain   what one row of a table is, and what kind of table it is
+           base    events counted against the rows they happen to
+           outcome a column saying what became of a row (late, returned)
+           number  what a numeric column is: amount, level, duration, score...
+    """
+    __tablename__ = "meaning_facts"
+    __table_args__ = (UniqueConstraint("data_source_id", "kind", "subject", name="uq_meaning_facts_subject"),)
+    id             = Column(Integer, primary_key=True)
+    org_id         = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    data_source_id = Column(Integer, ForeignKey("data_sources.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind           = Column(String(20), nullable=False)
+    #: "table", "table.column" or "events>base": what the fact is about.
+    subject        = Column(String(600), nullable=False)
+    body           = Column(JSON, nullable=False)
+    #: measured (counted on the database) | ai | confirmed (a person's word wins)
+    source         = Column(String(20), nullable=False, default="measured", server_default="measured")
+    #: active | rejected -- a person can say "not right"; it is then never used.
+    status         = Column(String(20), nullable=False, default="active", server_default="active")
+    measured_at    = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class SetupFlow(Base):
+    """One run of steps 2-4 of the guided setup (docs/guided-setup/PLAN_V2.md, part 1).
+
+    A person can want several things from one database: the journey keeps
+    what is shared (the Understand step's words), and each flow keeps its own
+    request, datasets, check and dashboard, so a second analysis never
+    replaces the first and two can be worked on side by side.
+    """
+    __tablename__ = "setup_flows"
+    id             = Column(Integer, primary_key=True)
+    org_id         = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id        = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    journey_id     = Column(Integer, ForeignKey("setup_journeys.id", ondelete="CASCADE"), nullable=False, index=True)
+    data_source_id = Column(Integer, ForeignKey("data_sources.id", ondelete="CASCADE"), nullable=False, index=True)
+    name           = Column(String(255), nullable=True)
+    #: data | check | dashboard | done
+    step           = Column(String(20), nullable=False, default="data", server_default="data")
+    #: {"work", "focus", "questions", "exclude"} -- what the person typed
+    brief          = Column(JSON, nullable=True)
+    #: What the person wants, written once from everything they said and
+    #: checked against the data (services/guided_setup/demand.py). Binding on
+    #: the check and the dashboard, unlike `brief`, which is only a hint.
+    demand         = Column(JSON, nullable=True)
+    dataset_ids    = Column(JSON, nullable=True)
+    #: The datasets this flow made itself: only these are cleaned automatically.
+    created_ids    = Column(JSON, nullable=True)
+    report_id      = Column(Integer, ForeignKey("reports.id", ondelete="SET NULL"), nullable=True)
+    proposals      = Column(JSON, nullable=True)
+    findings       = Column(JSON, nullable=True)
+    #: {"<dataset id>": {"actions": [...], "undone": [...], "rows_before", "rows_after"}}
+    cleaning       = Column(JSON, nullable=True)
+    designs        = Column(JSON, nullable=True)
+    archived       = Column(Boolean, nullable=False, default=False, server_default="0")
+    created_at     = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at     = Column(DateTime(timezone=True), default=datetime.utcnow)
+

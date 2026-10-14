@@ -233,7 +233,9 @@
    Right-to-left
    Arabic is a first-class audience here. Logical properties
    only — no left/right in spacing, no mirrored icon sprites.
-   Chart internals stay LTR; the surrounding layout flips.
+   Only the chart's SVG surface and its legend wrapper stay LTR;
+   the axes flip (x reversed, y on the right -- axisOptions.ts)
+   along with the surrounding layout.
 
    The authoritative, test-pinned copy of the recharts-surface
    rule lives in index.css (svgDirection.test.ts reads that file

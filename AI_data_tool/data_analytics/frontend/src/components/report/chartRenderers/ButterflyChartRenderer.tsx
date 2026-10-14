@@ -1,13 +1,15 @@
+import { useT } from '../../../i18n'
 import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer, LabelList } from 'recharts'
 import { fmtStr, TT, seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
 import { axisTitles, xAxisProps, yAxisProps, gridProps, labelListProps } from './axisOptions'
 
 export default function ButterflyChartRenderer({ data, cfg, rtl, measureFmt, measure2Fmt, ruleStyles, plotH }: ChartRendererProps) {
+  const t9 = useT()
   const rows: { name: string; value?: number; value2?: number }[] = data?.rows ?? []
 
   if (rows.length === 0) {
-    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>Configure widget to see data</div>
+    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>{t9('cr.configure')}</div>
   }
 
   const chartData = rows.map(r => ({ name: r.name, left: -(Math.abs(r.value ?? 0)), right: Math.abs(r.value2 ?? 0) }))

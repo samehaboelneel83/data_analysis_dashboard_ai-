@@ -187,3 +187,28 @@ describe('forecast', () => {
     expect(lastConfig(onUpdate).forecast_periods).toBe(36)
   })
 })
+
+describe('a crosstab\'s Columns can be a hierarchy (hierarchy plan, step 3)', () => {
+  const geo = [
+    { id: 20, dataset_id: 1, parent_id: null, name: 'Geo', node_type: 'folder', position: 0, created_at: '2026-01-01' },
+    { id: 21, dataset_id: 1, parent_id: 20, name: 'Country', node_type: 'dimension', column_name: 'country', position: 0, created_at: '2026-01-01' },
+  ] as never
+  function withHierarchy(widgetType: string, config: Record<string, unknown>) {
+    const onUpdate = vi.fn()
+    const widget = { id: 1, page_id: 100, widget_type: widgetType, title: '', config,
+      layout: { x: 0, y: 0, w: 6, h: 5 }, created_at: '2026-01-01' } as unknown as Widget
+    render(<CrossFilterProvider><WidgetConfigPanel widget={widget} columns={COLUMNS} onUpdate={onUpdate} hierarchy={geo} /></CrossFilterProvider>)
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Grid' } })
+    return lastConfig(onUpdate)
+  }
+
+  it('keeps the Columns hierarchy on a crosstab', () => {
+    expect(withHierarchy('crosstab', { dimension: 'region', dimension2: 'country', measure: 'revenue', hierarchyNodeId2: 21 })
+      .hierarchyNodeId2).toBe(21)
+  })
+
+  it('a chart has no Columns hierarchy, so none is written', () => {
+    expect(withHierarchy('bar', { dimension: 'region', dimension2: 'country', measure: 'revenue', hierarchyNodeId2: 21 }))
+      .not.toHaveProperty('hierarchyNodeId2')
+  })
+})

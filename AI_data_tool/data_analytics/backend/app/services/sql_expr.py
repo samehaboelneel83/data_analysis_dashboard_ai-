@@ -241,7 +241,38 @@ def translate_filter_expr_null_safe(expr: str, known_columns: set[str]) -> tuple
 # SQL meaning raises ExpressionTranslationError and the widget is refused with
 # the reason -- never computed by a different formula.
 
+#: DATEDIFF(a, b, 'day') with pandas' meaning -- whole days from a to b,
+#: FLOORED (a day and a half is 1, minus half a day is -1) -- per SQL family.
+#: `{a}`/`{b}` are the translated operands. A family not listed refuses.
+_DAYS_BETWEEN = {
+    "postgresql": "FLOOR(EXTRACT(EPOCH FROM (CAST({b} AS TIMESTAMP) - CAST({a} AS TIMESTAMP))) / 86400)",
+    "mysql": "FLOOR(TIMESTAMPDIFF(SECOND, {a}, {b}) / 86400)",
+    "sqlserver": "FLOOR(DATEDIFF_BIG(second, {a}, {b}) / 86400.0)",
+    "oracle": "FLOOR(CAST({b} AS DATE) - CAST({a} AS DATE))",
+    "sqlite": ("(CAST((julianday({b}) - julianday({a})) AS INTEGER) - "
+               "((julianday({b}) - julianday({a})) < CAST((julianday({b}) - julianday({a})) AS INTEGER)))"),
+}
+
+
 class _CalcTranslator(_Translator):
+    dialect: str | None = None
+
+    def _datediff(self, args: list) -> str:
+        if len(args) not in (2, 3):
+            raise ExpressionTranslationError("DATEDIFF() takes two dates and a unit")
+        unit = "day"
+        if len(args) == 3:
+            if not (isinstance(args[2], ast.Constant) and isinstance(args[2].value, str)):
+                raise ExpressionTranslationError("DATEDIFF()'s unit must be written as text")
+            unit = args[2].value.lower().rstrip("s")
+        template = _DAYS_BETWEEN.get(self.dialect or "")
+        if template is None:
+            raise ExpressionTranslationError(f"DATEDIFF() has no SQL translation for {self.dialect or 'this source'} yet")
+        if unit not in ("day", "week"):
+            raise ExpressionTranslationError(f"DATEDIFF() in {unit}s has no SQL translation yet; days and weeks do")
+        days = template.format(a=self.translate(args[0]), b=self.translate(args[1]))
+        return days if unit == "day" else f"FLOOR(({days}) / 7)"
+
     def _param(self, value) -> str:
         if value is None:
             return "NULL"
@@ -267,6 +298,8 @@ class _CalcTranslator(_Translator):
                 return f"(CASE WHEN {c} THEN {a} ELSE {b} END)"
             if name.lower() == "abs" and len(args) == 1:
                 return f"ABS({self.translate(args[0])})"
+            if name.upper() == "DATEDIFF":
+                return self._datediff(args)
             if name.lower() == "round" and len(args) in (1, 2):
                 digits = self.translate(args[1]) if len(args) == 2 else "0"
                 return f"ROUND({self.translate(args[0])}, {digits})"
@@ -274,7 +307,8 @@ class _CalcTranslator(_Translator):
         return super().translate(node)
 
 
-def calc_column_to_sql(expr: str, known_columns: set[str]) -> tuple[str, list[str]]:
+def calc_column_to_sql(expr: str, known_columns: set[str],
+                       dialect: str | None = None) -> tuple[str, list[str]]:
     """`(sql, columns_used)` for a calculated-column expression, or
     ExpressionTranslationError."""
     if not expr or not expr.strip():
@@ -292,4 +326,5 @@ def calc_column_to_sql(expr: str, known_columns: set[str]) -> tuple[str, list[st
     except SyntaxError as e:
         raise ExpressionTranslationError(f"expression is not valid: {e}") from e
     t = _CalcTranslator(known_columns, backtick_map)
+    t.dialect = dialect
     return t.translate(tree), list(t.used_columns)

@@ -31,7 +31,7 @@ export default function HierarchyTree({ nodes, datasetId, onRefresh }: Props) {
     await hierarchyApi.update(datasetId, node.id, { name: editName })
     setEditId(null)
     onRefresh()
-    toast.success('Renamed')
+    toast.success(t('pg.panelsA.hr.renamed'))
   }
 
   const deleteNode = async (node: HierarchyNode) => {
@@ -39,10 +39,11 @@ export default function HierarchyTree({ nodes, datasetId, onRefresh }: Props) {
     // re-parent to this node's parent (routers/hierarchy.py) -- so nothing is
     // lost, and styling it as a destructive delete would overstate it.
     if (!await confirm({
-      title: `Remove the level "${node.name}"?`,
-      body: 'Anything under it moves up to take its place. No fields are deleted.',
-      confirmLabel: 'Remove level',
+      title: t('pg.panelsA.hr.removeTitle', { name: node.name }),
+      body: t('pg.panelsA.hr.removeBody'),
+      confirmLabel: t('pg.panelsA.hr.removeLevel'),
       destructive: false,
+      focusCancel: true,
     })) return
     await hierarchyApi.delete(datasetId, node.id)
     onRefresh()
@@ -74,7 +75,7 @@ export default function HierarchyTree({ nodes, datasetId, onRefresh }: Props) {
     await hierarchyApi.update(datasetId, parent.id, { parent_id: node.id })
     if (child) await hierarchyApi.update(datasetId, child.id, { parent_id: parent.id })
     onRefresh()
-    toast.success(`${node.name} moved up`)
+    toast.success(t('pg.panelsA.hr.movedUp', { name: node.name }))
   }
 
   const setGranularity = async (node: HierarchyNode, format: string) => {
@@ -109,37 +110,37 @@ export default function HierarchyTree({ nodes, datasetId, onRefresh }: Props) {
             style={{ flex: 1, fontSize: 12, padding: '1px 4px' }} autoFocus />
         ) : (
           <span style={{ flex: 1, color: node.node_type === 'folder' ? 'var(--text)' : 'var(--muted)', fontWeight: node.node_type === 'folder' ? 600 : 400 }}>
-            {node.name}
+            <bdi>{node.name}</bdi>
           </span>
         )}
         {node.node_type === 'date' && node.format && (
-          <select aria-label={`Granularity of ${node.name}`} value={node.format}
+          <select aria-label={t('pg.panelsA.hr.granularityOf', { name: node.name })} value={node.format}
             onClick={e => e.stopPropagation()}
             onChange={e => setGranularity(node, e.target.value)}
             style={{ fontSize: 10.5, color: 'var(--muted)', background: 'var(--surface2)',
               border: '1px solid var(--border)', borderRadius: 4 }}>
-            {['year', 'quarter', 'month', 'week', 'day'].map(g => <option key={g} value={g}>{g}</option>)}
+            {(['year', 'quarter', 'month', 'week', 'day'] as const).map(g => <option key={g} value={g}>{t(`pg.panelsA.hr.gran.${g}`)}</option>)}
           </select>
         )}
         <div style={{ display: 'flex', gap: 2, opacity: 0 }} className="node-actions">
           {(node.node_type === 'dimension' || node.node_type === 'measure') && (
             <button onClick={() => toggleMeasureCategory(node)}
-              title={node.node_type === 'measure' ? 'Switch to Category' : 'Switch to Measure'}
-              aria-label={node.node_type === 'measure' ? 'Switch to Category' : 'Switch to Measure'}
+              title={node.node_type === 'measure' ? t('pg.panelsA.hr.toCategory') : t('pg.panelsA.hr.toMeasure')}
+              aria-label={node.node_type === 'measure' ? t('pg.panelsA.hr.toCategory') : t('pg.panelsA.hr.toMeasure')}
               style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 11, padding: '0 2px' }}>⇄</button>
           )}
           {(() => {
             const parent = nodes.find(n => n.id === node.parent_id)
             return parent && parent.node_type !== 'folder' ? (
-              <button onClick={() => moveLevelUp(node)} title="Move this level up"
-                aria-label={`Move ${node.name} up`}
+              <button onClick={() => moveLevelUp(node)} title={t('pg.panelsA.hr.moveUpTitle')}
+                aria-label={t('pg.panelsA.hr.moveUp', { name: node.name })}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 11, padding: '0 2px' }}>↑</button>
             ) : null
           })()}
           <button onClick={() => { setEditId(node.id); setEditName(node.name) }}
             style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 11, padding: '0 2px' }}>✏</button>
-          <button onClick={() => deleteNode(node)} title="Remove this level (children re-attach to its parent)"
-            aria-label={`Remove ${node.name}`}
+          <button onClick={() => deleteNode(node)} title={t('pg.panelsA.hr.removeHint')}
+            aria-label={t('pg.panelsA.hr.remove', { name: node.name })}
             style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', fontSize: 11, padding: '0 2px' }}>×</button>
         </div>
       </div>

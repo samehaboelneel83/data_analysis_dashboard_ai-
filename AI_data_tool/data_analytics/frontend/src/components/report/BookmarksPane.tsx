@@ -1,3 +1,4 @@
+import { useT } from '../../i18n'
 import { useState } from 'react'
 import { reportsApi } from '../../services/api'
 import type { Bookmark, BookmarkState } from '../../types/report'
@@ -10,6 +11,7 @@ export default function BookmarksPane({ reportId, bookmarks, captureState, onCap
   onApply: (b: Bookmark) => void
   onDeleted: (id: number) => void
 }) {
+  const t = useT()
   const [naming, setNaming] = useState(false)
   const [name, setName] = useState('')
 
@@ -24,7 +26,7 @@ export default function BookmarksPane({ reportId, bookmarks, captureState, onCap
   return (
     <div style={{ padding: '14px 14px 0' }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
-        Bookmarks
+        {t('builder.pane.bookmarks')}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 10 }}>
         {bookmarks.map(b => (
@@ -38,15 +40,15 @@ export default function BookmarksPane({ reportId, bookmarks, captureState, onCap
               style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer' }}>×</button>
           </div>
         ))}
-        {bookmarks.length === 0 && <span style={{ fontSize: 12, color: 'var(--muted)' }}>No bookmarks yet.</span>}
+        {bookmarks.length === 0 && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{t('bc.panes.bookmarks.empty')}</span>}
       </div>
       {naming ? (
         <div style={{ display: 'flex', gap: 6 }}>
-          <input value={name} onChange={e => setName(e.target.value)} placeholder="Bookmark name…" style={{ flex: 1, fontSize: 12 }} autoFocus />
-          <button className="btn btn-primary btn-sm" onClick={save}>Save</button>
+          <input value={name} onChange={e => setName(e.target.value)} placeholder={t('bc.panes.bookmarks.namePh')} style={{ flex: 1, fontSize: 12 }} autoFocus />
+          <button className="btn btn-primary btn-sm" onClick={save}>{t('bc.panes.save')}</button>
         </div>
       ) : (
-        <button className="btn btn-ghost btn-sm" onClick={() => setNaming(true)}>+ Add bookmark</button>
+        <button className="btn btn-ghost btn-sm" onClick={() => setNaming(true)}>{t('bc.panes.bookmarks.add')}</button>
       )}
     </div>
   )

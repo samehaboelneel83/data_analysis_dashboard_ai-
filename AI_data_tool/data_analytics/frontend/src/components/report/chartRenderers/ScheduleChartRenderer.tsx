@@ -1,7 +1,9 @@
+import { useT } from '../../../i18n'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell, ResponsiveContainer } from 'recharts'
 import { COLORS, TT } from '../chartUtils'
 import type { ChartRendererProps } from './types'
 import { axisTitles, xAxisProps, yAxisProps, gridProps } from './axisOptions'
+import { formatDate } from '../../../lib/dateFormat'
 
 function toMs(v: unknown): number {
   if (typeof v === 'number') return v
@@ -10,10 +12,11 @@ function toMs(v: unknown): number {
 }
 
 export default function ScheduleChartRenderer({ data, cfg, rtl, ruleStyles, plotH }: ChartRendererProps) {
+  const t9 = useT()
   const rows: { name: string; start: unknown; end: unknown; group?: string }[] = data?.rows ?? []
 
   if (rows.length === 0) {
-    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>Configure widget to see data</div>
+    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>{t9('cr.configure')}</div>
   }
 
   // origIndex tracks each row's position in the widget's original result rows, which is
@@ -23,7 +26,7 @@ export default function ScheduleChartRenderer({ data, cfg, rtl, ruleStyles, plot
   const validRows = parsed.filter(r => !isNaN(r.startMs) && !isNaN(r.endMs))
 
   if (validRows.length === 0) {
-    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>Configure widget to see data</div>
+    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>{t9('cr.configure')}</div>
   }
 
   const minStart = Math.min(...validRows.map(r => r.startMs))
@@ -58,7 +61,7 @@ export default function ScheduleChartRenderer({ data, cfg, rtl, ruleStyles, plot
           { title: timeTitle })}
           tick={{ fontSize: cfg.axis_tick_size ?? 11, ...(cfg.axis_tick_color ? { fill: cfg.axis_tick_color } : {}) }}
           axisLine={cfg.axis_line ?? true} tickLine={cfg.tick_line ?? true}
-          tickFormatter={v => new Date(minStart + v).toLocaleDateString()} />
+          tickFormatter={v => formatDate(minStart + v, 'date')} />
         {/* scale/domain/allowDecimals forced back to Recharts' own defaults after the
             spread: yAxisProps wires cfg.y_scale/y_min/y_max onto whatever <YAxis> it is
             spread onto, including this category axis. Recharts' parseScale
@@ -79,7 +82,7 @@ export default function ScheduleChartRenderer({ data, cfg, rtl, ruleStyles, plot
           tick={{ fontSize: cfg.axis_tick_size ?? 11, ...(cfg.axis_tick_color ? { fill: cfg.axis_tick_color } : {}) }}
           axisLine={cfg.axis_line ?? true} tickLine={cfg.tick_line ?? true} />
         <Tooltip contentStyle={TT} formatter={(_v: any, _n: string, props: any) =>
-          [`${new Date(minStart + props.payload.offset).toLocaleDateString()} → ${new Date(minStart + props.payload.offset + props.payload.span).toLocaleDateString()}`, props.payload.name]
+          [`${formatDate(minStart + props.payload.offset, 'date')} → ${formatDate(minStart + props.payload.offset + props.payload.span, 'date')}`, props.payload.name]
         } />
         <Bar dataKey="offset" stackId="gantt" fill="transparent" isAnimationActive={false} />
         <Bar dataKey="span" stackId="gantt" isAnimationActive={false} radius={3}>

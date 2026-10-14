@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderWithProviders as render, screen, waitFor, fireEvent } from '../test/renderWithProviders'
+import { renderWithProviders as render, screen, waitFor, fireEvent, act } from '../test/renderWithProviders'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { DirectionProvider } from '../contexts/DirectionContext'
 import DatasetDetail from './DatasetDetail'
 import { datasetsApi, analysisApi, dataPreviewApi, jobsApi } from '../services/api'
 import { AuthContext } from '../contexts/AuthContext'
@@ -8,9 +9,14 @@ import type { Dataset, User } from '../services/api'
 import { axeViolations } from '../test/axe'
 
 vi.mock('../services/api', () => ({
+  // DatasetShareDialog offers roles and org units (2.5).
+  adminRolesApi: { list: vi.fn().mockResolvedValue([]) },
+  orgUnitsApi: { list: vi.fn().mockResolvedValue([]) },
   datasetsApi: { get: vi.fn(), refresh: vi.fn(), setSchedule: vi.fn(), quality: vi.fn(),
                  list: vi.fn().mockResolvedValue([]),
-                 queueRefresh: vi.fn(), activeRefresh: vi.fn().mockResolvedValue(null) },
+                 queueRefresh: vi.fn(), activeRefresh: vi.fn().mockResolvedValue(null),
+                 // Rules & alerts (3b): saved checks, also read by the Overview's trust card.
+                 checks: vi.fn().mockResolvedValue([]), tryChecks: vi.fn().mockResolvedValue({ rows: 0, results: [] }) },
   // E12: a refresh is a durable job the page follows.
   jobsApi: { get: vi.fn(), cancel: vi.fn() },
   isJobActive: (j: { state: string }) => j.state === 'queued' || j.state === 'running',
@@ -19,6 +25,9 @@ vi.mock('../services/api', () => ({
   // Phase 7.6: the "Use in Python" snippet reads the API origin.
   api: { defaults: { baseURL: 'http://localhost:8000/api/v1' } },
   // Phase 7.3: the header's sensitivity control.
+  // The Columns tab's profile facts (services/discovery/profile on the server).
+  discoveryApi: { profile: vi.fn().mockResolvedValue({ columns: [] }), health: vi.fn().mockRejectedValue(new Error('none')) },
+  allowAiApi: { get: vi.fn().mockResolvedValue({ own: null, effective: true, decided_by: 'default', connection: null }), set: vi.fn() },
   sensitivityApi: { get: vi.fn().mockResolvedValue({ label: null, effective: null, reasons: [],
     options: ['Public', 'Internal', 'Confidential', 'Restricted'], redacted_on_share: [] }), set: vi.fn() },
   widgetDataApi: { query: vi.fn() },
@@ -81,9 +90,11 @@ function importDataset(): Dataset {
   }
 }
 
-function renderDetail(dsId: number) {
+/** `tab`: the redesign moved the automatic analyses to Analysis, the column
+ *  profile to Columns and the quality rules to Rules & alerts. */
+function renderDetail(dsId: number, tab?: string) {
   return render(
-    <MemoryRouter initialEntries={[`/datasets/${dsId}`]}>
+    <MemoryRouter initialEntries={[`/datasets/${dsId}${tab ? `?tab=${tab}` : ''}`]}>
       <Routes><Route path="/datasets/:id" element={<DatasetDetail />} /></Routes>
     </MemoryRouter>
   )
@@ -119,7 +130,7 @@ describe('DatasetDetail insights engine', () => {
         { kind: 'data_quality', score: 0.5, title: 'notes is 52% missing', detail: 'Aggregations ignore the gaps.', columns: ['notes'] },
       ],
     })
-    renderDetail(29)
+    renderDetail(29, 'analysis#insights')
     fireEvent.click(await screen.findByRole('button', { name: /Generate insights/ }))
     expect(await screen.findByTestId('insights-narrative')).toHaveTextContent('Across 2,000 rows')
     expect(screen.getByTestId('insight-standout')).toHaveTextContent('Software carries 40% of revenue')
@@ -142,7 +153,7 @@ describe('DatasetDetail insights engine', () => {
       rows: [{ name: 'Software', value: 40 }, { name: 'Hardware', value: 10 }],
     } as any)
 
-    renderDetail(29)
+    renderDetail(29, 'analysis#insights')
     fireEvent.click(await screen.findByRole('button', { name: /Generate insights/ }))
 
     expect(await screen.findByTestId('insight-standout'))
@@ -171,7 +182,7 @@ describe('DatasetDetail date & time profiling', () => {
       } } },
       overview: { rows: 90, cols: 2, missing_pct: 0, type_counts: {} },
     } as never)
-    renderDetail(29)
+    renderDetail(29, 'columns')
     const card = await screen.findByTestId('dt-card-order_date')
     expect(card).toHaveTextContent('order_date')
     expect(card).toHaveTextContent('date')                       // granularity badge
@@ -187,7 +198,7 @@ describe('DatasetDetail date & time profiling', () => {
       datetime: { columns: { junk: { note: 'no parseable date values' } } },
       overview: { rows: 1, cols: 1, missing_pct: 0, type_counts: {} },
     } as never)
-    renderDetail(29)
+    renderDetail(29, 'columns')
     expect(await screen.findByText('no parseable date values')).toBeInTheDocument()
   })
 })
@@ -210,7 +221,7 @@ describe('DatasetDetail segment (A2)', () => {
       warnings: [],
     })
 
-    renderDetail(29)
+    renderDetail(29, 'analysis#segment')
 
     expect(await screen.findByText(/k = 2 clusters/)).toBeInTheDocument()
     expect(screen.getByText(/silhouette 0.870/)).toBeInTheDocument()
@@ -228,7 +239,7 @@ describe('DatasetDetail segment (A2)', () => {
         silhouette: 0.5, centroids: [], n_rows_used: 1, n_rows_total: 1 },
       warnings: [],
     })
-    renderDetail(29)
+    renderDetail(29, 'analysis#segment')
     await screen.findByRole('button', { name: /Re-run segmentation/ })
 
     fireEvent.click(screen.getByRole('button', { name: /Re-run segmentation/ }))
@@ -241,7 +252,7 @@ describe('DatasetDetail segment (A2)', () => {
     vi.mocked(analysisApi.get).mockRejectedValue(new Error('none'))
     vi.mocked(analysisApi.segment).mockRejectedValue({ response: { data: { detail: 'Segmentation needs at least 2 usable numeric columns' } } })
 
-    renderDetail(29)
+    renderDetail(29, 'analysis#segment')
 
     expect(await screen.findByText('Segmentation needs at least 2 usable numeric columns')).toBeInTheDocument()
   })
@@ -249,9 +260,9 @@ describe('DatasetDetail segment (A2)', () => {
   it('does not offer segmentation for a DirectQuery dataset', async () => {
     vi.mocked(datasetsApi.get).mockResolvedValue(directQueryDataset())
 
-    renderDetail(28)
+    renderDetail(28, 'analysis#segment')
 
-    await screen.findByText('Live Sales')
+    await screen.findByRole('heading', { name: 'Live Sales' })
     expect(screen.queryByRole('button', { name: /Segment rows/ })).not.toBeInTheDocument()
     expect(analysisApi.segment).not.toHaveBeenCalled()
   })
@@ -271,7 +282,7 @@ describe('DatasetDetail patterns / association rules', () => {
     vi.mocked(analysisApi.get).mockRejectedValue(new Error('none'))
     vi.mocked(analysisApi.associationRules).mockResolvedValue(RULES_RESULT)
 
-    renderDetail(29)
+    renderDetail(29, 'analysis#associations')
 
     expect(await screen.findByText('region = West')).toBeInTheDocument()
     expect(analysisApi.associationRules).toHaveBeenCalledTimes(1)
@@ -282,7 +293,7 @@ describe('DatasetDetail patterns / association rules', () => {
     vi.mocked(datasetsApi.get).mockResolvedValue(importDataset())
     vi.mocked(analysisApi.get).mockRejectedValue(new Error('none'))
     vi.mocked(analysisApi.associationRules).mockResolvedValue(RULES_RESULT)
-    renderDetail(29)
+    renderDetail(29, 'analysis#associations')
     await screen.findByRole('button', { name: /Re-run/ })
 
     fireEvent.click(screen.getByRole('button', { name: /Re-run/ }))
@@ -295,7 +306,7 @@ describe('DatasetDetail patterns / association rules', () => {
     vi.mocked(analysisApi.get).mockRejectedValue(new Error('none'))
     vi.mocked(analysisApi.associationRules).mockRejectedValue({ response: { data: { detail: 'Too few rows to mine' } } })
 
-    renderDetail(29)
+    renderDetail(29, 'analysis#associations')
 
     expect(await screen.findByText('Too few rows to mine')).toBeInTheDocument()
   })
@@ -305,7 +316,7 @@ describe('DatasetDetail patterns / association rules', () => {
     vi.mocked(datasetsApi.get).mockResolvedValue(ds)
     vi.mocked(analysisApi.associationRules).mockResolvedValue(RULES_RESULT)
 
-    renderDetail(28)
+    renderDetail(28, 'analysis#associations')
 
     expect(await screen.findByText('region = West')).toBeInTheDocument()
   })
@@ -317,7 +328,7 @@ describe('DatasetDetail DirectQuery gating', () => {
 
     renderDetail(28)
 
-    await screen.findByText('Live Sales')
+    await screen.findByRole('heading', { name: 'Live Sales' })
     expect(analysisApi.get).not.toHaveBeenCalled()
   })
 
@@ -327,7 +338,7 @@ describe('DatasetDetail DirectQuery gating', () => {
 
     renderDetail(29)
 
-    await screen.findByText('CSV Upload')
+    await screen.findByRole('heading', { name: 'CSV Upload' })
     await waitFor(() => expect(analysisApi.get).toHaveBeenCalledWith(29))
   })
 
@@ -336,7 +347,7 @@ describe('DatasetDetail DirectQuery gating', () => {
 
     renderDetail(28)
 
-    await screen.findByText('Live Sales')
+    await screen.findByRole('heading', { name: 'Live Sales' })
     expect(screen.queryByText(/Refresh from source/)).not.toBeInTheDocument()
   })
 
@@ -354,8 +365,10 @@ describe('DatasetDetail DirectQuery gating', () => {
 
     renderDetail(28)
 
-    await screen.findByText('Live Sales')
-    expect(await screen.findByRole('button', { name: /Run analysis/ })).toBeInTheDocument()
+    await screen.findByRole('heading', { name: 'Live Sales' })
+    // In the header's ⋯ menu since 3b; the Overview offers it too.
+    fireEvent.click(screen.getByRole('button', { name: 'More actions for this dataset' }))
+    expect(await screen.findByRole('menuitem', { name: /Run analysis/ })).toBeInTheDocument()
   })
 
   it('shows a sample-based note after running analysis on a DirectQuery dataset', async () => {
@@ -366,10 +379,12 @@ describe('DatasetDetail DirectQuery gating', () => {
     })
 
     renderDetail(28)
-    await screen.findByText('Live Sales')
-    screen.getByRole('button', { name: /Run analysis/ }).click()
-
-    expect(await screen.findByText(/sample/i)).toBeInTheDocument()
+    await screen.findByRole('heading', { name: 'Live Sales' })
+    fireEvent.click(screen.getByRole('button', { name: 'Profile the columns' }))
+    await waitFor(() => expect(analysisApi.run).toHaveBeenCalled())
+    // The sample note sits with the column profile, on the Columns tab.
+    fireEvent.click(screen.getByRole('tab', { name: /^Columns/ }))
+    expect(await screen.findByText(/live sample/i)).toBeInTheDocument()
   })
 
   it('calls dataPreviewApi.query on the Data tab for a DirectQuery dataset, ignoring filters', async () => {
@@ -377,8 +392,8 @@ describe('DatasetDetail DirectQuery gating', () => {
     vi.mocked(dataPreviewApi.query).mockResolvedValue({ columns: ['region'], rows: [['north']], total: 1 })
 
     renderDetail(28)
-    await screen.findByText('Live Sales')
-    screen.getByRole('tab', { name: 'Data' }).click()
+    await screen.findByRole('heading', { name: 'Live Sales' })
+    screen.getByRole('tab', { name: /^Data/ }).click()
 
     await waitFor(() => expect(dataPreviewApi.query).toHaveBeenCalledWith(28, [], [], 100, 0))
     expect(await screen.findByText('north')).toBeInTheDocument()
@@ -389,8 +404,8 @@ describe('DatasetDetail DirectQuery gating', () => {
     vi.mocked(dataPreviewApi.query).mockResolvedValue({ columns: ['region'], rows: [], total: 0 })
 
     renderDetail(28)
-    await screen.findByText('Live Sales')
-    screen.getByRole('tab', { name: 'Data' }).click()
+    await screen.findByRole('heading', { name: 'Live Sales' })
+    screen.getByRole('tab', { name: /^Data/ }).click()
 
     await waitFor(() => expect(dataPreviewApi.query).toHaveBeenCalled())
     expect(await screen.findByText(/no rows match/i)).toBeInTheDocument()
@@ -403,8 +418,8 @@ describe('DatasetDetail source-backed re-import link', () => {
     vi.mocked(dataPreviewApi.query).mockRejectedValue({ response: { data: { detail: 'Dataset file not found' } } })
 
     renderDetail(29)
-    await screen.findByText('CSV Upload')
-    fireEvent.click(screen.getByRole('tab', { name: 'Data' }))
+    await screen.findByRole('heading', { name: 'CSV Upload' })
+    fireEvent.click(screen.getByRole('tab', { name: /^Data/ }))
 
     const link = await screen.findByRole('link', { name: /Re-import from this connection/ })
     expect(link).toHaveAttribute('href', '/connections/5/review')
@@ -416,8 +431,9 @@ describe('DatasetDetail "Edit query" (D1)', () => {
   it('hides "Edit query" for a dataset with no saved query_model (upload / hand-SQL)', async () => {
     vi.mocked(datasetsApi.get).mockResolvedValue(importDataset())  // no query_model
     renderDetail(29)
-    await screen.findByText('CSV Upload')
-    expect(screen.queryByRole('button', { name: /Edit query/ })).not.toBeInTheDocument()
+    await screen.findByRole('heading', { name: 'CSV Upload' })
+    fireEvent.click(screen.getByRole('button', { name: 'More actions for this dataset' }))
+    expect(screen.queryByRole('menuitem', { name: /Edit query/ })).not.toBeInTheDocument()
   })
 
   it('hides "Edit query" from a non-admin: the builder reads the source directly, which is admin-only', async () => {
@@ -425,8 +441,9 @@ describe('DatasetDetail "Edit query" (D1)', () => {
       ...importDataset(), query_model: { table: 'orders', columns: [{ column: 'region' }] },
     })
     renderDetail(29)
-    await screen.findByText('CSV Upload')
-    expect(screen.queryByRole('button', { name: /Edit query/ })).not.toBeInTheDocument()
+    await screen.findByRole('heading', { name: 'CSV Upload' })
+    fireEvent.click(screen.getByRole('button', { name: 'More actions for this dataset' }))
+    expect(screen.queryByRole('menuitem', { name: /Edit query/ })).not.toBeInTheDocument()
   })
 
   it('shows "Edit query" for a builder-created dataset and opens it hydrated', async () => {
@@ -434,8 +451,8 @@ describe('DatasetDetail "Edit query" (D1)', () => {
       ...importDataset(), query_model: { table: 'orders', columns: [{ column: 'region' }] },
     })
     renderDetailAsAdmin(29)
-    const btn = await screen.findByRole('button', { name: /Edit query/ })
-    fireEvent.click(btn)
+    fireEvent.click(await screen.findByRole('button', { name: 'More actions for this dataset' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Edit query/ }))
     expect(await screen.findByTestId('qb-dialog')).toHaveTextContent('editing CSV Upload')
   })
 })
@@ -444,14 +461,14 @@ describe('DatasetDetail sharing (SH1)', () => {
   it('hides the Share button for a non-admin (no auth context)', async () => {
     vi.mocked(datasetsApi.get).mockResolvedValue(importDataset())
     renderDetail(29)
-    await screen.findByText('CSV Upload')
+    await screen.findByRole('heading', { name: 'CSV Upload' })
     expect(screen.queryByRole('button', { name: 'Share' })).not.toBeInTheDocument()
   })
 
   it('shows the Share button for an org admin and opens the share dialog', async () => {
     vi.mocked(datasetsApi.get).mockResolvedValue(importDataset())
     renderDetailAsAdmin(29)
-    await screen.findByText('CSV Upload')
+    await screen.findByRole('heading', { name: 'CSV Upload' })
 
     fireEvent.click(await screen.findByRole('button', { name: 'Share' }))
 
@@ -503,7 +520,7 @@ describe('DatasetDetail key influencers', () => {
   const openAndRun = async () => {
     withChurnColumns()
     vi.mocked(analysisApi.keyInfluencers).mockResolvedValue(result)
-    renderDetail(29)
+    renderDetail(29, 'analysis')
     fireEvent.change(await screen.findByLabelText('Outcome to explain'),
                      { target: { value: 'churned' } })
     fireEvent.click(screen.getByRole('button', { name: /What drives this/ }))
@@ -512,7 +529,7 @@ describe('DatasetDetail key influencers', () => {
 
   it('asks for an outcome before it will run', async () => {
     withChurnColumns()
-    renderDetail(29)
+    renderDetail(29, 'analysis')
     await screen.findByLabelText('Outcome to explain')
     const btn = screen.getByRole('button', { name: /What drives this/ }) as HTMLButtonElement
     expect(btn.disabled).toBe(true)
@@ -527,8 +544,8 @@ describe('DatasetDetail key influencers', () => {
   it('says whether a factor raises or lowers the outcome', async () => {
     // "1.92x" alone reads as good news even when the outcome is churn.
     await openAndRun()
-    expect(screen.getByText(/1\.92× more/)).toBeInTheDocument()
-    expect(screen.getByText(/0\.38× less/)).toBeInTheDocument()
+    expect(screen.getByText(/92% higher/)).toBeInTheDocument()
+    expect(screen.getByText(/62% lower/)).toBeInTheDocument()
   })
 
   it('always shows the not-causation caveat', async () => {
@@ -541,7 +558,7 @@ describe('DatasetDetail key influencers', () => {
     vi.mocked(analysisApi.keyInfluencers).mockRejectedValue({
       response: { data: { detail: "'churned' has only one value" } },
     })
-    renderDetail(29)
+    renderDetail(29, 'analysis')
     fireEvent.change(await screen.findByLabelText('Outcome to explain'),
                      { target: { value: 'churned' } })
     fireEvent.click(screen.getByRole('button', { name: /What drives this/ }))
@@ -567,7 +584,7 @@ describe('DatasetDetail key influencers', () => {
       withRevenueColumn()
       vi.mocked(analysisApi.keyInfluencers).mockResolvedValue(result)
 
-      renderDetail(29)
+      renderDetail(29, 'analysis')
 
       expect(await screen.findByText(/is many/)).toBeInTheDocument()
       expect(analysisApi.keyInfluencers).toHaveBeenCalledWith(29, 'revenue')
@@ -593,7 +610,7 @@ describe('DatasetDetail key influencers', () => {
       vi.mocked(analysisApi.get).mockResolvedValue(null)
       vi.mocked(analysisApi.keyInfluencers).mockResolvedValue(result)
 
-      renderDetail(29)
+      renderDetail(29, 'analysis')
 
       expect(await screen.findByText(/is many/)).toBeInTheDocument()
       expect(analysisApi.keyInfluencers).toHaveBeenCalledWith(29, 'revenue')
@@ -609,36 +626,92 @@ describe('DatasetDetail key influencers', () => {
         { id: 4, name: 'IMEI', dtype: 'numeric', missing_pct: 0, stats: {} },
         { id: 5, name: 'RATED_AMOUNT', dtype: 'numeric', missing_pct: 0, stats: {} },
       ]
+      // That IMEI is a code and LATITUDE a coordinate is the dataset's stored
+      // classification (read from the values on the server), not a telecom
+      // word the browser knows.
+      ds.column_meta = { IMEI: { number: 'code' }, LATITUDE: { number: 'level', geo_level: 'latitude' } } as any
       vi.mocked(datasetsApi.get).mockResolvedValue(ds)
       vi.mocked(analysisApi.get).mockResolvedValue(null)
       vi.mocked(analysisApi.keyInfluencers).mockResolvedValue(result)
 
-      renderDetail(29)
+      renderDetail(29, 'analysis')
 
       expect(await screen.findByText(/is many/)).toBeInTheDocument()
       expect(analysisApi.keyInfluencers).toHaveBeenCalledWith(29, 'RATED_AMOUNT')
     })
 
-    it('falls back to an identifier-shaped column rather than staying manual, if it is the only numeric one', async () => {
-      // An imperfect default beats none: the "Re-run" button is right there
-      // to retarget once the reader sees it, and "no numeric column at all"
-      // (the churn-columns case above) is the only situation left fully manual.
+    it('does not auto-run on an identifier when it is the only numeric column, and asks instead (KI-1)', async () => {
+      // Reversed decision (redesign step 2): the old last-resort default ran
+      // on the identifier and showed a 1.00x table explaining nobody's question.
       const ds = importDataset()
       ds.columns = [{ id: 1, name: 'user_id', dtype: 'numeric', missing_pct: 0, stats: {} }]
       vi.mocked(datasetsApi.get).mockResolvedValue(ds)
       vi.mocked(analysisApi.get).mockResolvedValue(null)
       vi.mocked(analysisApi.keyInfluencers).mockResolvedValue(result)
 
-      renderDetail(29)
+      renderDetail(29, 'analysis')
 
-      expect(await screen.findByText(/is many/)).toBeInTheDocument()
-      expect(analysisApi.keyInfluencers).toHaveBeenCalledWith(29, 'user_id')
+      expect(await screen.findByText('Pick what to explain')).toBeInTheDocument()
+      expect(analysisApi.keyInfluencers).not.toHaveBeenCalled()
+      expect((screen.getByLabelText('Outcome to explain') as HTMLSelectElement).value).toBe('')
+    })
+
+    it('opens on the column marked worth explaining, highest priority first (KI-1)', async () => {
+      const ds = importDataset()
+      ds.columns = [
+        { id: 1, name: 'revenue', dtype: 'numeric', missing_pct: 0, stats: {} },
+        { id: 2, name: 'completion_rate', dtype: 'numeric', missing_pct: 0, stats: {} },
+        { id: 3, name: 'enrolled', dtype: 'numeric', missing_pct: 0, stats: {} },
+      ]
+      ds.column_targets = { enrolled: 1, completion_rate: 5 }
+      vi.mocked(datasetsApi.get).mockResolvedValue(ds)
+      vi.mocked(analysisApi.get).mockResolvedValue(null)
+      vi.mocked(analysisApi.keyInfluencers).mockResolvedValue(result)
+
+      renderDetail(29, 'analysis')
+
+      await waitFor(() => expect(analysisApi.keyInfluencers).toHaveBeenCalledWith(29, 'completion_rate'))
+    })
+
+    it('opens on an authored measure before the inferred rule (KI-1)', async () => {
+      const ds = importDataset()
+      ds.columns = [
+        { id: 1, name: 'units', dtype: 'numeric', missing_pct: 0, stats: {} },
+        { id: 2, name: 'score', dtype: 'categorical', missing_pct: 0, stats: {} },
+      ]
+      ds.column_meta = { score: { role: 'measure' } }
+      vi.mocked(datasetsApi.get).mockResolvedValue(ds)
+      vi.mocked(analysisApi.get).mockResolvedValue(null)
+      vi.mocked(analysisApi.keyInfluencers).mockResolvedValue(result)
+
+      renderDetail(29, 'analysis')
+
+      await waitFor(() => expect(analysisApi.keyInfluencers).toHaveBeenCalledWith(29, 'score'))
+    })
+
+    it('skips cohort_ref for the real measure and lists it under "Left out" (KI-1, KI-2)', async () => {
+      const ds = importDataset()
+      ds.columns = [
+        { id: 1, name: 'cohort_ref', dtype: 'numeric', missing_pct: 0, stats: {} },
+        { id: 2, name: 'campus', dtype: 'categorical', missing_pct: 0, stats: {} },
+        { id: 3, name: 'completed', dtype: 'numeric', missing_pct: 0, stats: {} },
+      ]
+      vi.mocked(datasetsApi.get).mockResolvedValue(ds)
+      vi.mocked(analysisApi.get).mockResolvedValue(null)
+      vi.mocked(analysisApi.keyInfluencers).mockResolvedValue({ ...result, meta: { ...result.meta, target: 'completed' } })
+
+      renderDetail(29, 'analysis')
+
+      await waitFor(() => expect(analysisApi.keyInfluencers).toHaveBeenCalledWith(29, 'completed'))
+      const leftOut = await screen.findByTestId('influencers-left-out')
+      expect(leftOut).toHaveTextContent('cohort_ref')
+      expect(leftOut).toHaveTextContent('Left out')
     })
 
     it('changing the outcome after the automatic run still re-runs manually', async () => {
       withRevenueColumn()
       vi.mocked(analysisApi.keyInfluencers).mockResolvedValue(result)
-      renderDetail(29)
+      renderDetail(29, 'analysis')
       await screen.findByText(/is many/)
 
       fireEvent.change(screen.getByLabelText('Outcome to explain'), { target: { value: 'region' } })
@@ -711,7 +784,7 @@ describe('DatasetDetail automatic refresh', () => {
       column_meta: { __derived_from__: { source_dataset_id: 29, dataflow_id: 7 } },
     }))
     renderDetail(31)
-    await screen.findByText('Joined')
+    await screen.findByRole('heading', { name: 'Joined' })
     expect(screen.queryByRole('button', { name: /Refresh/ })).toBeNull()
   })
 
@@ -725,14 +798,14 @@ describe('DatasetDetail automatic refresh', () => {
       data_source_id: null, column_meta: {},
     }))
     renderDetail(31)
-    await screen.findByText('Joined')
+    await screen.findByRole('heading', { name: 'Joined' })
     expect(screen.queryByRole('button', { name: /Refresh/ })).toBeNull()
   })
 
   it('never offers a schedule for DirectQuery — nothing is cached to refresh', async () => {
     vi.mocked(datasetsApi.get).mockResolvedValue(directQueryDataset())
     renderDetail(28)
-    await screen.findByText('Live Sales')
+    await screen.findByRole('heading', { name: 'Live Sales' })
     expect(screen.queryByLabelText('Automatic refresh interval')).toBeNull()
   })
 
@@ -814,7 +887,7 @@ describe('DatasetDetail deep links from the Insights hub', () => {
     vi.mocked(analysisApi.get).mockRejectedValue(new Error('none'))
 
     renderDetail(28)
-    await screen.findByText('Live Sales')
+    await screen.findByRole('heading', { name: 'Live Sales' })
     expect(screen.queryByRole('heading', { name: 'Anomalies' })).toBeNull()
   })
 
@@ -827,10 +900,11 @@ describe('DatasetDetail deep links from the Insights hub', () => {
     vi.mocked(datasetsApi.get).mockResolvedValue(ds)
     vi.mocked(analysisApi.get).mockRejectedValue(new Error('none'))
 
-    const { container } = renderDetailAt('/datasets/29#insights')
-    await screen.findByRole('heading', { name: 'Anomalies' })
+    // Each anchor opens its own question on the Analysis tab (redesign 3c).
     for (const id of ['insights', 'influencers', 'associations', 'segment', 'anomalies']) {
-      expect(container.querySelector(`#${id}`), id).not.toBeNull()
+      const { container, unmount } = renderDetailAt(`/datasets/29#${id}`)
+      await waitFor(() => expect(container.querySelector(`#${id}`), id).not.toBeNull())
+      unmount()
     }
   })
 
@@ -839,6 +913,8 @@ describe('DatasetDetail deep links from the Insights hub', () => {
     vi.mocked(analysisApi.get).mockRejectedValue(new Error('none'))
 
     renderDetailAt('/datasets/29?tab=statistics')
+    // The Analysis tab opens on its questions; "All analyses" is the full runner.
+    fireEvent.click(await screen.findByRole('button', { name: /^All .*analyses$/ }))
     expect(await screen.findByTestId('statistics-panel')).toBeInTheDocument()
   })
 })
@@ -916,6 +992,22 @@ describe('editing a cell in the data grid', () => {
     renderDetailAt('/datasets/29?tab=data')
     return screen.findByText('Nrth')
   }
+
+  it('speaks Arabic: Edit cells and the pager (QA T1)', async () => {
+    localStorage.setItem('datalytics.language', 'ar')
+    try {
+      editable()
+      render(
+        <DirectionProvider><MemoryRouter initialEntries={['/datasets/29?tab=data']}>
+          <Routes><Route path="/datasets/:id" element={<DatasetDetail />} /></Routes>
+        </MemoryRouter></DirectionProvider>)
+      await screen.findByText('Nrth')
+      expect(screen.getByRole('button', { name: /تعديل الخلايا/ })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /السابق/ })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /التالي/ })).toBeInTheDocument()
+      expect(screen.queryByText(/\bPrev\b|\bNext\b|Edit cells/)).toBeNull()
+    } finally { localStorage.removeItem('datalytics.language') }
+  })
 
   it('does not turn cells into inputs until editing is switched on', async () => {
     // The Data tab is a reading surface first; a grid where every cell is a
@@ -1202,7 +1294,7 @@ describe('the data quality report (2026-09-25)', () => {
                         outliers: 4, issues: ['4 outliers'] }],
       rules: [{ rule: 'amount >= 0', failing_rows: 2, examples: [] }],
     } as never)
-    renderDetail(29)
+    renderDetail(29, 'rules')
     fireEvent.change(await screen.findByLabelText('Quality rules'), { target: { value: 'amount >= 0\n' } })
     fireEvent.click(screen.getByRole('button', { name: 'Check data quality' }))
     const report = await screen.findByTestId('quality-report')
@@ -1256,5 +1348,119 @@ describe('the first look after an upload', () => {
     await waitFor(() => expect(analysisApi.run).toHaveBeenCalled())
     await new Promise(r => setTimeout(r, 50))
     expect(analysisApi.run).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('identifier names for Key influencers (redesign KI-2)', () => {
+  it.each(['cohort_ref', 'ref', 'invoice_no', 'item_num', 'region_code', 'order_key', 'sample_id', 'id'])(
+    '%s reads as an identifier', async name => {
+      const { looksLikeIdentifier } = await import('./datasetDetail/influencerOutcome')
+      expect(looksLikeIdentifier(name)).toBe(true)
+    })
+
+  it.each(['revenue', 'reference_price', 'number_of_calls', 'keynote_score', 'no_show_rate', 'units'])(
+    '%s does not', async name => {
+      const { looksLikeIdentifier } = await import('./datasetDetail/influencerOutcome')
+      expect(looksLikeIdentifier(name)).toBe(false)
+    })
+})
+
+describe('the tab map (redesign 3b)', () => {
+  it.each([['meaning', /^Columns/], ['statistics', /^Analysis/], ['alerts', /^Rules & alerts/], ['checks', /^Rules & alerts/]])(
+    'an old ?tab=%s link opens its new tab', async (key, name) => {
+      vi.mocked(datasetsApi.get).mockResolvedValue(importDataset())
+      renderDetailAt(`/datasets/29?tab=${key}`)
+      expect(await screen.findByRole('tab', { name, selected: true })).toBeInTheDocument()
+    })
+
+  it('offers the new tab set, with counts', async () => {
+    const ds = importDataset()
+    ds.columns = [{ id: 1, name: 'region', dtype: 'categorical', missing_pct: 0, stats: {} }]
+    vi.mocked(datasetsApi.get).mockResolvedValue(ds)
+    renderDetail(29)
+    await screen.findByRole('heading', { name: 'CSV Upload' })
+    const names = screen.getAllByRole('tab').map(t => t.textContent)
+    expect(names).toEqual(['Overview', 'Columns1', 'Data10', 'Analysis', 'Rules & alerts0', 'Models'])
+  })
+
+  it('a deep link to an analysis section opens the Analysis tab', async () => {
+    vi.mocked(datasetsApi.get).mockResolvedValue(importDataset())
+    renderDetailAt('/datasets/29#influencers')
+    expect(await screen.findByRole('tab', { name: /^Analysis/, selected: true })).toBeInTheDocument()
+  })
+})
+
+describe('the Analysis tab questions (redesign 3c)', () => {
+  it('opens on "What drives it?" and switches to the patterns question', async () => {
+    vi.mocked(datasetsApi.get).mockResolvedValue(importDataset())
+    renderDetail(29, 'analysis')
+    expect(await screen.findByRole('button', { name: /What drives it\?/ })).toHaveAttribute('aria-current', 'true')
+    expect(screen.getByLabelText('Outcome to explain')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /What appears together\?/ }))
+    expect(document.querySelector('#associations')).not.toBeNull()
+    expect(screen.queryByLabelText('Outcome to explain')).toBeNull()
+  })
+
+  it('a registry question opens the runner limited to its analyses', async () => {
+    vi.mocked(datasetsApi.get).mockResolvedValue(importDataset())
+    renderDetail(29, 'analysis')
+    fireEvent.click(await screen.findByRole('button', { name: /Do groups differ\?/ }))
+    expect(await screen.findByTestId('statistics-panel')).toBeInTheDocument()
+  })
+
+  it('offers no segments or anomalies for a DirectQuery dataset', async () => {
+    vi.mocked(datasetsApi.get).mockResolvedValue(directQueryDataset())
+    renderDetail(28, 'analysis')
+    await screen.findByRole('button', { name: /What drives it\?/ })
+    expect(screen.queryByRole('button', { name: /Which rows are alike\?/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /What looks unusual\?/ })).toBeNull()
+  })
+})
+
+describe('the automatic analyses wait for the Analysis tab (redesign 3c)', () => {
+  it('does not run them on the Overview, and runs them once Analysis opens', async () => {
+    const ds = importDataset()
+    ds.columns = [{ id: 1, name: 'revenue', dtype: 'numeric', missing_pct: 0, stats: {} } as any]
+    vi.mocked(datasetsApi.get).mockResolvedValue(ds)
+    renderDetail(29)
+    await screen.findByRole('heading', { name: 'CSV Upload' })
+    expect(analysisApi.segment).not.toHaveBeenCalled()
+    expect(analysisApi.keyInfluencers).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('tab', { name: /^Analysis/ }))
+    await waitFor(() => expect(analysisApi.segment).toHaveBeenCalledTimes(1))
+    expect(analysisApi.keyInfluencers).toHaveBeenCalledWith(29, 'revenue')
+  })
+})
+
+/**
+ * QA B5 (7-QA): with a sort active, a filter's chip appeared but the table
+ * kept the unfiltered rows until Apply was pressed again. The Data tab sent a
+ * new request for each change and showed whichever answer came back LAST; on
+ * the single-process server an older, slower request (the sort) could land
+ * after the newer one (the filter) and overwrite it. Only the latest request
+ * may fill the table.
+ */
+describe('Data tab: an older answer never overwrites a newer one (QA B5)', () => {
+  it('shows the result of the latest request even when an earlier one resolves after it', async () => {
+    vi.mocked(datasetsApi.get).mockResolvedValue(importDataset())
+    vi.mocked(analysisApi.get).mockRejectedValue(new Error('none'))
+    const first = { columns: ['region'], rows: [['Start']], total: 1 }
+    let resolveA!: (v: unknown) => void
+    let resolveB!: (v: unknown) => void
+    vi.mocked(dataPreviewApi.query)
+      .mockResolvedValueOnce(first as never)
+      .mockImplementationOnce(() => new Promise(r => { resolveA = r }) as never)
+      .mockImplementationOnce(() => new Promise(r => { resolveB = r }) as never)
+    renderDetail(29, 'data')
+    await screen.findByText('Start')
+    const box = screen.getByRole('searchbox')
+    fireEvent.change(box, { target: { value: 'a' } })           // request A (older)
+    await waitFor(() => expect(dataPreviewApi.query).toHaveBeenCalledTimes(2), { timeout: 2000 })
+    fireEvent.change(box, { target: { value: 'eu' } })          // request B (newer)
+    await waitFor(() => expect(dataPreviewApi.query).toHaveBeenCalledTimes(3), { timeout: 2000 })
+    await act(async () => { resolveB({ columns: ['region'], rows: [['Europe']], total: 1 }) })
+    await act(async () => { resolveA({ columns: ['region'], rows: [['Asia Pacific']], total: 1 }) })
+    expect(await screen.findByText('Europe')).toBeInTheDocument()
+    expect(screen.queryByText('Asia Pacific')).not.toBeInTheDocument()
   })
 })

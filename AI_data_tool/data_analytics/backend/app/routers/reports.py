@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update as sa_update
 from sqlalchemy.orm import selectinload
 from ..core.database import get_db
+from ..core.said_errors import refused
 from ..core.org_scope import check_org
 from ..core.capability import (_config_dataset_ids, can_read_dataset, effective_capabilities,
                                effective_capability, require_capability, require_dataset_read)
@@ -162,7 +163,7 @@ async def _capture_version(report_id: int, db: AsyncSession,
     widget_t = ReportWidget.__table__
     with db.sync_session.no_autoflush:
         rep = (await db.execute(
-            select(rep_t.c.revision, rep_t.c.theme, rep_t.c.display_rules)
+            select(rep_t.c.revision, rep_t.c.theme, rep_t.c.display_rules, rep_t.c.style)
             .where(rep_t.c.id == report_id))).first()
         if rep is None:
             return None
@@ -183,7 +184,7 @@ async def _capture_version(report_id: int, db: AsyncSession,
             {"id": w["id"], "widget_type": w["widget_type"], "title": w["title"],
              "config": w["config"], "layout": w["layout"]})
     snapshot = {
-        "report": {"theme": rep.theme, "display_rules": rep.display_rules},
+        "report": {"theme": rep.theme, "display_rules": rep.display_rules, "style": rep.style or {}},
         "pages": [{
             "id": p["id"],
             "name": p["name"], "title": p["title"], "page_type": p["page_type"],
@@ -409,6 +410,7 @@ async def _serve_release(db: AsyncSession, out: ReportOut, snapshot: dict, user:
     rep = snapshot.get("report") or {}
     out.theme = rep.get("theme") or out.theme
     out.display_rules = rep.get("display_rules") or []
+    out.style = rep.get("style") or {}
     out.dataset_id = rep.get("dataset_id")
     out.additional_dataset_ids = list(rep.get("additional_dataset_ids") or [])
     out.common_filters = list(snapshot.get("common_filters") or [])
@@ -451,6 +453,32 @@ async def get_report_revision(report_id: int, db: AsyncSession = Depends(get_db)
     obj = await db.get(Report, report_id)
     check_org(obj, current_user, "Report not found")
     return {"revision": obj.revision or 0}
+
+
+@router.get("/{report_id}/listed-records")
+async def get_listed_records(report_id: int, db: AsyncSession = Depends(get_db),
+                             current_user: User = Depends(get_current_user)):
+    """Charts of this dashboard that list single records (one mark per person,
+    account or item), for the share screen's warning (persona test 3.7)."""
+    from ..models.models import Dataset, DatasetColumn
+    from ..services.listed_records import listed
+    report = await _get_report(report_id, db, current_user)
+    widgets = [{"id": w.id, "title": w.title, "page": p.name, "widget_type": w.widget_type, "config": w.config or {}}
+               for p in report.pages for w in p.widgets]
+    ids = {report.dataset_id, *(report.additional_dataset_ids or [])}
+    ids |= {w["config"].get("dataset_id") for w in widgets}
+    ids = {i for i in ids if isinstance(i, int)}
+    semantic: dict[int, dict] = {i: {} for i in ids}
+    meta: dict[int, dict] = {}
+    if ids:
+        for ds_id, name, sem in (await db.execute(
+                select(DatasetColumn.dataset_id, DatasetColumn.name, DatasetColumn.semantic_type)
+                .where(DatasetColumn.dataset_id.in_(ids)))).all():
+            semantic[ds_id][name] = sem
+        for ds_id, cm in (await db.execute(select(Dataset.id, Dataset.column_meta)
+                                           .where(Dataset.id.in_(ids), Dataset.org_id == current_user.org_id))).all():
+            meta[ds_id] = cm or {}
+    return {"items": listed(widgets, semantic, meta, report.dataset_id)}
 
 
 @router.get("/{report_id}/classification")
@@ -522,7 +550,7 @@ async def add_common_filter(report_id: int, body: dict,
         try:
             body = {**body, "value": validate_spec(body.get("value"))}
         except RelativeDateError as e:
-            raise HTTPException(400, str(e))
+            raise refused(400, e)
     await _bump_revision(report_id, db, current_user)  # also enforces edit capability
     n = len((await db.execute(
         select(CommonFilter).where(CommonFilter.report_id == report_id))).scalars().all())
@@ -561,7 +589,12 @@ async def update_report(report_id: int, body: ReportUpdate, db: AsyncSession = D
     for k, v in body.model_dump(exclude_unset=True).items():
         if v is None and k != "dataset_id":
             continue
+        if k == "style":
+            from ..services.dashboard_templates.spec import clean_style
+            v = clean_style(v)
         setattr(obj, k, v)
+    if body.style is not None:
+        flag_modified(obj, 'style')
     if body.additional_dataset_ids is not None:
         flag_modified(obj, 'additional_dataset_ids')
     if body.display_rules is not None:
@@ -609,6 +642,12 @@ async def set_published(report_id: int, body: dict,
                                  "visible and editable org-wide")
     if not _may_administer_sharing(report, current_user):
         raise HTTPException(403, "Only the dashboard's author or an admin can publish it")
+    if body.get("published") and report.archived_at is not None:
+        raise HTTPException(409, "This dashboard is archived. Restore it before publishing it.")
+    if body.get("published") and not report.published:
+        # Approval, where the organisation asks for one (routers/publishing).
+        from .publishing import approval_gate
+        await approval_gate(db, report, current_user)
     if body.get("published") and not report.published:
         # Report quality as CI (Phase 7.4): when the org turns the gate on,
         # a report with open review errors does not go out to everyone.
@@ -629,6 +668,8 @@ async def set_published(report_id: int, body: dict,
         # E09: publishing distributes what is there now, as its release.
         from ..services.report_release import make_release
         release = await make_release(db, report.id, current_user.id, reason="publish")
+        from .publishing import stamp_published
+        stamp_published(report, current_user)
     await audit(db, current_user,
                 "report.publish" if report.published else "report.unpublish",
                 "report", report.id, report.name)
@@ -665,6 +706,10 @@ async def release_report(report_id: int, body: dict | None = None,
     await require_capability(db, current_user, report_id, "edit")
     if report.published:
         await _publish_gate(db, report)
+        # What already-published readers will see next needs the same approval.
+        from .publishing import approval_gate, stamp_published
+        await approval_gate(db, report, current_user)
+        stamp_published(report, current_user)
     note = (body or {}).get("note")
     release = await make_release(db, report_id, current_user.id, reason="release",
                                  note=note if isinstance(note, str) else None)
@@ -695,59 +740,35 @@ async def list_releases(report_id: int, db: AsyncSession = Depends(get_db),
 @router.get("/{report_id}/grants")
 async def list_grants(report_id: int, db: AsyncSession = Depends(get_db),
                       current_user: User = Depends(get_current_user)):
+    """Everyone a dashboard is shared with directly: people, roles and teams,
+    each with its level, its expiry and what it allows (routers/publishing)."""
+    from .publishing import grant_rows
     report = await db.get(Report, report_id)
     check_org(report, current_user, "Report not found")
     if not _may_administer_sharing(report, current_user):
         raise HTTPException(403, "Only the dashboard's author or an admin can see its grants")
-    rows = (await db.execute(
-        select(ReportUserGrant, User.email)
-        .join(User, User.id == ReportUserGrant.user_id)
-        .where(ReportUserGrant.report_id == report_id)
-        .order_by(ReportUserGrant.id)
-    )).all()
-    return [{"id": g.id, "user_id": g.user_id, "email": email, "level": g.level}
-            for g, email in rows]
+    return await grant_rows(db, report_id)
 
 
 @router.post("/{report_id}/grants", status_code=201)
 async def create_grant(report_id: int, body: dict,
                        db: AsyncSession = Depends(get_db),
                        current_user: User = Depends(get_current_user)):
-    """Share to a user BY EMAIL. An email input rather than a user picker on
-    purpose: members cannot list the org directory, and sharing should not be
-    the endpoint that leaks it -- you share with someone you already know."""
-    from ..core.capability import LEVELS
+    """Share to a person BY EMAIL (members cannot list the org directory, and
+    sharing should not be the endpoint that leaks it), or to a role or a team
+    by id. With an expiry, and with or without the right to download and to
+    share on. Re-sharing updates the share, not a 409. The rules are in
+    routers/publishing.create_or_update_grant."""
+    from pydantic import ValidationError
+    from .publishing import GrantIn, create_or_update_grant
     report = await db.get(Report, report_id)
     check_org(report, current_user, "Report not found")
-    if not _may_administer_sharing(report, current_user):
-        raise HTTPException(403, "Only the dashboard's author or an admin can share it")
-    level = str(body.get("level") or "edit")
-    if level not in LEVELS:
-        raise HTTPException(400, f"level must be one of {', '.join(LEVELS)}")
-    email = str(body.get("email") or "").strip().lower()
-    grantee = (await db.execute(
-        select(User).where(User.email == email, User.org_id == current_user.org_id)
-    )).scalar_one_or_none()
-    if grantee is None:
-        raise HTTPException(404, "No user with that email in your organization")
-    if report.created_by is not None and grantee.id == report.created_by:
-        raise HTTPException(400, "That user is the dashboard's author")
-    existing = (await db.execute(
-        select(ReportUserGrant).where(ReportUserGrant.report_id == report_id,
-                                      ReportUserGrant.user_id == grantee.id)
-    )).scalar_one_or_none()
-    if existing:
-        existing.level = level      # re-sharing updates the level, not a 409
-        grant = existing
-    else:
-        grant = ReportUserGrant(report_id=report_id, user_id=grantee.id, level=level)
-        db.add(grant)
-        await db.flush()
-    await audit(db, current_user, "report.share", "report", report.id,
-                f"{grantee.email}: {level}")
-    await db.commit()
-    return {"id": grant.id, "user_id": grantee.id, "email": grantee.email,
-            "level": level}
+    try:
+        # The level a share had before it could say more: 'edit' when unsaid.
+        asked = GrantIn(**{"level": "edit", **{k: v for k, v in (body or {}).items() if k in GrantIn.model_fields}})
+    except ValidationError as e:
+        raise HTTPException(400, f"That share could not be read: {e.errors()[0].get('msg')}")
+    return await create_or_update_grant(db, report, current_user, asked)
 
 
 @router.delete("/{report_id}/grants/{grant_id}", status_code=204)
@@ -853,7 +874,7 @@ def _validate_widget(widget_type: str | None, config: dict | None, changed_keys=
     try:
         validate_widget_payload(widget_type, config, changed_keys=changed_keys)
     except InvalidWidget as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
 
 
 #: The widget types whose renderer draws totals and subtotals (WidgetBody's table
@@ -1313,6 +1334,8 @@ async def restore_version(report_id: int, version_id: int,
         report.theme = rep_content["theme"]
     if rep_content.get("display_rules") is not None:
         report.display_rules = rep_content["display_rules"]
+    if rep_content.get("style") is not None:
+        report.style = rep_content["style"]
     await audit(db, current_user, "report.restore_version", "report",
                 report_id, f"restored to revision {version.revision}")
     await db.commit()
@@ -1627,6 +1650,60 @@ async def export_report_pdf(report_id: int, paper: str = "A4", orientation: str 
         headers={"Content-Disposition": disposition})
 
 
+@router.get("/{report_id}/xlsx")
+async def export_report_xlsx(report_id: int, db: AsyncSession = Depends(get_db),
+                             current_user: User = Depends(get_current_user)):
+    """The dashboard's data as an Excel workbook, one sheet per chart -- the
+    same workbook a scheduled delivery attaches, built AS THE CALLER (their
+    row and column rules), of the pages they can see. A dataset whose export
+    policy forbids xlsx is left out. HR evaluation, item 3.2: Excel was only
+    reachable through a schedule or an Ask answer."""
+    import io as _io
+    from urllib.parse import quote
+
+    from fastapi.responses import StreamingResponse
+
+    from ..models.models import Dataset
+    from ..services.delivery import build_digest
+    from ..services.report_release import served_release, visible_release_pages
+    from .datasets import _dataset_has_security, _exports_disabled, _policy_dataset
+    from .shared import download_gate
+
+    report = await _get_report(report_id, db, current_user)
+    release = await served_release(db, report_id, current_user)
+    visible = ({p["id"] for p in await visible_release_pages(db, release.snapshot, current_user)}
+               if release is not None else await _visible_page_ids(db, report, current_user))
+    label = await download_gate(db, current_user, report=report)
+    from ..services.sensitivity import report_dataset_ids
+    blocked: set[int] = set()
+    for did in await report_dataset_ids(db, report):
+        ds = await db.get(Dataset, did)
+        if ds is None:
+            continue
+        policy_ds = await _policy_dataset(db, ds)
+        if _exports_disabled(policy_ds, "xlsx", await _dataset_has_security(db, did)):
+            blocked.add(did)
+    payload, sheets = await build_digest(db, report, current_user, context_label=label,
+                                         release=release, skip_dataset_ids=blocked,
+                                         allowed_page_ids=visible)
+    if sheets == 0 and blocked:
+        # HR re-test 2026-10-01: every chart's data was withheld by policy and
+        # the reader still got a workbook saying "No widget produced tabular
+        # data" -- true, and the wrong reason. Say the real one instead.
+        raise HTTPException(
+            403, "Exports are switched off for the data behind this dashboard, "
+                 "so there is nothing to put in the workbook.")
+    raw = (report.name or "dashboard").strip()[:60] or "dashboard"
+    ascii_name = "".join(c for c in raw if (c.isalnum() and c.isascii()) or c in " _-").strip() or "dashboard"
+    disposition = (f'attachment; filename="{ascii_name}.xlsx"; '
+                   f"filename*=UTF-8''{quote(raw + '.xlsx')}")
+    return StreamingResponse(
+        _io.BytesIO(payload),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": disposition, "X-Sheet-Count": str(sheets),
+                 "X-Withheld-Datasets": str(len(blocked))})
+
+
 @router.get("/{report_id}/package")
 async def export_report_package(report_id: int, db: AsyncSession = Depends(get_db),
                                 current_user: User = Depends(get_current_user)):
@@ -1730,8 +1807,13 @@ async def suggest_widgets(report_id: int, db: AsyncSession = Depends(get_db),
     if not report.dataset_id:
         raise HTTPException(400, "Attach a dataset to this report first")
     ds = await db.get(Dataset, report.dataset_id)
-    if ds is None or ds.org_id != report.org_id or not ds.filename or ds.mode == "directquery":
-        raise HTTPException(400, "Suggestions run over import-mode datasets")
+    live = ds is not None and ds.mode == "directquery" and ds.data_source_id
+    if ds is None or ds.org_id != report.org_id or not (ds.filename or live):
+        raise HTTPException(400, "Suggestions need a dataset with data behind it")
+    # "Allow AI" for this data, applied to every model call below
+    # (services/ai_policy.py).
+    from ..services import ai_policy as _ai_policy
+    await _ai_policy.enter(db, datasets=[ds])
     # Read through THIS report, as a widget on it would: the report being
     # viewable is not by itself licence to its dataset (E01).
     await require_dataset_read(db, current_user, ds.id, report_id=report_id)
@@ -1759,28 +1841,199 @@ async def suggest_widgets(report_id: int, db: AsyncSession = Depends(get_db),
                        ds.id, exc_info=True)
         _ineligible = set()
 
+    from ..services import column_classes as column_classes_service
+    _class_hints = await column_classes_service.hints_for(db, ds, denied=set(denied or []))
+    live_frame = None
+    if live:
+        # A live dataset is read through its SQL (row rule pushed down, denied
+        # columns dropped) -- suggestions used to refuse live data outright,
+        # which left the HR evaluation's main dataset with no insight-driven
+        # ideas (item 3.4).
+        from ..services.analysis_frame import FrameUnavailable, load_directquery_frame
+        try:
+            live_frame = (await load_directquery_frame(
+                db, ds, rls_filter_expr=rls_expr, denied=set(denied or ()))).frame
+        except FrameUnavailable as e:
+            raise refused(400, e)
+
     def _run():
         from ..services.analytics import detect_types, load_file
         from ..services.insights import (effective_roles, generate_insights,
                                          suggest_widgets_from_findings)
         from ..services.widget_data import apply_calculated_columns, apply_rls_filter
-        df = load_file(ds.filename)
-        df = apply_rls_filter(df, rls_expr)
-        df = apply_prep_steps(df, _steps, _aux)
-        if denied:
-            df = df.drop(columns=[c for c in denied if c in df.columns])
+        if live_frame is not None:
+            df = live_frame
+        else:
+            df = load_file(ds.filename)
+            df = apply_rls_filter(df, rls_expr)
+            df = apply_prep_steps(df, _steps, _aux)
+            if denied:
+                df = df.drop(columns=[c for c in denied if c in df.columns])
         if ds.calculated_columns:
             df = apply_calculated_columns(df, ds.calculated_columns, ds.custom_functions)
         type_map = detect_types(df)
-        result = generate_insights(df, type_map, ds.column_meta or {})
-        roles = effective_roles(type_map, ds.column_meta or {})
+        # Each column classified once and kept (services/column_classes.py).
+        from ..services import column_classes
+        meta, changed = column_classes.classified(df, ds.column_meta or {}, *_class_hints)
+        result = generate_insights(df, type_map, meta)
+        roles = effective_roles(type_map, meta)
+        from ..core.config import settings as _settings
+        _more_types = int(getattr(_settings, "suggest_more_types", 0) or 0)
         return {"suggestions": suggest_widgets_from_findings(
-            result["findings"], roles, description, ineligible=_ineligible)}
+            result["findings"], roles, description, ineligible=_ineligible,
+            column_meta=meta, frame=df, catalogue=_more_types),
+            "_classes": meta if changed else None}
 
     try:
-        return await asyncio.to_thread(_run)
+        out = await asyncio.to_thread(_run)
+        classes = out.pop("_classes", None)
+        if classes is not None:
+            await column_classes_service.remember(db, ds, classes)
+        return out
     except FileNotFoundError:
         raise HTTPException(404, "Dataset file not found on server — please re-upload the file")
+
+
+# ── Suggestions that remember (docs/suggestions/PLAN.md, phase 4) ───────────
+from typing import Literal as _Literal
+
+from pydantic import BaseModel as _BaseModel, Field as _Field
+
+
+class SuggestionFeedbackIn(_BaseModel):
+    signature: str = _Field(..., min_length=1, max_length=600)
+    widget_type: str = _Field(..., min_length=1, max_length=50)
+    #: dismissed | added | restored (take a dismissal back)
+    action: _Literal["dismissed", "added", "restored"]
+
+
+async def _feedback_out(db: AsyncSession, user: User, dataset_id: int) -> dict:
+    """This person's dismissals on the dataset, and how each KIND of chart has
+    fared -- their own counts, and the organisation's for a kind they have not
+    judged yet."""
+    from ..models.models import SuggestionFeedback
+    rows = (await db.execute(select(SuggestionFeedback).where(
+        SuggestionFeedback.org_id == user.org_id, SuggestionFeedback.dataset_id == dataset_id))).scalars().all()
+    mine: dict[str, dict] = {}
+    org: dict[str, dict] = {}
+    for r in rows:
+        for bucket in ([mine, org] if r.user_id == user.id else [org]):
+            entry = bucket.setdefault(r.widget_type, {"added": 0, "dismissed": 0})
+            if r.action in entry:
+                entry[r.action] += 1
+    return {"dismissed": sorted(r.signature for r in rows if r.user_id == user.id and r.action == "dismissed"),
+            "types": mine, "org_types": org}
+
+
+@router.get("/{report_id}/pages/{page_id}/takeaways")
+async def page_takeaways(report_id: int, page_id: int, db: AsyncSession = Depends(get_db),
+                         current_user: User = Depends(get_current_user)):
+    """The key takeaways of one dashboard page, without a model: every data
+    widget computed as THIS reader sees it (row rules, hidden columns, report
+    filters), its result read back into a sentence with its own numbers, the
+    sentences in reading order (services/discovery/takeaways.py)."""
+    from ..schemas.schemas import WidgetDataRequest
+    from ..services.discovery import takeaways as takeaways_service
+    from .widget_data import _resolve_widget_data
+
+    report = await db.get(Report, report_id)
+    check_org(report, current_user, "Report not found")
+    page = (await db.execute(select(ReportPage).options(selectinload(ReportPage.widgets)).where(
+        ReportPage.id == page_id, ReportPage.report_id == report_id))).scalar_one_or_none()
+    if page is None or page.id not in await _visible_page_ids(db, report, current_user):
+        raise HTTPException(404, "Page not found")
+    common = [{"column": f["column"], "op": f["op"], "value": f["value"]}
+              for f in await _common_filters_of(report_id, db)]
+    items = []
+    for w in sorted(page.widgets, key=lambda x: ((x.layout or {}).get("y", 0), (x.layout or {}).get("x", 0)))[:40]:
+        if w.widget_type in ("text", "button", "image", "shape", "slicer", "container", "web_content", "script",
+                             "custom_visual", "table", "list"):
+            continue
+        cfg = dict(w.config or {})
+        ds_id = cfg.get("dataset_id") or report.dataset_id
+        if not ds_id:
+            continue
+        # The report's own filters narrow every widget on it, as on the page.
+        if common:
+            cfg["filters"] = [*(cfg.get("filters") or []), *common]
+        try:
+            result = await _resolve_widget_data(
+                int(ds_id), WidgetDataRequest(config=cfg, widget_type=w.widget_type, report_id=report.id),
+                db, current_user, via_report_id=report.id)
+        except Exception:  # noqa: BLE001 -- a widget the reader may not compute has nothing to say to them
+            result = None
+        items.append({"widget_id": w.id, "title": w.title, "widget_type": w.widget_type, "config": cfg,
+                      "result": result})
+    return {"report_id": report_id, "page_id": page_id, "page": page.name, **takeaways_service.summarise(items)}
+
+
+@router.get("/{report_id}/opportunities")
+async def report_opportunities(report_id: int, depth: int = 1, limit: int = 30, fresh: bool = False,
+                               db: AsyncSession = Depends(get_db),
+                               current_user: User = Depends(get_current_user)):
+    """What is worth adding to THIS dashboard: the discovery engine's cards
+    for the report's dataset, with the report's name and description as the
+    goal (services/discovery). The builder's Suggest pane reads this -- the
+    same engine, gate and evidence as every other door."""
+    from ..models.models import Dataset
+    from ..services import analysis_frame as frames
+    from ..services.discovery import engine as discovery
+
+    report = await db.get(Report, report_id)
+    check_org(report, current_user, "Report not found")
+    if not report.dataset_id:
+        raise HTTPException(400, "Attach a dataset to this report first")
+    ds = await db.get(Dataset, report.dataset_id)
+    live = ds is not None and ds.mode == "directquery" and ds.data_source_id
+    if ds is None or ds.org_id != report.org_id or not (ds.filename or live):
+        raise HTTPException(400, "Suggestions need a dataset with data behind it")
+    # Read through THIS report, as a widget on it would (E01).
+    await require_dataset_read(db, current_user, ds.id, report_id=report_id)
+    goal = " ".join(x for x in [report.name, report.description] if x)
+    try:
+        return await discovery.opportunities(db, current_user, ds, goal, depth=max(0, min(int(depth), 1)),
+                                             limit=max(1, min(int(limit), 60)), fresh=bool(fresh))
+    except frames.FrameUnavailable as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get("/{report_id}/suggestion-feedback")
+async def get_suggestion_feedback(report_id: int, db: AsyncSession = Depends(get_db),
+                                  current_user: User = Depends(get_current_user)):
+    """What this person dismissed and added among the suggestions for this
+    report's dataset, on any device."""
+    report = await db.get(Report, report_id)
+    check_org(report, current_user, "Report not found")
+    if not report.dataset_id:
+        return {"dismissed": [], "types": {}, "org_types": {}}
+    return await _feedback_out(db, current_user, report.dataset_id)
+
+
+@router.post("/{report_id}/suggestion-feedback")
+async def post_suggestion_feedback(report_id: int, body: SuggestionFeedbackIn, db: AsyncSession = Depends(get_db),
+                                   current_user: User = Depends(get_current_user)):
+    """Record that a suggestion was dismissed, added, or that a dismissal was
+    taken back. One row per person, dataset and chart: the last action stands."""
+    from ..models.models import SuggestionFeedback
+    report = await db.get(Report, report_id)
+    check_org(report, current_user, "Report not found")
+    if not report.dataset_id:
+        raise HTTPException(400, "Attach a dataset to this report first")
+    await require_dataset_read(db, current_user, report.dataset_id, report_id=report_id)
+    row = (await db.execute(select(SuggestionFeedback).where(
+        SuggestionFeedback.user_id == current_user.id, SuggestionFeedback.dataset_id == report.dataset_id,
+        SuggestionFeedback.signature == body.signature))).scalar_one_or_none()
+    if body.action == "restored":
+        if row is not None and row.action == "dismissed":
+            await db.delete(row)
+    elif row is None:
+        db.add(SuggestionFeedback(org_id=current_user.org_id, user_id=current_user.id,
+                                  dataset_id=report.dataset_id, signature=body.signature,
+                                  widget_type=body.widget_type, action=body.action))
+    else:
+        row.action, row.widget_type = body.action, body.widget_type
+    await db.commit()
+    return await _feedback_out(db, current_user, report.dataset_id)
 
 
 @router.post("/{report_id}/auto-compose")
@@ -1852,10 +2105,13 @@ async def auto_compose(report_id: int, db: AsyncSession = Depends(get_db),
         if ds.calculated_columns:
             df = apply_calculated_columns(df, ds.calculated_columns, ds.custom_functions)
         type_map = detect_types(df)
-        result = generate_insights(df, type_map, ds.column_meta or {})
-        roles = effective_roles(type_map, ds.column_meta or {})
+        from ..services import column_classes
+        _meta, _ = column_classes.classified(df, ds.column_meta or {})
+        result = generate_insights(df, type_map, _meta)
+        roles = effective_roles(type_map, _meta)
         suggestions = suggest_widgets_from_findings(
-            result["findings"], roles, description, ineligible=_ineligible)
+            result["findings"], roles, description, ineligible=_ineligible,
+            column_meta=ds.column_meta or {}, frame=df)
         return compose_page(result["findings"], suggestions,
                             result.get("narrative"), roles)
 
@@ -1902,6 +2158,8 @@ async def list_schedules(report_id: int, db: AsyncSession = Depends(get_db), cur
              "recipients": [x for x in (r.recipients or []) if isinstance(x, str)],
              "calendar": calendar_spec(r.recipients),
              "format": next((r["__format__"] for r in (r.recipients or []) if isinstance(r, dict) and r.get("__format__")), "xlsx"),
+             "per_recipient": any(isinstance(x, dict) and x.get("__per_recipient__") for x in (r.recipients or [])),
+             "only_if_changed": any(isinstance(x, dict) and x.get("__only_if_changed__") for x in (r.recipients or [])),
              "subject": r.subject, "last_run_at": r.last_run_at, "last_status": r.last_status,
              "timezone": r.timezone}
             for r in rows]
@@ -1958,6 +2216,11 @@ async def create_schedule(report_id: int, body: dict, db: AsyncSession = Depends
             raise HTTPException(400, "format must be 'xlsx' or 'pdf'")
         if fmt == "pdf":  # xlsx is the default; store only a real override
             recipients = [*recipients, {"__format__": "pdf"}]
+    # HR evaluation, item 3.3: each recipient's own view, and skip-if-unchanged.
+    if body.get("per_recipient"):
+        recipients = [*recipients, {"__per_recipient__": True}]
+    if body.get("only_if_changed"):
+        recipients = [*recipients, {"__only_if_changed__": True}]
 
     # T3: an IANA zone the scheduler interprets this schedule's calendar
     # hour/minute in (zoneinfo). Validated against the system tz database at
@@ -2187,7 +2450,8 @@ async def list_deliveries(report_id: int, db: AsyncSession = Depends(get_db), cu
     )).scalars().all()
     return [{"id": d.id, "schedule_id": d.schedule_id, "kind": d.kind, "status": d.status,
              "error": d.error, "artifact_kind": d.artifact_kind, "duration_ms": d.duration_ms,
-             "created_at": d.created_at}
+             "created_at": d.created_at, "subject": d.subject, "recipients": d.recipients,
+             "file_name": d.file_name}
             for d in rows]
 
 
@@ -2549,6 +2813,13 @@ async def create_share_link(report_id: int, body: dict, db: AsyncSession = Depen
     report = await db.get(Report, report_id)
     check_org(report, current_user, "Report not found")
     await require_capability(db, current_user, report_id, "edit")
+    from ..core.config import settings as _platform
+    if not _platform.guest_links_enabled:
+        raise HTTPException(403, "Links that open without signing in are switched off for this platform. "
+                                 "Share the dashboard with people, a role or a team instead, or ask an "
+                                 "administrator to allow guest links.")
+    if report.archived_at is not None:
+        raise HTTPException(409, "This dashboard is archived. Restore it before sharing it.")
     from ..services.sensitivity import rank as s_rank, report_effective
     label, reasons = await report_effective(db, report)
     if s_rank(label) >= s_rank("Restricted"):

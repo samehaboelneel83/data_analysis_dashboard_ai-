@@ -444,7 +444,7 @@ class TestDataQuestions:
         # the source. Found live -- the demo Live Orders report.
         from app.models.models import DataSource
         src = DataSource(name="wh", type="postgresql",
-                         org_id=two_orgs["a"]["org"].id)
+                         org_id=two_orgs["a"]["org"].id, allow_llm_sampling=True)
         db_session.add(src)
         await db_session.flush()
         world["dataset"].data_source_id = src.id
@@ -537,6 +537,20 @@ class TestCalculatedColumns:
         await db_session.refresh(widget)
         assert widget.widget_type == "table"
         assert widget.config.get("aggregation") == "none"
+
+    async def test_a_table_gets_every_column_asked_for(
+            self, client, auth_headers, world, columns, model, db_session):
+        # Live 2026-10-08: "a table of price, make, model and the link" was
+        # answered "Added" while the list was dropped -- price alone showed.
+        model.append({"reply": "Added the table.", "data_question": None,
+                      "actions": [action(op="create", widget_type="table", title="Listing",
+                                         config={"columns": "region, Revenue, nope",
+                                                 "aggregation": "none"})]})
+        r = await call(client, auth_headers["a"], world, "a table of region and revenue")
+        assert r.status_code == 200, r.text
+        created = (await db_session.execute(select(ReportWidget).where(
+            ReportWidget.title == "Listing"))).scalar_one()
+        assert created.config["columns"] == ["region", "revenue"]
 
     async def test_an_unsafe_expression_is_skipped_not_saved(
             self, client, auth_headers, world, columns, model, db_session):
@@ -642,3 +656,60 @@ class TestAiBudget:
         assert r.status_code == 429
         assert "AI budget" in r.json()["detail"]
         assert len(model) == 1, "the model must not be asked"
+
+
+class TestAllowAi:
+    async def test_the_copilot_refuses_when_ai_is_off_for_the_data(self, client, world, auth_headers, db_session):
+        """One switch for every AI feature (services/ai_policy.py): a dataset
+        with "Allow AI" off is not sent to the model by the copilot either."""
+        world["dataset"].allow_ai = False
+        await db_session.commit()
+        r = await call(client, auth_headers["a"], world, "add a chart")
+        # Not a refusal any more: what the platform can do by itself, and the
+        # page is left as it was (services/copilot_without_model.py).
+        assert r.status_code == 200, r.text
+        got = r.json()
+        assert got["without_ai"] is True and got["applied"] == []
+        assert "switched off" in got["reply"] and "not changed" in got["reply"]
+
+
+class TestWithoutAModel:
+    """A plain instruction is carried out with no model at all
+    (services/copilot_commands.py), through the same checked path."""
+
+    @pytest.fixture
+    def ai_off(self, monkeypatch):
+        async def never(db, **kw):
+            return False
+        monkeypatch.setattr("app.services.ai_policy.enter", never)
+
+    async def test_with_ai_off_a_plain_instruction_changes_the_page_and_can_be_undone(
+            self, client, auth_headers, world, columns, ai_off, model, db_session):
+        r = await call(client, auth_headers["a"], world, "add units by region")
+        assert r.status_code == 200, r.text
+        got = r.json()
+        assert got["without_ai"] is True and got["applied"][0]["op"] == "create"
+        assert got["before_version_id"]
+        made = (await db_session.execute(select(ReportWidget).where(
+            ReportWidget.id == got["applied"][0]["widget_id"]))).scalar_one()
+        assert made.widget_type == "bar" and made.config == {
+            "aggregation": "sum", "measure": "units", "dimension": "region"}
+
+    async def test_with_ai_off_anything_else_changes_nothing_and_says_what_can_be_done(
+            self, client, auth_headers, world, columns, ai_off, model, db_session):
+        r = await call(client, auth_headers["a"], world, "make this page tell a better story")
+        got = r.json()
+        assert r.status_code == 200 and got["without_ai"] is True and got["applied"] == []
+        assert "suggestions" in got
+
+    async def test_when_no_model_answers_a_plain_instruction_is_still_done(
+            self, client, auth_headers, world, columns, model, db_session):
+        r = await call(client, auth_headers["a"], world, "remove Revenue by region")
+        assert r.status_code == 200, r.text
+        assert r.json()["applied"] == [{"op": "delete", "widget_id": world["widget"].id,
+                                        "title": "Revenue by region"}]
+
+    async def test_when_no_model_answers_anything_else_is_the_error_it_was(
+            self, client, auth_headers, world, columns, model):
+        r = await call(client, auth_headers["a"], world, "what does this page say about growth?")
+        assert r.status_code == 502

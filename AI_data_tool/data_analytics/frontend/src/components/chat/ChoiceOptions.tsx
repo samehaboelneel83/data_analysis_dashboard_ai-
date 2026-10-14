@@ -1,4 +1,5 @@
 import type { AgentPresentation } from '../../services/api'
+import { useT } from '../../i18n'
 
 /**
  * The ways to continue, as buttons, under a question the agent asked back.
@@ -32,10 +33,11 @@ export default function ChoiceOptions(
     disabled?: boolean
   },
 ) {
+  const t = useT()
   const options = presentation.options.filter(o => typeof o === 'string' && o.trim())
   if (options.length === 0) return null
   return (
-    <div role="group" aria-label="Ways to continue"
+    <div role="group" aria-label={t('clar3.ways')}
       style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
       {options.map(option => (
         <button key={option} type="button" disabled={disabled}

@@ -45,4 +45,16 @@ describe('StatusBar', () => {
     render(<StatusBar pageIndex={0} pageCount={1} saveState="saved" />)
     expect(screen.queryByRole('button', { name: '+' })).not.toBeInTheDocument()
   })
+
+  it('in the builder: widgets on the page, the selection, and the shortcuts sheet (7e1)', () => {
+    const onShortcuts = vi.fn()
+    const { rerender } = render(<StatusBar pageIndex={0} pageCount={3} widgets={12} selected={1} onShortcuts={onShortcuts} />)
+    expect(screen.getByText('Page 1 of 3 · 12 widgets · 1 selected')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Shortcuts/ }))
+    expect(onShortcuts).toHaveBeenCalled()
+    rerender(<StatusBar pageIndex={0} pageCount={1} widgets={1} selected={0} onShortcuts={onShortcuts} />)
+    expect(screen.getByText('Page 1 of 1 · 1 widget')).toBeInTheDocument()
+    // Nothing about saving: the header says that now.
+    expect(screen.queryByText('Saved')).toBeNull()
+  })
 })

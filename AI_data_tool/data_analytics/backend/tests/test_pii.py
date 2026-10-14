@@ -184,7 +184,7 @@ def test_personal_columns_are_known_by_name(column, kind):
     assert personal_type(column) == kind
 
 
-@pytest.mark.parametrize("column", ["SITE_ADDRESS", "store_address", "product_name", "name",
+@pytest.mark.parametrize("column", ["SITE_ADDRESS", "office_address", "facility_address", "product_name", "name",
                                     "phone_calls", "email_count", "RATED_AMOUNT", "address_count"])
 def test_places_and_counts_are_not_personal(column):
     from app.services.pii import personal_type

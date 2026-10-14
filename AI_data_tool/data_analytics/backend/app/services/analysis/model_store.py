@@ -37,7 +37,8 @@ import pandas as pd
 
 from .automated_prediction import (MAX_CLASSES, MIN_ROWS, TEST_SIZE,
                                    AutomatedPredictionError)
-from .decision_tree import RANDOM_STATE, _encode, _usable_predictors
+from .decision_tree import OTHER, RANDOM_STATE, _encode, _usable_predictors, group_rare
+from ..readback import _s
 
 
 class ModelStoreError(ValueError):
@@ -79,6 +80,7 @@ def _fit_estimator(task: str, family: str, leaf: int) -> Any:
     from sklearn.dummy import DummyClassifier, DummyRegressor
     from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
     from sklearn.linear_model import LinearRegression, LogisticRegression
+    from .automated_prediction import with_gaps_filled
     from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 
     if task == "classification":
@@ -89,8 +91,8 @@ def _fit_estimator(task: str, family: str, leaf: int) -> Any:
             "random forest": lambda: RandomForestClassifier(
                 n_estimators=100, max_depth=8, random_state=RANDOM_STATE,
                 min_samples_leaf=leaf, n_jobs=1),
-            "logistic regression": lambda: LogisticRegression(
-                max_iter=1000, random_state=RANDOM_STATE),
+            "logistic regression": lambda: with_gaps_filled(LogisticRegression(
+                max_iter=1000, random_state=RANDOM_STATE)),
         }
     else:
         table = {
@@ -100,10 +102,10 @@ def _fit_estimator(task: str, family: str, leaf: int) -> Any:
             "random forest": lambda: RandomForestRegressor(
                 n_estimators=100, max_depth=8, random_state=RANDOM_STATE,
                 min_samples_leaf=leaf, n_jobs=1),
-            "linear regression": lambda: LinearRegression(),
+            "linear regression": lambda: with_gaps_filled(LinearRegression()),
         }
     if family not in table:
-        raise ModelStoreError(f"Unknown model family '{family}'")
+        raise ModelStoreError(_s("no.model_store.1", "Unknown model family '{a}'", cap=False, a=family))
     return table[family]()
 
 
@@ -130,11 +132,14 @@ def fit_and_package(df: pd.DataFrame, target: str,
     if family:
         champion_name = family
 
-    used, _skipped = _usable_predictors(df, target, predictors)
+    used, _skipped = _usable_predictors(df, target, predictors, allow_grouping=True)
     frame = df[[target, *used]].dropna(subset=[target])
+    # The same grouping the comparison used; the kept values become the
+    # model's category list, and scoring maps anything else to "(other)".
+    frame, _grouped = group_rare(frame, used)
     if len(frame) < MIN_ROWS:
         raise ModelStoreError(
-            f"Only {len(frame)} usable rows; at least {MIN_ROWS} are needed.")
+            _s("no.model_store.2", "Only {a} usable rows; at least {b} are needed.", cap=False, a=len(frame), b=MIN_ROWS))
 
     y = frame[target]
     if task == "classification":
@@ -147,8 +152,7 @@ def fit_and_package(df: pd.DataFrame, target: str,
         estimator.fit(X, y)
     except Exception as e:                       # noqa: BLE001 - reported, not swallowed
         raise ModelStoreError(
-            f"The chosen model ({champion_name}) could not be refitted on the "
-            f"full data: {e}") from e
+            _s("no.model_store.3", "The chosen model ({a}) could not be refitted on the full data: {b}", cap=False, a=champion_name, b=e)) from e
 
     # The values each categorical predictor was trained on. Kept so scoring can
     # name the ones it has never seen instead of silently encoding them as zero.
@@ -285,8 +289,7 @@ def align_frame(pkg: PackagedModel, df: pd.DataFrame) -> tuple[pd.DataFrame, dic
         # scoring the wrong data, and filling zeros would answer from a model
         # that saw none of its inputs.
         raise ModelStoreError(
-            "These columns are needed to score with this model and are not in "
-            f"the data: {', '.join(missing)}")
+            _s("no.model_store.4", "These columns are needed to score with this model and are not in the data: {a}", cap=False, a=', '.join(missing)))
 
     # TYPES COME FROM TRAINING, NOT FROM THE FRAME. `_encode` decides one-hot
     # versus numeric by DTYPE, and a scored row arrives off the wire where every
@@ -309,12 +312,16 @@ def align_frame(pkg: PackagedModel, df: pd.DataFrame) -> tuple[pd.DataFrame, dic
             if broke.any():
                 bad = frame.loc[broke, column].iloc[0]
                 raise ModelStoreError(
-                    f"'{column}' was a number when this model was trained, and "
-                    f"{bad!r} is not one.")
+                    _s("no.model_store.5", "'{a}' was a number when this model was trained, and {b} is not one.", cap=False, a=column, b=f'{bad!r}'))
             frame[column] = coerced
 
     unseen: dict[str, list[str]] = {}
     for column, known in pkg.categories.items():
+        if OTHER in known:
+            # A grouped category: anything but its kept values is "(other)",
+            # exactly as in training -- not an unseen value.
+            frame[column] = frame[column].where(frame[column].isin(known) | frame[column].isna(), OTHER)
+            continue
         present = {str(v) for v in frame[column].dropna().unique()}
         novel = sorted(present - set(known))
         if novel:

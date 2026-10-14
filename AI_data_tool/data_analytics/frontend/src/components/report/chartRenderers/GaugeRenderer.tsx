@@ -1,3 +1,4 @@
+import { useT } from '../../../i18n'
 import { RadialBarChart, RadialBar, PolarAngleAxis, ResponsiveContainer } from 'recharts'
 import { fmtStr, seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
@@ -13,12 +14,13 @@ import type { ChartRendererProps } from './types'
  * `value`) overrides the attainment colour in every shape.
  */
 export default function GaugeRenderer({ data, measureFmt, ruleStyles, cfg }: ChartRendererProps) {
+  const t9 = useT()
   const value: number | null = data?.value ?? null
   const target: number | null = data?.target ?? null
   const shape = String((cfg as { gauge_shape?: string })?.gauge_shape || 'arc')
 
   if (value == null) {
-    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>Configure widget to see data</div>
+    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>{t9('cr.configure')}</div>
   }
 
   const max = target != null && target > 0 ? Math.max(target, value) * 1.1 : (value > 0 ? value * 1.25 : 1)
@@ -36,7 +38,7 @@ export default function GaugeRenderer({ data, measureFmt, ruleStyles, cfg }: Cha
     return (
       <div data-testid="gauge-bullet" style={{ height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '0 16px', gap: 6 }}>
         <div style={{ fontSize: 18, fontWeight: 700 }}>{valueLabel}
-          {targetLabel && <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--muted)' }}> of {targetLabel}</span>}
+          {targetLabel && <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--muted)' }}> {t9('wb.of')} {targetLabel}</span>}
         </div>
         <div style={{ position: 'relative', height: 18, background: 'var(--surface2)', borderRadius: 4 }}>
           <div style={{ position: 'absolute', inset: 0, width: `${pct}%`, background: fill, borderRadius: 4 }} />
@@ -53,7 +55,7 @@ export default function GaugeRenderer({ data, measureFmt, ruleStyles, cfg }: Cha
       <div data-testid="gauge-progress" style={{ height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '0 16px', gap: 6 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
           <span style={{ fontSize: 18, fontWeight: 700 }}>{valueLabel}</span>
-          <span style={{ fontSize: 12, color: 'var(--muted)' }}>{Math.round(pct)}%{targetLabel ? ` of ${targetLabel}` : ''}</span>
+          <span style={{ fontSize: 12, color: 'var(--muted)' }}>{Math.round(pct)}%{targetLabel ? ` ${t9('wb.of')} ${targetLabel}` : ''}</span>
         </div>
         <div style={{ height: 8, background: 'var(--surface2)', borderRadius: 4, overflow: 'hidden' }}>
           <div style={{ height: '100%', width: `${pct}%`, background: fill, transition: 'width .3s' }} />
@@ -75,7 +77,7 @@ export default function GaugeRenderer({ data, measureFmt, ruleStyles, cfg }: Cha
         </svg>
         <div>
           <div style={{ fontSize: 20, fontWeight: 700 }}>{valueLabel}</div>
-          {targetLabel && <div style={{ fontSize: 11, color: 'var(--muted)' }}>of {targetLabel}</div>}
+          {targetLabel && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{t9('wb.of')} {targetLabel}</div>}
         </div>
       </div>
     )
@@ -107,7 +109,7 @@ export default function GaugeRenderer({ data, measureFmt, ruleStyles, cfg }: Cha
             stroke="var(--text)" strokeWidth={2.5} strokeLinecap="round" />
           <circle cx={cx} cy={cy} r={5} fill="var(--text)" />
           <text x={cx} y={cy + 28} textAnchor="middle" style={{ fontSize: 14, fontWeight: 700, fill: 'var(--text)' }}>{valueLabel}</text>
-          {targetLabel && <text x={cx} y={cy + 40} textAnchor="middle" style={{ fontSize: 8, fill: 'var(--muted)' }}>of {targetLabel}</text>}
+          {targetLabel && <text x={cx} y={cy + 40} textAnchor="middle" style={{ fontSize: 8, fill: 'var(--muted)' }}>{t9('wb.of')} {targetLabel}</text>}
         </svg>
       </div>
     )
@@ -124,7 +126,7 @@ export default function GaugeRenderer({ data, measureFmt, ruleStyles, cfg }: Cha
       </ResponsiveContainer>
       <div style={{ position: 'absolute', top: '55%', left: '50%', transform: 'translate(-50%, -20%)', textAlign: 'center', pointerEvents: 'none' }}>
         <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)' }}>{fmtStr(value, measureFmt)}</div>
-        {target != null && <div style={{ fontSize: 11, color: 'var(--muted)' }}>of {fmtStr(target, measureFmt)}</div>}
+        {target != null && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{t9('wb.of')} {fmtStr(target, measureFmt)}</div>}
       </div>
     </div>
   )

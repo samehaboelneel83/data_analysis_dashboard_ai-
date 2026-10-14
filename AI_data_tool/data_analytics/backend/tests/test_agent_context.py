@@ -754,7 +754,10 @@ class TestRetrievalRankedRender:
             "Objects:\n"
             "- omda_symbol_count (table) [CANONICAL — the source of truth "
             "for what it describes; prefer it over recomputing from raw "
-            "tables]: col_0 integer (0=L0, 1=L1, 2=L2, 3=L3, 4=L4, 5=L5) -- "
+            # HR re-test 2026-10-01: values past the label cap are listed by
+            # name ("also: ..."), so a WHERE literal is never out of sight.
+            "tables]: col_0 integer (0=L0, 1=L1, 2=L2, 3=L3, 4=L4, 5=L5, "
+            "also: 6, 7, 8, 9) -- "
             "Canonical counts.\n"
             "- customers (table): id integer, city text -- About customers.\n"
             "- orders (table): id integer, customer_id integer, total "
@@ -989,3 +992,17 @@ class TestEntitiesBlock:
         ctx = await load_context(db_session, ds.id, org.id)
         assert [e.name for e in ctx.entities] == ["customer"]
         assert ctx.entities[0].grain == "One row per customer."
+
+
+def test_every_department_reaches_the_model():
+    """HR re-test 2026-10-01: nine departments, six shown; "Sales" was cut and
+    an Arabic question about Sales was answered with Marketing's count."""
+    from app.services.agent.context import _render_column
+    depts = ["Customer Service", "Development", "Finance", "Human Resources",
+             "Marketing", "Production", "Quality Management", "Research", "Sales"]
+    line = _render_column("dept_name", "text", {d: d for d in depts})
+    for d in depts:
+        assert d in line
+    assert "Sales=Sales" not in line
+    many = _render_column("code", "text", {str(i): str(i) for i in range(100)})
+    assert "+70 more" in many

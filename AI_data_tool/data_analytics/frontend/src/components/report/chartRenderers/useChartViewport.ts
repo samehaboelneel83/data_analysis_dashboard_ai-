@@ -47,7 +47,9 @@ export function useChartViewport(
   const [dragged, setDragged] = useState<{ sig: string; a: number; b: number } | null>(null)
   const user = dragged && dragged.sig === sig ? dragged : null
 
-  const optedOut = cfg.overview_axis === false
+  // The window exists because tick LABELS crowd; an axis drawn without them
+  // (axis_ticks: false) has nothing to crowd, so it shows the whole series.
+  const optedOut = cfg.overview_axis === false || (cfg as { axis_ticks?: boolean }).axis_ticks === false
   const show = !isStatic && n > 1 && !optedOut && (auto.congested || cfg.overview_axis === true)
 
   let a = 0, b = Math.max(0, n - 1)

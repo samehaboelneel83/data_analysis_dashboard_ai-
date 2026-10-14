@@ -1,11 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
+import { Table2 } from 'lucide-react'
 import { useDirection } from '../../contexts/DirectionContext'
 import { useT } from '../../i18n'
 import { localDigits } from '../../lib/arabicFormats'
+import { formatCell, formatCellGrouped, readingValue } from '../../lib/displayNumber'
+import { nonAdditiveKind } from '../../lib/semanticGuard'
 import BarChartRenderer from '../report/chartRenderers/BarChartRenderer'
 import LineChartRenderer from '../report/chartRenderers/LineChartRenderer'
 import PieChartRenderer from '../report/chartRenderers/PieChartRenderer'
+import { MeasuredChart } from '../report/MeasuredChart'
 import type { AgentPresentation, AgentResult, EvidenceClaim } from '../../services/api'
+import CardSection from './CardSection'
 import './answerEvidence.css'
 
 /**
@@ -13,10 +18,13 @@ import './answerEvidence.css'
  *
  * The answer used to be prose only: the rows existed for one run on the
  * server and were summarised into a sentence. Now they arrive as a capped
- * snapshot (`AgentResult`) and are drawn as a grid, or -- when the run was a
- * presentation follow-up ("as a bar chart") -- through the same chart
- * renderers the dashboards use, so a chart in the chat looks like a chart on
- * a report. A chart keeps its rows one click away.
+ * snapshot (`AgentResult`) and are drawn through the same chart renderers the
+ * dashboards use, so a chart in the chat looks like a chart on a report: the
+ * chart the server asked for (a presentation follow-up, "as a bar chart"), or
+ * else the one `autoChart` picks for an unambiguous shape -- one number is a
+ * KPI, a label column with a measure is a bar (a line for dates), including a
+ * label column of numeric-looking codes. Any other shape is a grid. A chart
+ * keeps its rows one click away.
  */
 
 type Cell = string | number | boolean | null
@@ -44,22 +52,15 @@ const isNumberish = (v: Cell) =>
   typeof v === 'number' || (typeof v === 'string' && v.trim() !== '' && !isNaN(Number(v)))
 
 /**
- * A cell as text, without the binary-float noise.
- *
- * A summed currency column arrives as 2010526.4600000004 -- IEEE-754's honest
- * answer to adding .46 a few hundred times, and a number nobody reads as a
- * total. 12 significant digits sits well inside a double's ~15-17 and well
- * outside where that artefact lives, so rounding there drops the tail without
- * altering a value anyone actually typed.
+ * A cell as the grid shows it: non-integer floats at most 2 dp (3 significant
+ * digits below 1), so neither 2010526.4600000004 -- IEEE-754's honest answer
+ * to adding .46 a few hundred times -- nor an average like 83.8883333333
+ * reaches the reader. See `formatCell`.
  *
  * Deliberately no thousands separators: this grid shows whatever columns the
  * question returned, ids included, and "2,024" for a year is its own wrong.
  */
-export const cellText = (v: Cell): string => {
-  if (v == null) return ''
-  if (typeof v !== 'number' || !Number.isFinite(v) || Number.isInteger(v)) return String(v)
-  return String(Number.parseFloat(v.toPrecision(12)))
-}
+export const cellText = (v: Cell): string => formatCell(v)
 
 /** `{name, value}` rows for the chart renderers: the first non-numeric
  *  column names the mark, the first numeric column sizes it. A result with
@@ -75,13 +76,32 @@ export const cellText = (v: Cell): string => {
  *  made one, otherwise the same heuristic `chartRows` falls back to. Exported
  *  so the axes can be TITLED with them -- a chart whose axes are unnamed
  *  leaves the reader guessing which columns they are looking at. */
+/** 5.x (found in the Chrome re-test): "leavers per department" returned
+ *  dept_no AND dept_name, and the chart labelled its bars d001…d009. When two
+ *  text columns pair one-to-one and the first holds codes, the name labels the
+ *  bars. Otherwise the first text column, as before. */
+function labelIndex(columns: string[], rows: Cell[][], numeric: boolean[]): number {
+  const text = numeric.map((n, i) => (n ? -1 : i)).filter(i => i >= 0)
+  if (text.length < 2) return text[0] ?? -1
+  const [a, b] = text
+  const codeLike = (v: Cell) => typeof v === 'string' && v.length <= 6 && !/\s/.test(v) && /\d/.test(v)
+  const pairs = new Map<string, string>()
+  for (const r of rows) {
+    const k = String(r[a] ?? ''), v = String(r[b] ?? '')
+    if (pairs.has(k) && pairs.get(k) !== v) return a
+    pairs.set(k, v)
+  }
+  const oneToOne = new Set(pairs.values()).size === pairs.size
+  return oneToOne && rows.every(r => codeLike(r[a])) && !rows.every(r => codeLike(r[b])) ? b : a
+}
+
 export function chartColumns(result: AgentResult, x?: string | null, y?: string | null):
   { x?: string; y?: string } {
   const { columns, rows } = result
   if (columns.length === 0 || rows.length === 0) return {}
   if (x && y && columns.includes(x) && columns.includes(y)) return { x, y }
   const numeric = columns.map((_, i) => rows.every(r => r[i] == null || isNumberish(r[i])))
-  const nameIdx = numeric.findIndex(n => !n)
+  const nameIdx = labelIndex(columns, rows, numeric)
   const valueIdx = columns.findIndex(
     (_, i) => numeric[i] && i !== nameIdx && (nameIdx >= 0 || i !== 0))
   return {
@@ -104,7 +124,7 @@ export function chartRows(result: AgentResult, x?: string | null, y?: string | n
     return rows.map(r => ({ name: String(r[namedX] ?? ''), value: Number(r[namedY] ?? 0) }))
   }
   const numeric = columns.map((_, i) => rows.every(r => r[i] == null || isNumberish(r[i])))
-  const nameIdx = numeric.findIndex(n => !n)
+  const nameIdx = labelIndex(columns, rows, numeric)
   const valueIdx = columns.findIndex(
     (_, i) => numeric[i] && i !== nameIdx && (nameIdx >= 0 || i !== 0))
   return rows.map((r, i) => ({
@@ -116,10 +136,9 @@ export function chartRows(result: AgentResult, x?: string | null, y?: string | n
 /** RFC 4180 rows, CRLF-terminated, with a byte-order mark so Excel reads
  *  UTF-8 (Arabic cells otherwise open as mojibake). */
 export function toCsv(results: AgentResult[]): string {
-  // Same text the grid shows: an export that disagrees with the screen sends
-  // the reader hunting for which one is the real number.
+  // Exports carry raw values at full precision; the screen rounds for reading.
   const cell = (v: Cell) => {
-    const s = cellText(v)
+    const s = v == null ? '' : String(v)
     return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
   }
   const blocks = results.map(r =>
@@ -140,24 +159,34 @@ export function downloadCsv(results: AgentResult[], filename: string) {
 }
 
 function Caption({ result }: { result: AgentResult }) {
+  const t = useT()
   const shown = result.rows.length
   const partial = result.truncated || shown < result.total
   return (
     <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-      {partial ? `${result.total} rows, showing ${shown}` : `${result.total} rows`}
+      {localDigits(partial ? t('res.rowsShowing', { n: result.total, shown }) : t('res.rows', { n: result.total }))}
       {/* A grid that no query produced says so. These rows are real -- they
           are this workspace's own catalog -- but "rows with no SQL behind
           them" is precisely what a made-up answer looks like, and the reader
           should never have to tell the two apart by instinct. */}
-      {result.source === 'catalog' && ' · from the data catalog, not a query'}
+      {result.source === 'catalog' && ` · ${t('res.catalog')}`}
     </span>
   )
 }
 
-export function ResultGrid({ result, focus }: {
+function NoRows() {
+  const t = useT()
+  return <span style={{ fontSize: 12, color: 'var(--muted)' }}>{t('res.none')}</span>
+}
+
+export function ResultGrid({ result, focus, grouped }: {
   result: AgentResult
   focus?: Omit<EvidenceFocus, 'result'> | null
+  /** Step 10, the answer card: numbers are grouped by thousands and held
+   *  left-to-right, except in a year, identifier or coordinate column. */
+  grouped?: boolean
 }) {
+  const quantity = result.columns.map(c => !!grouped && !nonAdditiveKind(c))
   const box = useRef<HTMLDivElement>(null)
   const col = focus?.column != null ? result.columns.indexOf(focus.column) : -1
   const marked = (i: number, j: number) => !!focus && j === col
@@ -168,7 +197,7 @@ export function ResultGrid({ result, focus }: {
     hit?.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
   }, [focus])
   if (result.total === 0 || result.columns.length === 0) {
-    return <span style={{ fontSize: 12, color: 'var(--muted)' }}>No rows.</span>
+    return <NoRows />
   }
   return (
     <div>
@@ -195,7 +224,9 @@ export function ResultGrid({ result, focus }: {
                     style={{ padding: '4px 8px', borderBottom: '1px solid var(--border)',
                     whiteSpace: 'nowrap', textAlign: typeof v === 'number' ? 'end' : 'start',
                     fontVariantNumeric: 'tabular-nums' }}>
-                    {cellText(v)}
+                    {!grouped ? cellText(v)
+                      : typeof v === 'number' ? <bdi dir="ltr">{quantity[j] ? formatCellGrouped(v) : cellText(v)}</bdi>
+                      : quantity[j] ? formatCellGrouped(v) : cellText(v)}
                   </td>
                 ))}
               </tr>
@@ -220,36 +251,102 @@ function ResultChart({ result, format, x, y }: {
   // On a phone, value labels over each bar collide; the axis and the rows
   // under the chart carry the numbers there instead.
   const narrow = typeof window !== 'undefined' && !!window.matchMedia?.('(max-width: 560px)').matches
-  const rows = chartRows(result, x, y)
-  const axes = chartColumns(result, x, y)
+  // The server's named axes win; with none, a two-label result is grouped.
+  const grouped = format === 'bar' && !(x && y) ? groupedBars(result) : null
+  // Values with long decimals are rounded the way the sentence rounds them
+  // (redesign 1b), so the label over a bar reads 83.9, not 83.89. Display
+  // only: the rows, exports and Add to dashboard keep the raw result.
+  const rows = chartRows(result, x, y).map(r => ({ ...r, value: readingValue(r.value) }))
+  const axes = grouped ? { x: grouped.x, y: grouped.y } : chartColumns(result, x, y)
+  const data = grouped
+    ? { type: 'crosstab', columns: grouped.columns,
+        rows: grouped.rows.map(r => r.map(v => (typeof v === 'number' ? readingValue(v) : v))) }
+    : { rows }
   const Renderer = format === 'bar' ? BarChartRenderer : format === 'line' ? LineChartRenderer : PieChartRenderer
   return (
-    <div data-testid="result-chart" data-format={format}
+    <div data-testid="result-chart" data-format={format} data-grouped={grouped ? grouped.series : undefined}
       style={{ height: 240, width: '100%', minWidth: 280 }}>
       {/* The chat has no widget config to derive titles from, so it names the
           axes outright with the two columns it is actually drawing. The rows
           are `{name, value}` by then -- without this the axes would read
           "name" and "value", which say nothing about this data. */}
-      <Renderer rows={rows} data={{ rows }} rtl={rtl} broadcasts={false}
-        cfg={{ x_axis_label: axes.x, y_axis_label: axes.y, ...(narrow ? { data_labels: false } : {}) }}
-        localSelected={null} onClickPoint={() => {}} />
+      {/* QA4-V9: measured like a Builder tile. Without the measured width the
+          shared axis planner (axisOptions.xAxisPlan) assumed a nominal 560px
+          plot, so in the narrower chat column four Arabic region names were
+          judged to fit upright and drew on top of each other. With it the
+          same ladder as the Builder applies -- tilt, then thin, then clip
+          with "…" (full name in the tooltip) -- and the declutter pass
+          hides any tick that still collides. Not mirrored in RTL: the
+          renderers reverse the axis themselves. */}
+      <MeasuredChart>
+        {(plotW, plotH) => (
+          <Renderer rows={rows} data={data} rtl={rtl} broadcasts={false}
+            cfg={{ x_axis_label: axes.x, y_axis_label: axes.y,
+              // 5.13: long category names ("Assistant Engineer", department
+              // names) clip with "…" like the Suggestions preview, instead of
+              // tilting into the chart; the full name is in the tooltip.
+              axis_tick_max_chars: 14, labels_compact: true,
+              ...(grouped ? { bar_mode: 'clustered', legend_title: grouped.series } : {}), ...(narrow ? { data_labels: false } : {}) }}
+            localSelected={null} onClickPoint={() => {}} plotW={plotW} plotH={plotH} />
+        )}
+      </MeasuredChart>
     </div>
   )
+}
+
+/** Two label columns and a measure ("title, gender, avg_salary") read as a
+ *  grouped bar chart: the first label is the axis, the second the series.
+ *  Charting it as plain bars drew every title twice with no way to tell the
+ *  genders apart. Returns the crosstab the bar renderer draws, or null when
+ *  the result is not that shape (or would be too many bars to read). */
+export function groupedBars(result: AgentResult):
+  { columns: string[]; rows: Cell[][]; x: string; series: string; y: string } | null {
+  const { columns, rows } = result
+  if (columns.length < 3 || rows.length < 2) return null
+  if (result.truncated || rows.length < (Number(result.total) || 0)) return null
+  const numeric = columns.map((_, i) => rows.every(r => r[i] == null || isNumberish(r[i])))
+  const labels = numeric.map((n, i) => (n ? -1 : i)).filter(i => i >= 0)
+  const valueIdx = numeric.findIndex(n => n)
+  if (labels.length !== 2 || valueIdx < 0) return null
+  const [xi, si] = labels
+  const xs: string[] = []
+  const ss: string[] = []
+  for (const r of rows) {
+    const xv = String(r[xi] ?? ''); const sv = String(r[si] ?? '')
+    if (!xs.includes(xv)) xs.push(xv)
+    if (!ss.includes(sv)) ss.push(sv)
+  }
+  if (ss.length < 2 || ss.length > 8 || xs.length < 1 || xs.length > 24) return null
+  if (xs.length === rows.length || ss.length === rows.length) return null
+  const out: Cell[][] = xs.map(xv => {
+    const vals = ss.map(sv => {
+      const hit = rows.find(r => String(r[xi] ?? '') === xv && String(r[si] ?? '') === sv)
+      return hit ? Number(hit[valueIdx] ?? 0) : 0
+    })
+    return [xv, ...vals, vals.reduce((a, b) => a + b, 0)]
+  })
+  return { columns: [columns[xi], ...ss, 'Total'], rows: out, x: columns[xi], series: columns[si], y: columns[valueIdx] }
 }
 
 /** What to draw when the server did not ask for a particular chart.
  *  Only shapes that read unambiguously get a chart: one number is a KPI;
  *  a label column with one numeric column and 2-24 rows is a bar chart, or a
- *  line when the labels are dates. Everything else stays a grid. */
+ *  line when the labels are dates. Two numeric columns whose first is unique
+ *  count as label + value. Everything else stays a grid. */
 export function autoChart(result: AgentResult): 'kpi' | 'bar' | 'line' | null {
   const { columns, rows } = result
   if (!columns.length || !rows.length) return null
   // A partial result would chart as if it were the whole answer; show the grid.
   if (result.truncated || rows.length < (Number(result.total) || 0)) return null
   if (columns.length === 1 && rows.length === 1 && isNumberish(rows[0][0])) return 'kpi'
+  if (groupedBars(result)) return 'bar'
   if (rows.length < 2 || rows.length > 24) return null
   const numeric = columns.map((_, i) => rows.every(r => r[i] == null || isNumberish(r[i])))
-  const nameIdx = numeric.findIndex(n => !n)
+  let nameIdx = numeric.findIndex(n => !n)
+  // A label column of numeric-looking codes (faculty 1-4, "101", Arabic-Indic
+  // digits) is still a label when it names each row once: chart it by column
+  // 0, as `chartColumns` already does, instead of falling back to the grid.
+  if (nameIdx < 0 && columns.length === 2 && new Set(rows.map(r => r[0])).size === rows.length) nameIdx = 0
   const valueIdx = numeric.findIndex((n, i) => n && i !== nameIdx)
   if (nameIdx < 0 || valueIdx < 0) return null
   const dated = rows.every(r => typeof r[nameIdx] === 'string' && /^\d{4}-\d{2}/.test(r[nameIdx] as string))
@@ -268,28 +365,63 @@ function Kpi({ result, focused }: { result: AgentResult; focused?: boolean }) {
   )
 }
 
-export default function ResultView({ results, presentation, focus }: {
+/** The chart an answer's result is drawn as, if any: the server's named
+ *  format, or the one the result's shape suggests. One rule for the picture
+ *  and for the card's "Auto chart" chip. */
+export function drawnChart(result: AgentResult | undefined, presentation?: AgentPresentation | null): 'bar' | 'line' | 'pie' | null {
+  if (!result || !(result.total > 0)) return null
+  const format = presentation?.format
+  if (format === 'bar' || format === 'line' || format === 'pie') return format
+  const auto = autoChart(result)
+  return auto === 'bar' || auto === 'line' ? auto : null
+}
+
+export default function ResultView({ results, presentation, focus, sectioned }: {
   results: AgentResult[]
   presentation?: AgentPresentation | null
   /** A number of the answer to point at (E11). */
   focus?: EvidenceFocus | null
+  /** Step 10: inside an answer card. The chart sits in its own frame and the
+   *  rows are a collapsible band, "Rows behind this answer", with their count:
+   *  closed under a chart, open when the rows are all there is. */
+  sectioned?: boolean
 }) {
   const t = useT()
   const [rowsOpen, setRowsOpen] = useState(false)
+  // Rows with no chart above them start open; the reader can still close them.
+  const [gridClosed, setGridClosed] = useState(false)
   // A number in a charted result lives in the rows under the chart: open them.
-  useEffect(() => { if (focus) setRowsOpen(true) }, [focus])
-  const format = presentation?.format
-  const chartable = (format === 'bar' || format === 'line' || format === 'pie') ? format : null
+  useEffect(() => { if (focus) { setRowsOpen(true); setGridClosed(false) } }, [focus])
   return (
-    <div className="dl-result">
+    <div className={sectioned ? 'dl-result dl-result--card' : 'dl-result'}>
       {results.map((r, i) => {
-        const auto = chartable ? null : autoChart(r)
-        const drawn = chartable ?? (auto === 'bar' || auto === 'line' ? auto : null)
-        const showChart = !!drawn && r.total > 0
+        const auto = autoChart(r)
+        const drawn = drawnChart(r, presentation)
+        const showChart = !!drawn
         const here = focus && focus.result === i ? focus : null
+        if (sectioned) {
+          const kpi = !presentationChart(presentation) && auto === 'kpi'
+          const open = showChart ? rowsOpen : !gridClosed
+          return (
+            <div key={`${r.step}-${i}`}>
+              {kpi && <Kpi result={r} focused={!!here} />}
+              {showChart && (
+                <figure className="dl-ac__chart">
+                  <ResultChart result={r} format={drawn!} x={presentation?.x} y={presentation?.y} />
+                </figure>
+              )}
+              {!kpi && (
+                <CardSection icon={Table2} label={t('ask2.ans.rowsBehind')} count={r.total} open={open}
+                  onToggle={() => (showChart ? setRowsOpen(o => !o) : setGridClosed(c => !c))}>
+                  <ResultGrid result={r} focus={here} grouped />
+                </CardSection>
+              )}
+            </div>
+          )
+        }
         return (
           <div key={`${r.step}-${i}`}>
-            {auto === 'kpi' && <Kpi result={r} focused={!!here} />}
+            {!presentationChart(presentation) && auto === 'kpi' && <Kpi result={r} focused={!!here} />}
             {showChart ? (
               <>
                 <div className="dl-result__chart">
@@ -300,10 +432,11 @@ export default function ResultView({ results, presentation, focus }: {
                   onClick={() => setRowsOpen(o => !o)}>
                   {rowsOpen ? t('ask.hideRows') : t('ask.showRows', { n: localDigits(String(r.total)) })}
                 </button>
-                {rowsOpen && <ResultGrid result={r} focus={here} />}
+                {/* QAF 10: the answer card's number rule in the compact view too. */}
+                {rowsOpen && <ResultGrid result={r} focus={here} grouped />}
               </>
-            ) : auto === 'kpi' ? null : (
-              <ResultGrid result={r} focus={here} />
+            ) : !presentationChart(presentation) && auto === 'kpi' ? null : (
+              <ResultGrid result={r} focus={here} grouped />
             )}
           </div>
         )
@@ -311,3 +444,5 @@ export default function ResultView({ results, presentation, focus }: {
     </div>
   )
 }
+
+const presentationChart = (p?: AgentPresentation | null) => p?.format === 'bar' || p?.format === 'line' || p?.format === 'pie'

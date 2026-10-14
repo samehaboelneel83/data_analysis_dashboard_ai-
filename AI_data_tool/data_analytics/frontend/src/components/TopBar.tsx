@@ -4,9 +4,11 @@ import { CRUMB_EVENT, type CrumbDetail } from '../lib/crumb'
 import { useAuth } from '../contexts/AuthContext'
 import NotificationsBell from './NotificationsBell'
 import LanguageSwitcher from './LanguageSwitcher'
+import LlmPicker from './LlmPicker'
 import { messageForPath, SECTION_MESSAGE, useT } from '../i18n'
 import { sectionForPath } from './navigation'
-import { ChevronDown, ChevronRight, LogOut, Menu, Moon, Search, Sun } from 'lucide-react'
+import { ChevronDown, ChevronRight, ListTree, LogOut, Menu, Moon, Search, Sun, UserRound } from 'lucide-react'
+import { useAlwaysShowDetails } from '../lib/detailsPreference'
 import { MOBILE_QUERY, useMediaQuery } from '../hooks/useMediaQuery'
 
 /**
@@ -44,6 +46,7 @@ export default function TopBar({ onOpenNav, theme, onToggleTheme }: {
   const { user, logout } = useAuth()
   const t = useT()
   const [menuOpen, setMenuOpen] = useState(false)
+  const [alwaysDetails, setAlwaysDetails] = useAlwaysShowDetails()
   const menuRef = useRef<HTMLDivElement>(null)
   const compact = useMediaQuery(MOBILE_QUERY)
   const section = sectionForPath(pathname)
@@ -109,7 +112,8 @@ export default function TopBar({ onOpenNav, theme, onToggleTheme }: {
         style={{ flex: compact ? '1 1 0' : undefined }}>
         {section && !compact && (
           <>
-            <span className="dl-crumbs__section">{t(SECTION_MESSAGE[section] ?? 'nav.home')}</span>
+            {/* QA4 V8: a crumb cut short keeps its full name as a tooltip */}
+            <span className="dl-crumbs__section" title={t(SECTION_MESSAGE[section] ?? 'nav.home')}>{t(SECTION_MESSAGE[section] ?? 'nav.home')}</span>
             <span aria-hidden className="dl-crumbs__sep"><ChevronRight size={14} /></span>
           </>
         )}
@@ -117,14 +121,14 @@ export default function TopBar({ onOpenNav, theme, onToggleTheme }: {
           <>
             {!compact && (
               <>
-                <Link to={parentPath} className="dl-crumbs__section dl-crumbs__link">{t(messageForPath(pathname))}</Link>
+                <Link to={parentPath} className="dl-crumbs__section dl-crumbs__link" title={t(messageForPath(pathname))}>{t(messageForPath(pathname))}</Link>
                 <span aria-hidden className="dl-crumbs__sep"><ChevronRight size={14} /></span>
               </>
             )}
             <span className="dl-crumbs__page" aria-current="page" title={leafTitle}>{leafTitle}</span>
           </>
         ) : (
-          <span className="dl-crumbs__page" aria-current="page">{t(messageForPath(pathname))}</span>
+          <span className="dl-crumbs__page" aria-current="page" title={t(messageForPath(pathname))}>{t(messageForPath(pathname))}</span>
         )}
       </nav>
 
@@ -143,9 +147,11 @@ export default function TopBar({ onOpenNav, theme, onToggleTheme }: {
         {!compact && (
           <span aria-hidden style={{ fontFamily: 'var(--mono)', fontSize: 10.5,
             border: '1px solid var(--border)', borderRadius: 4, padding: '1px 5px',
-            background: 'var(--surface)' }}>Ctrl K</span>
+            background: 'var(--surface)' }}>Ctrl K{/* i18n-ok */}</span>
         )}
       </button>
+
+      <LlmPicker />
 
       <LanguageSwitcher />
 
@@ -201,6 +207,26 @@ export default function TopBar({ onOpenNav, theme, onToggleTheme }: {
                   {user.role?.name}{user.organization?.name ? ` · ${user.organization.name}` : ''}
                 </div>
               </div>
+              {/* Guided setup D2: plain summaries for everyone, the full
+                  report open by default for whoever always wants it. */}
+              <button role="menuitemcheckbox" aria-checked={alwaysDetails}
+                title={t('plain.alwaysDetailsHint')}
+                onClick={() => setAlwaysDetails(!alwaysDetails)}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                  background: 'none', border: 'none', cursor: 'pointer', textAlign: 'start',
+                  padding: '8px 10px', borderRadius: 7, fontSize: 12.5, color: 'var(--text)',
+                  fontFamily: 'var(--sans)' }}>
+                <span aria-hidden style={{ display: 'inline-flex' }}><ListTree size={13} /></span>
+                <span style={{ flex: 1 }}>{t('plain.alwaysDetails')}</span>
+                <span aria-hidden style={{ fontSize: 12, color: alwaysDetails ? 'var(--accent)' : 'var(--muted)' }}>
+                  {alwaysDetails ? '✓' : ''}
+                </span>
+              </button>
+              <Link role="menuitem" to="/profile" onClick={() => setMenuOpen(false)}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textDecoration: 'none',
+                  padding: '8px 10px', borderRadius: 7, fontSize: 12.5, color: 'var(--text)', fontFamily: 'var(--sans)' }}>
+                <span aria-hidden style={{ display: 'inline-flex' }}><UserRound size={13} /></span> {t('top.profile')}
+              </Link>
               <button role="menuitem" onClick={() => { setMenuOpen(false); logout() }}
                 style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%',
                   background: 'none', border: 'none', cursor: 'pointer', textAlign: 'start',

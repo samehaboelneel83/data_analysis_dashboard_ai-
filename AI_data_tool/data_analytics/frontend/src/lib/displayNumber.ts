@@ -1,0 +1,121 @@
+import { localDigits } from './arabicFormats'
+
+/**
+ * Numbers rounded for reading (redesign step 1b).
+ *
+ * The backend keeps raw floats, so the model wrote "61.53500000000001" into its
+ * sentence and the grid showed "83.8883333333". Both are display problems: the
+ * screen rounds, while exports and evidence offsets keep the raw value.
+ */
+
+const trimZeros = (s: string) => (s.includes('.') ? s.replace(/\.?0+$/, '') : s)
+
+/** Three significant digits, for values below 1 (0.123456 -> "0.123"). */
+function sig3(v: number): string {
+  if (v === 0) return '0'
+  const s = v.toPrecision(3)
+  return /e/i.test(s) ? String(Number(s)) : trimZeros(s)
+}
+
+/** The prose rounding of a non-negative value: 1 dp from 100 up, 2 dp from 1
+ *  to 100, 3 significant digits below 1. QA V9: 1 dp from 10 up made 18.958
+ *  and 19.0 the same "19" in the sentence and over the bars, while the grid
+ *  (2 dp) told them apart. */
+function readable(v: number): string {
+  return v >= 100 ? trimZeros(v.toFixed(1)) : v >= 1 ? trimZeros(v.toFixed(2)) : sig3(v)
+}
+
+/**
+ * A chart value with the prose rule applied, for the value labels the chat's
+ * charts print: only values with more than 2 decimals change, so the label
+ * over a bar reads like the sentence above it (83.89, not 83.888333).
+ */
+export function readingValue(v: number): number {
+  if (!Number.isFinite(v) || Number.isInteger(v)) return v
+  const decimals = (String(Math.abs(v)).split('.')[1] ?? '').length
+  if (decimals <= 2 || /e/i.test(String(v))) return v
+  return Math.sign(v) * Number(readable(Math.abs(v)))
+}
+
+/**
+ * A number token from a sentence or a chart value label ("61.53500000000001",
+ * "-3.14159%"). Only tokens with MORE than 2 decimal places change: 1 dp from
+ * 100 up, 2 dp from 1 to 100, 3 significant digits below 1. Sign, `%` and
+ * thousands separators are kept; integers and anything already at 2 dp or
+ * fewer -- years, ids, "1,234.5" -- are left as written.
+ */
+export function formatProseNumber(token: string): string {
+  const m = /^([-+]?)([\d,]+)(?:\.(\d+))?(%?)$/.exec(token)
+  if (!m || !m[3] || m[3].length <= 2) return localDigits(token)
+  const v = Number(`${m[2].replace(/,/g, '')}.${m[3]}`)
+  if (!Number.isFinite(v)) return localDigits(token)
+  let r = readable(v)
+  if (m[2].includes(',')) r = r.replace(/^\d+/, d => d.replace(/\B(?=(\d{3})+(?!\d))/g, ','))
+  return localDigits(`${m[1]}${r}${m[4]}`)
+}
+
+/**
+ * A result-grid cell. Non-integer floats get at most 2 dp (3 significant
+ * digits below 1). Integers stay exactly as they are, with no thousands
+ * separators: the grid shows whatever columns the question returned, ids and
+ * years included, and "2,024" for a year is its own wrong. A decimal that
+ * arrives as a string (a NUMERIC column) is rounded the same way.
+ */
+export function formatCell(v: string | number | boolean | null | undefined): string {
+  if (v == null) return ''
+  const n = typeof v === 'number' ? v
+    : typeof v === 'string' && /^[-+]?\d+\.\d+$/.test(v.trim()) ? Number(v) : null
+  if (n == null || !Number.isFinite(n)) return String(v)
+  if (Number.isInteger(n)) return localDigits(String(v))
+  return localDigits(Math.abs(n) >= 1 ? trimZeros(n.toFixed(2)) : sig3(n))
+}
+
+/**
+ * A cell of an answer's rows on the Ask AI card: `formatCell`, with the
+ * thousands grouped ("2,348,914"). Only for a column that holds a quantity:
+ * the caller leaves years, identifiers and coordinates to `formatCell`,
+ * where "2,024" would be its own wrong. A whole number that arrives as text
+ * (a code, a phone number) is never grouped.
+ */
+export function formatCellGrouped(v: string | number | boolean | null | undefined): string {
+  if (v == null) return ''
+  const n = typeof v === 'number' ? v
+    : typeof v === 'string' && /^[-+]?\d+\.\d+$/.test(v.trim()) ? Number(v) : null
+  if (n == null || !Number.isFinite(n)) return String(v)
+  const text = Number.isInteger(n) ? String(n) : Math.abs(n) >= 1 ? trimZeros(n.toFixed(2)) : sig3(n)
+  if (/e/i.test(text)) return localDigits(text)
+  const [whole, frac] = text.split('.')
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  return localDigits(frac ? `${grouped}.${frac}` : grouped)
+}
+
+/** What a data table needs to know about a column to show its cells. */
+export interface CellFormat { type?: string; decimals?: number; symbol?: string; symbol_position?: 'before' | 'after'; prefix?: string; suffix?: string }
+
+/**
+ * A cell of a data table (9-polish): the column's own number format when the
+ * dataset has one -- a currency with its symbol, a fixed number of decimals,
+ * a percent -- and otherwise `formatCell` with the thousands grouped for a
+ * quantity column. A year, an identifier or a coordinate is never grouped
+ * (the caller passes `quantity` false for those, from `nonAdditiveKind`).
+ * Display only: edits, exports and the stored value are unchanged.
+ */
+export function formatTableCell(v: string | number | boolean | null | undefined, quantity: boolean, fmt?: CellFormat | null): string {
+  if (v == null) return ''
+  const n = typeof v === 'number' ? v : typeof v === 'string' && /^[-+]?\d+(\.\d+)?$/.test(v.trim()) ? Number(v) : null
+  if (n != null && Number.isFinite(n) && fmt && ['number', 'integer', 'currency', 'percent'].includes(fmt.type ?? '')) {
+    const d = fmt.type === 'integer' ? 0 : fmt.decimals ?? 2
+    const fixed = n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d, useGrouping: fmt.type !== 'percent' })
+    const pre = fmt.prefix ?? '', suf = fmt.suffix ?? ''
+    if (fmt.type === 'percent') return localDigits(`${pre}${fixed}%${suf}`)
+    if (fmt.type === 'currency') {
+      const sym = fmt.symbol ?? '$'
+      const after = fmt.symbol_position ? fmt.symbol_position === 'after' : /[؀-ۿ]/.test(sym)
+      return localDigits(after ? `${pre}${fixed} ${sym}${suf}` : `${pre}${sym} ${fixed}${suf}`)
+    }
+    return localDigits(`${pre}${fixed}${suf}`)
+  }
+  // A whole number written as text (a code, a phone number) is not grouped.
+  if (quantity && (typeof v === 'number' || (typeof v === 'string' && /^[-+]?\d+\.\d+$/.test(v.trim())))) return formatCellGrouped(v)
+  return formatCell(v)
+}

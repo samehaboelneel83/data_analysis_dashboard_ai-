@@ -7,6 +7,11 @@ export const THEMES: Record<string, string[]> = {
   ocean:   ['#0284c7','#06b6d4','#14b8a6','#6366f1','#0ea5e9','#22d3ee','#3b82f6','#0891b2','#67e8f9','#818cf8'],
   sunset:  ['#ea580c','#e11d48','#f59e0b','#9f1239','#f97316','#fb7185','#fbbf24','#dc2626','#fdba74','#be123c'],
   forest:  ['#15803d','#65a30d','#0d9488','#a16207','#22c55e','#84cc16','#14b8a6','#ca8a04','#166534','#4d7c0f'],
+  // Two palettes made for a dark canvas (lib/dashboardLooks): bright enough to
+  // read on navy, and far enough apart in hue to tell neighbours from each other.
+  emerald: ['#4ade80','#7dd3fc','#3b82f6','#fbbf24','#a3e635','#22d3ee','#f472b6','#818cf8','#34d399','#fb923c'],
+  aurora:  ['#38bdf8','#a78bfa','#34d399','#fbbf24','#f472b6','#818cf8','#2dd4bf','#fb923c','#c084fc','#60a5fa'],
+  ember:   ['#fb923c','#3b82f6','#8b5cf6','#2dd4bf','#fbbf24','#f472b6','#60a5fa','#a3e635','#f87171','#c084fc'],
   mono:    ['#1f2937','#4b5563','#9ca3af','#cbd5e1','#374151','#6b7280','#d1d5db','#111827','#e5e7eb','#94a3b8'],
   // Every pair in this palette clears a 3:1 contrast ratio against both the light and
   // dark canvas, and adjacent entries are separated by lightness as well as hue, so the

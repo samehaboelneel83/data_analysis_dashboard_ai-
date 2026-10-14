@@ -1,3 +1,5 @@
+import { useT } from '../../i18n'
+import { rich } from '../../i18n/pages/modelsMaps'
 import type { FkEvidence } from '../../services/api'
 
 /**
@@ -10,6 +12,7 @@ import type { FkEvidence } from '../../services/api'
  * no way to check.
  */
 export function EvidenceSummary({ evidence }: { evidence: FkEvidence | null }) {
+  const t9 = useT()
   if (!evidence) return null
 
   const overlapPct = Math.round((evidence.overlap ?? 0) * 100)
@@ -17,21 +20,20 @@ export function EvidenceSummary({ evidence }: { evidence: FkEvidence | null }) {
   return (
     <div style={{ fontSize: 12, color: '#475569', lineHeight: 1.6 }}>
       <div>
-        <strong>{overlapPct}%</strong> of the child column&apos;s distinct values
-        appear in the parent
+        {rich(t9, 'evp.overlap', { pct: <strong>{overlapPct}%</strong> })}
         {evidence.child_distinct != null && (
-          <> ({evidence.child_distinct} distinct values sampled)</>
+          <> {t9('evp.sampled', { n: evidence.child_distinct })}</>
         )}
       </div>
       <div>
-        Name match: <strong>{Math.round((evidence.name_score ?? 0) * 100)}%</strong>
-        {evidence.name_score >= 1 && ' — follows the <table>_id convention'}
+        {rich(t9, 'evp.name', { pct: <strong>{Math.round((evidence.name_score ?? 0) * 100)}%</strong> })}
+        {evidence.name_score >= 1 && ` ${t9('evp.convention', { pattern: '<table>_id' })}`}
       </div>
       {evidence.parent_distinct != null && (
-        <div>Parent column holds {evidence.parent_distinct} distinct values</div>
+        <div>{t9('evp.parent', { n: evidence.parent_distinct })}</div>
       )}
       <div style={{ marginTop: 4, color: '#64748b', fontStyle: 'italic' }}>
-        Measured on a cached sample, not the live table.
+        {t9('evp.cached')}
       </div>
     </div>
   )

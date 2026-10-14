@@ -36,6 +36,12 @@ REQUIRED_ROLES: dict[str, tuple[str, ...]] = {
     "model_cluster": ("measures",),
     "model_compare": (),
     "model_score": (),
+    # Association rules: the columns are optional (blank = every usable text
+    # column), and so is the column the conclusions must be about.
+    "model_rules": (),
+    "model_influencers": ("response",),
+    # An analysis result as a tile: its inputs are the analysis' own parameters.
+    "analysis_result": (),
     "area": ("category",),
     "bar": ("category",),
     "box_plot": ("category", "measure"),
@@ -186,6 +192,9 @@ def missing_roles(widget_type: str, config: dict) -> list[str]:
     required = REQUIRED_ROLES.get(widget_type)
     if not required:
         return []
+    from .multi_measure import measures_as_bars
+    if measures_as_bars(widget_type, config):
+        return []                       # one bar per measure: no category needed
     from .widget_data import resolve_roles
     cfg = config or {}
     have = resolve_roles(cfg)
@@ -301,13 +310,13 @@ VOCABULARIES: dict[str, frozenset] = {
     "totals_position": frozenset({"before", "after"}),
     "totals_scope": frozenset({"all", "shown"}),
     "bar_mode": frozenset({"clustered", "stacked", "stacked100"}),
-    "slicer_mode": frozenset({"auto", "buttons", "list", "dropdown", "search", "text"}),
+    "slicer_mode": frozenset({"auto", "buttons", "list", "dropdown", "search", "text", "range"}),
     "legend_position": frozenset({"top", "bottom", "left", "right"}),
     "y_scale": frozenset({"linear", "log"}),
     "gauge_shape": frozenset({"arc", "speedometer", "bullet", "thermometer", "progress"}),
     "container_mode": frozenset({"group", "tabs", "scroll", "prompt", "precision"}),
     "dimension_granularity": frozenset({"year", "quarter", "month", "week", "day",
-                                        "hour", "hour_of_day",
+                                        "hour", "hour_of_day", "weekday", "month_of_year",
                                         "hijri_month", "hijri_year",
                                         "fiscal_year", "fiscal_quarter"}),
 }
@@ -484,7 +493,7 @@ def _check_settings(config: dict, keys) -> None:
             probe = value.lower() if isinstance(value, str) and key in _CASE_FOLDED else value
             if probe not in VOCABULARIES[key]:
                 raise InvalidWidget(f"{key} must be one of {', '.join(sorted(VOCABULARIES[key]))}")
-        elif key in ("limit", "suppress_below"):
+        elif key in ("limit", "suppress_below", "min_group_rows"):
             _check_count(key, value)
 
 
@@ -568,6 +577,20 @@ def validate_widget_payload(widget_type: str | None, config: dict | None, *,
             raise InvalidWidget(f"{key} must be a list of field names")
         if v and widget_type is not None and widget_type not in PIVOT_WIDGETS:
             raise InvalidWidget(f"{key} is for a crosstab or matrix, not a {widget_type} widget")
+
+    # Live QA 2026-10-03: both of these, in the wrong shape, saved fine and
+    # then failed every render with a bare 500. The panel writes a string
+    # for each; the API, the copilot or an import can write anything.
+    def _changing(key):
+        return changed_keys is None or key in changed_keys
+    running = config.get("running")
+    if _changing("running") and running not in (None, "") and (not isinstance(running, str)
+                                      or running.lower() not in ("sum", "avg")):
+        raise InvalidWidget("running must be 'sum' or 'avg'")
+    split_by = config.get("split_by")
+    if _changing("split_by") and split_by not in (None, "") and not isinstance(split_by, str):
+        raise InvalidWidget("split_by names one field: the decomposition tree "
+                            "splits one level at a time")
 
     roles = config.get("roles")
     if roles is not None and not isinstance(roles, dict):

@@ -360,3 +360,53 @@ class TestIdentifierSafety:
                  ["region", "sales"], "read_csv_auto('x')")
         assert "DROP TABLE" not in p.sql
         assert "'; DROP TABLE t; --" in p.params
+
+
+class TestASingleNumber:
+    """A headline number over all the rows is computed without loading them
+    (added for large data, 2026-10-11) -- and is the pandas answer exactly."""
+
+    FRAME = pd.DataFrame({"region": ["a", "b", "a", None, "c"], "sales": [1.5, 2.0, None, 4.0, 10.0],
+                          "who": ["x", "y", "x", None, "z"]})
+
+    def _kpi(self, path, config, monkeypatch):
+        monkeypatch.setattr(settings, "widget_duckdb_pushdown", False)
+        slow = get_widget_data(path, config, widget_type="kpi", use_cache=False)
+        monkeypatch.setattr(settings, "widget_duckdb_pushdown", True)
+        calls = []
+        real = duck_agg.aggregate
+        monkeypatch.setattr(duck_agg, "aggregate", lambda *a, **k: calls.append(1) or real(*a, **k))
+        fast = get_widget_data(path, config, widget_type="kpi", use_cache=False)
+        return slow, fast, calls
+
+    @pytest.mark.parametrize("config", [
+        {"measure": "sales", "aggregation": "sum"}, {"measure": "sales", "aggregation": "avg"},
+        {"measure": "sales", "aggregation": "max"}, {"measure": "sales", "aggregation": "median"},
+        {"measure": "sales", "aggregation": "count"}, {"measure": "who", "aggregation": "count"},
+        {"measure": "who", "aggregation": "countd"},
+        {"measure": "sales", "aggregation": "sum", "filters": [{"column": "region", "op": "eq", "value": "a"}]},
+        {"measure": "sales", "aggregation": "count", "filters": [{"column": "region", "op": "eq", "value": "zzz"}]},
+    ])
+    def test_it_is_the_same_answer_as_loading_everything(self, tmp_path, monkeypatch, config):
+        path = _csv(tmp_path, self.FRAME)
+        slow, fast, calls = self._kpi(path, config, monkeypatch)
+        assert calls, "the single number was not computed in DuckDB"
+        assert_shaped_equal(slow, fast)
+
+    def test_only_a_headline_number_takes_this_path(self, tmp_path, monkeypatch):
+        path = _csv(tmp_path, self.FRAME)
+        monkeypatch.setattr(settings, "widget_duckdb_pushdown", True)
+        calls = []
+        real = duck_agg.aggregate
+        monkeypatch.setattr(duck_agg, "aggregate", lambda *a, **k: calls.append(1) or real(*a, **k))
+        get_widget_data(path, {"measure": "sales", "aggregation": "sum"}, widget_type="table", use_cache=False)
+        assert calls == []
+
+    @pytest.mark.parametrize("config", [
+        {"measure": "sales", "aggregation": "std"}, {"measure": "nope", "aggregation": "sum"},
+        {"aggregation": "count"}, {"measure": "sales", "aggregation": "sum", "sparkline_date": "day"},
+        {"measure": "sales", "aggregation": "sum", "target_value": 5},
+    ])
+    def test_what_it_cannot_answer_exactly_is_left_to_pandas(self, config):
+        with pytest.raises(Ineligible):
+            plan(config, ["region", "sales", "who"], "t")

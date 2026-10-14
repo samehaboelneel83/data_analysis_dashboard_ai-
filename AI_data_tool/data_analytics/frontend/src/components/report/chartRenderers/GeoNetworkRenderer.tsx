@@ -1,3 +1,4 @@
+import { useT } from '../../../i18n'
 import { useMemo, useState } from 'react'
 import type { ChartRendererProps } from './types'
 import { fmtStr, seriesColor } from '../chartUtils'
@@ -13,6 +14,7 @@ import { placeLabels } from '../geo/labelPlacement'
  */
 export default function GeoNetworkRenderer({ data, measureFmt, broadcasts,
                                             localSelected, onClickPoint, plotW, plotH }: ChartRendererProps) {
+  const t9 = useT()
   const [hover, setHover] = useState<string | null>(null)
   const { ref, w, h, tiles, view } = useMapBox(plotW, plotH)
   const nodes = (data as { nodes?: { id: string; lat: number; lon: number; degree: number }[] })?.nodes ?? []
@@ -50,7 +52,7 @@ export default function GeoNetworkRenderer({ data, measureFmt, broadcasts,
 
   return (
     <div ref={ref} style={MAP_WRAP_STYLE}>
-      <MapSvg view={view} w={w} h={h} projection={projection} tiles={tiles} role="img" aria-label="Geographic network">
+      <MapSvg view={view} w={w} h={h} projection={projection} tiles={tiles} role="img" aria-label={t9('cr.geoNetwork')}>
         {COUNTRIES.map(f => (
           <path key={f.properties.name} d={path(f) ?? undefined}
             fill="var(--surface2)" stroke="var(--border)" strokeWidth={0.5} />
@@ -89,7 +91,7 @@ export default function GeoNetworkRenderer({ data, measureFmt, broadcasts,
         return n && (
           <div style={{ position: 'absolute', top: 8, left: 8, fontSize: 11, background: 'var(--surface)',
             border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px', lineHeight: 1.6 }}>
-            <strong>{n.id}</strong> — {n.degree} link{n.degree === 1 ? '' : 's'}
+            <strong>{n.id}</strong> — {t9(n.degree === 1 ? 'cr.link' : 'cr.links', { n: n.degree })}
             {linked.slice(0, 6).map(l => (
               <div key={`${l.source}-${l.target}`} style={{ color: 'var(--muted)' }}>
                 {l.source} → {l.target}: {fmtStr(l.value, measureFmt)}

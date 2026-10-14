@@ -121,3 +121,51 @@ def test_a_warm_unrestricted_entry_is_not_served_to_a_restricted_role(xy_sqlite_
     restricted = run_direct_query(xy_sqlite_source, _dataset(), {}, widget_type="table",
                                   cache_ttl_seconds=60, drop_columns=["y"])
     assert restricted["columns"] == ["x"]
+
+
+@pytest.mark.parametrize("agg,expected", [
+    ("sum", 210.0), ("avg", 10.5), ("min", 1.0), ("max", 20.0),
+    ("count", 20), ("countd", 20),
+])
+def test_a_sampled_kpi_is_remeasured_over_every_row(xy_sqlite_source, agg, expected):
+    """HR re-test 2026-10-01: "Total Headcount" read 10,000 on a 240,124-row
+    live dataset -- the KPI aggregated the 10k sample. Above the cap the plain
+    aggregates are now computed in SQL over the real rows and not flagged."""
+    result = run_direct_query(xy_sqlite_source, _dataset(),
+                              {"measure": "x", "aggregation": agg},
+                              widget_type="kpi", row_cap=5)
+    assert result["rows"][0]["value"] == pytest.approx(expected)
+    assert result["sampled"] is False
+    assert result["total"] == 20
+
+
+def test_a_sampled_kpi_respects_its_filters(xy_sqlite_source):
+    result = run_direct_query(
+        xy_sqlite_source, _dataset(),
+        {"measure": "x", "aggregation": "count",
+         "filters": [{"column": "x", "op": "gt", "value": 10}]},
+        widget_type="kpi", row_cap=3)
+    assert result["rows"][0]["value"] == 10
+
+
+def test_a_median_kpi_reads_every_row_not_the_drawing_cap(xy_sqlite_source):
+    """A median cannot be re-measured in portable SQL, so it used to stay a
+    sample of the 10,000-row drawing cap -- 69,934 then 69,915 on two loads
+    for a true 69,805 (HR analyst panel, 2026-10-02). It now takes the
+    analysis cap, like every other aggregate fetched for computing."""
+    import statistics
+    result = run_direct_query(xy_sqlite_source, _dataset(),
+                              {"measure": "x", "aggregation": "median"},
+                              widget_type="kpi", row_cap=5)
+    assert not result.get("sampled")
+    assert result["rows"][0]["value"] == statistics.median(r[0] for r in ROWS)
+
+
+def test_a_sampled_multi_row_card_is_remeasured_row_by_row(xy_sqlite_source):
+    """Analyst panel dashboard 2026-10-02: a "Workforce snapshot" card read a
+    headcount of 10,000 -- the cap -- on a 240,124-row live dataset."""
+    result = run_direct_query(xy_sqlite_source, _dataset(),
+                              {"measures": ["x", "y"], "aggregation": "countd"},
+                              widget_type="card", row_cap=5)
+    assert [r["value"] for r in result["rows"]] == [20, 20]
+    assert result["sampled"] is False

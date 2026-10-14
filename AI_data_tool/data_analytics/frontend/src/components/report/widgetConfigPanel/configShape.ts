@@ -42,9 +42,11 @@ export const PANEL_KEYS: ReadonlySet<string> = new Set([
   'target_value', 'gauge_shape', 'anim_label_position', 'anim_order', 'anim_label_size',
   'anim_label_style', 'anim_label_opacity', 'anim_label_box',
   // every type
-  'dataset_id', 'drillthroughPageId', 'tooltipPageId', 'hierarchyNodeId',
+  'dataset_id', 'drillthroughPageId', 'tooltipPageId', 'hierarchyNodeId', 'hierarchyNodeId2',
   'dimension_granularity', 'fiscal_start_month', 'aggregation2', 'bar_mode', 'centrality_metric', 'method',
   'event_value', 'max_depth', 'compare', 'prediction_model_id', 'model_follows', 'forecast_target',
+  'rules_view', 'rules_items', 'model_tab',
+  'influencer_style', 'influencer_direction', 'influencer_limit', 'influencer_details', 'influencer_format', 'influencer_decimals',
   'display_rules', 'analytics', 'container_mode', 'background_url', 'container_id', 'z',
   // formatting
   'x_axis_label', 'y_axis_label', 'axis_tick_size', 'axis_tick_color', 'x_axis_angle',
@@ -78,12 +80,12 @@ export const SETTING_VOCABULARIES: Record<string, readonly string[]> = {
   totals_position: ['before', 'after'],
   totals_scope: ['all', 'shown'],
   bar_mode: ['clustered', 'stacked', 'stacked100'],
-  slicer_mode: ['auto', 'buttons', 'list', 'dropdown', 'search', 'text'],
+  slicer_mode: ['auto', 'buttons', 'list', 'dropdown', 'search', 'text', 'range'],
   legend_position: ['top', 'bottom', 'left', 'right'],
   y_scale: ['linear', 'log'],
   gauge_shape: ['arc', 'speedometer', 'bullet', 'thermometer', 'progress'],
   container_mode: ['group', 'tabs', 'scroll', 'prompt', 'precision'],
-  dimension_granularity: ['year', 'quarter', 'month', 'week', 'day', 'hour', 'hour_of_day', 'hijri_month', 'hijri_year',
+  dimension_granularity: ['year', 'quarter', 'month', 'week', 'day', 'hour', 'hour_of_day', 'weekday', 'month_of_year', 'hijri_month', 'hijri_year',
                           'fiscal_year', 'fiscal_quarter'],
 }
 

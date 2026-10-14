@@ -182,10 +182,18 @@ class TestValkeyIsOptional:
         TypeError". A real backend class, not a lenient fake, catches that."""
         monkeypatch.setattr(settings, "valkey_url", "redis://valkey:6379/0")
 
+        import fakeredis
         import app.services.widget_data as wd
-        from app.services.cache_backend import InProcessCache
+        from app.services.cache_backend import ValkeyCache
 
-        monkeypatch.setattr(wd, "_get_cache_backend", lambda: InProcessCache())
+        cache = ValkeyCache(client=fakeredis.FakeRedis())
+        monkeypatch.setattr(wd, "_get_cache_backend", lambda: cache)
 
         r = await _get("/health/ready")
         assert r.json()["checks"]["valkey"]["status"] == "ok", r.json()["checks"]["valkey"]
+        # Probing must never trip the circuit. The probe after that one wrote
+        # a dict, which redis refuses ("Invalid input of type: 'dict'"): every
+        # healthcheck opened the circuit and the shared cache went unused.
+        assert not cache.circuit_open
+        r = await _get("/health/ready")
+        assert r.json()["checks"]["valkey"]["status"] == "ok"

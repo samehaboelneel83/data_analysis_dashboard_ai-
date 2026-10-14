@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ArrowDown, ArrowUp, Calendar, Globe, GripVertical, Type } from 'lucide-react'
 import type { HierarchyNode } from '../../types/report'
+import { useT } from '../../i18n'
 
 /** One drill chain: its title and its levels, outermost first. */
 export interface Chain {
@@ -70,6 +71,7 @@ export default function HierarchyChains({ nodes, isChecked, onToggle, onReorder,
   onPick?: (node: HierarchyNode) => void
   canEdit: boolean
 }) {
+  const t = useT()
   const [folded, setFolded] = useState<Set<string>>(() => new Set())
   const [drag, setDrag] = useState<{ chain: string; from: number } | null>(null)
   const chains = chainsOf(nodes)
@@ -88,7 +90,7 @@ export default function HierarchyChains({ nodes, isChecked, onToggle, onReorder,
         return (
           <div key={c.key} data-chain={c.title}>
             <button type="button" aria-expanded={open} draggable
-              title="Drag onto the canvas to chart the first level"
+              title={t('bc.panes.hc.dragHint')}
               onDragStart={e => { e.dataTransfer.setData('application/x-hierarchy', String(c.anchor)); e.dataTransfer.effectAllowed = 'copy' }}
               onClick={() => setFolded(p => { const n = new Set(p); if (n.has(c.key)) n.delete(c.key); else n.add(c.key); return n })}
               style={{ ...btn, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11.5, fontWeight: 600, padding: '2px 0' }}>
@@ -96,7 +98,7 @@ export default function HierarchyChains({ nodes, isChecked, onToggle, onReorder,
               <LevelIcon size={12} aria-hidden /> {c.title}
             </button>
             {open && (
-              <ol role="list" aria-label={`${c.title} levels`} style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+              <ol role="list" aria-label={t('bc.panes.hc.levels', { chain: c.title })} style={{ listStyle: 'none', margin: 0, padding: 0 }}>
                 {c.levels.map((l, i) => {
                   const token = `h:${l.id}`
                   return (
@@ -109,19 +111,19 @@ export default function HierarchyChains({ nodes, isChecked, onToggle, onReorder,
                       style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 0',
                         paddingInlineStart: 10 + i * 12,
                         background: drag?.chain === c.key && drag.from === i ? 'var(--surface2)' : undefined }}>
-                      <input type="checkbox" aria-label={`Select ${c.title} ${l.name}`} checked={isChecked(token)}
+                      <input type="checkbox" aria-label={t('bc.panes.hc.select', { chain: c.title, level: l.name })} checked={isChecked(token)}
                         onChange={() => onToggle(token)} style={{ margin: 0 }} />
                       {canEdit && <GripVertical size={12} aria-hidden style={{ color: 'var(--muted)', cursor: 'grab', flex: 'none' }} />}
                       <button type="button" onClick={() => (onPick ? onPick(l) : onToggle(token))}
-                        title={onPick ? `Use ${l.name} on the selected widget` : undefined}
+                        title={onPick ? t('bc.panes.hc.pick', { level: l.name }) : undefined}
                         style={{ ...btn, color: 'var(--text)', fontSize: 11.5, flex: 1, textAlign: 'start', minWidth: 0,
                           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {l.name}
                       </button>
                       {canEdit && (<>
-                        <button type="button" style={btn} aria-label={`Move ${l.name} up`} disabled={i === 0}
+                        <button type="button" style={btn} aria-label={t('bc.panes.hc.up', { level: l.name })} disabled={i === 0}
                           onClick={() => reorder(i, i - 1)}><ArrowUp size={11} aria-hidden /></button>
-                        <button type="button" style={btn} aria-label={`Move ${l.name} down`} disabled={i === c.levels.length - 1}
+                        <button type="button" style={btn} aria-label={t('bc.panes.hc.down', { level: l.name })} disabled={i === c.levels.length - 1}
                           onClick={() => reorder(i, i + 1)}><ArrowDown size={11} aria-hidden /></button>
                       </>)}
                     </li>

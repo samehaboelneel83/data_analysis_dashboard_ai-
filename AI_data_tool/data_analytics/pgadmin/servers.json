@@ -1,0 +1,13 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Datalytics Postgres",
+      "Group": "Datalytics",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "postgres",
+      "Username": "datalytics",
+      "SSLMode": "prefer"
+    }
+  }
+}

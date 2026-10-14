@@ -1,3 +1,4 @@
+import { useT } from '../../i18n'
 import { useState } from 'react'
 import type { Report, ReportPage, Widget } from '../../types/report'
 
@@ -16,6 +17,7 @@ export default function OutlinePane({ report, activePageId, selectedWidgetId, on
   onRename: (widgetId: number, pageId: number, title: string) => void
   onSetContainer: (widgetId: number, pageId: number, containerId: number | null) => void
 }) {
+  const t = useT()
   const [editing, setEditing] = useState<number | null>(null)
   const [draft, setDraft] = useState('')
 
@@ -32,7 +34,7 @@ export default function OutlinePane({ report, activePageId, selectedWidgetId, on
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingInlineStart: depth * 14,
         background: w.id === selectedWidgetId ? 'color-mix(in srgb, var(--accent) 12%, transparent)' : 'transparent', borderRadius: 4 }}>
         {editing === w.id ? (
-          <input autoFocus value={draft} aria-label={`Rename ${label(w)}`}
+          <input autoFocus value={draft} aria-label={t('bc.panes.outline.rename', { name: label(w) })}
             onChange={e => setDraft(e.target.value)}
             onBlur={() => commit(w, page.id)}
             onKeyDown={e => { if (e.key === 'Enter') commit(w, page.id); if (e.key === 'Escape') setEditing(null) }}
@@ -40,7 +42,7 @@ export default function OutlinePane({ report, activePageId, selectedWidgetId, on
         ) : (
           <button onClick={() => onSelect(w.id, page.id)}
             onDoubleClick={() => { setEditing(w.id); setDraft(w.title || '') }}
-            title="Click to select, double-click to rename"
+            title={t('bc.panes.outline.hint')}
             style={{ flex: 1, textAlign: 'start', border: 'none', background: 'none', cursor: 'pointer',
               fontSize: 11, color: 'var(--text)', padding: '3px 4px', whiteSpace: 'nowrap',
               overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -48,7 +50,7 @@ export default function OutlinePane({ report, activePageId, selectedWidgetId, on
           </button>
         )}
         {w.widget_type !== 'container' && containers.length > 0 && (
-          <select aria-label={`Container for ${label(w)}`}
+          <select aria-label={t('bc.panes.outline.containerFor', { name: label(w) })}
             value={(w.config as { container_id?: number })?.container_id ?? ''}
             onChange={e => onSetContainer(w.id, page.id, e.target.value ? Number(e.target.value) : null)}
             style={{ fontSize: 10.5, maxWidth: 70 }}>
@@ -63,7 +65,7 @@ export default function OutlinePane({ report, activePageId, selectedWidgetId, on
   return (
     <div style={{ padding: 12, overflowY: 'auto', height: '100%' }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
-        Outline
+        {t('builder.pane.outline')}
       </div>
       {report.pages.map(page => {
         const widgets = page.widgets ?? []
@@ -76,7 +78,7 @@ export default function OutlinePane({ report, activePageId, selectedWidgetId, on
           <div key={page.id} style={{ marginBottom: 10 }}>
             <div style={{ fontSize: 11, fontWeight: 700, padding: '2px 0',
               color: page.id === activePageId ? 'var(--accent)' : 'var(--text)' }}>
-              {page.name}
+              <bdi>{page.name}</bdi>
               <span style={{ fontWeight: 400, color: 'var(--muted)' }}> · {widgets.length}</span>
             </div>
             <ul style={{ listStyle: 'none' }}>

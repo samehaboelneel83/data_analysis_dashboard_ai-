@@ -4,6 +4,7 @@ import { render, screen, fireEvent, within, waitFor, act } from '@testing-librar
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import ReportBuilder from './ReportBuilder'
 import { analysisApi, authzApi, reportsApi, datasetsApi, widgetDataApi, dataPreviewApi, dataSourcesApi, columnMetaApi, hierarchyApi } from '../services/api'
+import { PromptProvider } from '../components/ui/PromptDialog'
 import { ConfirmProvider } from '../components/ui/ConfirmDialog'
 import { axeViolations } from '../test/axe'
 
@@ -15,7 +16,7 @@ vi.mock('../services/api', () => ({
   // Phase 7.3: the header asks what this user may do (share, download...).
   authzApi: { decisions: vi.fn().mockResolvedValue([]) },
   reportsApi: {
-    get: vi.fn(), list: vi.fn().mockResolvedValue([]), update: vi.fn(), addPage: vi.fn(), updatePage: vi.fn(), deletePage: vi.fn(),
+    get: vi.fn(), list: vi.fn().mockResolvedValue([]), update: vi.fn(), addPage: vi.fn(), updatePage: vi.fn(), deletePage: vi.fn(), versions: vi.fn().mockResolvedValue([]),
     addWidget: vi.fn(), updateWidget: vi.fn(), deleteWidget: vi.fn(),
     listBookmarks: vi.fn().mockResolvedValue([]), addBookmark: vi.fn(), deleteBookmark: vi.fn(),
     getRevision: vi.fn().mockResolvedValue(0),
@@ -48,6 +49,15 @@ vi.mock('../services/api', () => ({
   pageVisibilityApi: { roles: vi.fn().mockResolvedValue([]), get: vi.fn().mockResolvedValue({ role_ids: [] }), set: vi.fn() },
   schedulesApi: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), delete: vi.fn(), runNow: vi.fn() },
   deliveriesApi: { list: vi.fn().mockResolvedValue([]) },
+  // View mode (7d) reads the top bar's model light, as Ask AI does.
+  lastLlmEndpoints: () => null,
+  getLlmChoice: () => null,
+  LLM_ENDPOINTS_EVENT: 'datalytics:llm-endpoints',
+  LLM_CHOICE_EVENT: 'datalytics:llm-choice',
+  // The Share dialog (7c) reads grants, guest links and embed configs.
+  reportGrantsApi: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), remove: vi.fn() },
+  shareLinksApi: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), revoke: vi.fn() },
+  embedConfigsApi: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), setEnabled: vi.fn(), delete: vi.fn() },
   COMMON_TIMEZONES: ['UTC', 'Asia/Riyadh'],
   widgetTemplatesApi: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), delete: vi.fn() },
   columnsApi: { duplicate: vi.fn() },
@@ -79,33 +89,36 @@ function reportWithWidget() {
   return r
 }
 
-/** The builder's left panel is tabbed (Fields / Charts / More); the widget
- *  catalog lives under Charts, templates and report filters under More. */
-async function openLeftTab(name: 'Fields' | 'Charts' | 'More') {
+/** The builder's left panel is tabbed (Insert / Fields / Templates, since 7e2;
+ *  v1: Charts / Fields / More): the widget catalog under Insert, report
+ *  filters under Fields, widget templates under Templates. */
+async function openLeftTab(name: 'Fields' | 'Insert' | 'Templates') {
   fireEvent.click(await screen.findByRole('tab', { name }))
 }
 // The chosen tab is remembered per viewer; a test that opened Charts must not
 // leave the next one there.
 beforeEach(() => { try { localStorage.removeItem('datalytics:builder-left-tab'); sessionStorage.removeItem('datalytics:open-reports') } catch { /* */ } })
 
-function renderBuilder() {
+/** `?edit=1` is how a just-created dashboard arrives (QA2 N2): the builder
+ *  opens in Edit for it. An existing dashboard opens in View. */
+function renderBuilder(path = '/reports/1?edit=1') {
   return render(
     // ConfirmProvider mirrors App.tsx: ReportBuilder's page delete asks through
     // useConfirm, which throws outside a provider by design rather than silently
     // never confirming.
-    <ConfirmProvider>
-      <MemoryRouter initialEntries={['/reports/1']}>
+    <ConfirmProvider><PromptProvider>
+      <MemoryRouter initialEntries={[path]}>
         <Routes><Route path="/reports/:id" element={<ReportBuilder />} /></Routes>
       </MemoryRouter>
-    </ConfirmProvider>
+    </PromptProvider></ConfirmProvider>
   )
 }
 
-// Overflow panels (Selection, Tab order, Performance, Sync slicers, Bookmarks,
-// Mobile layout, Report rules) live behind the toolbar's More menu.
+// The panels (Selection, Tab order, Performance, Sync slicers, Bookmarks,
+// Mobile layout, Report rules, ...) open from the right rail since 7e3 (v1:
+// the toolbar's More menu).
 function openOverflowPanel(name: RegExp) {
-  fireEvent.click(screen.getByRole('button', { name: 'More panels' }))
-  fireEvent.click(screen.getByRole('menuitem', { name }))
+  fireEvent.click(within(screen.getByRole('navigation', { name: 'Panels' })).getByRole('button', { name }))
 }
 
 describe('ReportBuilder view switcher', () => {
@@ -297,6 +310,24 @@ describe('ReportBuilder multi-select and Align/Distribute toolbar', () => {
 
     expect(reportsApi.updateWidget).toHaveBeenCalledWith(1, 100, 6, { layout: expect.objectContaining({ x: 0 }) })
   })
+
+  it('QA3 A1: a plain click then a Shift+click counts both widgets', async () => {
+    const report = reportWithWidget()
+    ;(report.pages[0].widgets as any[]).push({ id: 6, page_id: 100, widget_type: 'bar', title: 'Second Widget', config: { dimension: 'region' }, layout: { x: 6, y: 0, w: 6, h: 5 }, created_at: '2026-01-01' })
+    vi.mocked(reportsApi.get).mockResolvedValue(report as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    fireEvent.click(await screen.findByText('Sales by Region'))
+    fireEvent.click(await screen.findByText('Second Widget'), { shiftKey: true })
+    expect(await screen.findByText('2 selected')).toBeInTheDocument()
+    expect(screen.getAllByText('2 widgets selected').length).toBeGreaterThan(0)
+    // QA4 V5: no per-widget quick toolbar under the group bar
+    expect(screen.queryByRole('toolbar', { name: /^Quick actions for/ })).toBeNull()
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByText('2 selected')).toBeNull())
+  })
 })
 
 describe('ReportBuilder Performance panel', () => {
@@ -430,6 +461,9 @@ describe('ReportBuilder Fields pane', () => {
     fireEvent.click(await screen.findByText('Sales by Region', {}, { timeout: 3000 }))
     await screen.findByText('Widget: Sales by Region')
 
+    // 7e3: the interaction is set under Properties' Interactions section,
+    // the title under Format -- the carry-through now crosses sections too.
+    fireEvent.click(screen.getByRole('tab', { name: 'Interactions' }))
     const isolated = screen.queryByRole('button', { name: 'Isolated —' })
       ?? (fireEvent.click(screen.getByRole('button', { name: /Interactions/ })),
           await screen.findByRole('button', { name: 'Isolated —' }))
@@ -437,6 +471,7 @@ describe('ReportBuilder Fields pane', () => {
     await waitFor(() => expect(reportsApi.updateWidget).toHaveBeenLastCalledWith(1, 100, 5,
       { config: expect.objectContaining({ interaction: expect.objectContaining({ broadcasts: false, receives: false }) }) }))
 
+    fireEvent.click(screen.getByRole('tab', { name: 'Format' }))
     fireEvent.change(screen.getByPlaceholderText('Widget title'), { target: { value: 'Sales, isolated' } })
     await waitFor(() => expect(reportsApi.updateWidget).toHaveBeenLastCalledWith(1, 100, 5,
       expect.objectContaining({ title: 'Sales, isolated',
@@ -449,10 +484,14 @@ describe('ReportBuilder Fields pane', () => {
     // from the pre-save config and sent {dimension} alone, wiping the measure.
     const first = reportWithWidget(); (first.pages[0].widgets[0] as any).config = {}
     const second = reportWithWidget(); (second.pages[0].widgets[0] as any).config = { measure: 'sales' }
-    vi.mocked(reportsApi.get).mockResolvedValueOnce(first as any).mockResolvedValue(second as any)
+    // The server's copy: empty until the first save lands (QA4 E2: a fixture
+    // that served `second` from the second load on had "sales" on the widget
+    // before it was clicked, and the old planner put it in a second role).
+    let saved = false
+    vi.mocked(reportsApi.get).mockImplementation(async () => (saved ? second : first) as any)
     vi.mocked(datasetsApi.get).mockResolvedValue(datasetWithColumns() as any)
     vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
-    vi.mocked(reportsApi.updateWidget).mockResolvedValue({} as any)
+    vi.mocked(reportsApi.updateWidget).mockReset().mockImplementation(async () => { saved = true; return {} as any })
     renderBuilder()
     await screen.findByTestId('view-strip')
     fireEvent.click(await screen.findByText('Sales by Region', {}, { timeout: 3000 }))
@@ -780,12 +819,15 @@ describe('ReportBuilder mobile layout editor', () => {
       addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => false,
     }) as unknown as MediaQueryList
 
-    renderBuilder()
-    await screen.findByTestId('view-strip')
-    fireEvent.click(screen.getByRole('button', { name: 'View mode' }))
-
-    expect(await screen.findByTestId('mobile-stack')).toBeInTheDocument()
-    window.matchMedia = realMatchMedia
+    try {
+      // A phone opens straight into View mode (Modern look): no studio strip.
+      renderBuilder()
+      expect(await screen.findByTestId('mobile-stack')).toBeInTheDocument()
+      expect(screen.queryByTestId('view-strip')).toBeNull()
+    } finally {
+      // Restored even on failure, or every later test runs as a phone.
+      window.matchMedia = realMatchMedia
+    }
   })
 })
 
@@ -804,8 +846,8 @@ describe('ReportBuilder drillthrough navigation', () => {
     vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
     vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'North', value: 5 }], sampled: false })
 
-    renderBuilder()
-    await screen.findByTestId('view-strip')
+    // Read, not edit (QA3 A6): while building, a click selects the widget only.
+    renderBuilder('/reports/1')
 
     const row = await screen.findByText('North')
     fireEvent.click(row)
@@ -970,7 +1012,8 @@ describe('ReportBuilder popup overlay (view mode)', () => {
     renderBuilder()
     await screen.findByTestId('view-strip')
     // Default state is edit mode.
-    expect(screen.getByRole('button', { name: /Popup KPIs.*\[P\]/ })).toBeInTheDocument()
+    // 7e1: the marker is in words for a screen reader (it was "[P]").
+    expect(screen.getByRole('button', { name: 'Popup KPIs (pop-up page)' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Open KPIs' }))
 
@@ -1142,7 +1185,7 @@ describe('ReportBuilder zoom-aware drag math', () => {
       renderBuilder()
       await screen.findByTestId('view-strip')
 
-      const zoomIn = screen.getByRole('button', { name: '+' })
+      const zoomIn = screen.getByRole('button', { name: 'Zoom in' })
       for (let i = 0; i < 5; i++) fireEvent.click(zoomIn)
       expect(screen.getByText('150%')).toBeInTheDocument()
 
@@ -1161,7 +1204,133 @@ describe('ReportBuilder zoom-aware drag math', () => {
   })
 })
 
-describe('ReportBuilder status bar zoom', () => {
+describe('opening an old dashboard writes nothing (QA3 N3)', () => {
+  const oldPage = (layout_mode: string | null, widgets: any[]) => {
+    const r = baseReport()
+    ;(r.pages[0] as any).layout_mode = layout_mode
+    r.pages[0].widgets = widgets as any
+    return r
+  }
+  const kpi = (id: number, x: number, y: number, w = 12, h = 5) =>
+    ({ id, page_id: 100, widget_type: 'kpi', title: `KPI ${id}`, config: { measure: 'revenue' }, layout: { x, y, w, h }, created_at: '2026-01-01' })
+
+  it.each([
+    ['no layout mode', null, [kpi(1, 0, 0), kpi(2, 0, 5)]],
+    ['packed, overlapping', 'packed', [kpi(1, 0, 0, 6, 4), kpi(2, 3, 2, 6, 4)]],
+  ])('%s: zero widget or page writes on opening in Edit', async (_, mode, widgets) => {
+    vi.mocked(reportsApi.get).mockResolvedValue(oldPage(mode as any, widgets) as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    vi.mocked(reportsApi.updateWidget).mockClear()
+    vi.mocked(reportsApi.updatePage).mockClear()
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    await screen.findByText('KPI 1')
+    await new Promise(r => setTimeout(r, 300))
+    expect(reportsApi.updateWidget).not.toHaveBeenCalled()
+    expect(reportsApi.updatePage).not.toHaveBeenCalled()
+  })
+
+  it('the first real edit stores what was shown, page first, one write at a time; undo restores it all', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(oldPage(null, [kpi(1, 0, 0), kpi(2, 0, 5), kpi(3, 0, 10)]) as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    const order: string[] = []; let inFlight = 0, maxInFlight = 0
+    const slow = (what: string) => async () => {
+      order.push(what); inFlight++; maxInFlight = Math.max(maxInFlight, inFlight)
+      await new Promise(r => setTimeout(r, 5)); inFlight--; return {} as any
+    }
+    vi.mocked(reportsApi.updateWidget).mockReset().mockImplementation(((_r: number, _p: number, id: number) => slow(`widget ${id}`)()) as any)
+    vi.mocked(reportsApi.updatePage).mockReset().mockImplementation(((_r: number, _p: number, d: any) => slow(`page ${d.layout_mode === '' ? 'restore' : d.layout_mode}`)()) as any)
+    const realRect = Element.prototype.getBoundingClientRect
+    Element.prototype.getBoundingClientRect = vi.fn(() => ({ left: 0, top: 0, right: 900, bottom: 600, width: 900, height: 600, x: 0, y: 0, toJSON: () => {} })) as any
+    try {
+      renderBuilder()
+      await screen.findByTestId('view-strip')
+      const grip = (await screen.findAllByText('⠿'))[0].closest('div') as HTMLElement
+      fireEvent.mouseDown(grip, { clientX: 0, clientY: 0 })
+      fireEvent.mouseMove(window, { clientX: 0, clientY: 20 * 66 })
+      fireEvent.mouseUp(window)
+      await waitFor(() => expect(order.filter(o => o.startsWith('widget')).length).toBeGreaterThanOrEqual(2))
+      await new Promise(r => setTimeout(r, 100))
+      expect(order[0]).toBe('page packed')
+      expect(maxInFlight).toBe(1)
+      // every widget the automatic layout moved is stored where it was shown
+      const stored = vi.mocked(reportsApi.updateWidget).mock.calls.map(c => c[2])
+      expect(new Set(stored)).toEqual(new Set([1, 2, 3]))
+
+      order.length = 0
+      fireEvent.click(await screen.findByRole('button', { name: 'Undo' }))
+      await waitFor(() => expect(order).toContain('page restore'))
+      expect(maxInFlight).toBe(1)
+      const undone = vi.mocked(reportsApi.updateWidget).mock.calls.slice(-3).map(c => [c[2], (c[3] as any).layout])
+      expect(Object.fromEntries(undone)).toEqual({ 1: { x: 0, y: 0, w: 12, h: 5 }, 2: { x: 0, y: 5, w: 12, h: 5 }, 3: { x: 0, y: 10, w: 12, h: 5 } })
+    } finally {
+      Element.prototype.getBoundingClientRect = realRect
+    }
+  })
+})
+
+describe('View → Edit starts with nothing selected (QA4 V6)', () => {
+  it('a value a reader picked (and its cross-filter) does not follow them into Edit', async () => {
+    const report = baseReport()
+    report.pages[0].widgets = [
+      { id: 5, page_id: 100, widget_type: 'list', title: 'Regions', config: { dimension: 'region' }, layout: { x: 0, y: 0, w: 6, h: 5 }, created_at: '2026-01-01' },
+      { id: 6, page_id: 100, widget_type: 'bar', title: 'Other', config: { dimension: 'region', measure: 'revenue' }, layout: { x: 6, y: 0, w: 6, h: 5 }, created_at: '2026-01-01' },
+    ] as any
+    vi.mocked(reportsApi.get).mockResolvedValue(report as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'North', value: 5 }], sampled: false })
+    renderBuilder('/reports/1')
+    fireEvent.click(await screen.findByText('North'))
+    expect(await screen.findAllByText(/region = North/)).not.toHaveLength(0)
+    fireEvent.click(screen.getByTestId('mode-toggle'))
+    await screen.findByTestId('view-strip')
+    await waitFor(() => expect(screen.queryByText(/region = North/)).toBeNull())
+  })
+})
+
+describe('Assign data on a widget that is not selected (QA3)', () => {
+  it('selects it and opens the Assign data dialog', async () => {
+    const r = baseReport()
+    r.pages[0].widgets = [
+      { id: 7, page_id: 100, widget_type: 'kpi', title: 'Empty KPI', config: {}, layout: { x: 0, y: 0, w: 3, h: 2 }, created_at: '2026-01-01' },
+      { id: 8, page_id: 100, widget_type: 'kpi', title: 'Other', config: { measure: 'revenue' }, layout: { x: 3, y: 0, w: 3, h: 2 }, created_at: '2026-01-01' },
+    ] as any
+    vi.mocked(reportsApi.get).mockResolvedValue(r as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    fireEvent.click(await screen.findByText('Other'))
+    const tile = document.querySelector('[data-widget-id="7"]') as HTMLElement
+    fireEvent.click(within(tile).getByRole('button', { name: 'Assign data' }))
+    expect(await screen.findByRole('dialog', { name: /^Assign data/ })).toBeInTheDocument()
+  })
+})
+
+describe('a canvas column narrower than the page (QA3 B5)', () => {
+  it('scales the page down to fit instead of cutting widgets off', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    // every box 400 wide: the column Properties-pinned-beside-a-panel leaves
+    const real = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth')!
+    Object.defineProperty(Element.prototype, 'clientWidth', { configurable: true, get: () => 400 })
+    try {
+      renderBuilder()
+      await screen.findByTestId('view-strip')
+      const canvas = document.querySelector('[data-canvas]') as HTMLElement
+      await waitFor(() => expect(canvas.style.transform).toMatch(/scale\(0\.66/))
+      expect(canvas.style.width).toBe('600px')
+      expect((canvas.parentElement as HTMLElement).style.minWidth).toBe('400px')
+    } finally {
+      Object.defineProperty(Element.prototype, 'clientWidth', real)
+    }
+  })
+})
+
+describe('ReportBuilder zoom (in the second row since 7e1)', () => {
   it('zooms the canvas in and updates the displayed percentage', async () => {
     vi.mocked(reportsApi.get).mockResolvedValue(baseReport() as any)
     vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
@@ -1169,7 +1338,7 @@ describe('ReportBuilder status bar zoom', () => {
     await screen.findByTestId('view-strip')
 
     expect(screen.getByText('100%')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '+' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }))
     expect(screen.getByText('110%')).toBeInTheDocument()
   })
 })
@@ -1183,7 +1352,7 @@ describe('ReportBuilder widget catalog in the left sidebar', () => {
       layout: { x: 0, y: 0, w: 6, h: 5 }, created_at: '2026-01-01',
     } as any)
     renderBuilder()
-    await openLeftTab('Charts')
+    await openLeftTab('Insert')
     await screen.findByTestId('view-strip')
 
     fireEvent.click(screen.getByRole('button', { name: /Bar Chart/i }))
@@ -1218,7 +1387,7 @@ describe('ReportBuilder widget catalog in the left sidebar', () => {
       return widget as any
     })
     renderBuilder()
-    await openLeftTab('Charts')
+    await openLeftTab('Insert')
     await screen.findByTestId('view-strip')
 
     fireEvent.click(screen.getByRole('button', { name: /Bar Chart/i }))
@@ -1239,7 +1408,23 @@ describe('ReportBuilder Present', () => {
 
     expect(document.documentElement.dataset.presenting).toBe('1')
     expect(screen.queryByText('Analytics')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Stop/i })).toBeInTheDocument()
+    // 7d: the header goes too; the present controls exit, and so does Esc.
+    expect(screen.queryByTestId('builder-header')).not.toBeInTheDocument()
+    const controls = screen.getByTestId('present-controls')
+    fireEvent.click(within(controls).getByRole('button', { name: /Exit/ }))
+    expect(document.documentElement.dataset.presenting).toBeFalsy()
+  })
+
+  it('Esc exits; other keys no longer do (arrows move between pages)', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    fireEvent.click(screen.getByRole('button', { name: /Present/i }))
+    fireEvent.keyDown(document, { key: 'ArrowRight' })
+    expect(document.documentElement.dataset.presenting).toBe('1')
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => expect(document.documentElement.dataset.presenting).toBeFalsy())
   })
 })
 
@@ -1252,7 +1437,7 @@ describe('ReportBuilder report-level display rules', () => {
     renderBuilder()
     await screen.findByTestId('view-strip')
 
-    await screen.findByRole('button', { name: 'More panels' }); openOverflowPanel(/report rules/i)
+    await screen.findByRole('navigation', { name: 'Panels' }); openOverflowPanel(/report rules/i)
     fireEvent.click(screen.getByRole('button', { name: /add rule/i }))
 
     await waitFor(() => expect(reportsApi.update).toHaveBeenCalledWith(
@@ -1310,7 +1495,7 @@ describe('ReportBuilder report-level display rules', () => {
     const { unmount } = renderBuilder()
     await screen.findByTestId('view-strip')
 
-    await screen.findByRole('button', { name: 'More panels' }); openOverflowPanel(/report rules/i)
+    await screen.findByRole('navigation', { name: 'Panels' }); openOverflowPanel(/report rules/i)
     fireEvent.click(screen.getByRole('button', { name: /add rule/i }))
 
     // Unmount immediately -- well inside the 600ms debounce window -- rather than
@@ -1337,7 +1522,7 @@ describe('ReportBuilder object templates', () => {
       config: { dimension: 'region', measure: 'sales' }, layout: { x: 0, y: 0, w: 6, h: 5 }, created_at: '2026-01-01',
     } as any)
     renderBuilder()
-    await openLeftTab('More')
+    await openLeftTab('Templates')
 
     const tpl = await screen.findByRole('button', { name: 'My Bar' })
     fireEvent.click(tpl)
@@ -1374,7 +1559,7 @@ describe('ReportBuilder report-level common filters', () => {
     vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales', columns: [{ name: 'region', dtype: 'text' }] } as any)
     vi.mocked(reportsApi.addCommonFilter).mockResolvedValue({ id: 9, column: 'region', op: 'eq', value: 'North' })
     renderBuilder()
-    await openLeftTab('More')
+    await openLeftTab('Fields')
     await screen.findByTestId('view-strip')
 
     fireEvent.change(await screen.findByLabelText('Report filter column'), { target: { value: 'region' } })
@@ -1383,7 +1568,8 @@ describe('ReportBuilder report-level common filters', () => {
 
     await waitFor(() => expect(reportsApi.addCommonFilter).toHaveBeenCalledWith(1, { column: 'region', op: 'eq', value: 'North' }))
     // the active filter chip is shown
-    await waitFor(() => expect(screen.getByText(/region eq North/)).toBeInTheDocument())
+    // QA5 L5: the operator as a word, the code underneath
+    await waitFor(() => expect(screen.getByText((_, el) => el?.tagName === 'SPAN' && !el.closest('[data-report-filter]') && !!el.textContent?.replace(/\s+/g, ' ').trim().startsWith('region equals (=) North'))).toBeInTheDocument())
   })
 
   it('parses a comma list into an array for the in operator', async () => {
@@ -1391,7 +1577,7 @@ describe('ReportBuilder report-level common filters', () => {
     vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales', columns: [{ name: 'region', dtype: 'text' }] } as any)
     vi.mocked(reportsApi.addCommonFilter).mockResolvedValue({ id: 10, column: 'region', op: 'in', value: ['A', 'B'] })
     renderBuilder()
-    await openLeftTab('More')
+    await openLeftTab('Fields')
     await screen.findByTestId('view-strip')
 
     fireEvent.change(await screen.findByLabelText('Report filter column'), { target: { value: 'region' } })
@@ -1409,7 +1595,7 @@ describe('ReportBuilder report-level common filters', () => {
     const spec = { mode: 'to_date', unit: 'year', anchor: 'data_max' }
     vi.mocked(reportsApi.addCommonFilter).mockResolvedValue({ id: 11, column: 'order_date', op: 'relative', value: spec })
     renderBuilder()
-    await openLeftTab('More')
+    await openLeftTab('Fields')
     await screen.findByTestId('view-strip')
 
     fireEvent.change(await screen.findByLabelText('Report filter column'), { target: { value: 'order_date' } })
@@ -1420,7 +1606,8 @@ describe('ReportBuilder report-level common filters', () => {
     fireEvent.click(screen.getByRole('button', { name: '+ Add report filter' }))
 
     await waitFor(() => expect(reportsApi.addCommonFilter).toHaveBeenCalledWith(1, { column: 'order_date', op: 'relative', value: spec }))
-    expect(await screen.findByText('order_date: Year to date · from latest data')).toBeInTheDocument()
+    // Listed in the Fields panel and (F7) on the canvas filter bar.
+    expect(await screen.findAllByText('order_date: Year to date · from latest data')).toHaveLength(2)
     await waitFor(() => expect(vi.mocked(reportsApi.getRevision).mock.calls.length).toBeGreaterThan(callsBefore))
     // our own write is not somebody else's edit
     await new Promise(r => setTimeout(r, 50))
@@ -1474,7 +1661,21 @@ describe('ReportBuilder — a view-only viewer gets the dashboard, not the studi
   it('offers no way into edit mode, and says why', async () => {
     await renderViewOnly()
     expect(screen.queryByRole('button', { name: /Edit mode/i })).not.toBeInTheDocument()
-    expect(screen.getByText(/View only/i)).toBeInTheDocument()
+    // The Modern header's "View only" chip, and the "View only · why?" button.
+    expect(screen.getByRole('button', { name: /View only · why\?/i })).toBeInTheDocument()
+  })
+
+  it('reads with Ask AI and Insights, but no Suggest, no Present, and nothing that adds to the page (7d)', async () => {
+    await renderViewOnly()
+    expect(screen.queryByRole('button', { name: /Present/i })).not.toBeInTheDocument()
+    fireEvent.click(await screen.findByTestId('view-ai-open'))
+    const panel = await screen.findByTestId('view-assist')
+    expect(within(panel).getByRole('tab', { name: 'Ask' })).toBeInTheDocument()
+    expect(within(panel).getByRole('tab', { name: 'Insights' })).toBeInTheDocument()
+    expect(within(panel).queryByRole('tab', { name: 'Suggest' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'More' }))
+    expect(await screen.findByRole('menuitem', { name: 'Print' })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: 'Version history' })).not.toBeInTheDocument()
   })
 
   it('drops the authoring chrome: panels, add-widget, page controls, copilot', async () => {
@@ -1496,7 +1697,7 @@ describe('ReportBuilder — a view-only viewer gets the dashboard, not the studi
 
   it('does not let a double-click start renaming a page', async () => {
     await renderViewOnly()
-    fireEvent.doubleClick(screen.getByRole('button', { name: 'Page 1' }))
+    fireEvent.doubleClick(screen.getByRole('tab', { name: 'Page 1' }))
     // The rename input never appears, so nothing can get stuck open on a 403.
     expect(screen.queryByDisplayValue('Page 1')).not.toBeInTheDocument()
   })
@@ -1506,7 +1707,7 @@ describe('ReportBuilder — a view-only viewer gets the dashboard, not the studi
     // that rides with the render path -- none of it is edit-gated.
     await renderViewOnly()
     expect(screen.getByText('Sales by Region')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Page 1' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Page 1' })).toBeInTheDocument()
   })
 
   it('leaves a page prompt filter usable', async () => {
@@ -1525,7 +1726,8 @@ describe('ReportBuilder — a view-only viewer gets the dashboard, not the studi
     vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
     renderBuilder()
     await screen.findByText('Sales by Region')
-    expect(screen.getByRole('group', { name: 'Report mode' })).toBeInTheDocument()
+    // One mode button that flips in place: an editor opens in Edit, so it offers View.
+    expect(screen.getByTestId('mode-toggle')).toHaveAccessibleName('View mode')
     // The studio's left panel: Fields / Charts / More tabs (was an "Analytics" header).
     expect(screen.getByRole('tablist', { name: 'Builder panel' })).toBeInTheDocument()
   })
@@ -1652,12 +1854,15 @@ describe('dropping several fields on the canvas', () => {
 
   it('a numeric identifier groups with the dimensions and a coordinate with geography', async () => {
     // Live QA 2026-09-28: IMEI and A_NUMBER sat under Measures with a Sum beside them.
+    // That IMEI is a code is the dataset's stored classification (the server
+    // reads it from the values: a long fixed-width number), not a telecom
+    // word known to the browser.
     vi.mocked(reportsApi.get).mockResolvedValue(baseReport() as any)
     vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Calls', columns: [
       { id: 1, name: 'IMEI', dtype: 'numeric', missing_pct: 0, stats: {} },
       { id: 2, name: 'LATITUDE', dtype: 'numeric', missing_pct: 0, stats: {} },
       { id: 3, name: 'RATED_AMOUNT', dtype: 'numeric', missing_pct: 0, stats: {} },
-    ] } as any)
+    ], column_meta: { IMEI: { number: 'code' } } } as any)
     renderBuilder()
     await screen.findByTestId('view-strip')
     const groupOf = async (name: string) =>
@@ -1715,6 +1920,32 @@ describe('dropping several fields on the canvas', () => {
     await waitFor(() => expect(reportsApi.addWidget).toHaveBeenCalledTimes(1))
     expect(reportsApi.addWidget).toHaveBeenCalledWith(1, 100, expect.objectContaining({
       widget_type: 'dual_axis_bar' }))
+  })
+
+  it('QA3 A2/A3: a measure dropped on a KPI that needs one fills it, found by the pointer', async () => {
+    vi.mocked(reportsApi.addWidget).mockClear()
+    vi.mocked(reportsApi.updateWidget).mockClear().mockResolvedValue({} as any)
+    const r = baseReport()
+    r.pages[0].widgets = [{ id: 7, page_id: 100, widget_type: 'kpi', title: 'Empty KPI', config: {},
+      layout: { x: 0, y: 0, w: 3, h: 2 }, created_at: '2026-01-01' }] as any
+    vi.mocked(reportsApi.get).mockResolvedValue(r as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns } as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    const tile = await waitFor(() => { const t = document.querySelector('[data-widget-id="7"]') as HTMLElement; if (!t) throw new Error('no tile'); return t })
+    fireEvent.click(within(tile).getByText('Empty KPI'))
+    tile.getBoundingClientRect = () => ({ left: 10, top: 10, right: 300, bottom: 160, width: 290, height: 150, x: 10, y: 10, toJSON: () => ({}) })
+    const dt = transfer()
+    fireEvent.dragStart(await fieldButton('revenue'), { dataTransfer: dt })
+    // Dropped over the tile, but the event lands on the canvas itself (an
+    // overlay was on top): the target is found by the pointer.
+    const canvas = document.querySelector('[data-canvas]')!
+    const ev = new Event('drop', { bubbles: true, cancelable: true }) as any
+    Object.assign(ev, { dataTransfer: dt, clientX: 100, clientY: 80 })
+    act(() => { canvas.dispatchEvent(ev) })
+    await waitFor(() => expect(reportsApi.updateWidget).toHaveBeenCalledWith(1, 100, 7,
+      { config: expect.objectContaining({ measure: 'revenue' }) }))
+    expect(reportsApi.addWidget).not.toHaveBeenCalled()
   })
 
   it('a single field still drops the way it always did', async () => {
@@ -2006,17 +2237,29 @@ describe('classifying a field as geography', () => {
 
   it('offers the classification on a category field', async () => {
     await builder()
-    expect(await screen.findByRole('button', { name: 'Classify governorate' }))
+    expect(await screen.findByRole('button', { name: 'Map geography for governorate (is it a place on a map?)' }))
       .toBeInTheDocument()
+  })
+
+  it('a year column is a category everywhere, not only in its group (Fields plan F1)', async () => {
+    // It was listed under Dimensions but drew a histogram and got the measure buttons.
+    cols.push({ id: 3, name: 'model_year', dtype: 'numeric', missing_pct: 0, stats: {} })
+    try {
+      await builder()
+      const group = (await screen.findAllByText('model_year')).map(e => e.closest('[data-field-group]')).find(Boolean)
+      expect(group?.getAttribute('data-field-group')).toBe('Dimensions')
+      expect(screen.getByRole('button', { name: 'Reclassify model_year as measure' })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Reclassify model_year as category' })).not.toBeInTheDocument()
+    } finally { cols.pop() }
   })
 
   it('does not offer it on a measure', async () => {
     // There is no map of a number: geography is a property of a category.
     await builder()
-    await screen.findByRole('button', { name: 'Classify governorate' })
+    await screen.findByRole('button', { name: 'Map geography for governorate (is it a place on a map?)' })
     // Exact: there is already a "Reclassify sales as category" control beside
     // every field, and a loose pattern matches that instead.
-    expect(screen.queryByRole('button', { name: 'Classify sales' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Map geography for sales/ })).not.toBeInTheDocument()
   })
 
   it('saves the classification and the boundary set together', async () => {
@@ -2026,7 +2269,7 @@ describe('classifying a field as geography', () => {
     const { boundarySetsApi } = await import('../services/api')
     vi.mocked(boundarySetsApi.get).mockResolvedValue({ id: 7, name: 'Egypt governorates', key_properties: ['name'],
       geometry: { type: 'FeatureCollection', features: [] } } as never)
-    fireEvent.click(await screen.findByRole('button', { name: 'Classify governorate' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Map geography for governorate (is it a place on a map?)' }))
     fireEvent.click(await screen.findByRole('menuitem', { name: /Egypt governorates/ }))
     // The validation panel comes first: the match is shown before it is saved.
     expect(await screen.findByRole('dialog', { name: /Check governorate against Egypt governorates/ })).toBeInTheDocument()
@@ -2040,7 +2283,7 @@ describe('classifying a field as geography', () => {
 
   it('can be turned back into an ordinary category', async () => {
     const api = await builder({ governorate: { role: 'geography', boundary_set_id: 7 } })
-    fireEvent.click(await screen.findByRole('button', { name: 'Classify governorate' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Map geography for governorate (is it a place on a map?)' }))
     fireEvent.click(await screen.findByRole('menuitem', { name: /not geography/i }))
 
     await waitFor(() => {
@@ -2174,7 +2417,7 @@ describe('the object selector', () => {
 describe('the insert palette', () => {
   it('filters to what was typed', async () => {
     renderBuilder()
-    await openLeftTab('Charts')
+    await openLeftTab('Insert')
     const box = await screen.findByLabelText(/find a chart/i)
 
     fireEvent.change(box, { target: { value: 'waterfall' } })
@@ -2187,7 +2430,7 @@ describe('the insert palette', () => {
     // Somebody looking for a map does not necessarily know it is called
     // "Choropleth"; the category is part of what they are searching.
     renderBuilder()
-    await openLeftTab('Charts')
+    await openLeftTab('Insert')
     const box = await screen.findByLabelText(/find a chart/i)
 
     fireEvent.change(box, { target: { value: 'maps' } })
@@ -2196,7 +2439,7 @@ describe('the insert palette', () => {
 
   it('says so when nothing matches, rather than showing an empty panel', async () => {
     renderBuilder()
-    await openLeftTab('Charts')
+    await openLeftTab('Insert')
     fireEvent.change(await screen.findByLabelText(/find a chart/i),
       { target: { value: 'zzzz' } })
     expect(screen.getByText(/no chart matches/i)).toBeInTheDocument()
@@ -2204,7 +2447,7 @@ describe('the insert palette', () => {
 
   it('shows everything again when the box is cleared', async () => {
     renderBuilder()
-    await openLeftTab('Charts')
+    await openLeftTab('Insert')
     const box = await screen.findByLabelText(/find a chart/i)
     fireEvent.change(box, { target: { value: 'waterfall' } })
     fireEvent.change(box, { target: { value: '' } })
@@ -2230,6 +2473,62 @@ describe('the builder header', () => {
     renderBuilder()
     const header = await screen.findByTestId('builder-header')
     expect(header).toHaveStyle({ flexWrap: 'wrap' })
+  })
+
+  it('keeps the shared actions and the one mode button in the same place in both modes', async () => {
+    renderBuilder()
+    await screen.findByTestId('builder-header')
+    const endNames = () => Array.from(document.querySelectorAll('.dl-hdr-end button'))
+      .map(b => b.getAttribute('aria-label') || b.textContent?.trim()).filter(Boolean)
+    const editing = endNames()
+    expect(screen.getByTestId('mode-toggle')).toHaveAccessibleName('View mode')
+    fireEvent.click(screen.getByTestId('mode-toggle'))
+    expect(screen.getByTestId('mode-toggle')).toHaveAccessibleName('Edit mode')
+    // Same buttons, same order; only the mode button's word changes.
+    const reading = endNames()
+    expect(reading.slice(0, -1)).toEqual(editing.slice(0, -1))
+    expect(reading.length).toBe(editing.length)
+  })
+
+  it('applies the reader\'s page filters to every chart on the page, and shows them above it', async () => {
+    localStorage.setItem('datalytics:page-filters:1:100', JSON.stringify([
+      { id: 'a', column: 'region', kind: 'values', values: ['East'] },
+      { id: 'b', column: 'units', kind: 'range', from: 1, to: 20 },
+    ]))
+    vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data',
+      columns: [{ name: 'region', dtype: 'categorical' }, { name: 'units', dtype: 'numeric' }] } as any)
+    vi.mocked(widgetDataApi.query).mockClear()
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    try {
+      renderBuilder()
+      expect(await screen.findByRole('button', { name: 'region: East' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'units: 1 – 20' })).toBeInTheDocument()
+      await waitFor(() => {
+        const sent = vi.mocked(widgetDataApi.query).mock.calls.map(c => (c[1] as any).filters ?? [])
+        expect(sent.some(f => JSON.stringify(f).includes('"op":"in","value":["East"]')
+          && JSON.stringify(f).includes('{"column":"units","op":"gte","value":1}')
+          && JSON.stringify(f).includes('{"column":"units","op":"lte","value":20}'))).toBe(true)
+      })
+    } finally {
+      localStorage.removeItem('datalytics:page-filters:1:100')
+    }
+  })
+
+  it('folds the top area away and brings it back, remembering the choice', async () => {
+    localStorage.removeItem('datalytics:builder-top-collapsed')
+    renderBuilder()
+    await screen.findByTestId('builder-header')
+    expect(screen.getByTestId('view-strip')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('top-collapse'))
+    expect(screen.queryByTestId('builder-header')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('view-strip')).not.toBeInTheDocument()
+    expect(localStorage.getItem('datalytics:builder-top-collapsed')).toBe('1')
+
+    fireEvent.click(screen.getByTestId('top-expand'))
+    expect(screen.getByTestId('builder-header')).toBeInTheDocument()
+    expect(localStorage.getItem('datalytics:builder-top-collapsed')).toBe('0')
   })
 })
 
@@ -2302,11 +2601,14 @@ describe('ReportBuilder explains permissions and sensitivity (Phase 7.3)', () =>
     renderBuilder()
     await screen.findByTestId('view-strip')
     expect((await screen.findByTestId('sensitivity-badge')).textContent).toContain('Restricted')
-    fireEvent.click(screen.getByRole('button', { name: /Share/ }))
-    const guest = await screen.findByRole('menuitem', { name: /Guest links/ })
-    expect(guest.getAttribute('aria-disabled')).toBe('true')
-    expect(guest.getAttribute('title')).toContain('share it with named people instead')
-    fireEvent.click(screen.getByRole('menuitem', { name: /Your access, and why/ }))
+    expect((await screen.findByTestId('sensitivity-badge')).textContent).toContain('Data:')
+    // 7c: Share opens one dialog; the refused guest link is greyed there
+    // with the server's reason, and "Your access, and why" is in its footer.
+    fireEvent.click(screen.getByRole('button', { name: /^Share$/ }))
+    const dialog = await screen.findByRole('dialog', { name: /Share/ })
+    expect(await within(dialog).findByText(/share it with named people instead/)).toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: 'Create guest link' })).not.toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: /Your access, and why/ }))
     const list = await screen.findByTestId('access-decisions')
     expect(list.textContent).toContain('Share it by guest link')
     expect(screen.getByTestId('access-sensitivity').textContent).toContain('No guest links or embeds')
@@ -2364,7 +2666,7 @@ describe('ReportBuilder: every edit is one undo step', () => {
     vi.mocked(reportsApi.deletePage).mockResolvedValue(undefined as any)
     renderBuilder()
     await screen.findByTestId('view-strip')
-    fireEvent.click(screen.getByRole('button', { name: /^\+?\s*Page$/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add page' }))
     await waitFor(() => expect(undoTitle()).toBe('Undo: Add page "Page 2" (Ctrl+Z)'))
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
     await waitFor(() => expect(reportsApi.deletePage).toHaveBeenCalledWith(1, 101))
@@ -2395,7 +2697,9 @@ describe('ReportBuilder: every edit is one undo step', () => {
     vi.mocked(reportsApi.addWidget).mockClear().mockResolvedValue({ id: 90 } as any)
     renderBuilder()
     await screen.findByTestId('view-strip')
-    fireEvent.click(screen.getByRole('button', { name: 'Delete page "Detail"' }))
+    // 7e1: Delete lives in the page's ⌄ menu (it was an "x" on every tab).
+    fireEvent.click(screen.getByRole('button', { name: 'Page options: Detail' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete page' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Delete' }))
     await waitFor(() => expect(reportsApi.deletePage).toHaveBeenCalledWith(1, 101))
     await waitFor(() => expect(undoTitle()).toBe('Undo: Delete page "Detail" (Ctrl+Z)'))
@@ -2414,7 +2718,7 @@ describe('ReportBuilder: every edit is one undo step', () => {
     vi.mocked(reportsApi.deleteCommonFilter).mockResolvedValue(undefined as any)
     renderBuilder()
     await screen.findByTestId('view-strip')
-    await openLeftTab('More')
+    await openLeftTab('Fields')
     fireEvent.click(await screen.findByRole('button', { name: 'Last 30 days' }))
     await waitFor(() => expect(reportsApi.addCommonFilter).toHaveBeenCalledWith(1, {
       column: 'order_date', op: 'relative', value: { mode: 'last', unit: 'day', n: 30, anchor: 'data_max' } }))
@@ -2438,19 +2742,15 @@ describe('ReportBuilder accessibility', () => {
 })
 
 describe('ReportBuilder Modern view style', () => {
-  beforeEach(() => { try { localStorage.removeItem('datalytics.viewStyle') } catch { /* */ } })
-
-  it('reads a report in the Modern layout, remembers the choice, and never applies while editing', async () => {
+  it('reads a report in the Modern layout, with no style switch, and never applies while editing', async () => {
     vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
     vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
     renderBuilder()
     await screen.findByTestId('view-strip')
-    // The switch is a reading choice: the builder has one look.
-    expect(screen.queryByRole('group', { name: 'View style' })).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: 'View mode' }))
-    const styles = screen.getByRole('group', { name: 'View style' })
-    fireEvent.click(within(styles).getByRole('button', { name: 'Modern' }))
+    // One look only: the Default/Modern switch is gone.
+    expect(screen.queryByRole('group', { name: 'View style' })).toBeNull()
 
     // One header row, pill page tabs with the filters beside them; no studio strip.
     expect(screen.queryByTestId('view-strip')).toBeNull()
@@ -2458,7 +2758,6 @@ describe('ReportBuilder Modern view style', () => {
     expect(within(pages).getByRole('tab', { name: 'Page 1' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByText('No filters applied')).toBeInTheDocument()
     expect(await screen.findByText('Sales by Region')).toBeInTheDocument()
-    expect(localStorage.getItem('datalytics.viewStyle')).toBe('modern')
 
     // Edit is the primary action, and editing is the builder as always.
     fireEvent.click(screen.getByRole('button', { name: 'Edit mode' }))
@@ -2486,5 +2785,279 @@ describe('ReportBuilder Convert to', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Undo' }))
     await waitFor(() => expect(reportsApi.updateWidget).toHaveBeenLastCalledWith(1, 100, 5,
       { widget_type: 'bar', config: { dimension: 'region' } }), { timeout: 5000 })
+  })
+})
+
+describe('ReportBuilder reading (redesign 7d)', () => {
+  const toReading = async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    renderBuilder()
+    await screen.findByTestId('builder-header')
+    if (screen.getByTestId('mode-toggle').getAttribute('aria-label') === 'View mode') fireEvent.click(screen.getByTestId('mode-toggle'))
+    await screen.findByRole('toolbar', { name: 'Actions for Sales by Region' })
+  }
+
+  it('a widget can be focused full screen, and the focus closes again', async () => {
+    await toReading()
+    fireEvent.click(screen.getByRole('button', { name: 'Focus on Sales by Region' }))
+    const focus = await screen.findByTestId('focus-view')
+    expect(within(focus).getByRole('heading', { level: 2, name: 'Sales by Region' })).toBeInTheDocument()
+    expect(within(focus).getByRole('button', { name: 'Explain "Sales by Region"' })).toBeInTheDocument()
+    fireEvent.click(within(focus).getByRole('button', { name: /Exit focus/ }))
+    expect(screen.queryByTestId('focus-view')).not.toBeInTheDocument()
+  })
+
+  it('"Ask AI about" a widget opens the panel with the question in the box, not sent', async () => {
+    await toReading()
+    fireEvent.click(screen.getByRole('button', { name: 'Ask AI about Sales by Region' }))
+    const panel = await screen.findByTestId('view-assist')
+    expect(within(panel).getByRole('textbox', { name: /question/i })).toHaveValue('Explain "Sales by Region"')
+  })
+
+  it('the Ask AI button and Ctrl+/ open and close the panel', async () => {
+    await toReading()
+    fireEvent.click(screen.getByTestId('view-ai-open'))
+    expect(await screen.findByTestId('view-assist')).toBeInTheDocument()
+    fireEvent.click(within(screen.getByTestId('view-assist')).getByRole('button', { name: 'Close' }))
+    expect(screen.queryByTestId('view-assist')).not.toBeInTheDocument()
+    fireEvent.keyDown(document, { key: '/', ctrlKey: true })
+    expect(await screen.findByTestId('view-assist')).toBeInTheDocument()
+  })
+
+  it('an editor gets Suggest; the More menu keeps print, history and settings', async () => {
+    await toReading()
+    fireEvent.click(screen.getByTestId('view-ai-open'))
+    expect(within(await screen.findByTestId('view-assist')).getByRole('tab', { name: 'Suggest' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'More' }))
+    for (const name of ['Print', 'Version history', 'Report settings']) expect(await screen.findByRole('menuitem', { name })).toBeInTheDocument()
+  })
+
+  it('Present pages with the arrows and the controls; auto-play starts off and can be turned on', async () => {
+    const r = reportWithWidget()
+    r.pages.push({ ...r.pages[0], id: 101, name: 'Second', position: 1, widgets: [] } as any)
+    vi.mocked(reportsApi.get).mockResolvedValue(r as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    fireEvent.click(screen.getByRole('button', { name: /Present/i }))
+    const controls = screen.getByTestId('present-controls')
+    expect(controls).toHaveTextContent('1 / 2')
+    fireEvent.keyDown(document, { key: 'ArrowRight' })
+    await waitFor(() => expect(controls).toHaveTextContent('2 / 2'))
+    fireEvent.click(within(controls).getByRole('button', { name: 'Previous page' }))
+    await waitFor(() => expect(controls).toHaveTextContent('1 / 2'))
+    // Auto-play starts off (GATE D); the button turns it on.
+    const auto = within(controls).getByRole('button', { name: /Auto-play/ })
+    expect(auto).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(auto)
+    expect(auto).toHaveAttribute('aria-pressed', 'true')
+  })
+})
+
+describe('the builder opens with the icon rail (redesign 7e1, S6)', () => {
+  it('asks the shell to fold the rail in edit mode, and lets it go when reading or leaving', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(baseReport() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    const seen: boolean[] = []
+    const on = (e: Event) => seen.push(!!(e as CustomEvent<boolean>).detail)
+    window.addEventListener('datalytics:builder-compact', on)
+    try {
+      const { unmount } = renderBuilder()
+      await screen.findByTestId('view-strip')
+      expect(seen.at(-1)).toBe(true)
+      fireEvent.click(screen.getByTestId('mode-toggle'))
+      expect(seen.at(-1)).toBe(false)
+      // QA3 A9: back to editing folds it again, whatever the path.
+      fireEvent.click(screen.getByTestId('mode-toggle'))
+      expect(seen.at(-1)).toBe(true)
+      unmount()
+      expect(seen.at(-1)).toBe(false)
+    } finally { window.removeEventListener('datalytics:builder-compact', on) }
+  })
+})
+
+describe('page tab menu (redesign 7e1)', () => {
+  it('Move left swaps the page with its neighbour, as one undo step', async () => {
+    const r = baseReport()
+    r.pages.push({ id: 101, report_id: 1, name: 'Detail', page_type: 'normal', position: 1, created_at: '2026-01-01', layout_mode: 'free', widgets: [] } as any)
+    vi.mocked(reportsApi.get).mockResolvedValue(r as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(reportsApi.updatePage).mockClear().mockResolvedValue({} as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    fireEvent.click(screen.getByRole('button', { name: 'Page options: Detail' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move left' }))
+    await waitFor(() => expect(reportsApi.updatePage).toHaveBeenCalledWith(1, 101, { position: 0 }))
+    expect(reportsApi.updatePage).toHaveBeenCalledWith(1, 100, { position: 1 })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Undo' })).toHaveAttribute('title', 'Undo: Move page "Detail" (Ctrl+Z)'))
+  })
+})
+
+describe('right rail and Properties (redesign 7e3)', () => {
+  it('pinned, Properties stays open beside the next panel; unpinned, the panel replaces it', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    fireEvent.click(await screen.findByText('Sales by Region'))
+    expect(await screen.findByText('Widget: Sales by Region')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Pin Properties open' }))
+    openOverflowPanel(/^Selection$/)
+    expect(screen.getByRole('heading', { name: 'Selection' })).toBeInTheDocument()
+    expect(screen.getByText('Widget: Sales by Region')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Unpin Properties' }))
+    expect(screen.queryByText('Widget: Sales by Region')).not.toBeInTheDocument()
+  })
+
+  it('one AI button opens Ask, Insights and Suggest as tabs', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(baseReport() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    openOverflowPanel(/^AI$/)
+    const tabs = screen.getByRole('tablist', { name: 'AI' })
+    expect(within(tabs).getByRole('tab', { name: 'Ask' })).toHaveAttribute('aria-selected', 'true')
+    fireEvent.click(within(tabs).getByRole('tab', { name: 'Insights' }))
+    expect(within(tabs).getByRole('tab', { name: 'Insights' })).toHaveAttribute('aria-selected', 'true')
+    expect(within(screen.getByRole('navigation', { name: 'Panels' })).getByRole('button', { name: 'AI' })).toHaveAttribute('aria-pressed', 'true')
+  })
+})
+
+describe('canvas overlays (redesign 7e4)', () => {
+  it('a multi-selection gets the group box and is laid out from Properties; one widget gets guides', async () => {
+    const report = reportWithWidget()
+    ;(report.pages[0].widgets as any[]).push({ id: 6, page_id: 100, widget_type: 'bar', title: 'Second Widget', config: { dimension: 'region' }, layout: { x: 6, y: 0, w: 6, h: 5 }, created_at: '2026-01-01' })
+    vi.mocked(reportsApi.get).mockResolvedValue(report as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    vi.mocked(reportsApi.updateWidget).mockResolvedValue({} as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    fireEvent.click(await screen.findByText('Sales by Region'))
+    expect(await screen.findByTestId('selection-guides')).toHaveTextContent('col 1–6 · row 1–5')
+    // QA3 A1: the plain click already selected it; Shift+click adds the second.
+    fireEvent.click(await screen.findByText('Second Widget'), { shiftKey: true })
+    expect(screen.getByTestId('group-box')).toHaveTextContent('2 selected')
+    expect(screen.queryByTestId('selection-guides')).toBeNull()
+    const multi = screen.getByRole('region', { name: '2 widgets selected' })
+    for (const mode of ['Align Center', 'Align Bottom', 'Distribute Vertically']) expect(within(multi).getByRole('button', { name: mode })).toBeInTheDocument()
+    // Both already share a top edge; the left edges differ, so that one moves.
+    fireEvent.click(screen.getByRole('button', { name: 'Line up left edges' }))
+    await waitFor(() => expect(reportsApi.updateWidget).toHaveBeenCalledWith(1, 100, 6, { layout: expect.objectContaining({ x: 0 }) }))
+  })
+
+  it('the quick toolbar duplicates a widget', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    vi.mocked(reportsApi.addWidget).mockClear().mockResolvedValue({ id: 77, page_id: 100, widget_type: 'bar', title: 'Sales by Region', config: {}, layout: { x: 0, y: 5, w: 6, h: 5 }, created_at: '2026-01-01' } as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    fireEvent.click(await screen.findByRole('button', { name: 'Duplicate Sales by Region' }))
+    await waitFor(() => expect(reportsApi.addWidget).toHaveBeenCalledWith(1, 100, expect.objectContaining({ widget_type: 'bar' })))
+  })
+
+  it('a page past the Review threshold says it is heavy and opens Performance', async () => {
+    const r = baseReport()
+    r.pages[0].widgets = Array.from({ length: 15 }, (_, i) => ({ id: 500 + i, page_id: 100, widget_type: 'text', title: `T${i}`, config: { text: 'x' },
+      layout: { x: 0, y: i * 2, w: 3, h: 2 }, created_at: '2026-01-01' })) as any
+    vi.mocked(reportsApi.get).mockResolvedValue(r as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    expect(await screen.findByRole('note')).toHaveTextContent('This page has 15 widgets that all query on load')
+    fireEvent.click(within(screen.getByRole('note')).getByRole('button', { name: 'Performance' }))
+    expect(screen.getByRole('heading', { name: 'Performance' })).toBeInTheDocument()
+  })
+})
+
+describe('builder shortcuts (redesign 7e5)', () => {
+  it('Ctrl+D duplicates the selection, Ctrl + / − zoom, Ctrl+/ opens the copilot only, ? opens the sheet', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    vi.mocked(reportsApi.addWidget).mockClear().mockResolvedValue({ id: 78, page_id: 100, widget_type: 'bar', title: 'Sales by Region', config: {}, layout: { x: 0, y: 5, w: 6, h: 5 }, created_at: '2026-01-01' } as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    fireEvent.click(await screen.findByText('Sales by Region'))
+    fireEvent.keyDown(document.body, { key: 'd', ctrlKey: true })
+    await waitFor(() => expect(reportsApi.addWidget).toHaveBeenCalledWith(1, 100, expect.objectContaining({ widget_type: 'bar' })))
+    fireEvent.keyDown(document.body, { key: '=', ctrlKey: true })
+    expect(screen.getByText('110%')).toBeInTheDocument()
+    fireEvent.keyDown(document.body, { key: '-', ctrlKey: true })
+    expect(screen.getByText('100%')).toBeInTheDocument()
+    // Ctrl+/ is the page copilot's toggle (v1); the rail is left alone.
+    fireEvent.keyDown(document.body, { key: '/', ctrlKey: true })
+    expect(await screen.findByRole('dialog', { name: 'Ask AI' })).toBeInTheDocument()
+    expect(within(screen.getByRole('navigation', { name: 'Panels' })).getByRole('button', { name: 'AI' })).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.keyDown(document.body, { key: '?' })
+    expect(screen.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument()
+  })
+})
+
+describe('builder states the prototype does not draw (redesign 7e5)', () => {
+  it('while the dashboard loads, a skeleton of the builder says it is loading', async () => {
+    vi.mocked(reportsApi.get).mockReturnValue(new Promise(() => {}) as any)
+    renderBuilder()
+    const s = await screen.findByRole('status', { name: 'Loading the dashboard' })
+    expect(s).toHaveAttribute('aria-busy', 'true')
+  })
+
+  it('a dashboard that fails to load offers Retry and the way back', async () => {
+    vi.mocked(reportsApi.get).mockRejectedValue(Object.assign(new Error('boom'), { response: { status: 500 } }))
+    renderBuilder()
+    expect(await screen.findByRole('button', { name: /Retry|Try again/ })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Dashboards/ })).toHaveAttribute('href', '/reports')
+  })
+
+  it('an empty page offers the Templates tab', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(baseReport() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    renderBuilder()
+    const empty = await screen.findByTestId('empty-page')
+    fireEvent.click(within(empty).getByRole('button', { name: /template/i }))
+    expect(screen.getByRole('tab', { name: 'Templates' })).toHaveAttribute('aria-selected', 'true')
+  })
+})
+
+describe('opening a dashboard (QA2 N2)', () => {
+  it('an editor opening an existing dashboard reads it first; Edit is one click', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    renderBuilder('/reports/1')
+    expect(await screen.findByTestId('mode-toggle')).toHaveAccessibleName('Edit mode')
+    expect(screen.queryByTestId('view-strip')).toBeNull()
+  })
+
+  it('Version history opens over the view, without switching to Edit', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    vi.mocked(reportsApi.versions).mockResolvedValue([] as any)
+    renderBuilder('/reports/1')
+    await screen.findByTestId('mode-toggle')
+    fireEvent.click(screen.getByRole('button', { name: 'More' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Version history' }))
+    expect(await screen.findByTestId('view-history')).toBeInTheDocument()
+    expect(screen.getByTestId('mode-toggle')).toHaveAccessibleName('Edit mode')
+  })
+})
+
+
+describe('Present starts at the top (QA2 Visual 8)', () => {
+  it('a canvas scrolled down is brought back to the top when Present opens', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    renderBuilder('/reports/1')
+    await screen.findByTestId('mode-toggle')
+    const scroller = document.querySelector('[data-canvas-scroll]') as HTMLElement
+    expect(scroller).not.toBeNull()
+    scroller.scrollTop = 400
+    fireEvent.click(screen.getByRole('button', { name: /Present/ }))
+    await waitFor(() => expect((document.querySelector('[data-canvas-scroll]') as HTMLElement).scrollTop).toBe(0))
   })
 })

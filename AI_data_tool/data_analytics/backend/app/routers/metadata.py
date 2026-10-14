@@ -58,9 +58,12 @@ class ConfirmRequest(BaseModel):
 
 
 async def _get_source(db: AsyncSession, source_id: int, user: User) -> DataSource:
-    source = await db.get(DataSource, source_id)
-    check_org(source, user, "Data source not found")
-    return source
+    """The connection, if this user may SEE it -- the same rule as the
+    Connections list. Org membership alone used to be enough here, so a
+    member could read the catalog (tables, columns, value lists) of a
+    connection the list hid from them. 404, not 403: see the module notes."""
+    from .guided_setup import source_or_404
+    return await source_or_404(db, source_id, user)
 
 
 # ── sync ────────────────────────────────────────────────────────────────────
@@ -446,12 +449,24 @@ class GlossaryIn(BaseModel):
     synonyms: list[str] = Field(default_factory=list)
     maps_to_object: str | None = None
     maps_to_column: str | None = None
+    #: A rule the AI must follow when the term is meant (a SQL predicate or a
+    #: one-line instruction), and whether it applies to EVERY question.
+    rule: str | None = Field(default=None, max_length=2000)
+    always: bool = False
+
+
+class GlossaryPatch(BaseModel):
+    definition: str | None = None
+    synonyms: list[str] | None = None
+    rule: str | None = Field(default=None, max_length=2000)
+    always: bool | None = None
 
 
 def _glossary_payload(t: GlossaryTerm) -> dict:
     return {"id": t.id, "term": t.term, "definition": t.definition,
             "synonyms": t.synonyms or [], "maps_to_object": t.maps_to_object,
             "maps_to_column": t.maps_to_column,
+            "rule": getattr(t, "rule", None), "always": bool(getattr(t, "always", False)),
             "data_source_id": t.data_source_id}
 
 
@@ -498,11 +513,45 @@ async def create_glossary_term(
         org_id=current_user.org_id, data_source_id=source.id, term=term,
         definition=body.definition, synonyms=[s.strip() for s in synonyms],
         maps_to_object=body.maps_to_object, maps_to_column=body.maps_to_column,
+        rule=(body.rule or "").strip() or None, always=bool(body.always),
     )
     db.add(row)
+    if row.rule:
+        # A new rule changes what earlier answers SHOULD have been.
+        from ..services.agent import memory
+        await memory.forget(db, current_user.org_id, source_id=source.id)
     await db.commit()
     await db.refresh(row)
     return _glossary_payload(row)
+
+
+@router.patch("/{source_id}/glossary/{term_id}")
+async def update_glossary_term(
+    source_id: int, term_id: int, body: GlossaryPatch,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_org_admin),
+):
+    """Edit a term's meaning or its rule -- the Glossary page's inline edit."""
+    await _get_source(db, source_id, current_user)
+    term = await db.get(GlossaryTerm, term_id)
+    check_org(term, current_user, "Glossary term not found")
+    if term.data_source_id not in (None, source_id):
+        raise HTTPException(404, "Glossary term not found")
+    data = body.model_dump(exclude_unset=True)
+    if "definition" in data:
+        term.definition = data["definition"]
+    if "synonyms" in data and data["synonyms"] is not None:
+        term.synonyms = [s.strip() for s in data["synonyms"] if s and s.strip()]
+    if "rule" in data:
+        term.rule = (data["rule"] or "").strip() or None
+    if "always" in data and data["always"] is not None:
+        term.always = bool(data["always"])
+    if "rule" in data or "always" in data:
+        from ..services.agent import memory
+        await memory.forget(db, current_user.org_id, source_id=source_id)
+    await db.commit()
+    await db.refresh(term)
+    return _glossary_payload(term)
 
 
 @router.delete("/{source_id}/glossary/{term_id}", status_code=204)
@@ -718,6 +767,9 @@ async def suggest_dashboard_for_role(source_id: int, body: SuggestDashboardIn,
     """
     src = await db.get(DataSource, source_id)
     check_org(src, current_user, "Data source not found")
+    # "Allow AI" for this connection (services/ai_policy.py).
+    from ..services import ai_policy as _ai_policy
+    await _ai_policy.enter(db, source=src)
 
     from ..services.suggest_dashboard import load_catalog, load_joins
     catalog = await load_catalog(db, source_id)
@@ -740,7 +792,14 @@ async def suggest_dashboard_for_role(source_id: int, body: SuggestDashboardIn,
             return str(exc)[:300]
 
     from ..services.suggest_dashboard import suggest_dashboard
-    suggestion, why = await suggest_dashboard(catalog, body.for_role, body.goal,
+    # Their words, then what they wrote about themselves and what this
+    # connection is described as (services/ai_context.py).
+    from ..core.config import settings as _settings
+    from ..services import ai_context
+    _goal = ai_context.compose(body.goal, llm_on=bool(_settings.llm_enabled),
+                               about=getattr(current_user, "about", None),
+                               connection=src.description, connection_name=src.name) or None
+    suggestion, why = await suggest_dashboard(catalog, body.for_role, _goal,
                                               probe=probe)
     if suggestion is None:
         # 200 with a reason, not an error: "the model is off" and "the model

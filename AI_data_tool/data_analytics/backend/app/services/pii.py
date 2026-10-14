@@ -219,7 +219,9 @@ _NAME_RULES: list[tuple[str, re.Pattern]] = [
     ("device_id", re.compile(r"(^|_)(imei|imsi|iccid)$", re.I)),
 ]
 #: A place's address is not a person's: a site's, a store's, a branch's.
-_PLACE_WORDS = re.compile(r"(^|_)(site|store|branch|office|warehouse|shop|plant|depot|company|business)(_|$)", re.I)
+# In the words any organisation uses for a place of its own, not one trade's.
+_PLACE_WORDS = re.compile(r"(^|_)(site|location|facility|building|venue|station|office|branch|company|"
+                          r"organi[sz]ation|business|institution)(_|$)", re.I)
 
 
 def personal_type(column: str | None, semantic_type: str | None = None) -> str | None:

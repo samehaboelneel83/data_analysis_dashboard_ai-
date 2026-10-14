@@ -35,6 +35,7 @@ delete_prefix`'s docstring for the one flush case it does support.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import threading
 import time
@@ -147,6 +148,16 @@ class ValkeyCache(CacheBackend):
                     "in-process cache for %.0fs", self._cooldown_s)
                 self._error_logged = True
 
+    @property
+    def circuit_open(self) -> bool:
+        """True while failures have this cache serving from the fallback."""
+        return self._circuit_open()
+
+    def ping(self) -> bool:
+        """A direct round-trip to the server, for the readiness probe. Raises
+        on failure (the caller reports it); never touches the circuit."""
+        return bool(self._client.ping())
+
     def get(self, key: str):
         if self._circuit_open():
             return self._fallback.get(key)
@@ -160,6 +171,13 @@ class ValkeyCache(CacheBackend):
         if self._circuit_open():
             self._fallback.set(key, value, ttl_s)
             return
+        if not isinstance(value, (bytes, bytearray, memoryview, str, int, float)):
+            # Redis stores bytes. A dict/list handed in by a caller that forgot
+            # to encode it used to raise DataError ("Invalid input of type:
+            # 'dict'") INSIDE the try below -- which opened the circuit and
+            # silently switched every worker to the in-process cache for five
+            # minutes, over a caller bug, not a connection problem.
+            value = json.dumps(value, default=str).encode("utf-8")
         try:
             hkey = self._hashed(key)
             if ttl_s and ttl_s > 0:

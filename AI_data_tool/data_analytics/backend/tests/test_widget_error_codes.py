@@ -124,6 +124,38 @@ class TestTheHttpChannel:
         assert r.json()["code"] == "source_unavailable"
 
     @pytest.mark.asyncio
+    async def test_source_busy(self, client, auth_headers, db_session, two_orgs, monkeypatch):
+        """HR re-test: a source out of shared memory was a 500 'see server logs'
+        because the code it raised was never registered."""
+        from sqlalchemy.exc import OperationalError
+        src = DataSource(name="Warehouse", type="postgresql", org_id=two_orgs["a"]["org"].id,
+                         config={"host": "db.internal", "port": 5432, "database": "s",
+                                 "username": "r", "password": "p"})
+        db_session.add(src)
+        await db_session.flush()
+        ds = Dataset(name="Live", org_id=two_orgs["a"]["org"].id, mode="directquery",
+                     data_source_id=src.id, source_table="orders")
+        db_session.add(ds)
+        await db_session.flush()
+        for c in ("region", "amount"):
+            db_session.add(DatasetColumn(dataset_id=ds.id, name=c, dtype="categorical"))
+        await db_session.commit()
+
+        class _Full(Exception):
+            pgcode = "53100"
+
+        def _full(*a, **kw):
+            raise OperationalError("q", {}, _Full("could not resize shared memory segment"))
+        monkeypatch.setattr("app.services.direct_query._run_direct_query_inner", _full)
+        monkeypatch.setattr("app.services.direct_query.time.sleep", lambda s: None)
+
+        r = await client.post(f"/api/v1/datasets/{ds.id}/widget-data", json=BAR,
+                              headers=auth_headers["a"])
+        assert r.status_code == 503
+        assert r.json()["code"] == "source_busy"
+        assert "Warehouse" in r.json()["detail"]
+
+    @pytest.mark.asyncio
     async def test_an_unsupported_directquery_feature(self, client, auth_headers, db_session, two_orgs):
         src = DataSource(name="W", type="postgresql", org_id=two_orgs["a"]["org"].id,
                          config={"host": "h", "port": 5432, "database": "s",

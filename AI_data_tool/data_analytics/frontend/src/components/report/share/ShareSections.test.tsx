@@ -1,0 +1,141 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { renderWithProviders as render, screen, fireEvent, waitFor, within } from '../../../test/renderWithProviders'
+import { EmbedSection, GuestLinks } from './ShareSections'
+import { shareLinksApi, embedConfigsApi } from '../../../services/api'
+
+vi.mock('../../../services/api', () => ({
+  shareLinksApi: { create: vi.fn(), list: vi.fn(), revoke: vi.fn() },
+  embedConfigsApi: { create: vi.fn(), list: vi.fn(), setEnabled: vi.fn(), delete: vi.fn() },
+}))
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  vi.mocked(shareLinksApi.list).mockResolvedValue([
+    { id: 1, creator: 'me@x.com', created_at: '2026-08-23', expires_at: '2026-08-30', active: true, pinned: false,
+      access_count: 3, last_access_at: '2026-08-24T00:00:00Z' },
+  ])
+  vi.mocked(shareLinksApi.create).mockResolvedValue(
+    { id: 2, token: 'tok123', expires_at: '2026-08-30', pinned: false, note: '' })
+  vi.mocked(shareLinksApi.revoke).mockResolvedValue(undefined as never)
+  vi.mocked(embedConfigsApi.list).mockResolvedValue([
+    { id: 5, name: 'portal', allowed_origins: ['https://app.customer.com'], enabled: true,
+      created_at: '2026-08-23', last_used_at: null },
+  ])
+  vi.mocked(embedConfigsApi.create).mockResolvedValue(
+    { id: 6, name: 'new-cfg', secret: 'embed-secret-xyz', allowed_origins: [], enabled: true,
+      created_at: '2026-08-24', note: '' })
+  vi.mocked(embedConfigsApi.setEnabled).mockResolvedValue(undefined as never)
+  vi.mocked(embedConfigsApi.delete).mockResolvedValue(undefined as never)
+})
+
+/** v1's Guest links dialog, now two sections of the Share dialog (7c): the
+ *  same calls and the same one-time URL / secret and revoke confirmation. */
+describe('GuestLinks and EmbedSection', () => {
+  it('states the permission consequence before anything is minted', async () => {
+    render(<><GuestLinks reportId={7} /><EmbedSection reportId={7} /></>)
+    expect(await screen.findByText(/with your data permissions/i)).toBeInTheDocument()
+  })
+
+  it('shows per-link access count and last-access', async () => {
+    render(<><GuestLinks reportId={7} /><EmbedSection reportId={7} /></>)
+    expect(await screen.findByText(/3 views/)).toBeInTheDocument()
+  })
+
+  it('mints a link and shows the one-time URL', async () => {
+    render(<><GuestLinks reportId={7} /><EmbedSection reportId={7} /></>)
+    fireEvent.click(await screen.findByRole('button', { name: '30 days' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create guest link' }))
+    await waitFor(() => expect(shareLinksApi.create).toHaveBeenCalledWith(7, 30, false))
+    expect(screen.getByLabelText('Guest link URL')).toHaveValue(`${window.location.origin}/shared/tok123`)
+    expect(screen.getByText(/shown only once/)).toBeInTheDocument()
+  })
+
+  it('sends pinned:true when "Pin current layout" is checked', async () => {
+    render(<><GuestLinks reportId={7} /><EmbedSection reportId={7} /></>)
+    fireEvent.click(await screen.findByLabelText(/Pin current layout/))
+    fireEvent.click(screen.getByRole('button', { name: 'Create guest link' }))
+    await waitFor(() => expect(shareLinksApi.create).toHaveBeenCalledWith(7, 7, true))
+  })
+
+  it('revokes an active link', async () => {
+    render(<><GuestLinks reportId={7} /><EmbedSection reportId={7} /></>)
+    fireEvent.click(await screen.findByLabelText('Revoke link 1'))
+    // Destructive actions are guarded, so the dialog has to be accepted.
+    // The row's trigger carries the same label, so scope to the dialog.
+    fireEvent.click(within(await screen.findByRole('alertdialog'))
+      .getByRole('button', { name: /^revoke$/i }))
+    await waitFor(() => expect(shareLinksApi.revoke).toHaveBeenCalledWith(7, 1))
+  })
+
+  it('cancelling the confirm leaves the link working', async () => {
+    // The blast radius sits outside the system: the URL is already in other
+    // people's hands, and revoking cannot be undone.
+    render(<><GuestLinks reportId={7} /><EmbedSection reportId={7} /></>)
+    fireEvent.click(await screen.findByLabelText('Revoke link 1'))
+    expect(await screen.findByRole('alertdialog')).toHaveTextContent(/cannot be restored/i)
+    fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
+
+    await waitFor(() =>
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    expect(shareLinksApi.revoke).not.toHaveBeenCalled()
+  })
+
+  it('lists existing embed configs', async () => {
+    render(<><GuestLinks reportId={7} /><EmbedSection reportId={7} /></>)
+    expect(await screen.findByText(/portal/)).toBeInTheDocument()
+  })
+
+  it('creates an embed config and shows the one-time secret plus sample code', async () => {
+    render(<><GuestLinks reportId={7} /><EmbedSection reportId={7} /></>)
+    fireEvent.change(await screen.findByLabelText(/Config name/), { target: { value: 'new-cfg' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create embed config' }))
+    await waitFor(() => expect(embedConfigsApi.create).toHaveBeenCalledWith(7, 'new-cfg', []))
+    expect(screen.getByLabelText('Embed secret')).toHaveValue('embed-secret-xyz')
+    expect(screen.getByText(/shown only once/)).toBeInTheDocument()
+    expect(screen.getByText(/token, Python/)).toBeInTheDocument()
+    expect(screen.getByText(/token, Node/)).toBeInTheDocument()
+  })
+
+  it('disables and deletes an embed config', async () => {
+    render(<><GuestLinks reportId={7} /><EmbedSection reportId={7} /></>)
+    fireEvent.click(await screen.findByLabelText('Disable embed config 5'))
+    await waitFor(() => expect(embedConfigsApi.setEnabled).toHaveBeenCalledWith(7, 5, false))
+    fireEvent.click(screen.getByLabelText('Delete embed config 5'))
+    await waitFor(() => expect(embedConfigsApi.delete).toHaveBeenCalledWith(7, 5))
+  })
+})
+
+describe('guest links refused by policy', () => {
+  it("say why instead of offering the button", async () => {
+    render(<GuestLinks reportId={7} blockedReason="The report is Restricted; share it with named people instead." />)
+    expect(await screen.findByText(/share it with named people instead/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Create guest link' })).not.toBeInTheDocument()
+  })
+})
+
+describe('guest links after a revoke (QA2 Visual 9)', () => {
+  it('revoking the link just minted takes its one-time URL away', async () => {
+    render(<GuestLinks reportId={7} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Create guest link' }))
+    await screen.findByLabelText('Guest link URL')
+    vi.mocked(shareLinksApi.list).mockResolvedValue([
+      { id: 2, creator: 'me@x.com', created_at: '2026-08-23', expires_at: '2026-08-30', active: true, pinned: false, access_count: 0, last_access_at: null },
+    ] as never)
+    fireEvent.click(screen.getByRole('button', { name: 'Create guest link' }))
+    fireEvent.click(await screen.findByLabelText('Revoke link 2'))
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: /^revoke$/i }))
+    await waitFor(() => expect(screen.queryByLabelText('Guest link URL')).toBeNull())
+  })
+
+  it('revoked links fold away behind a toggle, kept as the record of who had access', async () => {
+    vi.mocked(shareLinksApi.list).mockResolvedValue([
+      { id: 1, creator: 'me@x.com', created_at: '2026-08-23', expires_at: '2026-08-30', active: true, pinned: false, access_count: 3, last_access_at: null },
+      { id: 3, creator: 'old@x.com', created_at: '2026-08-01', expires_at: '2026-08-02', active: false, pinned: false, access_count: 0, last_access_at: null },
+    ] as never)
+    render(<GuestLinks reportId={7} />)
+    await screen.findByText(/3 views/)
+    expect(screen.queryByText('old@x.com')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Show 1 revoked or expired link' }))
+    expect(screen.getByText('old@x.com')).toBeInTheDocument()
+  })
+})

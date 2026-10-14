@@ -56,11 +56,25 @@ _JOIN_NEEDS_ON = {"left", "inner", "right", "full"}
 _SUBQUERY_OPS = {"in": "IN", "not_in": "NOT IN", "exists": "EXISTS",
                  "not_exists": "NOT EXISTS"}
 _ALIAS = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,60}$")
-MAX_LIMIT = 100_000
+#: The highest row limit the builder accepts. Kept equal to the import cap
+#: (settings.import_row_cap) so the Query builder and Browse follow ONE rule:
+#: the HR evaluation typed 300,000, the SQL quietly said 100,000, and the
+#: dataset came out 58% short with nothing on screen saying so. A limit above
+#: this is now refused with a message, never clamped.
+def max_limit() -> int:
+    from ..core.config import settings
+    cap = int(getattr(settings, "import_row_cap", 0) or 0)
+    return cap if cap > 0 else 10_000_000
+
+
+MAX_LIMIT = 100_000  # kept for importers; the live ceiling is max_limit()
 #: A nested WHERE may itself nest. Bounded because the compile is recursive and
 #: a model is client-supplied: without a ceiling, a deeply self-nested payload
 #: is a stack-overflow request rather than a query.
 _MAX_SUBQUERY_DEPTH = 3
+#: How deep "Match all / Match any" condition groups may nest (client-supplied,
+#: compiled recursively -- bounded for the same reason as subqueries).
+_MAX_GROUP_DEPTH = 5
 
 # ── Self-referencing hierarchies ─────────────────────────────────────────────
 # Any table shaped (id, parent_id) -- an org chart, a category tree, a bill of
@@ -178,11 +192,10 @@ _FUNC_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,80}$")
 
 
 def _quote(dialect: str, name: str) -> str:
-    if dialect == "mysql":
-        return f"`{name}`"
-    if dialect == "sqlserver":
-        return f"[{name}]"
-    return f'"{name}"'
+    # The quote character is doubled inside the name (sql_safety.quote_ident):
+    # names are catalogue members, and this keeps even a real `a"b` one name.
+    from .sql_safety import quote_ident
+    return quote_ident(dialect, name)
 
 
 def _require(d: dict, key: str, what: str) -> str:
@@ -200,15 +213,12 @@ def _require(d: dict, key: str, what: str) -> str:
     return v
 
 
-def _encode_value(v) -> str:
-    if v is None:
-        return "NULL"
-    if isinstance(v, bool):
-        return "1" if v else "0"
-    if isinstance(v, (int, float)):
-        return repr(float(v)) if isinstance(v, float) else repr(int(v))
-    # single-quote doubling: the one escape SQL string literals define
-    return "'" + str(v).replace("'", "''") + "'"
+def _encode_value(v, dialect: str | None = None) -> str:
+    # Per dialect (sql_safety.encode_literal): quote doubling alone let a value
+    # end its string early on MySQL/MariaDB/ClickHouse, where a backslash is an
+    # escape too. A dialect-less call gets the strictest (backslash) encoding.
+    from .sql_safety import encode_literal
+    return encode_literal(v, dialect)
 
 
 def _build_hierarchy_cte(spec: dict, dialect: str, known: dict[str, set[str]],
@@ -270,7 +280,7 @@ def _build_hierarchy_cte(spec: dict, dialect: str, known: dict[str, set[str]],
     if root_value is None:
         anchor_where = f"{qid_null_check(qparent)}"
     else:
-        anchor_where = f"{qid} = {_encode_value(root_value)}"
+        anchor_where = f"{qid} = {_encode_value(root_value, dialect)}"
 
     # Both terms of a UNION must select the same columns in the same order, so
     # the base table's columns are listed EXPLICITLY rather than with `*`:
@@ -312,12 +322,17 @@ def qid_null_check(qparent: str) -> str:
 def build_sql(model: dict, dialect: str, known: dict[str, set[str]],
               schema: str | None = None,
               known_functions: set[str] | None = None,
-              depth: int = 0) -> str:
+              depth: int = 0, unlimited: bool = False) -> str:
     """Compile the model. Raises ValueError with an author-readable message on
     anything invalid -- the router turns those into 400s.
 
     `depth` is the subquery nesting level; callers leave it at 0 and the
     recursive WHERE-subquery compile increments it.
+
+    `unlimited` compiles with NO row limit -- the form a DirectQuery dataset
+    stores. A live dataset is a view of the source, not a sample of it: a
+    LIMIT baked into its SQL silently cut every widget to the first N rows
+    (and, with no ORDER BY, a different N rows on every query).
     """
     def qtable(t: str) -> str:
         q = _quote(dialect, t)
@@ -430,14 +445,17 @@ def build_sql(model: dict, dialect: str, known: dict[str, set[str]],
             # being read and ignored.
             sql_from += f" {how} {qtable(jt)}"
 
-    # WHERE -- D3: a single joiner (AND/OR) ties every filter row together,
-    # the same "one joiner for the whole row set" shape as the codeless
-    # ExpressionBuilder's Simple mode (lib/simpleExpr.ts), not per-pair logic.
+    # WHERE -- D3: a single joiner (AND/OR) ties the top-level rows together.
+    # A row may also be a GROUP -- {"group": "and"|"or", "filters": [...]} --
+    # with its own joiner, nested up to _MAX_GROUP_DEPTH: the box editor's
+    # "Match all / Match any", so `condition = Used AND (make = Kia OR make =
+    # Hyundai)` no longer needs the SQL tab. A group compiles through this same
+    # code, so every condition inside it is validated exactly as strictly.
     joiner = model.get("filters_joiner", "and")
     if joiner not in ("and", "or"):
         raise ValueError(f"unknown filters joiner '{joiner}'")
-    wheres = []
-    for f in model.get("filters") or []:
+
+    def one(f: dict) -> str:
         op = f.get("op", "eq")
 
         # Nested subquery: `col IN (SELECT …)`, or a correlated-free EXISTS.
@@ -463,33 +481,57 @@ def build_sql(model: dict, dialect: str, known: dict[str, set[str]],
             inner_sql = build_sql(inner_model, dialect, known, schema,
                                   known_functions, depth=depth + 1)
             if op in ("exists", "not_exists"):
-                wheres.append(f"{_SUBQUERY_OPS[op]} ({inner_sql})")
+                return f"{_SUBQUERY_OPS[op]} ({inner_sql})"
             else:
                 inner_cols = inner_model.get("columns") or []
                 if len(inner_cols) != 1:
                     raise ValueError(
                         f"an '{op}' subquery must select exactly one column")
                 col = qcol(f.get("table"), _require(f, "column", "a filter"))
-                wheres.append(f"{col} {_SUBQUERY_OPS[op]} ({inner_sql})")
-            continue
+                return f"{col} {_SUBQUERY_OPS[op]} ({inner_sql})"
 
         col = qcol(f.get("table"), _require(f, "column", "a filter"))
         if op in _OPS:
-            wheres.append(f"{col} {_OPS[op]} {_encode_value(f.get('value'))}")
+            return f"{col} {_OPS[op]} {_encode_value(f.get('value'), dialect)}"
         elif op == "contains":
-            v = str(f.get("value", "")).replace("'", "''")
-            wheres.append(f"{col} LIKE '%{v}%'")
+            # Encoded like every other value, and % / _ in the text match
+            # themselves (sql_safety.like_pattern).
+            from .sql_safety import like_pattern
+            return f"{col} LIKE {like_pattern(f.get('value', ''), dialect)}"
         elif op == "in":
             vals = f.get("value") or []
             if not isinstance(vals, list) or not vals:
                 raise ValueError("'in' filter needs a non-empty list value")
-            wheres.append(f"{col} IN ({', '.join(_encode_value(v) for v in vals)})")
+            return f"{col} IN ({', '.join(_encode_value(v, dialect) for v in vals)})"
         elif op == "is_null":
-            wheres.append(f"{col} IS NULL")
+            return f"{col} IS NULL"
         elif op == "not_null":
-            wheres.append(f"{col} IS NOT NULL")
+            return f"{col} IS NOT NULL"
         else:
             raise ValueError(f"unknown filter op '{op}'")
+
+    def conditions(items, level: int) -> list[str]:
+        """Each item compiled; a group becomes one parenthesised part."""
+        parts = []
+        for f in items or []:
+            if not isinstance(f, dict):
+                raise ValueError("a filter must be an object")
+            if "group" in f:
+                g = f.get("group")
+                if g not in ("and", "or"):
+                    raise ValueError(f"unknown group joiner '{g}'")
+                if level >= _MAX_GROUP_DEPTH:
+                    raise ValueError(f"condition groups nest at most {_MAX_GROUP_DEPTH} deep")
+                inner = conditions(f.get("filters"), level + 1)
+                if not inner:
+                    continue            # an empty group says nothing: no "()"
+                parts.append(inner[0] if len(inner) == 1
+                             else "(" + f" {g.upper()} ".join(inner) + ")")
+            else:
+                parts.append(one(f))
+        return parts
+
+    wheres = conditions(model.get("filters"), 0)
 
     # HAVING -- filters on the AGGREGATE, which WHERE cannot express: WHERE is
     # applied before grouping, so "regions whose total exceeds 1000" has to be
@@ -508,7 +550,7 @@ def build_sql(model: dict, dialect: str, known: dict[str, set[str]],
         op = h.get("op", "gt")
         if op not in _OPS:
             raise ValueError(f"unknown having op '{op}'")
-        havings.append(f"{expr} {_OPS[op]} {_encode_value(h.get('value'))}")
+        havings.append(f"{expr} {_OPS[op]} {_encode_value(h.get('value'), dialect)}")
 
     # ORDER BY: a selected alias, or a (validated) column
     orders = []
@@ -522,11 +564,17 @@ def build_sql(model: dict, dialect: str, known: dict[str, set[str]],
             orders.append(f"{qcol(s.get('table'), s['column'])} {direction}")
 
     try:
-        limit = min(int(model.get("limit") or 10_000), MAX_LIMIT)
+        limit = int(model.get("limit") or 10_000)
     except (TypeError, ValueError):
         limit = 10_000
     if limit < 1:
         limit = 1
+    ceiling = max_limit()
+    if limit > ceiling and not unlimited and depth == 0:
+        raise ValueError(
+            f"The row limit can be at most {ceiling:,} (the import limit set in "
+            f"Admin → Settings). Lower it, or choose DirectQuery (live), which "
+            f"has no row limit.")
 
     # A SUBQUERY takes no LIMIT of its own. The outer query bounds the result;
     # a limit inside `IN (...)` silently truncates the set being matched
@@ -535,17 +583,38 @@ def build_sql(model: dict, dialect: str, known: dict[str, set[str]],
     # (Oracle and SQL Server also reject a bare inner LIMIT/TOP outright.)
     nested = depth > 0
 
-    top = f"TOP {limit} " if dialect == "sqlserver" and not nested else ""
+    top = f"TOP {limit} " if dialect == "sqlserver" and not nested and not unlimited else ""
     sql = f"{hier_cte}SELECT {top}{', '.join(select_parts)} FROM {sql_from}"
-    if wheres:
-        sql += " WHERE " + f" {joiner.upper()} ".join(wheres)
+    # 4.1 "Current rows only": a table with from/to dates (dept_emp, titles,
+    # salaries) holds history; "current" is the row whose end date is still
+    # open -- NULL, the 9999-01-01 sentinel, or simply in the future. One tick
+    # per table instead of three hand-written filter rows. ANDed with the
+    # filter group whatever its joiner: it narrows the population, it is not
+    # one alternative among the filters. CURRENT_DATE is evaluated by the
+    # database on every read, so a live dataset stays current tomorrow.
+    today = "CAST(GETDATE() AS date)" if dialect == "sqlserver" else "CURRENT_DATE"
+    current = [f"({c} IS NULL OR {c} > {today})" for c in (
+        qcol(x.get("table"), _require(x, "column", "a current-rows option"))
+        for x in (model.get("current_only") or []))]
+    if wheres or current:
+        group = f" {joiner.upper()} ".join(wheres)
+        if group and current and len(wheres) > 1 and joiner == "or":
+            group = f"({group})"
+        sql += " WHERE " + " AND ".join([g for g in [group] if g] + current)
     if group_parts:
         sql += " GROUP BY " + ", ".join(group_parts)
     if havings:
         sql += " HAVING " + " AND ".join(havings)
+    if not orders and not nested and not unlimited:
+        # A LIMIT with no ORDER BY lets the database return ANY N rows, and it
+        # may return different ones next time -- the evaluation saw a payroll
+        # total move by 130M between two reloads with nothing edited. Order by
+        # every selected column (by position, which every dialect accepts) so
+        # a capped result is the same capped result every time.
+        orders = [str(i + 1) for i in range(len(select_parts))]
     if orders:
         sql += " ORDER BY " + ", ".join(orders)
-    if nested:
+    if nested or unlimited:
         return sql
     if dialect == "oracle":
         sql += f" FETCH FIRST {limit} ROWS ONLY"
@@ -558,10 +627,24 @@ def referenced_functions(model: dict) -> list[str]:
     """Same recursion as `referenced_tables`: a function used only inside a
     subquery must still be looked up, or the compile rejects it as unknown."""
     out = [c["function"] for c in (model.get("columns") or []) if c.get("function")]
-    for f in model.get("filters") or []:
+    for f in _all_conditions(model.get("filters")):
         sub = f.get("subquery")
         if isinstance(sub, dict):
             out.extend(referenced_functions(sub))
+    return out
+
+
+def _all_conditions(items, level: int = 0) -> list[dict]:
+    """Every condition in a filter list, groups opened (bounded like the compile)."""
+    out = []
+    for f in items or []:
+        if not isinstance(f, dict):
+            continue
+        if "group" in f:
+            if level < _MAX_GROUP_DEPTH:
+                out.extend(_all_conditions(f.get("filters"), level + 1))
+        else:
+            out.append(f)
     return out
 
 
@@ -584,7 +667,7 @@ def referenced_tables(model: dict) -> list[str]:
             tables = [t for t in tables if t != "hierarchy"]
     for j in model.get("joins") or []:
         tables.append(j.get("table"))
-    for f in model.get("filters") or []:
+    for f in _all_conditions(model.get("filters")):
         sub = f.get("subquery")
         if isinstance(sub, dict):
             tables.extend(referenced_tables(sub))

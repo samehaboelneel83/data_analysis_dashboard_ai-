@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { dataViewsApi } from '../../services/api'
+import { useT } from '../../i18n'
 
 /**
  * Save/apply SETTINGS TEMPLATES (stored as "data views"): a named snapshot of a dataset's semantic
@@ -20,6 +21,7 @@ export default function DataViewsBar({ datasetId, onApplied, isAdmin }: {
    *  403 they could not have predicted. */
   isAdmin?: boolean
 }) {
+  const t = useT()
   const [views, setViews] = useState<{ id: number; name: string; pieces: string[]; is_default?: boolean }[]>([])
   const [selected, setSelected] = useState('')
   const [saving, setSaving] = useState(false)
@@ -33,11 +35,11 @@ export default function DataViewsBar({ datasetId, onApplied, isAdmin }: {
     if (!name.trim()) return
     try {
       await dataViewsApi.save(datasetId, name.trim())
-      setStatus(`Saved settings template "${name.trim()}"`)
+      setStatus(t('pg.panelsB.dvb.saved', { name: name.trim() }))
       setSaving(false); setName('')
       refresh()
     } catch {
-      setStatus('Could not save the settings template')
+      setStatus(t('pg.panelsB.dvb.saveFailed'))
     }
   }
 
@@ -46,12 +48,15 @@ export default function DataViewsBar({ datasetId, onApplied, isAdmin }: {
     if (!id) return
     try {
       const r = await dataViewsApi.apply(datasetId, id)
-      const parts = Object.entries(r.applied).map(([k, v]) => `${k.replace(/_/g, ' ')}: ${v}`)
-      setStatus(`Applied ${parts.join(', ') || 'nothing'}${r.skipped.length ? ` — skipped ${r.skipped.length}: ${r.skipped.join('; ')}` : ''}`)
+      const parts = Object.entries(r.applied).map(([k, v]) => `${k.replace(/_/g, ' ')}: ${v}`).join(t('pg.panelsB.listSep'))
+        || t('pg.panelsB.dvb.nothing')
+      setStatus(r.skipped.length
+        ? t('pg.panelsB.dvb.appliedSkipped', { parts, n: r.skipped.length, list: r.skipped.join('; ') })
+        : t('pg.panelsB.dvb.applied', { parts }))
       onApplied?.()
     } catch (e) {
       const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setStatus(detail || 'Could not apply the data view')
+      setStatus(detail || t('pg.panelsB.dvb.applyFailed'))
     }
   }
 
@@ -62,47 +67,46 @@ export default function DataViewsBar({ datasetId, onApplied, isAdmin }: {
     try {
       await dataViewsApi.setDefault(chosen.id, on)
       setStatus(on
-        ? `"${chosen.name}" will be applied to every dataset uploaded from now on`
-        : `"${chosen.name}" is no longer applied to new datasets`)
+        ? t('pg.panelsB.dvb.defaultOn', { name: chosen.name })
+        : t('pg.panelsB.dvb.defaultOff', { name: chosen.name }))
       refresh()
     } catch (e) {
       const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setStatus(detail || 'Could not change the default data view')
+      setStatus(detail || t('pg.panelsB.dvb.defaultFailed'))
     }
   }
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap' }}>
       <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
-        Data views
+        {t('pg.panelsB.dvb.title')}
       </span>
       {saving ? (
         <>
-          <input aria-label="Data view name" value={name} onChange={e => setName(e.target.value)}
-            placeholder="e.g. Sales semantics" style={{ fontSize: 11, width: 180 }} />
-          <button className="btn btn-primary" style={{ fontSize: 11 }} onClick={() => void save()}>Save</button>
-          <button className="btn" style={{ fontSize: 11 }} onClick={() => { setSaving(false); setName('') }}>Cancel</button>
+          <input aria-label={t('pg.panelsB.dvb.nameLabel')} value={name} onChange={e => setName(e.target.value)}
+            placeholder={t('pg.panelsB.dvb.namePh')} style={{ fontSize: 11, width: 180 }} />
+          <button className="btn btn-primary" style={{ fontSize: 11 }} onClick={() => void save()}>{t('pg.panelsB.dvb.save')}</button>
+          <button className="btn" style={{ fontSize: 11 }} onClick={() => { setSaving(false); setName('') }}>{t('common.cancel')}</button>
         </>
       ) : (
-        <button className="btn" style={{ fontSize: 11 }} onClick={() => setSaving(true)}>Save settings as template…</button>
+        <button className="btn" style={{ fontSize: 11 }} onClick={() => setSaving(true)}>{t('pg.panelsB.dvb.saveAs')}</button>
       )}
-      <select aria-label="Settings templates" value={selected} onChange={e => setSelected(e.target.value)} style={{ fontSize: 11 }}>
-        <option value="">— choose a settings template —</option>
+      <select aria-label={t('pg.panelsB.dvb.templates')} value={selected} onChange={e => setSelected(e.target.value)} style={{ fontSize: 11 }}>
+        <option value="">{t('pg.panelsB.dvb.choose')}</option>
         {views.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
       </select>
-      <button className="btn" style={{ fontSize: 11 }} disabled={!selected} title={!selected ? 'Choose a template first' : undefined} onClick={() => void apply()}>Apply to this dataset</button>
+      <button className="btn" style={{ fontSize: 11 }} disabled={!selected} title={!selected ? t('pg.panelsB.dvb.chooseFirst') : undefined} onClick={() => void apply()}>{t('pg.panelsB.dvb.apply')}</button>
       {isAdmin && chosen && (
         <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--muted)' }}>
           <input type="checkbox" checked={!!chosen.is_default}
             onChange={e => void toggleDefault(e.target.checked)}
             style={{ margin: 0 }} />
-          Default for new datasets
+          {t('pg.panelsB.dvb.default')}
         </label>
       )}
       {isAdmin && chosen && (
         <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-          (applied to every dataset uploaded into this organisation, as far as its
-          columns match)
+          {t('pg.panelsB.dvb.defaultNote')}
         </span>
       )}
       {status && <span data-testid="dataview-status" style={{ fontSize: 11, color: 'var(--muted)', flexBasis: '100%' }}>{status}</span>}

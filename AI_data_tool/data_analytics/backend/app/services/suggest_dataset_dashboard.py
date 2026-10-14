@@ -39,7 +39,10 @@ of them were blank on screen.
 """
 from __future__ import annotations
 
+from .llm import data_block as _data_block
+
 import asyncio
+import json
 import re
 
 from .dataset_profile import HIGH_CARDINALITY, describe_for_prompt
@@ -92,7 +95,9 @@ WIDGET_GUIDE: dict[str, str] = {
     "kpi": "one headline number over the WHOLE dataset. Give it a `measure` and an "
            "`aggregation` and NO dimension -- a dimension would make it show one "
            "group's number under a headline label.",
-    "card": "several headline numbers together. Use when 2-4 figures share a frame.",
+    "card": "several headline numbers together: `measures` is a list of 2-4 DIFFERENT "
+            "columns sharing one `aggregation`. For one column under several "
+            "aggregations, use one kpi each.",
     "gauge": "one number against its range. Use when there is a natural target or ceiling.",
     "bar": "compare a measure across categories. The default for a breakdown.",
     "line": "a measure over time. Needs a date dimension.",
@@ -101,7 +106,8 @@ WIDGET_GUIDE: dict[str, str] = {
     "pie": "share of a whole. Only for 2-6 categories; beyond that a bar is clearer.",
     "donut": "share of a whole, with room for a total in the middle.",
     "treemap": "share of a whole across many categories, sized by value.",
-    "scatter": "the relationship between two measures.",
+    "scatter": "a measure per category, drawn as points (`dimension` + `measure`). For two "
+               "measures against each other use numeric_series.",
     "histogram": "the distribution of one measure. Use to show spread, not total.",
     "box_plot": "the spread of a measure per category, including outliers.",
     "dot_plot": "compare a measure across a handful of categories, precisely.",
@@ -109,7 +115,10 @@ WIDGET_GUIDE: dict[str, str] = {
     "butterfly": "two measures per category, mirrored. Use for a comparison of two sides.",
     "waterfall": "how a total is built up or eroded, step by step.",
     "funnel": "attrition through ordered stages.",
-    "table": "the rows themselves. Use when the detail is the point.",
+    "table": "the rows themselves, for looking a record up: `columns` (a list of the columns "
+             "to show) with optional `filters`, `sort_col`, `sort` and `limit` -- e.g. the rows "
+             "that are overdue, the ones needing follow-up. With a `dimension` and a measure it is a "
+             "grouped table instead; by an identifier that only works as a top list (`limit` <= 25).",
     "crosstab": "a measure across two categories, as a grid of numbers.",
     "matrix": "a measure across two categories, as a grid of numbers.",
     "heatmap": "a measure across two categories, as colour. Use to spot hot spots.",
@@ -140,8 +149,11 @@ WIDGET_GUIDE: dict[str, str] = {
     "dendrogram": "a nesting, as a branching diagram. Takes `levels`.",
     "org": "a reporting line. Takes `id_col`, `parent_col` and `label_col`.",
     "schedule": "intervals over time. Takes `start` and `end` date columns.",
-    "bubble": "three measures at once: x, y and size, per category.",
-    "numeric_series": "two numeric columns plotted against each other, row by row.",
+    "bubble": "three numbers per category: x (`measure`), y (`measure2`) and `size`. A date "
+              "column is read as years since it; `size` may be the identifier with "
+              "`size_aggregation: countd` to size by how many distinct ones there are.",
+    "numeric_series": "the relationship between two measures: `measure` (x) against `measure2` "
+                      "(y), row by row. Use when the question is whether one moves with the other.",
     "map_points": "locations on a map. Needs latitude and longitude.",
     "map_bubbles": "locations sized by a measure.",
     "map_clusters": "locations grouped into clusters where they crowd.",
@@ -152,26 +164,48 @@ WIDGET_GUIDE: dict[str, str] = {
     "map_network": "a network anchored to geography.",
     "map_pie": "composition per COUNTRY, as pies on a map.",
     "map_layers": "regions and points on one map.",
+    "model_linear": "what drives a number: a regression. `measure` is the number to explain, "
+                    "`predictors` a list of columns (text compares its levels; a date is read "
+                    "as years since it). Use when the question is 'what moves X'.",
+    "model_logistic": "what predicts a yes/no outcome. `response` is a two-value column, "
+                      "`event_value` the value counted as yes, `predictors` a list of columns.",
+    "model_tree": "plain if-then rules that split rows into groups with different outcomes. "
+                  "`response` is the outcome, `predictors` a list, `max_depth` 2-4.",
+    "model_cluster": "natural groups of rows. `measures` is a list of 2+ numeric columns "
+                     "(a date is read as years).",
+    "model_rules": "which values go together (association rules). Optional `predictors` "
+                   "(columns to mine) and `response` (the column the rules conclude).",
+    "model_influencers": "which values of the other columns go with an outcome, against its "
+                         "overall rate. `response` is the outcome, optional `event_value` the "
+                         "value of interest, optional `predictors` the columns to look in.",
 }
 
-#: Widget types that need something the profile can tell us about in advance.
-#: The value is the profile key that must be non-empty.
-_NEEDS_STRUCTURE = {
-    "map_points": "coordinate_pairs", "map_bubbles": "coordinate_pairs",
-    "map_clusters": "coordinate_pairs", "map_density": "coordinate_pairs",
-    "map_lines": "coordinate_pairs", "map_network": "coordinate_pairs",
-    "map_layers": "coordinate_pairs",
-    "org": "parent_child",
-    "tree": "hierarchies", "sunburst": "hierarchies",
-    "icicle": "hierarchies", "dendrogram": "hierarchies",
-}
+#: What a widget type needs of the table before it is worth offering lives in
+#: ONE place now -- services/discovery/capabilities.py -- beside what every
+#: analysis needs. These names stay as this module's view of it.
+from .discovery.capabilities import (NEEDS_COUNTRY as _NEEDS_COUNTRY, NEEDS_DATE as _NEEDS_DATE,  # noqa: E402
+                                     NEEDS_STRUCTURE as _NEEDS_STRUCTURE,
+                                     NEEDS_TWO_CATEGORIES as _NEEDS_TWO_CATEGORIES,
+                                     NEEDS_TWO_MEASURES as _NEEDS_TWO_MEASURES,
+                                     NOT_PROPOSABLE as _NOT_PROPOSABLE)
 
 #: Config keys that are SETTINGS rather than field roles: their values are
 #: numbers, booleans or enumerations, and are never column names.
 _SETTING_KEYS = ("aggregation", "aggregation2", "limit", "sort", "sort_by",
                  "dimension_granularity", "auto_split", "running", "rtl",
                  "inner_widget_type", "why", "bins", "baseline", "bar_mode",
-                 "show_totals", "show_subtotals", "x_axis_angle", "filters")
+                 "show_totals", "show_subtotals", "x_axis_angle", "filters",
+                 "event_value", "max_depth", "size_aggregation", "x_axis_label",
+                 "y_axis_label", "target_value", "target_period", "sort_order",
+                 # A line that is read, a Pareto, a headline's history (discovery, phase 2-3).
+                 "dimension2_granularity", "bridge_from", "difference_of", "timeline_notes", "anomaly_band", "change_point", "pareto", "trend_good", "sparkline_granularity",
+                 "y2_axis_label",
+                 # How a gauge or a filter control is drawn (bullet, progress; buttons, dropdown).
+                 "gauge_shape", "slicer_mode",
+                 "influencer_style", "influencer_direction", "influencer_limit", "influencer_details",
+                 "influencer_format", "influencer_decimals", "rules_view", "rules_items", "model_tab", "points",
+                 # An ordinal axis's real order, and a reader's line under a number.
+                 "category_order", "caption")
 
 #: What `_apply_filters` actually implements. An operator outside this list is
 #: swallowed there without complaint, which would leave a chart showing
@@ -189,38 +223,22 @@ _CATEGORY_AXIS = ("bar", "pie", "donut", "treemap", "dot_plot", "needle",
 READABLE_CATEGORIES = 12
 
 
-#: The two map types that place rows by COUNTRY NAME rather than by coordinates.
-#: Detected by column name, which is how such a column is actually named, and
-#: gated because a choropleth of Egyptian governorates matched nothing and drew a
-#: blank world map on a real dashboard in this repository.
-_NEEDS_COUNTRY = ("map_choropleth", "map_pie")
 _COUNTRY_WORDS = ("country", "nation", "country_name", "country_code", "iso_country")
 
 
 def _has_country_column(profile: dict) -> bool:
     from .dataset_profile import _looks_like
-    return any(_looks_like(c["name"], _COUNTRY_WORDS)
+    # The stored classification first (a column the author -- or the
+    # classifier -- marked as holding countries, whatever it is called), then
+    # the name.
+    return any(c.get("geo_level") == "country" or (c.get("geo_level") is None
+                                                   and _looks_like(c["name"], _COUNTRY_WORDS))
                for c in profile.get("columns", [])
                if c["role"] == "categorical")
 
 
-#: Types that need a date column to mean anything.
-_NEEDS_DATE = ("line", "area", "step", "forecast", "ribbon", "schedule",
-               "dual_axis_time_series", "comparative_time_series", "bubble_change")
 
-#: Types that need at least two numeric columns.
-_NEEDS_TWO_MEASURES = ("scatter", "bubble", "numeric_series", "correlation_matrix",
-                       "parallel_coordinates", "dual_axis_bar", "dual_axis_line",
-                       "dual_axis_bar_line", "butterfly", "vector_plot")
 
-#: Types deliberately withheld from the model. They carry no data (a text box, a
-#: shape) or need a target the model cannot know (a button's action), so
-#: proposing them is noise on a first draft.
-#: `script` is withheld for a stronger reason than the rest: its content is
-#: Python the server executes, only an admin may author one, and a proposed
-#: tile with no code is a tile that shows an error.
-_NOT_PROPOSABLE = ("text", "image", "shape", "button", "web_content", "container",
-                   "custom_visual", "slicer", "script")
 
 PROPOSALS_SCHEMA = {
     "type": "object",
@@ -287,10 +305,31 @@ def usable_widgets(profile: dict) -> list[str]:
             continue
         if wt in _NEEDS_DATE and not has_date:
             continue
-        if wt in _NEEDS_TWO_MEASURES and len(numeric) < 2:
+        # A bubble reads a date as years since it and can size by a count, so
+        # one number and a date make its three (pay vs tenure vs headcount per
+        # department: the HR benchmark's bubble, never offered before).
+        if wt in _NEEDS_TWO_MEASURES and len(numeric) < 2 \
+                and not (wt == "bubble" and numeric and has_date):
             continue
-        if wt in ("heatmap", "crosstab", "matrix", "sankey", "network", "map_pie") \
-                and len(categorical) < 2:
+        if wt in _NEEDS_TWO_CATEGORIES and len(categorical) < 2:
+            continue
+        # A table of numbers by DAY has no category but every trend: without
+        # this the daily-ops data offered no line chart at all, and the model
+        # drew its trends as numeric_series (2026-10-02).
+        if not categorical and has_date and wt in _NEEDS_DATE + ("table",):
+            out.append(wt)
+            continue
+        # The periods are its categories: "revenue by quarter" as bars,
+        # "orders vs cancellations by month" on two axes, the spread of a
+        # daily rate per quarter -- each in the daily-ops analysts' reference
+        # and each drawn by its shaper from a date dimension; a regression
+        # of one total on the others needs numbers only (2026-10-02).
+        if not categorical and has_date and wt in ("bar", "dual_axis_bar_line", "dual_axis_bar",
+                                                   "box_plot"):
+            out.append(wt)
+            continue
+        if not categorical and wt == "model_linear" and len(numeric) >= 2:
+            out.append(wt)
             continue
         if not categorical and wt not in ("kpi", "card", "gauge", "histogram",
                                           "numeric_series", "correlation_matrix",
@@ -348,7 +387,7 @@ you care about, rather than writing a condition into a field."""
 
 
 def build_messages(profile: dict, goal: str | None, count: int,
-                   knowledge=None) -> list[dict]:
+                   knowledge=None, facts: str | None = None, questions: str = "") -> list[dict]:
     """The full exchange sent to the model.
 
     `knowledge` (a `services.knowledge.DatasetKnowledge`) is what turns this from
@@ -358,15 +397,22 @@ def build_messages(profile: dict, goal: str | None, count: int,
     all anything knows about it.
     """
     who = (goal or "").strip()
+    # The person's decisions first, inside the same call (no extra round
+    # trip): asked by a minister of supply, the designer offered "Number of
+    # rows by total population" (food review, 2026-10-03).
     person = ('The person asking describes themselves like this, in their own words:\n'
-              '"""\n{}\n"""\n'.format(who) if who else
+              '"""\n{}\n"""\n'
+              'Before designing, work out the 5 to 8 questions whose answers would change a '
+              'decision THIS person takes, and that these columns can answer. Every widget '
+              'answers one of them, and its `why` names it. Never a chart of row counts or of '
+              'one number against itself. Write titles in the language of their words.\n'.format(who) if who else
               "The person asking has not described their role. Propose dashboards "
               "that would suit whoever owns this data, and say who you think that is "
               "in each rationale.\n")
     user = """{person}
-THE DATA
+{questions}THE DATA
 {data}
-
+{facts}
 WIDGETS YOU MAY USE
 {menu}
 
@@ -374,13 +420,314 @@ Propose {count} different dashboards. Make them genuinely different from each \
 other -- different questions, not the same page reordered. Each needs a title, a \
 one-sentence rationale naming who it is for and what it answers, and 4 to 8 \
 widgets. Give every widget a `why`: the question it answers, in one short \
-sentence.""".format(person=person, data=describe_for_prompt(profile, knowledge),
-                    menu=_menu_text(profile), count=count)
+sentence.""".format(person=person, questions=questions, data=_data_block(describe_for_prompt(profile, knowledge)),
+                    menu=_menu_text(profile), count=count,
+                    facts=("\nMEASURED FACTS (exact, computed on the rows this person may see)\n"
+                           + facts + "\n\nBuild on these facts. Prefer charts that show a "
+                           "difference that exists. A comparison listed as the same everywhere "
+                           "or independent is worth at most ONE chart, and its `why` must say "
+                           "the result is flat -- never promise a gap the facts rule out.\n")
+                    if facts else "")
     return [{"role": "system", "content": SYSTEM},
             {"role": "user", "content": user}]
 
 
-def validate_widget(widget: dict, profile: dict) -> tuple[bool, str]:
+_GRAINS = ("year", "quarter", "month", "week", "day")
+
+
+#: Settings a model folds into a field slot, lifted back out to the config.
+_SLOT_SETTINGS = ("aggregation", "dimension_granularity", "granularity", "grain")
+
+
+#: Names a model gives the "one line per X" field. The engine's name for it is
+#: `dimension2`; under any other name it is silently ignored, and "Hiring by
+#: title over time" drew one line for everyone (live HR panel, 2026-10-02).
+_SERIES_ALIASES = ("series", "color", "colour", "group_by", "breakdown", "legend", "stack_by",
+                   "split", "segment", "hue")
+_TAKES_DIMENSION2 = ("bar", "line", "area", "step", "column", "heatmap", "crosstab", "matrix",
+                     "ribbon", "sankey", "table", "dot_plot")
+#: Types whose shapers read `start`.
+_READS_START = ("dual_axis_time_series", "comparative_time_series", "schedule", "gantt")
+#: Types whose own shapers read `color` / `group`.
+_READS_COLOR = ("bubble", "bubble_change", "scatter", "schedule")
+
+
+def _unwrap_slots(config: dict, widget_type: str | None = None) -> tuple[dict, bool]:
+    """`measure: {"column": "emp_no", "aggregation": "countd"}` -> two keys.
+
+    A model asked for a widget per lens wrote the field and its setting as one
+    object in 24 of 63 ideas on the live HR panel (2026-10-02), and every one
+    was refused as "has to name a column". The meaning is unambiguous, so the
+    object is split: the column stays in the slot, a setting it carried goes
+    to the config unless the config already sets it. A list of such objects
+    becomes a list of columns.
+    """
+    changed = False
+    # The aggregation written beside its slot: `measure_aggregation: "avg"`,
+    # `measure2_agg`. Eleven enrolment ideas were refused as "no column called
+    # avg" when a model took that spelling up (live panel, 2026-10-02).
+    # `size_aggregation` is a real setting and stays.
+    for key in list(config):
+        m = re.fullmatch(r"(measure2?|value2?)_(aggregation|agg|aggregate)", str(key))
+        if not m or not isinstance(config.get(key), str):
+            continue
+        target = "aggregation2" if m.group(1).endswith("2") else "aggregation"
+        val = config.pop(key)
+        config.setdefault(target, val)
+        changed = True
+    # A filter under a singular or invented name, and the same keys misspelt
+    # inside it: four "by gender in Sales" ideas were refused on the live HR
+    # panel for writing `filter` (2026-10-02).
+    numbered = [k for k in config if re.fullmatch(r"(filter|where|condition)_?\d+", str(k))]
+    for alias in ("filter", "where", "condition", "subset", *numbered):
+        val = config.get(alias)
+        if val is None or alias == "filters":
+            continue
+        items = val if isinstance(val, list) else [val]
+        fixed = []
+        for f in items:
+            if not isinstance(f, dict):
+                fixed = None
+                break
+            f = {{"field": "column", "col": "column", "operator": "op", "values": "value"}.get(k, k): v
+                 for k, v in f.items()}
+            f.setdefault("op", "in" if isinstance(f.get("value"), list) else "eq")
+            fixed.append(f)
+        if fixed:
+            config.pop(alias)
+            config["filters"] = list(config.get("filters") or []) + fixed
+            changed = True
+    # One aggregation per measure ("aggregations": ["sum", "avg"]): the engine
+    # takes one for the chart, so the first one, which is the lead measure's.
+    aggs = config.get("aggregations")
+    if isinstance(aggs, list):
+        config.pop("aggregations")
+        if aggs and isinstance(aggs[0], str) and not config.get("aggregation"):
+            config["aggregation"] = aggs[0]
+        if len(aggs) > 1 and isinstance(aggs[1], str) and config.get("measure2") and not config.get("aggregation2"):
+            config["aggregation2"] = aggs[1]
+        changed = True
+    # Stacking written as a flag rather than the engine's `bar_mode`.
+    # Percent first: `stacked` and `percent` together mean a 100% stack.
+    for flag, mode in (("percent", "stacked100"), ("normalize", "stacked100"),
+                       ("normalized", "stacked100"), ("stacked100", "stacked100"),
+                       ("percentage", "stacked100"), ("stacked", "stacked"), ("stack", "stacked")):
+        if flag in config and isinstance(config[flag], bool):
+            if config.pop(flag) and not config.get("bar_mode"):
+                config["bar_mode"] = mode
+            changed = True
+    # A gauge's target written as a number is `target_value`; `target` names
+    # a column ("target has to name a column, not a value like 148").
+    if isinstance(config.get("target"), (int, float)) and not isinstance(config.get("target"), bool):
+        config.setdefault("target_value", config.pop("target"))
+        changed = True
+    # Sort direction under another name.
+    for alias in ("sort_order", "order", "sort_direction"):
+        val = config.get(alias)
+        if isinstance(val, str) and val.lower() in ("asc", "desc", "ascending", "descending"):
+            config.pop(alias)
+            config.setdefault("sort", "desc" if val.lower().startswith("desc") else "asc")
+            changed = True
+    for alias, key in (("bin_count", "bins"), ("num_bins", "bins"), ("n_bins", "bins"),
+                       ("top_n", "limit"), ("top", "limit")):
+        if alias in config and key not in config:
+            config[key] = config.pop(alias)
+            changed = True
+    # `limit_dimension`, `top_n_sellers`, `max_items`: a number under a
+    # limit-like name is the limit ("has to name a column, not 10").
+    for k in [k for k in config if k != "limit" and k not in _SETTING_KEYS
+              and re.match(r"(limit|top|max)_?\w*$", str(k))
+              and isinstance(config[k], int) and not isinstance(config[k], bool)]:
+        val = config.pop(k)
+        config.setdefault("limit", val)
+        changed = True
+
+    def lift(obj: dict) -> str | None:
+        col = obj.get("column") or obj.get("field") or obj.get("name")
+        for k in _SLOT_SETTINGS:
+            v = obj.get(k)
+            if v and isinstance(v, str):
+                key = "dimension_granularity" if k in ("granularity", "grain") else k
+                config.setdefault(key, v)
+        return col if isinstance(col, str) else None
+
+    for key in [k for k in config if k not in _SETTING_KEYS]:
+        val = config[key]
+        if isinstance(val, dict) and lift(val):
+            config[key] = lift(val)
+            changed = True
+        elif isinstance(val, list) and any(isinstance(v, dict) for v in val):
+            cols = [lift(v) if isinstance(v, dict) else v for v in val]
+            # Once per column: a card takes one aggregation for all its
+            # measures, so [salary avg, salary median] cannot both be drawn.
+            config[key] = list(dict.fromkeys(c for c in cols if c))
+            changed = True
+    # `start` is the time field of the two-scale time charts and of schedules;
+    # elsewhere the engine reads `dimension` ("a forecast also needs dimension").
+    if widget_type and widget_type not in _READS_START and isinstance(config.get("start"), str) \
+            and not (config.get("dimension") or config.get("category")):
+        config["dimension"] = config.pop("start")
+        changed = True
+    if widget_type and widget_type not in _READS_COLOR:
+        # `facet_by` is small multiples' own field; on any other chart it is
+        # ignored, and "Department mix stability" drew one line for everyone.
+        aliases = _SERIES_ALIASES + (("facet_by",) if widget_type != "small_multiples" else ())
+        for alias in aliases:
+            val = config.get(alias)
+            if not isinstance(val, str) or not val:
+                continue
+            config.pop(alias)
+            changed = True
+            if widget_type in _TAKES_DIMENSION2 and not config.get("dimension2") \
+                    and val != config.get("dimension"):
+                config["dimension2"] = val
+            # Otherwise dropped: the type cannot split by it. A title that
+            # promised the split is then refused by the panel's title check.
+    return config, changed
+
+
+def resolve_time_words(widget: dict, profile: dict) -> dict:
+    """Map an invented time field onto the real date column and its grain.
+
+    Told "rows per year of hire date", a model writes `dimension: "year"` or
+    `"hire_year"` -- a column that does not exist -- and the widget was dropped
+    (three of a live HR answer, 2026-10-02). What it means is the date column
+    bucketed by that grain, which the engine already does; so that is what the
+    widget becomes. Only for a value that is NOT a real column, and only when
+    there is a date column to mean.
+    """
+    known = _by_name(profile)
+    dates = [n for n, c in known.items() if c.get("role") == "datetime"]
+    config, changed = _unwrap_slots(dict(widget.get("config") or {}), widget.get("widget_type"))
+    # Widget-type aliases a model reaches for: the engine draws these as a bar
+    # with a stacking mode ("stacked_bar is not usable", 2026-10-02).
+    wt = widget.get("widget_type")
+    alias = _TYPE_ALIASES.get(str(wt))
+    if alias:
+        wt, mode = alias
+        if mode and not config.get("bar_mode"):
+            config["bar_mode"] = mode
+        changed = True
+    # "OUT vs IN": the same measure twice, each meant under its own filter on
+    # one column -- which the engine cannot do (filters apply to the whole
+    # chart, so the two contradict and nothing draws). That is a split by the
+    # column: one series per value (call-records panel, 2026-10-02).
+    wt, config, split = _two_filters_to_split(wt, config)
+    changed = changed or split
+    # This engine's scatter is points per CATEGORY; two measures against each
+    # other, row by row, is `numeric_series`. "Price vs freight" as a scatter
+    # drew one point per price value (Olist panel, 2026-10-02).
+    if wt == "scatter" and config.get("measure") and config.get("measure2") \
+            and not (config.get("dimension") or config.get("category")):
+        wt = "numeric_series"
+        changed = True
+    # Two "measures" where one is a date is a trend: "Cancellation rate trend"
+    # as a row-by-row plot of dates against rates drew and said nothing.
+    if wt in ("numeric_series", "scatter") and config.get("measure2") in dates \
+            and config.get("measure") and not config.get("dimension"):
+        config["measure"], config["measure2"] = config["measure2"], config["measure"]
+    if wt in ("numeric_series", "scatter") and config.get("measure") in dates \
+            and config.get("measure2") and not config.get("dimension"):
+        wt = "line"
+        config["dimension"] = config.pop("measure")
+        config["measure"] = config.pop("measure2")
+        changed = True
+    # ...and "numeric_series" read as "a series of numbers over time": a date
+    # dimension with one measure is a line (daily-ops panel: six refused).
+    if wt in ("numeric_series", "scatter") and config.get("dimension") in dates \
+            and config.get("measure") and not config.get("measure2"):
+        wt = "line"
+        changed = True
+    if not dates:
+        return {**widget, "widget_type": wt, "config": config} if changed else widget
+    # A grain written under its own name (`granularity: "year"`) is the
+    # engine's dimension_granularity, not a field to map.
+    for key in [k for k in config if k in ("granularity", "grain", "time_grain", "date_granularity")]:
+        val = str(config.pop(key) or "").lower()
+        if val in _GRAINS and not config.get("dimension_granularity"):
+            config["dimension_granularity"] = val
+        changed = True
+    # Any field slot, not only `dimension`: a model names the time field
+    # whatever it likes (`category`, `x`, `start`).
+    for key in [k for k in config if k not in _SETTING_KEYS]:
+        val = config.get(key)
+        if not isinstance(val, str) or val in known:
+            continue
+        low = val.lower().strip()
+        grain = next((g for g in _GRAINS if low == g or low.endswith("_" + g) or low.startswith(g + "_")
+                      or low.endswith(" " + g) or low.startswith(g + " of ")), None)
+        if not grain:
+            continue
+        stem = low.replace(grain, "").strip(" _")
+        stem = stem[3:].strip() if stem.startswith("of ") else stem
+        date = next((d for d in dates if stem and stem in d.lower()), dates[0])
+        config[key] = date
+        if not config.get("dimension_granularity"):
+            config["dimension_granularity"] = grain
+        changed = True
+    return {**widget, "widget_type": wt, "config": config} if changed else widget
+
+
+_SPLIT_TYPE = {"comparative_time_series": "line", "dual_axis_time_series": "line",
+               "dual_axis_line": "line", "dual_axis_bar": "bar", "butterfly": "bar",
+               "dual_axis_bar_line": "bar"}
+_AGG_NAMES = ("count", "countd", "sum", "avg", "mean", "median", "min", "max")
+
+
+def _two_filters_to_split(wt, config: dict) -> tuple:
+    if config.get("measure") in _AGG_NAMES and config.get("measure") == config.get("measure2"):
+        # "measure": "countd" -- the aggregation written as the measure: a count of rows.
+        config["aggregation"] = config.pop("measure")
+        config.pop("measure2", None)
+    if str(config.get("aggregation") or "").lower() in ("none", "null", "raw"):
+        config.pop("aggregation")
+    if wt not in _SPLIT_TYPE:
+        return wt, config, False
+    if config.get("measure2") not in (None, config.get("measure")):
+        return wt, config, False
+    if config.get("aggregation2") not in (None, config.get("aggregation")):
+        return wt, config, False
+    filters = [f for f in config.get("filters") or [] if isinstance(f, dict)]
+    by_col: dict = {}
+    for f in filters:
+        if f.get("op") in ("eq", None):
+            by_col.setdefault(f.get("column"), []).append(f)
+    col = next((c for c, fs in by_col.items() if len(fs) >= 2), None)
+    if not col:
+        return wt, config, False
+    new = {k: v for k, v in config.items() if k not in ("measure2", "aggregation2", "filters")}
+    keep = [f for f in filters if f.get("column") != col]
+    if keep:
+        new["filters"] = keep
+    if new.get("start") and not new.get("dimension"):
+        new["dimension"] = new.pop("start")
+    new["dimension2"] = col
+    if _SPLIT_TYPE[wt] == "bar":
+        new.setdefault("bar_mode", "clustered")
+    return _SPLIT_TYPE[wt], new, True
+
+
+_TYPE_ALIASES = {
+    "stacked_bar": ("bar", "stacked"), "stacked_bar_100": ("bar", "stacked100"),
+    "bar_stacked": ("bar", "stacked"), "percent_stacked_bar": ("bar", "stacked100"),
+    "stacked100_bar": ("bar", "stacked100"), "column": ("bar", None),
+    "column_chart": ("bar", None), "bar_chart": ("bar", None), "line_chart": ("line", None),
+    "pie_chart": ("pie", None), "stacked_area": ("area", None),
+}
+
+
+#: Types whose `dimension` may be a continuous number.
+_NUMERIC_AXIS_TYPES = ("histogram", "numeric_series", "scatter", "bubble", "bubble_change",
+                       "line", "area", "step", "forecast")
+
+#: A top list of an identifier stays readable up to this many entries.
+TOP_LIST_MAX = 25
+_TOP_LIST_TYPES = ("bar", "table", "list", "dot_plot", "needle", "bubble", "box_plot", "scatter",
+                   "dual_axis_bar", "treemap", "donut", "pie")
+
+
+def validate_widget(widget: dict, profile: dict,
+                    column_meta: dict | None = None) -> tuple[bool, str]:
     """`(ok, why not)` for one proposed widget."""
     wt = widget.get("widget_type")
     config = normalise_aggregations(widget.get("config") or {})
@@ -389,7 +736,22 @@ def validate_widget(widget: dict, profile: dict) -> tuple[bool, str]:
     if wt not in usable_widgets(profile):
         return False, "{}: {} is not usable on this dataset".format(title, wt)
 
+    # The render path's own veto (routers/widget_data.py): a year, a coordinate
+    # or an identifier is never summed. The probe draws from the frame directly
+    # and never met it, so "Total hire year" was OFFERED -- and would have shown
+    # an error on the dashboard it was accepted into (HR panel, 2026-10-02).
+    from .semantic_guard import config_refusal
+    from .widget_data import sums_measure_by_default
+    veto = config_refusal(config, column_meta, sums_by_default=sums_measure_by_default(wt or "bar"))
+    if veto:
+        return False, "{}: {}".format(title, veto["message"])
+
     gaps = missing_roles(wt, config)
+    # A detail table lists rows: its `columns` are what it shows, and it has
+    # no group to need (widget_data's raw-table path).
+    if wt == "table" and not config.get("dimension") and isinstance(config.get("columns"), list) \
+            and config["columns"]:
+        gaps = [g for g in gaps if g != "dimension"]
     # ROLE_SPECS marks `category` required on a KPI and a gauge because the config
     # panel lists the field. The tile does not need it -- and must not have it, or
     # it shows one group's number under a headline label. The prompt says so; the
@@ -483,6 +845,25 @@ def validate_widget(widget: dict, profile: dict) -> tuple[bool, str]:
         if not isinstance(col, str):
             continue
         info = known.get(col, {})
+        # A continuous number on a category axis is one bar per distinct
+        # value: "Price-Freight by Status" drew a column per freight amount
+        # (Olist panel, 2026-10-02). Binned, or few values, it is fine.
+        if info.get("role") == "numeric" and not info.get("is_identifier") \
+                and (info.get("distinct") or 0) > READABLE_CATEGORIES * 3 \
+                and not config.get("dimension_bin") and wt not in _NUMERIC_AXIS_TYPES:
+            return False, ("{}: {} is a continuous number -- as a {} it draws one {} per value. "
+                           "Use a histogram, a box plot by a category, or numeric_series."
+                           .format(title, col, dim_key, "bar" if wt == "bar" else "group"))
+        # A ranked top list is the exception: "top 10 sellers by revenue" is
+        # the first question a marketplace asks, and ten labels are readable
+        # even when they are codes (Olist panel, 2026-10-02).
+        try:
+            top_n = int(config.get("limit") or 0)
+        except (TypeError, ValueError):
+            top_n = 0
+        if dim_key == "dimension" and wt in _TOP_LIST_TYPES and 0 < top_n <= TOP_LIST_MAX \
+                and str(config.get("sort_by") or "value") != "name":
+            continue
         if info.get("is_identifier") and (info.get("distinct") or 0) > HIGH_CARDINALITY:
             alternatives = sorted(
                 name for name, c in known.items()
@@ -570,6 +951,19 @@ def _is_bounded_measure(name: str, column: dict) -> bool:
         return False
 
 
+#: Words for a part of the calendar, as a title says it (English and Arabic).
+_TIME_PARTS = (
+    ("hour_of_day", re.compile(r"\b(hour of (the )?day|by hour|per hour|hourly|time of day)\b|ساعة|الساعات", re.I)),
+    ("weekday", re.compile(r"\b(day of (the )?week|weekdays?|by day of week)\b|أيام الأسبوع|يوم الأسبوع", re.I)),
+    ("month_of_year", re.compile(r"\b(month of (the )?year|by calendar month|seasonality)\b|أشهر السنة|شهر السنة", re.I)),
+)
+
+
+def time_part_named(title: str) -> str | None:
+    """The calendar part a title asks to group by, or None."""
+    return next((grain for grain, words in _TIME_PARTS if words.search(title or "")), None)
+
+
 def polish_widget(widget: dict, profile: dict) -> dict:
     """Fill in the settings an author would set and a model routinely forgets.
 
@@ -591,11 +985,38 @@ def polish_widget(widget: dict, profile: dict) -> dict:
         config.pop("dimension2", None)
 
     dim = config.get("dimension")
-    if isinstance(dim, str) and known.get(dim, {}).get("role") == "datetime" \
+    # The axis may be under `category` or `start` (dual-axis time series): one
+    # left ungrouped drew the first 50 raw hire dates on the live HR panel.
+    axis = dim or (None if widget.get("widget_type") == "schedule"
+                   else config.get("category") or config.get("start"))
+    if isinstance(axis, str) and known.get(axis, {}).get("role") == "datetime" \
             and not config.get("dimension_granularity") and span.get("granularity"):
         config["dimension_granularity"] = span["granularity"]
+    # A time grain on a column that is not a date reads its numbers as
+    # timestamps: item positions 1-21 drew as "1970-Q1" (Olist panel).
+    if isinstance(axis, str) and axis in known and known[axis].get("role") != "datetime" \
+            and config.get("dimension_granularity"):
+        config.pop("dimension_granularity")
 
-    if isinstance(dim, str) and not config.get("limit"):
+    # A part of the day, week or year named in the title is what the axis
+    # groups by: "Average earnings by hour of day" grouped by DATE drew one
+    # point per day from 2002 to 2024 (persona test 2026-10-12).
+    part = time_part_named(str(widget.get("title") or ""))
+    if part and isinstance(axis, str) and known.get(axis, {}).get("role") == "datetime":
+        config["dimension_granularity"] = part
+
+    # A row limit on a grouped TIME axis keeps the earliest N periods: "EGX30
+    # index trend" stopped at 2004-Q4 on data running to 2026 (guided-setup
+    # walkthrough, 2026-10-07). "The last 12 months" is a filter, never a
+    # limit, so a limit here -- the model's or the default below -- goes.
+    if isinstance(axis, str) and known.get(axis, {}).get("role") == "datetime" \
+            and config.get("dimension_granularity"):
+        config.pop("limit", None)
+        is_time_axis = True
+    else:
+        is_time_axis = False
+
+    if isinstance(dim, str) and not config.get("limit") and not is_time_axis:
         distinct = known.get(dim, {}).get("distinct") or 0
         is_time = known.get(dim, {}).get("role") == "datetime"
         if distinct > HIGH_CARDINALITY:
@@ -614,7 +1035,50 @@ def polish_widget(widget: dict, profile: dict) -> dict:
     for key in unsupported_options(widget.get("widget_type") or "", config):
         config.pop(key, None)
 
-    return {**widget, "config": config}
+    # The column's own way of being summed up outranks the model's. HR re-test
+    # 2026-10-01: the automation's model proposal put "salary" as a SUM KPI --
+    # a payroll total nobody asked for, headlined as if it meant something --
+    # and the Suggestions path had the same rule since step 1.6. A salary is
+    # averaged, an identifier is counted, never summed.
+    title = widget.get("title")
+    meas = config.get("measure")
+    # A share of a whole needs the total: "Revenue by Top Sellers" summed
+    # prices in a treemap, and turning that into an average left slices that
+    # add up to nothing (Olist quick designer, 2026-10-02).
+    whole = widget.get("widget_type") in ("pie", "donut", "treemap", "sunburst", "circle_pack",
+                                          "icicle", "waterfall", "funnel")
+    if isinstance(meas, str) and str(config.get("aggregation") or "").lower() == "sum" and not whole:
+        from .semantic_guard import default_summary, is_identifier, meta_of
+        # What the column IS comes from its stored classification, carried in
+        # the profile -- not from a list of one industry's column names.
+        _classes = meta_of(profile)
+        if is_identifier(meas, _classes):
+            config["aggregation"] = "countd"
+        else:
+            summ = default_summary(meas, _classes)
+            if summ in ("avg", "median"):
+                config["aggregation"] = summ
+                if isinstance(title, str):
+                    word = "Average" if summ == "avg" else "Median"
+                    title = re.sub(r"^(total|sum of)\s+", f"{word} ", title, flags=re.I)
+
+    # An average, a rate or an extreme per group is ranked only over groups with
+    # enough rows behind it (admin setting `min_group_rows`); a total keeps all.
+    if isinstance(dim, str) and not is_time_axis and not config.get("min_group_rows") \
+            and str(config.get("aggregation") or "").lower() in _RANKED_PER_ROW:
+        from ..core.config import settings
+        floor = int(getattr(settings, "min_group_rows", 30) or 0)
+        if floor > 1:
+            config["min_group_rows"] = floor
+
+    out = {**widget, "config": config}
+    if title is not None:
+        out["title"] = title
+    return out
+
+
+#: Aggregations that describe a group's typical row, not its total.
+_RANKED_PER_ROW = frozenset({"avg", "mean", "median", "min", "max", "std", "stddev"})
 
 
 #: Distinguishes "caller said nothing" from "caller said there is no model".
@@ -623,7 +1087,12 @@ _UNSET = object()
 
 async def suggest_for_dataset(profile: dict, goal: str | None, count: int = 3,
                               client=_UNSET, probe=None,
-                              knowledge=None) -> tuple[list[dict], str]:
+                              knowledge=None, facts: str | None = None,
+                              column_meta: dict | None = None,
+                              mixed_units: dict | None = None,
+                              one_to_one: dict | None = None,
+                              identical: dict | None = None,
+                              edges: dict | None = None) -> tuple[list[dict], str]:
     """`(proposals, reason)` -- dashboards to choose from, or why there are none.
 
     `probe(widget_type, config)` runs the widget the way the browser will. A
@@ -638,62 +1107,133 @@ async def suggest_for_dataset(profile: dict, goal: str | None, count: int = 3,
     if client is None:
         return [], "the model endpoint is not configured"
 
-    messages = build_messages(profile, goal, count, knowledge)
-    rejected: list[str] = []
+    messages = build_messages(profile, goal, count, knowledge, facts)
 
-    # One generation, then at most one repair. The repair is worth its cost
-    # because the failures are the kind a model fixes when told exactly what was
-    # wrong -- an invented column, a missing field -- and without it the person
-    # asked for help and got an empty panel.
-    for attempt in range(2):
-        got = await client.complete_json(messages, PROPOSALS_SCHEMA,
-                                         max_tokens=12000, enforce=True)
-        if not got or not got.get("proposals"):
-            return [], "the model did not answer"
-
-        kept: list[dict] = []
-        rejected = []
-        for proposal in got["proposals"][:count]:
+    async def gate(proposals: list) -> tuple[list[list[dict]], list[list[str]]]:
+        """Each proposal's drawn widgets, and each one's refusal reasons."""
+        from .analyst_panel import repair_and_check
+        drawn_all: list[list[dict]] = []
+        why_all: list[list[str]] = []
+        for proposal in proposals:
             # Validate first -- it is free -- then probe what survives, several
             # at a time. Probing eighteen widgets one after another took 99
             # seconds in the browser: each one re-reads and re-prepares the
             # frame, so end to end they are the whole wait. Bounded, because the
             # pandas work is GIL-bound and firing them all at once would starve
             # the event loop without finishing sooner.
-            candidates = []
-            for widget in proposal.get("widgets") or []:
-                ok, why = validate_widget(widget, profile)
+            candidates, whys = [], []
+            for widget in (proposal or {}).get("widgets") or []:
+                if not isinstance(widget, dict):
+                    continue
+                # The analyst panel's repairs and checks, for this designer too:
+                # titles that keep their promise, no sums of rates, no totals
+                # across units (analyst_panel.repair_and_check).
+                widget, ok, why = repair_and_check({**widget, "source": "model"}, profile,
+                                                   column_meta, mixed_units, one_to_one, identical,
+                                                   edges)
+                widget = {k: v for k, v in widget.items() if k != "source"}
                 if not ok:
-                    rejected.append(why)
+                    whys.append(why)
                     continue
                 candidates.append(polish_widget(widget, profile))
 
-            gate = asyncio.Semaphore(PROBE_CONCURRENCY)
+            sem = asyncio.Semaphore(PROBE_CONCURRENCY)
+
+            drawn_results: dict = {}
 
             async def _guarded(w):
-                async with gate:
-                    return await _probe(w, probe)
+                async with sem:
+                    return await _probe(w, probe, drawn_results)
 
-            results = await asyncio.gather(*(_guarded(w) for w in candidates))                 if candidates else []
-
+            results = await asyncio.gather(*(_guarded(w) for w in candidates)) if candidates else []
+            # The common gate (services/suggest_gate.py): a chart that draws and
+            # says nothing -- one bar, the same value everywhere, a headline of
+            # zero -- is refused here as it is in the guided setup, and goes
+            # back to the model with its reason like any other refusal.
+            from .suggest_gate import REASONS, date_columns, says_nothing
+            _dates = date_columns(profile)
+            judged = []
+            for widget, (drew, rows, why) in zip(candidates, results):
+                if drew and id(widget) in drawn_results:
+                    nothing = says_nothing(widget, drawn_results[id(widget)], _dates)
+                    # "The same in every group" is an ANSWER when somebody asked
+                    # the question: with a stated goal ("I run HR") the model's
+                    # "average salary by gender" stays even though the two
+                    # averages are level -- that is the finding. With no goal it
+                    # is a chart nobody asked for that shows nothing.
+                    if nothing == REASONS["flat"] and (goal or "").strip():
+                        nothing = None
+                    if nothing:
+                        drew, why = False, nothing
+                judged.append((drew, rows, why))
+            results = judged
             # Zipped back onto `candidates`, so the order the model chose
             # survives being probed out of sequence -- the tiles are laid out in
             # exactly this order.
             widgets = []
             for widget, (drew, rows, why) in zip(candidates, results):
                 if not drew:
-                    rejected.append("{}: {}".format(
-                        widget.get("title"), why or "returned nothing to draw"))
+                    whys.append("{}: {}".format(widget.get("title"), why or "returned nothing to draw"))
                     continue
                 widgets.append({**widget, "row_count": rows})
-            if widgets:
-                kept.append({**proposal, "widgets": widgets})
+            drawn_all.append(widgets)
+            why_all.append(whys)
+        return drawn_all, why_all
 
-        if kept:
+    # One generation, then at most one repair. The repair is worth its cost
+    # because the failures are the kind a model fixes when told exactly what was
+    # wrong -- an invented column, a missing field -- and without it the person
+    # asked for help and got an empty panel.
+    rejected: list[str] = []
+    for attempt in range(2):
+        got = await client.complete_json(messages, PROPOSALS_SCHEMA,
+                                         max_tokens=12000, enforce=True)
+        if not got or not got.get("proposals"):
+            return [], "the model did not answer"
+        proposals = got["proposals"][:count]
+        drawn, whys = await gate(proposals)
+        rejected = [w for ws in whys for w in ws]
+        kept_idx = [i for i, ws in enumerate(drawn) if ws]
+        if kept_idx:
+            replaced = 0
+            if rejected:
+                # The ideas the gate refused are replaced, not just dropped:
+                # quick mode kept what survived one call, so every refusal
+                # was a lost chart (five-dataset review, 2026-10-02). One more
+                # call, told each proposal's refusals, asks for that many new
+                # charts; they pass the same gate.
+                ask = [{"role": "assistant", "content": json.dumps(got)[:12000]},
+                       {"role": "user", "content":
+                        "Some charts could not be used. For EACH proposal below, in the same order, "
+                        "propose replacement widgets only -- the same number as were refused -- that "
+                        "answer the same questions without the problem. Keep each proposal's title.\n"
+                        + "\n".join(
+                            f"{i + 1}. {p.get('title')}: " + ("; ".join(whys[i]) if whys[i] else "nothing refused")
+                            for i, p in enumerate(proposals))}]
+                try:
+                    more = await client.complete_json(messages + ask, PROPOSALS_SCHEMA,
+                                                      max_tokens=8000, enforce=True)
+                except Exception:                            # noqa: BLE001
+                    more = None
+                extra = (more or {}).get("proposals") or []
+                if extra:
+                    extra_drawn, _ = await gate(extra[:len(proposals)])
+                    for i, ws in enumerate(extra_drawn):
+                        if i >= len(drawn) or not whys[i]:
+                            continue
+                        have = {json.dumps(w.get("config"), sort_keys=True) for w in drawn[i]}
+                        add = [w for w in ws if json.dumps(w.get("config"), sort_keys=True) not in have]
+                        add = add[:len(whys[i])]
+                        drawn[i] = drawn[i] + add
+                        replaced += len(add)
+            kept = [{**proposals[i], "widgets": drawn[i]} for i in range(len(proposals)) if drawn[i]]
             # The rejections travel with the answer. A page that quietly contains
             # four widgets when the model proposed seven tells the person nothing;
             # naming what was dropped, and why, lets them judge the rest.
-            return kept, ("; ".join(rejected[:6]) if rejected else "")
+            reason = "; ".join(rejected[:6]) if rejected else ""
+            if replaced:
+                reason = f"{replaced} of {len(rejected)} refused ideas replaced. " + reason
+            return kept, reason
         if attempt == 0:
             messages = messages + [
                 {"role": "assistant", "content": "(previous attempt)"},
@@ -711,7 +1251,7 @@ _RESULT_METADATA = frozenset({"truncation", "relative_dates", "partial_period", 
                               "evidence", "notes", "warnings", "disclosure"})
 
 
-async def _probe(widget: dict, probe) -> tuple[bool, int, str]:
+async def _probe(widget: dict, probe, keep: dict | None = None) -> tuple[bool, int, str]:
     """Did this widget actually draw, how much, and if not -- why not?
 
     The shaper's own verdict is the authority. Counting rows under a key of my
@@ -731,6 +1271,9 @@ async def _probe(widget: dict, probe) -> tuple[bool, int, str]:
         result = await probe(widget["widget_type"], widget["config"])
     except Exception as exc:                                 # noqa: BLE001
         return False, 0, "could not be drawn ({})".format(type(exc).__name__)
+    if keep is not None:
+        # What it drew, for the common gate: judged once, never drawn twice.
+        keep[id(widget)] = result
     # A probe may hand back its own refusal rather than an empty shape.
     if isinstance(result, dict) and result.get("unsupported"):
         return False, 0, str(result["unsupported"])

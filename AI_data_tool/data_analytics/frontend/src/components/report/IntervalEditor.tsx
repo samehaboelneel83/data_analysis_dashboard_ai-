@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import type { DisplayRule } from '../../lib/displayRules'
+import { useT } from '../../i18n'
+import { localDigits } from '../../lib/arabicFormats'
 
 interface Props {
   rule: DisplayRule
@@ -20,6 +22,7 @@ const BAND_ICONS = ['✅', '⚠️', '❌', '▲', '▼'] as const
  *  inclusive so a value equal to the maximum lands in a band instead of falling
  *  through unstyled. An author cannot infer that, so the UI states it. */
 export default function IntervalEditor({ rule, onChange }: Props) {
+  const t = useT()
   const bands = rule.bands ?? []
   const emit = (patch: Partial<DisplayRule>) => onChange({ ...rule, kind: 'interval', ...patch })
 
@@ -73,37 +76,37 @@ export default function IntervalEditor({ rule, onChange }: Props) {
     emit({ bands: bands.filter((_, j) => j !== i) })
   }
 
+  const n = (i: number) => localDigits(String(i + 1))
   return (
     <div style={{ display: 'grid', gap: 6 }}>
       {bands.map((b, i) => (
         <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <label htmlFor={`bd-min-${rule.id}-${i}`} style={{ fontSize: 11 }}>Band {i + 1} minimum</label>
+          <label htmlFor={`bd-min-${rule.id}-${i}`} style={{ fontSize: 11 }}>{t('bc.rules.band.min', { n: n(i) })}</label>
           <input id={`bd-min-${rule.id}-${i}`} type="text" inputMode="decimal"
             value={displayValue(i, 'min', b.min)}
             onChange={e => setBound(i, 'min', e.target.value)} />
-          <label htmlFor={`bd-max-${rule.id}-${i}`} style={{ fontSize: 11 }}>Band {i + 1} maximum</label>
+          <label htmlFor={`bd-max-${rule.id}-${i}`} style={{ fontSize: 11 }}>{t('bc.rules.band.max', { n: n(i) })}</label>
           <input id={`bd-max-${rule.id}-${i}`} type="text" inputMode="decimal"
             value={displayValue(i, 'max', b.max)}
             onChange={e => setBound(i, 'max', e.target.value)} />
-          <input type="color" aria-label={`Colour for band ${i + 1}`} value={b.color ?? '#f87171'}
+          <input type="color" aria-label={t('bc.rules.band.color', { n: n(i) })} value={b.color ?? '#f87171'}
             onChange={e => setColor(i, e.target.value)} />
-          <select aria-label={`Icon for band ${i + 1}`} value={b.icon ?? ''}
+          <select aria-label={t('bc.rules.band.icon', { n: n(i) })} value={b.icon ?? ''}
             onChange={e => setIcon(i, e.target.value)}>
-            <option value="">No icon</option>
+            <option value="">{t('bc.rules.band.noIcon')}</option>
             {BAND_ICONS.map(icon => <option key={icon} value={icon}>{icon}</option>)}
           </select>
-          <button type="button" onClick={() => removeBand(i)}>Remove band {i + 1}</button>
+          <button type="button" onClick={() => removeBand(i)}>{t('bc.rules.band.remove', { n: n(i) })}</button>
         </div>
       ))}
 
       <button type="button" onClick={addBand}>
-        Add band
+        {t('bc.rules.band.add')}
       </button>
 
       <p style={{ fontSize: 11, color: 'var(--muted)', margin: 0 }}>
-        A band includes its minimum and excludes its maximum, so bands can sit end to end.
-        The <strong>last band</strong> also includes its maximum, so a value equal to the
-        top of the range is still coloured.
+        {t('bc.rules.band.help1')}{' '}
+        {(() => { const [a, b] = t('bc.rules.band.help2').split('{last}'); return <>{a}<strong>{t('bc.rules.band.last')}</strong>{b}</> })()}
       </p>
     </div>
   )

@@ -461,3 +461,24 @@ async def test_the_worker_loop_picks_up_a_queued_import_by_itself(
     assert outcomes == ["succeeded"]
     assert (await _job(db_session, job_id)).state == "succeeded"
     assert await _count(db_session, Dataset) == 1
+
+
+async def test_a_job_that_runs_past_the_time_limit_ends_as_failed_and_frees_the_worker(
+        client, db_session, two_orgs, auth_headers, tmp_path, factory, monkeypatch):
+    """settings.job_time_limit_s: a stuck job cannot hold the worker for good (§AX)."""
+    import asyncio
+    from app.core.config import settings
+    from app.services import source_import
+    src = await _source(db_session, two_orgs["a"]["org"].id, tmp_path)
+    job_id = (await _queue(client, src, auth_headers["a"])).json()["id"]
+
+    async def _forever(*a, **k):
+        await asyncio.sleep(60)
+
+    monkeypatch.setattr(source_import, "import_from_source", _forever)
+    monkeypatch.setattr(settings, "job_time_limit_s", 1)
+    assert await jobs.run_next(factory, "w1") == "failed"
+    job = await _job(db_session, job_id)
+    assert job.error_code == "timeout" and "took longer than the limit" in job.error
+    # The worker is free: nothing left to claim, and it returns at once.
+    assert await jobs.run_next(factory, "w1") is None

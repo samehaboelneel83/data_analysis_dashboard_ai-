@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { renderWithProviders } from '../test/renderWithProviders'
 import Connections, { SchemaBrowser } from './Connections'
 import { dataSourcesApi, jobsApi } from '../services/api'
@@ -58,7 +58,7 @@ describe('SchemaBrowser dataset-mode toggle', () => {
 
     renderBrowser()
     fireEvent.click(await screen.findByText('sales'))
-    await screen.findByText(/1 rows preview/)
+    await screen.findByText(/1 row preview/)
 
     fireEvent.click(screen.getByText(/Import as Dataset/))
 
@@ -78,7 +78,7 @@ describe('SchemaBrowser dataset-mode toggle', () => {
 
     renderBrowser()
     fireEvent.click(await screen.findByText('sales'))
-    await screen.findByText(/1 rows preview/)
+    await screen.findByText(/1 row preview/)
 
     fireEvent.click(screen.getByText('DirectQuery'))
     fireEvent.click(screen.getByText(/Import as Dataset|Create DirectQuery Dataset/))
@@ -126,6 +126,8 @@ describe('ConnectionModal custom preset resolution', () => {
     renderPage()
 
     fireEvent.click(await screen.findByRole('button', { name: /New Connection/ }))
+    // Autopilot 7: the drawer starts on the type grid.
+    fireEvent.click(await screen.findByRole('button', { name: 'Next' }))
 
     const select = await screen.findByLabelText('Type') as HTMLSelectElement
     fireEvent.change(select, { target: { value: 'custom:7' } })
@@ -142,6 +144,57 @@ describe('ConnectionModal custom preset resolution', () => {
     expect(call.custom_connector_id).not.toBeUndefined()
   })
 
+  it('takes a new connection straight into the guided setup, and offers it on every row', async () => {
+    vi.mocked(dataSourcesApi.connectors).mockResolvedValue([BUILTIN, CUSTOM])
+    vi.mocked(dataSourcesApi.list).mockResolvedValue([DS])
+    vi.mocked(dataSourcesApi.create).mockResolvedValue({
+      id: 100, name: 'cars', type: 'postgresql', config: {}, created_at: '2026-01-01',
+    })
+    const auth = {
+      user: { id: 1, email: 'admin@x.y', role: { id: 1, name: 'Admin', is_org_admin: true } },
+      login: vi.fn(), logout: vi.fn(), loading: false,
+    }
+    renderWithProviders(
+      <AuthContext.Provider value={auth as never}>
+        <MemoryRouter initialEntries={['/connections']}>
+          <Routes>
+            <Route path="/connections" element={<Connections />} />
+            <Route path="/setup/:id" element={<p>setup page</p>} />
+          </Routes>
+        </MemoryRouter>
+      </AuthContext.Provider>
+    )
+    expect(await screen.findByRole('link', { name: 'Guided setup' })).toHaveAttribute('href', '/setup/1')
+    fireEvent.click(screen.getByRole('button', { name: /New Connection/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Next' }))
+    fireEvent.change(await screen.findByLabelText('Connection name *'), { target: { value: 'cars' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create connection' }))
+    expect(await screen.findByText('setup page')).toBeInTheDocument()
+  })
+
+  it('lets AI describe a new connection unless the box is unticked', async () => {
+    vi.mocked(dataSourcesApi.create).mockClear()
+    vi.mocked(dataSourcesApi.connectors).mockResolvedValue([BUILTIN, CUSTOM])
+    vi.mocked(dataSourcesApi.list).mockResolvedValue([])
+    vi.mocked(dataSourcesApi.create).mockResolvedValue({
+      id: 100, name: 'cars', type: 'postgresql', config: {}, created_at: '2026-01-01',
+    })
+
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: /New Connection/ }))
+    // Autopilot 7: the drawer starts on the type grid.
+    fireEvent.click(await screen.findByRole('button', { name: 'Next' }))
+    const box = await screen.findByRole('checkbox', { name: /Let AI read a few sample rows/ })
+    expect(box).toBeChecked()
+    fireEvent.click(box)
+    fireEvent.change(screen.getByLabelText('Connection name *'), { target: { value: 'cars' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create connection' }))
+
+    await waitFor(() => expect(dataSourcesApi.create).toHaveBeenCalledWith(
+      expect.objectContaining({ allow_llm_sampling: false })
+    ))
+  })
+
   it('tests the settings in the form before anything is saved', async () => {
     vi.mocked(dataSourcesApi.create).mockClear()
     vi.mocked(dataSourcesApi.connectors).mockResolvedValue([BUILTIN, CUSTOM])
@@ -150,10 +203,47 @@ describe('ConnectionModal custom preset resolution', () => {
 
     renderPage()
     fireEvent.click(await screen.findByRole('button', { name: /New Connection/ }))
+    // Autopilot 7: the drawer starts on the type grid.
+    fireEvent.click(await screen.findByRole('button', { name: 'Next' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Test connection' }))
 
     expect(await screen.findByRole('status')).toBeInTheDocument()
     expect(dataSourcesApi.testSettings).toHaveBeenCalledWith(expect.objectContaining({ type: 'postgresql', source_id: undefined }))
     expect(dataSourcesApi.create).not.toHaveBeenCalled()
+  })
+})
+
+describe('QAF M1: each value sits under its own header', () => {
+  it('a row has one cell per header, in the same order, and shares the header row grid', async () => {
+    vi.mocked(dataSourcesApi.connectors).mockResolvedValue([])
+    vi.mocked(dataSourcesApi.list).mockResolvedValue([DS])
+    const auth = {
+      user: { id: 1, email: 'admin@x.y', role: { id: 1, name: 'Admin', is_org_admin: true } },
+      login: vi.fn(), logout: vi.fn(), loading: false,
+    }
+    renderWithProviders(
+      <AuthContext.Provider value={auth as never}>
+        <MemoryRouter><Connections /></MemoryRouter>
+      </AuthContext.Provider>
+    )
+    await screen.findByRole('link', { name: 'Live DB' })
+    const table = screen.getByRole('table', { name: 'Connections' })
+    const [head, row] = Array.from(table.querySelectorAll('[role="row"]'))
+    const headers = Array.from(head.querySelectorAll('[role="columnheader"]')).map(h => h.textContent)
+    const cells = Array.from(row.querySelectorAll(':scope > [role="cell"]'))
+    expect(headers).toEqual(['Connection', 'Status', 'Last sync', 'Datasets', 'Actions'])
+    expect(cells).toHaveLength(headers.length)
+    expect(cells[0]).toHaveTextContent('Live DB')
+    expect(cells[1]).toHaveTextContent('Not tested')
+    expect(cells[2]).toHaveTextContent('—')
+    expect(cells[3]).toHaveTextContent(/^0$/)
+    expect(cells[4]).toHaveTextContent('Open')
+    // The drift came from each row sizing its own columns; rows now take the
+    // table's columns (CSS subgrid), the header row included.
+    const fs = await import('node:fs')
+    const path = await import('node:path')
+    const css = fs.readFileSync(path.join(__dirname, 'connections', 'connections.css'), 'utf8')
+    expect(css).toMatch(/\.dl-cn-row \{[^}]*grid-template-columns: subgrid/)
+    expect(css).toMatch(/\.dl-cn-table \{[^}]*display: grid; grid-template-columns:/)
   })
 })

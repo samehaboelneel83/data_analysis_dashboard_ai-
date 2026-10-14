@@ -71,11 +71,42 @@ def test_sort_by_alias_must_be_selected():
         build_sql(base_model(sort=[{"alias": "ghost"}]), "postgresql", KNOWN)
 
 
-def test_limit_is_capped_and_sanitised():
-    sql = build_sql(base_model(limit=10**9), "postgresql", KNOWN)
-    assert sql.endswith("LIMIT 100000")
+def test_limit_above_the_import_cap_is_refused_not_clamped():
+    # HR evaluation: 300,000 typed, LIMIT 100000 compiled, nothing said.
+    with pytest.raises(ValueError, match="at most"):
+        build_sql(base_model(limit=10**9), "postgresql", KNOWN)
     sql = build_sql(base_model(limit="lots"), "postgresql", KNOWN)
     assert sql.endswith("LIMIT 10000")
+
+
+def test_a_limit_under_the_cap_is_kept_exactly():
+    sql = build_sql(base_model(limit=300_000), "postgresql", KNOWN)
+    assert sql.endswith("LIMIT 300000")
+
+
+def test_unlimited_compiles_with_no_row_limit_in_any_dialect():
+    for dialect in ("postgresql", "mysql", "sqlite", "oracle", "sqlserver"):
+        sql = build_sql(base_model(limit=500), dialect, KNOWN, unlimited=True)
+        assert "LIMIT" not in sql and "FETCH FIRST" not in sql and "TOP " not in sql, (dialect, sql)
+
+
+def test_a_capped_query_without_a_sort_gets_a_stable_order():
+    sql = build_sql(base_model(), "postgresql", KNOWN)
+    assert " ORDER BY 1" in sql
+    # ...and an explicit sort is left alone
+    m = base_model()
+    alias = next(c.get("alias") for c in m["columns"] if c.get("alias")) if any(c.get("alias") for c in m["columns"]) else None
+    if alias:
+        sql = build_sql({**m, "sort": [{"alias": alias, "dir": "desc"}]}, "postgresql", KNOWN)
+        assert "ORDER BY 1" not in sql
+
+
+def test_strip_compiled_limit_repairs_old_live_sql():
+    from app.services.source_import import strip_compiled_limit
+    assert strip_compiled_limit('SELECT "a" FROM "t" LIMIT 100000') == 'SELECT "a" FROM "t"'
+    assert strip_compiled_limit('SELECT "a" FROM "t" FETCH FIRST 100000 ROWS ONLY') == 'SELECT "a" FROM "t"'
+    assert strip_compiled_limit('SELECT TOP 100000 [a] FROM [t]') == 'SELECT [a] FROM [t]'
+    assert strip_compiled_limit('SELECT "a" FROM "t"') is None
 
 
 def test_filters_joiner_or_ties_rows_together():
@@ -307,3 +338,40 @@ def test_the_same_table_joined_twice_is_refused():
              "right_column": "id", "how": "inner"},
             {"table": "customers", "left_column": "customer_id",
              "right_column": "id", "how": "left"}]), "postgresql", KNOWN)
+
+
+# ── 4.1 "Current rows only" ────────────────────────────────────────────────
+def _hr_known():
+    return {"employees": {"emp_no", "gender"}, "dept_emp": {"emp_no", "dept_no", "from_date", "to_date"},
+            "titles": {"emp_no", "title", "to_date"}}
+
+
+def test_current_only_adds_an_open_end_date_condition_per_table():
+    from app.services.query_builder import build_sql
+    sql = build_sql({"table": "employees",
+                     "joins": [{"table": "dept_emp", "left_column": "emp_no", "right_column": "emp_no", "how": "inner"},
+                               {"table": "titles", "left_column": "emp_no", "right_column": "emp_no", "how": "inner"}],
+                     "columns": [{"table": "dept_emp", "column": "dept_no"}, {"table": "employees", "column": "emp_no", "aggregation": "count"}],
+                     "current_only": [{"table": "dept_emp", "column": "to_date"}, {"table": "titles", "column": "to_date"}]},
+                    "postgres", _hr_known(), unlimited=True)
+    assert '("dept_emp"."to_date" IS NULL OR "dept_emp"."to_date" > CURRENT_DATE)' in sql
+    assert '("titles"."to_date" IS NULL OR "titles"."to_date" > CURRENT_DATE)' in sql
+
+
+def test_current_only_is_anded_with_an_or_filter_group():
+    from app.services.query_builder import build_sql
+    sql = build_sql({"table": "dept_emp", "columns": [{"column": "dept_no"}],
+                     "filters": [{"column": "dept_no", "op": "eq", "value": "d001"},
+                                 {"column": "dept_no", "op": "eq", "value": "d002"}],
+                     "filters_joiner": "or",
+                     "current_only": [{"table": "dept_emp", "column": "to_date"}]},
+                    "sqlserver", _hr_known(), unlimited=True)
+    assert "WHERE ([dept_emp].[dept_no] = 'd001' OR [dept_emp].[dept_no] = 'd002') AND ([dept_emp].[to_date] IS NULL OR [dept_emp].[to_date] > CAST(GETDATE() AS date))" in sql
+
+
+def test_current_only_rejects_an_unknown_column():
+    import pytest
+    from app.services.query_builder import build_sql
+    with pytest.raises(ValueError):
+        build_sql({"table": "dept_emp", "columns": [{"column": "dept_no"}],
+                   "current_only": [{"table": "dept_emp", "column": "nope"}]}, "postgres", _hr_known())

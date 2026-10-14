@@ -16,6 +16,9 @@ const Home = lazy(() => import('./pages/Home'))
 import Upload from './pages/Upload'
 const DatasetDetail = lazy(() => import('./pages/DatasetDetail'))
 import Reports from './pages/Reports'
+import Templates from './pages/Templates'
+import Portal from './pages/Portal'
+import Profile from './pages/Profile'
 import Loader from './components/ui/Loader'
 import ErrorBoundary from './components/ui/ErrorBoundary'
 import NotFound from './pages/NotFound'
@@ -23,9 +26,11 @@ const ReportBuilder = lazy(() => import('./pages/ReportBuilder'))
 const ReportPrint = lazy(() => import('./pages/ReportPrint'))
 const Connections = lazy(() => import('./pages/Connections'))
 const Lineage = lazy(() => import('./pages/Lineage'))
+const Glossary = lazy(() => import('./pages/Glossary'))
 const Dataflows = lazy(() => import('./pages/Dataflows'))
 const Migration = lazy(() => import('./pages/Migration'))
 const SourceReview = lazy(() => import('./pages/SourceReview'))
+const Setup = lazy(() => import('./pages/Setup'))
 const SharedReport = lazy(() => import('./pages/SharedReport'))
 const EmbeddedReport = lazy(() => import('./pages/EmbeddedReport'))
 const AdminRoles = lazy(() => import('./pages/admin/AdminRoles'))
@@ -103,6 +108,9 @@ export default function App() {
               <Route path="automation" element={<Automations />} />
               <Route path="datasets/:id" element={<DatasetDetail />} />
               <Route path="reports" element={<Reports />} />
+              <Route path="templates" element={<Templates />} />
+              <Route path="portal" element={<Portal />} />
+              <Route path="profile" element={<Profile />} />
               <Route path="reports/:id" element={<ReportBuilder />} />
               {/* "Dashboards" alias: the product renamed reports to dashboards
                   in every label, and a typed /dashboards URL should land, but
@@ -112,11 +120,15 @@ export default function App() {
               <Route path="reports/:id/print" element={<ReportPrint />} />
               <Route path="connections" element={<Connections />} />
               <Route path="lineage" element={<Lineage />} />
+              <Route path="glossary" element={<Glossary />} />
               <Route path="dataflows" element={<Dataflows />} />
               <Route path="migration" element={<Migration />} />
           {/* Layer 1 — confirm the relationships and descriptions that
               metadata inference proposed for one connection. */}
           <Route path="connections/:id/review" element={<SourceReview />} />
+          {/* Guided setup (docs/guided-setup/PLAN.md): understand the database,
+              choose data, check it, build a dashboard. */}
+          <Route path="setup/:id" element={<Setup />} />
               <Route element={<RequireAdmin />}>
                 <Route path="admin/roles" element={<AdminRoles />} />
                 <Route path="admin/custom-connectors" element={<AdminCustomConnectors />} />

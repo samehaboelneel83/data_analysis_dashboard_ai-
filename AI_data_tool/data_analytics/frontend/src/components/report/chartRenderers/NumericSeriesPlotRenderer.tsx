@@ -1,7 +1,7 @@
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Dot, ResponsiveContainer, LabelList } from 'recharts'
 import { TT, fmtStr, seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
-import { axisTitles, xAxisProps, yAxisProps, gridProps, labelListProps, chartMargin } from './axisOptions'
+import { axisTitles, xAxisProps, yAxisProps, gridProps, labelListProps, chartMargin, valueTick } from './axisOptions'
 
 export default function NumericSeriesPlotRenderer({ rows, cfg, rtl, measureFmt, measure2Fmt, ruleStyles, plotH }: ChartRendererProps) {
   // Both axes are measures: x is the first, y is the second. The builders'
@@ -9,14 +9,17 @@ export default function NumericSeriesPlotRenderer({ rows, cfg, rtl, measureFmt, 
   const titles = axisTitles(cfg)
   const grid = gridProps(cfg)
   const labels = labelListProps(cfg, measure2Fmt, 'y', rows.length)
+  // `points`: a cloud of dots, no line through them -- two numbers set against
+  // each other are not a sequence, and a line joining them invents one.
+  const points = !!(cfg as { points?: boolean }).points
   return (
     <ResponsiveContainer width="100%" height="100%">
       <LineChart data={rows} margin={chartMargin(rtl, { top: 4, right: 8, bottom: 4, left: 0 })}>
         {grid && <CartesianGrid {...grid} />}
-        <XAxis dataKey="x" type="number" {...xAxisProps(cfg, rtl, undefined, undefined, { title: titles.measure })} tickFormatter={v => fmtStr(v, measureFmt)} />
+        <XAxis dataKey="x" type="number" {...xAxisProps(cfg, rtl, undefined, undefined, { title: titles.measure })} tickFormatter={valueTick(cfg, measureFmt)} />
         {/* allowDecimals forced true after the spread: this axis never set it before, so
             Recharts' own default (true) applied, unlike the builder's false default. */}
-        <YAxis dataKey="y" type="number" {...yAxisProps(cfg, rtl, measure2Fmt, rows.map((r: any) => r.y), undefined, { height: plotH, title: titles.measure2 })} allowDecimals tickFormatter={v => fmtStr(v, measure2Fmt)} />
+        <YAxis dataKey="y" type="number" {...yAxisProps(cfg, rtl, measure2Fmt, rows.map((r: any) => r.y), undefined, { height: plotH, title: titles.measure2 })} allowDecimals tickFormatter={valueTick(cfg, measure2Fmt)} />
         <Tooltip contentStyle={TT} formatter={(v: unknown, name: string) => [fmtStr(v, name === 'x' ? measureFmt : measure2Fmt), name]} />
         {/* Every row here is its own (x, y) pair -- shape_xy_numeric is row-level, not a
             time series -- so unlike Area/Line/Step/ComparativeTimeSeries (one continuous
@@ -28,12 +31,12 @@ export default function NumericSeriesPlotRenderer({ rows, cfg, rtl, measureFmt, 
             renderer) rather than hardcoded, so an unruled dot keeps the same ring the
             old `{ fill, r }` object form got for free -- dropping them left every
             unruled dot's stroke missing. */}
-        <Line type="monotone" dataKey="y" stroke={seriesColor(0)} strokeWidth={2}
+        <Line type="monotone" dataKey="y" stroke={seriesColor(0)} strokeWidth={points ? 0 : 2} isAnimationActive={!points}
           dot={(props: any) => {
             const { key, cx, cy, index, stroke, strokeWidth } = props
             return (
-              <Dot key={key ?? index} cx={cx} cy={cy} r={3} stroke={stroke} strokeWidth={strokeWidth}
-                fill={ruleStyles?.rows?.[index]?.fill ?? seriesColor(0)} />
+              <Dot key={key ?? index} cx={cx} cy={cy} r={points ? 2.5 : 3} stroke={stroke} strokeWidth={strokeWidth}
+                fillOpacity={points ? 0.55 : 1} fill={ruleStyles?.rows?.[index]?.fill ?? seriesColor(0)} />
             )
           }}
         >

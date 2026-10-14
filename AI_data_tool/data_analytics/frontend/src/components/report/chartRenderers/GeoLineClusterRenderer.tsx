@@ -1,3 +1,4 @@
+import { useT } from '../../../i18n'
 import { useMemo, useState } from 'react'
 import type { ChartRendererProps } from './types'
 import { fmtStr, seriesColor } from '../chartUtils'
@@ -13,6 +14,7 @@ import { MapSvg, MAP_WRAP_STYLE, useMapBox } from '../geo/MapFrame'
  */
 export function GeoLinesRenderer({ rows, measureFmt, broadcasts, localSelected,
                                   onClickPoint, plotW, plotH }: ChartRendererProps) {
+  const t9 = useT()
   const [hover, setHover] = useState<string | null>(null)
   const { ref, w, h, tiles, view } = useMapBox(plotW, plotH)
   const padPx = Math.max(16, Math.min(w, h) * 0.1)
@@ -51,7 +53,7 @@ export function GeoLinesRenderer({ rows, measureFmt, broadcasts, localSelected,
 
   return (
     <div ref={ref} style={MAP_WRAP_STYLE}>
-      <MapSvg view={view} w={w} h={h} projection={projection} tiles={tiles} role="img" aria-label="Line map">
+      <MapSvg view={view} w={w} h={h} projection={projection} tiles={tiles} role="img" aria-label={t9('cr.lineMap')}>
         {COUNTRIES.map(f => (
           <path key={f.properties.name} d={path(f) ?? undefined}
             fill="var(--surface2)" stroke="var(--border)" strokeWidth={0.5} />
@@ -90,6 +92,7 @@ export function GeoLinesRenderer({ rows, measureFmt, broadcasts, localSelected,
    a grid cell the data never names would be a wrong answer dressed as a
    feature; pinned by a test in geoRenderers.test.tsx. */
 export function GeoClustersRenderer({ rows, measureFmt, plotW, plotH }: ChartRendererProps) {
+  const t9 = useT()
   const [hover, setHover] = useState<string | null>(null)
   const { ref, w, h, tiles, view } = useMapBox(plotW, plotH)
   // Largest bubble is r=30; without that much pad the eastmost cluster (Tokyo
@@ -116,7 +119,7 @@ export function GeoClustersRenderer({ rows, measureFmt, plotW, plotH }: ChartRen
 
   return (
     <div ref={ref} style={MAP_WRAP_STYLE}>
-      <MapSvg view={view} w={w} h={h} projection={projection} tiles={tiles} role="img" aria-label="Cluster map">
+      <MapSvg view={view} w={w} h={h} projection={projection} tiles={tiles} role="img" aria-label={t9('cr.clusterMap')}>
         {COUNTRIES.map(f => (
           <path key={f.properties.name} d={path(f) ?? undefined}
             fill="var(--surface2)" stroke="var(--border)" strokeWidth={0.5} />

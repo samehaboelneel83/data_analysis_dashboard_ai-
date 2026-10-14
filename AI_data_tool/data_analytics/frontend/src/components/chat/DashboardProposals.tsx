@@ -1,12 +1,17 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { dataSourcesApi, reportsApi } from '../../services/api'
+import { useT } from '../../i18n'
+import { localDigits } from '../../lib/arabicFormats'
 
 /** One dashboard the agent proposed: the query that builds its data, and the
  *  tiles to put over it. Mirrors `services/suggest_dashboard.SUGGESTION_SCHEMA`. */
 export interface DashboardProposal {
   title: string
+  /** What this dashboard is for, in the brief's language (brief-first designer). */
+  purpose?: string
   sql: string
+  row_count?: number
   widgets: {
     widget_type: string
     title: string
@@ -22,7 +27,29 @@ export interface DashboardProposal {
     sort_by?: string
     dimension_granularity?: string
     running?: string
+    /** The brief question this chart answers. */
+    question?: string
+    /** The chart's answer, read off the rows it will draw ("Highest Giza:
+     *  500,596; lowest Port Said: 1,301", or "Flat: ..."). */
+    finding?: string
+    /** One line per item (a line per commodity), or side-by-side bars. */
+    dimension2?: string
+    /** The rows a KPI or chart reads, e.g. only the latest month. */
+    filters?: { column: string; op: string; value: unknown }[]
+    /** A table's columns, in order. */
+    columns?: string[]
   }[]
+}
+
+/** What the designer understood before designing (services/source_brief.py):
+ *  who the person is, what this data really holds, the questions worth asking,
+ *  and what it cannot answer. Shown so the reader can disagree with it. */
+export interface DashboardBrief {
+  language?: string
+  role?: string
+  understanding?: string
+  questions?: { question: string; decision?: string; tables?: string[]; how?: string }[]
+  cannot_answer?: string[]
 }
 
 export interface DashboardProposalsPresentation {
@@ -30,6 +57,7 @@ export interface DashboardProposalsPresentation {
   source_id: number
   for_role: string
   proposals: DashboardProposal[]
+  brief?: DashboardBrief | null
 }
 
 /** Where each tile lands. Fixed rather than computed: a first draft the person is
@@ -55,6 +83,7 @@ export default function DashboardProposals(
   { presentation }: { presentation: DashboardProposalsPresentation },
 ) {
   const navigate = useNavigate()
+  const t = useT()
   const [busy, setBusy] = useState<number | null>(null)
   const [failed, setFailed] = useState<Record<number, string>>({})
   const [openSql, setOpenSql] = useState<Record<number, boolean>>({})
@@ -75,7 +104,7 @@ export default function DashboardProposals(
         presentation.source_id, proposal.title, undefined, proposal.sql, 'import')
       const report = await reportsApi.create({
         name: proposal.title,
-        description: `Proposed by the AI for a ${presentation.for_role}.`,
+        description: proposal.purpose || t('i2c.dp.description', { role: presentation.for_role }),
         dataset_id: dataset.id,
       })
       const pageId = report.pages?.[0]?.id
@@ -88,6 +117,13 @@ export default function DashboardProposals(
           measure: w.measure, aggregation: w.aggregation,
         }
         if (w.dimension) config.dimension = w.dimension
+        if (w.dimension2) config.dimension2 = w.dimension2
+        if (w.filters?.length) config.filters = w.filters
+        if (w.columns?.length) {
+          config.columns = w.columns
+          if (w.measure && w.columns.includes(w.measure)) config.sort_col = w.measure
+        }
+        if (w.question) config.note = w.question
         // The attributes the review pass chose. Without these the built chart is
         // the unreadable version the review existed to fix.
         if (w.limit) config.limit = w.limit
@@ -111,23 +147,59 @@ export default function DashboardProposals(
       // proposed, so a failure here is worth reading rather than retrying.
       setFailed(prev => ({
         ...prev,
-        [index]: (e as Error)?.message || 'something went wrong',
+        [index]: (e as Error)?.message || t('i2c.dp.wrong'),
       }))
     } finally {
       setBusy(null)
     }
   }
 
+  const brief = presentation.brief
+  const rtl = (brief?.language || '').toLowerCase().startsWith('ar')
   return (
-    <div style={{ marginTop: 8 }}>
+    <div style={{ marginTop: 8 }} dir={rtl ? 'rtl' : undefined}>
+      {/* Guided setup 4c: the same journey, step by step (data, checks, designs). */}
+      <div style={{ fontSize: 12, marginBottom: 6 }}>
+        <a href={`/setup/${presentation.source_id}`}
+          onClick={e => { e.preventDefault(); navigate(`/setup/${presentation.source_id}`) }}>
+          {t('i2c.dp.guided')}
+        </a>
+      </div>
+      {brief && (
+        <div style={{ ...card, fontSize: 12 }}>
+          {brief.role && <div><b>{t('i2c.dp.role')}</b>{' '}<bdi>{brief.role}</bdi></div>}
+          {brief.understanding && (
+            <div style={{ marginTop: 6 }}><b>{t('i2c.dp.holds')}</b>{' '}
+              {brief.understanding}</div>)}
+          {!!brief.questions?.length && (
+            <div style={{ marginTop: 6 }}>
+              <b>{t('i2c.dp.questions')}</b>
+              <ol style={{ margin: '4px 0 0', paddingInlineStart: 18 }}>
+                {brief.questions.map((q, qi) => (
+                  <li key={qi} style={{ padding: '1px 0' }}>{q.question}
+                    {q.decision && <span style={{ color: 'var(--muted)' }}> — {q.decision}</span>}</li>
+                ))}
+              </ol>
+            </div>)}
+          {!!brief.cannot_answer?.length && (
+            <div style={{ marginTop: 6, color: 'var(--muted)' }}>
+              <b>{t('i2c.dp.cannot')}</b>
+              <ul style={{ margin: '4px 0 0', paddingInlineStart: 18 }}>
+                {brief.cannot_answer.map((x, xi) => <li key={xi}>{x}</li>)}
+              </ul>
+            </div>)}
+        </div>
+      )}
       {presentation.proposals.map((p, i) => (
         <div key={i} style={card}>
           <div style={{ fontWeight: 700, fontSize: 14 }}>{p.title}</div>
+          {p.purpose && <div style={{ fontSize: 12, marginTop: 2 }}>{p.purpose}</div>}
           <ul style={{ margin: '6px 0 10px', padding: 0, listStyle: 'none' }}>
             {p.widgets.map((w, wi) => (
               <li key={wi} style={{ fontSize: 12, color: 'var(--muted)', padding: '2px 0' }}>
                 <span style={{ color: 'var(--text)' }}>{w.title}</span>
-                {w.note && <span style={{ fontStyle: 'italic' }}> — {w.note}</span>}
+                {w.finding && <span style={{ color: 'var(--text)', fontWeight: 600 }}> — {w.finding}</span>}
+                {(w.question || w.note) && <span style={{ fontStyle: 'italic' }}> — {w.question || w.note}</span>}
               </li>
             ))}
           </ul>
@@ -141,14 +213,14 @@ export default function DashboardProposals(
                 cursor: busy === null ? 'pointer' : 'default',
                 background: 'var(--accent)', color: 'var(--mc-accent-fg)',
               }}>
-              {busy === i ? 'Building…' : 'Create dashboard'}
+              {busy === i ? t('i2c.dp.building') : t('i2c.dp.create')}
             </button>
             <button style={linkish}
                     onClick={() => setOpenSql(s => ({ ...s, [i]: !s[i] }))}>
-              {openSql[i] ? 'Hide SQL' : 'Show SQL'}
+              {openSql[i] ? t('i2c.dp.hideSql') : t('i2c.dp.showSql')}
             </button>
             <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-              {p.widgets.length} widget{p.widgets.length === 1 ? '' : 's'}
+              {t('i2c.dp.widgets', { n: localDigits(String(p.widgets.length)) })}
             </span>
           </div>
 
@@ -161,7 +233,7 @@ export default function DashboardProposals(
 
           {failed[i] && (
             <div style={{ marginTop: 8, fontSize: 12, color: 'var(--danger, #b4232a)' }}>
-              Could not build this dashboard: {failed[i]}
+              {t('i2c.dp.buildFail')} {failed[i]}
             </div>
           )}
         </div>

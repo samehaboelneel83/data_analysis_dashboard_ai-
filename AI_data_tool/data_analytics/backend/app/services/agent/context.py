@@ -64,6 +64,11 @@ class ObjectInfo:
 #: pass 2 spends on more objects rather than deeper labels for a few.
 MAX_RENDERED_ENUM_LABELS = 6
 
+#: Values past the label cap, listed by name only (no gloss). Names are short
+#: and they are what a WHERE clause needs verbatim; 24 covers a department,
+#: region or status list without letting a free-text column flood the prompt.
+MAX_EXTRA_ENUM_VALUES = 24
+
 #: A label longer than this is truncated with a visible ellipsis. Column
 #: VALUES stay exact (never truncated: a wrong WHERE literal is worse than a
 #: verbose one) -- only the human-written gloss is capped, and glosses this
@@ -130,9 +135,26 @@ def _render_column(name: str, dtype: str, labels: dict[str, str] | None, *,
     tail = f" — {desc}" if desc else ""
     if not labels:
         return f"{name} {dtype}{tail}"
-    pairs = ", ".join(f"{v}={_truncate_label(l)}"
-                      for v, l in list(labels.items())[:MAX_RENDERED_ENUM_LABELS])
-    return f"{name} {dtype} ({pairs}){tail}"
+    items = list(labels.items())
+
+    def _pair(v, l):
+        # A value whose "label" is itself says nothing twice.
+        return str(v) if str(v) == str(l) else f"{v}={_truncate_label(l)}"
+
+    parts = [_pair(v, l) for v, l in items[:MAX_RENDERED_ENUM_LABELS]]
+    # HR re-test 2026-10-01: dept_name has nine values and only the first six
+    # (alphabetical) were shown, so "Sales" never reached the model. Asked
+    # about Sales in Arabic it filtered on Marketing -- the nearest name it
+    # could see -- and answered 14,842. The VALUES past the label cap are
+    # still listed, by name only: a WHERE literal the model cannot see is one
+    # it will guess.
+    rest = [str(v) for v, _ in items[MAX_RENDERED_ENUM_LABELS:]]
+    if rest:
+        shown = rest[:MAX_EXTRA_ENUM_VALUES]
+        parts.append("also: " + ", ".join(shown))
+        if len(rest) > len(shown):
+            parts.append(f"+{len(rest) - len(shown)} more")
+    return f"{name} {dtype} ({', '.join(parts)}){tail}"
 
 
 #: SchemaContext.render's default budget (H7 fix). Qwen's context window is
@@ -249,6 +271,10 @@ class GlossaryInfo:
     synonyms: list[str] = field(default_factory=list)
     maps_to_object: str | None = None
     maps_to_column: str | None = None
+    #: A business rule to apply when the term is meant (glossary_terms.rule).
+    rule: str | None = None
+    #: Apply `rule` to every question, named or not (glossary_terms.always).
+    always: bool = False
 
 
 @dataclass
@@ -456,6 +482,8 @@ class SchemaContext:
                 if g.maps_to_column:
                     target += f".{g.maps_to_column}"
                 line += f" [-> {target}]"
+            if g.rule and not g.always:
+                line += f" RULE (apply it): {g.rule}"
             # Live bug (verified): the hint was descriptive prose and the
             # model still copied the QUESTION's spelling of a synonym into
             # a SQL predicate, getting zero rows against the STORED
@@ -473,6 +501,23 @@ class SchemaContext:
                         "stored spelling verbatim in SQL predicates.")
             glines.append(line)
         return "\n\nGlossary (matched from the question):\n" + "\n".join(glines)
+
+    def _rules_block(self) -> str:
+        """Business rules marked `always`: rendered for EVERY question, named
+        or not. "Employees per department" means CURRENT employees in an HR
+        database whose history tables close rows with to_date 9999-01-01 --
+        and nobody types "current" (HR evaluation, blocker 3)."""
+        rules = [g for g in self.glossary if g.always and g.rule]
+        if not rules:
+            return ""
+        lines = [f"- {g.term}: {g.rule}" + (f" ({g.definition})" if g.definition else "")
+                 for g in rules]
+        return ("\n\nBusiness rules (ALWAYS apply these whenever the tables they "
+                "name are used, unless the question explicitly asks for history; "
+                "prefer the tables a rule names over views or tables whose NAME "
+                "merely sounds like the rule -- a view called current_x is not "
+                "proof that its rows follow the rule):\n"
+                + "\n".join(lines))
 
     def _entities_block(self, question: str | None) -> str:
         """Task R3 (spec section 5): a compact "Entities:" block, present only
@@ -629,7 +674,7 @@ class SchemaContext:
         """
         header = "Objects:\n"
         joins_block = self._joins_block()
-        glossary_block = self._glossary_block(question)
+        glossary_block = self._rules_block() + self._glossary_block(question)
         entities_block = self._entities_block(question)
         measures_block = self._measures_block()
         ranking = self._retrieval_ranking(question)
@@ -745,6 +790,7 @@ async def load_context(db, source_id: int, org_id: int) -> SchemaContext:
                 if obj_info is not None and (s.null_ratio or 0.0) >= HIGH_NULL_RATIO:
                     obj_info.high_null.add(col_name)
 
+
         rels = (await db.execute(select(SourceRelationship).where(
             SourceRelationship.data_source_id == source_id,
             SourceRelationship.org_id == org_id,
@@ -769,7 +815,8 @@ async def load_context(db, source_id: int, org_id: int) -> SchemaContext:
         ctx.glossary.append(GlossaryInfo(
             term=t.term, definition=t.definition,
             synonyms=list(t.synonyms or []),
-            maps_to_object=t.maps_to_object, maps_to_column=t.maps_to_column))
+            maps_to_object=t.maps_to_object, maps_to_column=t.maps_to_column,
+            rule=getattr(t, "rule", None), always=bool(getattr(t, "always", False))))
 
     # Task R3: this source's entities. Source-scoped only (unlike glossary,
     # entities have no org-wide analogue -- a "customer" entity's grain is
@@ -780,6 +827,33 @@ async def load_context(db, source_id: int, org_id: int) -> SchemaContext:
         ctx.entities.append(EntityInfo(
             name=e.name, business_name=e.business_name, grain=e.grain,
             description=e.description, primary_object=e.primary_object))
+    # The connection's Meaning map (docs/meaning-map/PLAN.md), said where the
+    # planner already reads: on the table and column descriptions. Without it
+    # "which branch has the most complaints" is answered by a count, and the
+    # biggest branch wins for being the biggest.
+    try:
+        from ..guided_setup import meaning
+        m = await meaning.load(db, source_id)
+        for b in m.bases:
+            info = ctx.objects.get(b["events"])
+            if info is not None and b["base"] in ctx.objects:
+                note = (f"Its rows happen to rows of `{b['base']}` (join {b['events']}.{b['via'][0]} = "
+                        f"{b['base']}.{b['via'][1]}; about {b['per_base'] * 1000:,.0f} per 1,000). To compare "
+                        f"groups, give the rate per `{b['base']}` of each group beside the count: a bigger "
+                        f"group has more of everything.")
+                info.description = f"{info.description} {note}".strip() if info.description else note
+        for (table, column), n in m.numbers.items():
+            info = ctx.objects.get(table)
+            if info is None or column not in info.columns or n.get("kind") in (None, "code"):
+                continue
+            way = {"higher_better": "; higher is better", "higher_worse": "; higher is worse"}.get(n.get("direction"), "")
+            how = "add it up" if n["kind"] in meaning.ADDITIVE else "average it, never total it"
+            note = f"[{n['kind']}: {how}{way}]"
+            have = info.descriptions.get(column)
+            info.descriptions[column] = f"{have} {note}" if have else note
+    except Exception:                                           # noqa: BLE001 -- the map is a help, never a gate
+        pass
+
     return ctx
 
 

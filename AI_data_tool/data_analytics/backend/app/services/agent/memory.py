@@ -70,3 +70,25 @@ async def remember(db, org_id: int, source_id: int | None,
     db.add(QueryExample(org_id=org_id, data_source_id=source_id,
                         question=question, sql=sql, confirmed_by=user_id,
                         dataset_key=dataset_key))
+
+
+
+async def forget(db, org_id: int, *, sql: str | None = None,
+                 source_id: int | None = None, question: str | None = None) -> int:
+    """Drop remembered examples so a wrong answer stops teaching the next one.
+
+    Every answer without concerns is remembered and replayed as a "verified
+    example" -- so one wrong answer kept reproducing itself (HR evaluation:
+    "current employees per department" came back from the same wrong view
+    after a business rule was added). Called on a 👎, and for the whole
+    source whenever its business rules change."""
+    from sqlalchemy import delete
+    q = delete(QueryExample).where(QueryExample.org_id == org_id)
+    if sql is not None:
+        q = q.where(QueryExample.sql == sql)
+    if question is not None:
+        q = q.where(QueryExample.question == question)
+    if source_id is not None:
+        q = q.where(QueryExample.data_source_id == source_id)
+    res = await db.execute(q)
+    return int(res.rowcount or 0)

@@ -1,3 +1,4 @@
+import { useT } from '../../../i18n'
 import { COLORS, EmptyState, fmtStr } from '../chartUtils'
 import type { ChartRendererProps } from './types'
 import { legendProps } from './axisOptions'
@@ -16,6 +17,7 @@ import { legendProps } from './axisOptions'
  * stacked-bar rendering used. RTL reverses the period order.
  */
 export default function RibbonChartRenderer({ data, cfg, rtl, ruleStyles, broadcasts, onClickPoint }: ChartRendererProps) {
+  const t9 = useT()
   const rowsAxis: string[] = data?.rows_axis ?? []
   const colsAxis: string[] = data?.cols_axis ?? []
   const cells: (number | null)[][] = data?.cells ?? []
@@ -99,14 +101,14 @@ export default function RibbonChartRenderer({ data, cfg, rtl, ruleStyles, broadc
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px', justifyContent: 'center', padding: '4px 6px 0', fontSize: 10 }}>
           {colsAxis.map((c, j) => (
             <span key={c} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-              <span className="ribbon-legend-swatch" style={{ width: 8, height: 8, borderRadius: 2, background: COLORS[j % COLORS.length] }} />
+              <span className="ribbon-legend-swatch dl-key-swatch" style={{ width: 8, height: 8, borderRadius: 2, background: COLORS[j % COLORS.length] }} />
               {c}
             </span>
           ))}
         </div>
       )}
       <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet"
-        style={{ flex: 1, width: '100%', minHeight: 0 }} role="img" aria-label="Ribbon chart">
+        style={{ flex: 1, width: '100%', minHeight: 0 }} role="img" aria-label={t9('cr.ribbon')}>
         {ribbons}
         {bars}
         {/* Label decimation: at most ~10 period labels, always including the

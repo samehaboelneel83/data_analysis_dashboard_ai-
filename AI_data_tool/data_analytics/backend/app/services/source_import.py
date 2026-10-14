@@ -56,6 +56,71 @@ async def _before_commit(hook, db, dataset) -> None:
         await hook(db, dataset)
 
 
+def compile_model_for_source(cfg: dict, ds_type: str, model: dict, *, unlimited: bool) -> str:
+    """Compile a Query-builder model against the live schema -- the SAME
+    compile the builder shows, run server-side at save time so the stored SQL
+    never depends on what the browser happened to send.
+
+    `unlimited` is True for DirectQuery: a live dataset stores its SQL with no
+    LIMIT (see query_builder.build_sql)."""
+    from .query_builder import (build_sql, introspect_tables, list_functions,
+                                referenced_functions, referenced_tables)
+    known = introspect_tables(cfg, referenced_tables(model))
+    funcs = {f["name"] for f in list_functions(cfg)} if referenced_functions(model) else set()
+    return build_sql(model, connectors.sql_family_of(cfg) or ds_type, known,
+                     cfg.get('schema') or None, funcs, unlimited=unlimited)
+
+
+_TRAILING_LIMIT = None
+
+
+def strip_compiled_limit(sql: str) -> str | None:
+    """The LIMIT the builder appended to a compiled statement, removed -- or
+    None when `sql` does not end the way build_sql ends a capped query.
+
+    Used once, to repair live datasets saved before build_sql learned
+    `unlimited`: their stored SQL ends `... LIMIT 100000` (or the Oracle /
+    SQL Server spelling) and every widget saw only those rows."""
+    import re
+    global _TRAILING_LIMIT
+    if _TRAILING_LIMIT is None:
+        _TRAILING_LIMIT = (
+            re.compile(r"\s+LIMIT\s+\d+\s*$", re.I),
+            re.compile(r"\s+FETCH\s+FIRST\s+\d+\s+ROWS\s+ONLY\s*$", re.I),
+            re.compile(r"^(\s*(?:WITH\s.*?\)\s*)?SELECT\s+)TOP\s+\d+\s+", re.I | re.S),
+        )
+    lim, fetch, top = _TRAILING_LIMIT
+    for pat in (lim, fetch):
+        if pat.search(sql):
+            return pat.sub("", sql)
+    if top.search(sql):
+        return top.sub(r"\1", sql, count=1)
+    return None
+
+
+async def repair_capped_live_datasets(db: AsyncSession) -> int:
+    """Strip the row LIMIT that older Query-builder saves baked into live
+    (DirectQuery) datasets. Only datasets with a `query_model` are touched:
+    their SQL was compiled by build_sql, so the trailing LIMIT is known to be
+    the builder's and not something a person wrote on purpose. Idempotent."""
+    rows = (await db.execute(
+        select(Dataset).where(Dataset.mode == "directquery",
+                              Dataset.query_model.is_not(None),
+                              Dataset.source_query.is_not(None)))).scalars().all()
+    fixed = 0
+    for d in rows:
+        new_sql = strip_compiled_limit(d.source_query or "")
+        if new_sql and new_sql != d.source_query:
+            d.source_query = new_sql
+            fixed += 1
+    if fixed:
+        await db.commit()
+        import logging
+        logging.getLogger(__name__).info(
+            "removed a builder row LIMIT from %d live dataset(s)", fixed)
+    return fixed
+
+
 async def import_from_source(db: AsyncSession, current_user: User, ds: DataSource,
                              req: ImportRequest, *, checkpoint=None, before_commit=None) -> dict:
     """Import (or DirectQuery-connect) `req` from `ds` for `current_user`.
@@ -101,6 +166,18 @@ async def import_from_source(db: AsyncSession, current_user: User, ds: DataSourc
             if col.source_column_id is None:
                 col.source_column_id = source_links.get(col.name)
             db.add(col)
+
+    # A builder save carries its model: compile it HERE, for the target mode,
+    # instead of storing whatever SQL the browser sent. Live datasets get no
+    # row LIMIT; imports keep the person's limit (refused above the import
+    # cap, never silently lowered). Hand-written SQL (no model) is kept as is.
+    if req.query_model and req.query:
+        try:
+            req.query = await asyncio.to_thread(
+                compile_model_for_source, cfg, ds.type, req.query_model,
+                unlimited=(req.mode == "directquery"))
+        except ValueError as e:
+            raise ImportRefused(str(e))
 
     if req.mode == "directquery":
         # Refuse up front for a source that cannot serve DirectQuery at all.
@@ -182,14 +259,42 @@ async def import_from_source(db: AsyncSession, current_user: User, ds: DataSourc
         # never synced has no catalog to link against, and an import must not
         # fail because metadata is missing.
         await knowledge.link_columns(db, dataset)
+        from .sensitivity import apply_confidential_export_default
+        await apply_confidential_export_default(db, dataset)
         await _audit_import(db, current_user, dataset, ds, req, replaced=False)
         await _before_commit(before_commit, db, dataset)
         await db.commit()
         await db.refresh(dataset)
         return {'id': dataset.id, 'name': dataset.name, 'row_count': 0, 'col_count': dataset.col_count, 'mode': 'directquery'}
 
+    # A large import is written to disk as it arrives (connections.Streamed):
+    # it gets a folder of its own to be written in, removed whatever happens.
+    import shutil
+    import tempfile
+
+    from .connections import Streamed
+    from .upload_store import allocate_path as _allocate
+    stream_dir = tempfile.mkdtemp(prefix="import_", dir=str(Path(_allocate(current_user.org_id, "import.parquet")).parent))
+
+    def _prepare(chunk):
+        # What `_write_aside` does to a whole frame, done to each chunk as it
+        # passes: instants to the reference zone, then the conversions type
+        # detection makes in place (an epoch number or a text date becomes a date).
+        dupes = duplicate_columns(chunk.columns)
+        if dupes:
+            raise ValueError(
+                "The query returns more than one column named %s. Give each one a "
+                "different name with AS, for example `l.unit AS lab_unit`."
+                % ", ".join("'%s'" % d for d in dupes))
+        from .timezones import normalize_instants
+        normalize_instants(chunk)
+        detect_types(chunk)
+        return chunk
+
     def _fetch():
-        df = import_to_dataframe(cfg, req.table, req.query)
+        df = import_to_dataframe(cfg, req.table, req.query, stream_dir=stream_dir, prepare=_prepare)
+        if isinstance(df, Streamed):
+            return df
         # Two columns with the same name make `df[name]` a DataFrame rather than a
         # Series, and every later truth test on it raises a pandas message that
         # names nothing the person wrote. Refuse here, naming the column instead.
@@ -202,6 +307,15 @@ async def import_from_source(db: AsyncSession, current_user: User, ds: DataSourc
         return df
 
     def _write_aside(df, file_path_hint: str | None):
+        if isinstance(df, Streamed):
+            # Already on disk, as parquet: that file IS the dataset (no CSV
+            # beside it -- at this size a second copy is the larger cost). A
+            # re-import of a dataset that was a CSV gets a new file; the old
+            # one is removed once the new one is in place.
+            keep = file_path_hint if file_path_hint and str(file_path_hint).lower().endswith(".parquet") else None
+            file_path = Path(keep) if keep else Path(_allocate(current_user.org_id, "import.parquet"))
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            return file_path, Path(df.path), detect_types(df.sample)
         if file_path_hint:
             file_path = Path(file_path_hint)
             file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -232,6 +346,8 @@ async def import_from_source(db: AsyncSession, current_user: User, ds: DataSourc
 
     def _swap_in(file_path: Path, tmp: Path) -> None:
         os.replace(tmp, file_path)
+        if str(file_path).lower().endswith(".parquet"):
+            return                             # a streamed import: the parquet file is the dataset
         write_parquet_sidecar(str(file_path))  # already on a worker thread
 
     # Three stages with a checkpoint between each, so a queued import can be
@@ -240,35 +356,52 @@ async def import_from_source(db: AsyncSession, current_user: User, ds: DataSourc
     try:
         df = await asyncio.to_thread(_fetch)
     except Exception as e:
+        shutil.rmtree(stream_dir, ignore_errors=True)
         raise ImportRefused(str(e))
-    await _checkpoint(checkpoint, "writing", rows=len(df))
+    streamed = isinstance(df, Streamed)
+    n_rows = df.rows if streamed else len(df)
+    n_cols = len(df.columns)
+    await _checkpoint(checkpoint, "writing", rows=n_rows)
     try:
         target, tmp, type_map = await asyncio.to_thread(
             _write_aside, df, existing.filename if existing is not None else None)
     except Exception as e:
+        shutil.rmtree(stream_dir, ignore_errors=True)
         raise ImportRefused(str(e))
     try:
-        await _checkpoint(checkpoint, "saving", rows=len(df))
+        await _checkpoint(checkpoint, "saving", rows=n_rows)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
+        shutil.rmtree(stream_dir, ignore_errors=True)
         raise
     try:
         await asyncio.to_thread(_swap_in, target, tmp)
     except Exception as e:
         Path(tmp).unlink(missing_ok=True)
+        shutil.rmtree(stream_dir, ignore_errors=True)
         raise ImportRefused(str(e))
     file_path = str(target)
+    shutil.rmtree(stream_dir, ignore_errors=True)
+    old = existing.filename if existing is not None else None
+    if streamed and old and str(old) != file_path:
+        # The dataset was a CSV and is now this parquet file: the old file and its copy go.
+        from .frame_cache import remove_parquet_sidecar
+        Path(old).unlink(missing_ok=True)
+        remove_parquet_sidecar(str(old))
 
+    # How empty each column is: counted on every row either way (a streamed
+    # import counted it on disk; its sample is only for the types).
     new_cols = [DatasetColumn(name=col_name, dtype=dtype,
-                               missing_pct=missing_pct(df[col_name]), stats={})
+                               missing_pct=(df.missing.get(col_name, 0.0) if streamed else missing_pct(df[col_name])),
+                               stats={})
                 for col_name, dtype in type_map.items()]
 
     if existing is not None:
         existing.name = req.dataset_name
         existing.description = f"Imported from {ds.name} ({ds.type})"
         existing.filename = file_path
-        existing.row_count = len(df)
-        existing.col_count = len(df.columns)
+        existing.row_count = n_rows
+        existing.col_count = n_cols
         existing.file_size = Path(file_path).stat().st_size
         existing.data_source_id = ds.id
         existing.source_table = req.table
@@ -309,8 +442,8 @@ async def import_from_source(db: AsyncSession, current_user: User, ds: DataSourc
         name=req.dataset_name,
         description=f"Imported from {ds.name} ({ds.type})",
         filename=file_path,
-        row_count=len(df),
-        col_count=len(df.columns),
+        row_count=n_rows,
+        col_count=n_cols,
         file_size=Path(file_path).stat().st_size,
         data_source_id=ds.id,
         source_table=req.table,
@@ -332,6 +465,8 @@ async def import_from_source(db: AsyncSession, current_user: User, ds: DataSourc
     # never synced has no catalog to link against, and an import must not
     # fail because metadata is missing.
     await knowledge.link_columns(db, dataset)
+    from .sensitivity import apply_confidential_export_default
+    await apply_confidential_export_default(db, dataset)
     await _audit_import(db, current_user, dataset, ds, req, replaced=False)
     await _before_commit(before_commit, db, dataset)
     await db.commit()
@@ -344,9 +479,16 @@ async def _audit_import(db: AsyncSession, user: User, dataset, source, req, *, r
     exports and deletes were audited; an import from a database was not."""
     from .audit import record
     what = req.table or ("query: " + " ".join((req.query or "").split())[:200])
-    rows = "live" if dataset.mode == "directquery" else f"{dataset.row_count:,} rows"
-    await record(db, user, "dataset.reimport" if replaced else "dataset.import", "dataset",
-                 dataset.id, f"{source.name} ({source.type}) {what} -> {rows}")
+    live = dataset.mode == "directquery"
+    rows = "live" if live else f"{dataset.row_count:,} rows"
+    # 5.7: a live dataset copies nothing, so "import" in the activity log
+    # misdescribed it -- an auditor looking for data leaving the source would
+    # chase a copy that does not exist.
+    if live:
+        action = "dataset.update_live" if replaced else "dataset.create_live"
+    else:
+        action = "dataset.reimport" if replaced else "dataset.import"
+    await record(db, user, action, "dataset", dataset.id, f"{source.name} ({source.type}) {what} -> {rows}")
 
 
 # ── The queued path ──────────────────────────────────────────────────────────

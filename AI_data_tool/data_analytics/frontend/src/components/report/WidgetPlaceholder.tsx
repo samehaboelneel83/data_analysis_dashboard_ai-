@@ -9,6 +9,9 @@
  */
 import type { Widget, WidgetType } from '../../types/report'
 import { ROLE_SPECS, configKeyFor } from '../../types/report'
+import { useT } from '../../i18n'
+import { useRoleLabel } from './panelLabels'
+import { useDirection } from '../../contexts/DirectionContext'
 
 /** Event the builder listens for: select this widget, open its Data roles. */
 export const ASSIGN_DATA_EVENT = 'datalytics:assign-data'
@@ -29,8 +32,19 @@ export function emptyPickerReason(hasAnyColumns: boolean, kind: string | undefin
 }
 
 /** Required roles this widget has not been given yet (labels, for display). */
+/** A bar of several measures and no category draws one bar per measure
+ *  (the items of a score group compared). MIRRORS
+ *  `multi_measure.measures_as_bars` on the server. */
+export function measuresAsBars(widget: Pick<Widget, 'widget_type' | 'config'>): string[] | null {
+  const cfg = (widget.config ?? {}) as Record<string, unknown>
+  if (widget.widget_type !== 'bar' || cfg.dimension) return null
+  const ms = Array.isArray(cfg.measures) ? [...new Set(cfg.measures.filter((m): m is string => typeof m === 'string' && !!m))] : []
+  return ms.length >= 2 ? ms : null
+}
+
 export function missingRequiredRoles(widget: Pick<Widget, 'widget_type' | 'config'>): string[] {
   const cfg = (widget.config ?? {}) as Record<string, unknown>
+  if (measuresAsBars(widget)) return []
   return (ROLE_SPECS[widget.widget_type as WidgetType] ?? [])
     .filter(rf => rf.required)
     .filter(rf => {
@@ -107,6 +121,10 @@ function Sample({ family }: { family: Family }) {
 
 export function WidgetPlaceholder({ widget, missing, onAssignData }:
   { widget: Pick<Widget, 'widget_type'>; missing: string[]; onAssignData?: () => void }) {
+  const t = useT()
+  const role = useRoleLabel()
+  // Letter-spacing pulls Arabic's joined letters apart.
+  const { language } = useDirection()
   return (
     <div data-testid="widget-placeholder" style={{ position: 'relative', height: '100%', minHeight: 90,
       display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
@@ -117,17 +135,17 @@ export function WidgetPlaceholder({ widget, missing, onAssignData }:
       </svg>
       <div style={{ position: 'relative', textAlign: 'center', display: 'flex', flexDirection: 'column',
         alignItems: 'center', gap: 6, padding: 8 }}>
-        <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--muted)' }}>Sample</span>
+        <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: language === 'ar' ? 0 : '.06em', color: 'var(--muted)' }}>{t('bc.canvas.sample')}</span>
         <span style={{ fontSize: 12, color: 'var(--text)' }}>
-          Needs {missing.join(' · ')}
+          {t('bc.canvas.needs', { roles: missing.map(role).join(' · ') })}
         </span>
         {onAssignData
           ? <button type="button" className="btn btn-primary btn-sm"
               onMouseDown={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()}
               onClick={e => { e.stopPropagation(); onAssignData() }}>
-              Assign data
+              {t('bc.canvas.assignData')}
             </button>
-          : <span style={{ fontSize: 11, color: 'var(--muted)' }}>The author has not finished this widget.</span>}
+          : <span style={{ fontSize: 11, color: 'var(--muted)' }}>{t('bc.canvas.unfinished')}</span>}
       </div>
     </div>
   )

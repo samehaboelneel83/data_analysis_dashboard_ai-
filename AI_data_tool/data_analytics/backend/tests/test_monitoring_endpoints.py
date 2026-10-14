@@ -118,3 +118,50 @@ class TestDeliveries:
         await _seed_world(db_session, two_orgs)
         resp = await client.get("/api/v1/admin/monitoring/deliveries", headers=auth_headers["b"])
         assert [r["report_name"] for r in resp.json()] == ["report-b"]
+
+
+class TestRefreshRuns:
+    """Pipeline plan, phase 1: a dataset's job row reports its last attempt,
+    and /monitoring/refresh-runs lists the history, org-scoped."""
+
+    async def _runs(self, db_session, two_orgs):
+        from app.models.models import RefreshRun, ScheduleFailure
+        seeded = await _seed_world(db_session, two_orgs)
+        a_ds, b_ds = seeded["a"]["ds"], seeded["b"]["ds"]
+        db_session.add_all([
+            RefreshRun(org_id=two_orgs["a"]["org"].id, kind="dataset", item_id=a_ds.id,
+                       trigger="schedule", status="ok", rows=10),
+            RefreshRun(org_id=two_orgs["a"]["org"].id, kind="dataset", item_id=a_ds.id,
+                       trigger="schedule", status="failed", error="source down",
+                       error_code="refresh_failed"),
+            RefreshRun(org_id=two_orgs["b"]["org"].id, kind="dataset", item_id=b_ds.id,
+                       trigger="manual", status="failed", error="b's secret error"),
+            ScheduleFailure(kind="dataset", item_id=a_ds.id, attempts=1,
+                            next_attempt_at=datetime(2026, 10, 3, 9, 5, tzinfo=timezone.utc),
+                            last_error="source down"),
+        ])
+        await db_session.commit()
+        return seeded
+
+    async def test_a_dataset_job_shows_its_last_attempt(self, client, db_session, two_orgs, auth_headers):
+        seeded = await self._runs(db_session, two_orgs)
+        jobs = (await client.get("/api/v1/admin/monitoring/jobs", headers=auth_headers["a"])).json()
+        [row] = [j for j in jobs if j["kind"] == "dataset_refresh"]
+        assert row["id"] == seeded["a"]["ds"].id
+        assert row["status"] == "failed" and row["error"] == "source down"
+        assert row["next_retry_at"] is not None
+        assert row["last_refreshed_at"] is not None
+
+    async def test_the_history_is_newest_first_and_org_scoped(self, client, db_session, two_orgs, auth_headers):
+        await self._runs(db_session, two_orgs)
+        runs = (await client.get("/api/v1/admin/monitoring/refresh-runs",
+                                 headers=auth_headers["a"])).json()
+        assert [r["status"] for r in runs] == ["failed", "ok"]
+        assert runs[0]["name"] == "ds-a"
+        assert all("secret" not in (r["error"] or "") for r in runs)
+
+    async def test_failed_only(self, client, db_session, two_orgs, auth_headers):
+        await self._runs(db_session, two_orgs)
+        runs = (await client.get("/api/v1/admin/monitoring/refresh-runs",
+                                 params={"status": "failed"}, headers=auth_headers["a"])).json()
+        assert [r["error_code"] for r in runs] == ["refresh_failed"]

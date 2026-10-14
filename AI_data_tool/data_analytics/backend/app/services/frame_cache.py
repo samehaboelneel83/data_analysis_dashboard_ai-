@@ -83,6 +83,96 @@ def _read_sidecar(pq_path: str) -> pd.DataFrame:
 
 
 def _parse(path: str) -> pd.DataFrame:
+    # Before anything is read: does it fit? (services/memory_guard.py)
+    from . import memory_guard
+    with memory_guard.reserved(path):
+        return _parse_unguarded(path)
+
+
+def parquet_of(path: str) -> str | None:
+    """The parquet file holding this dataset's rows: the dataset itself, or a
+    CSV's fresh sidecar. None when there is none (then nothing can be read by
+    column, or sampled, without parsing the whole file)."""
+    p = str(path)
+    if p.lower().endswith(".parquet"):
+        return p
+    if p.lower().endswith(".csv"):
+        pq = sidecar_path(p)
+        try:
+            if os.stat(pq).st_mtime_ns >= os.stat(p).st_mtime_ns:
+                return pq
+        except OSError:
+            return None
+    return None
+
+
+def load_columns(path: str, columns: list[str]) -> pd.DataFrame:
+    """Only `columns` of a dataset, every row: for a file too large to load
+    whole, a chart that names two columns of fifty needs a twenty-fifth of
+    the memory. Weighed by the memory guard like any load; never cached (the
+    result cache holds what is drawn from it). Raises ValueError when the
+    dataset has no parquet file to read by column."""
+    from . import memory_guard
+    pq = parquet_of(path)
+    if pq is None:
+        raise ValueError("no parquet file to read by column")
+    with memory_guard.reserved(pq, columns=list(columns)):
+        df = pd.read_parquet(pq, columns=list(columns))
+    import numpy as np
+    for c in df.columns:
+        col = df[c]
+        if col.dtype == object and col.hasnans:
+            df[c] = col.where(col.notna(), np.nan)
+    return df
+
+
+def load_or_sample(path: str) -> pd.DataFrame:
+    """For an analysis: the whole dataset, or -- when it is too large to load
+    -- a random sample of `settings.analysis_row_cap` rows, the size an
+    analysis of a live source already works on. A sampled frame says so in
+    `attrs["sampled_of"]` (the rows the file holds). A file that cannot be
+    sampled keeps its refusal."""
+    from .ingest import load_file
+    from .memory_guard import TooLargeToLoad
+    try:
+        return load_file(path)
+    except TooLargeToLoad:
+        try:
+            df, total = load_sample(path, int(getattr(settings, "analysis_row_cap", 250_000) or 250_000))
+        except ValueError:
+            raise TooLargeToLoad(0, 0) from None
+        df.attrs["sampled_of"] = total
+        return df
+
+
+def load_sample(path: str, rows: int, seed: int = 7, columns: list[str] | None = None) -> tuple[pd.DataFrame, int]:
+    """(a random sample of `rows` rows, how many rows the file holds): what an
+    analysis runs on when the dataset is too large to load. The same sample
+    every time for the same file, so an answer does not change between two
+    readings. Raises ValueError when there is no parquet file to sample."""
+    import duckdb
+    pq = parquet_of(path)
+    if pq is None:
+        raise ValueError("no parquet file to sample")
+    src = "read_parquet('%s')" % pq.replace("\\", "/").replace("'", "''")
+    con = duckdb.connect()
+    try:
+        con.execute(f"SET threads TO {max(1, int(getattr(settings, 'widget_duckdb_threads', 2)))}")
+        total = int(con.execute(f"SELECT COUNT(*) FROM {src}").fetchone()[0])
+        what = "*" if columns is None else ", ".join('"' + str(c).replace('"', '""') + '"' for c in columns)
+        df = con.execute(f"SELECT {what} FROM {src} USING SAMPLE reservoir({int(rows)} ROWS) REPEATABLE ({int(seed)})"
+                         ).fetch_df() if total > rows else con.execute(f"SELECT {what} FROM {src}").fetch_df()
+    finally:
+        con.close()
+    import numpy as np
+    for c in df.columns:
+        col = df[c]
+        if col.dtype == object and col.hasnans:
+            df[c] = col.where(col.notna(), np.nan)
+    return df, total
+
+
+def _parse_unguarded(path: str) -> pd.DataFrame:
     """The uncached read: what load_file always did, except a CSV with a
     fresh parquet sidecar (written by write_parquet_sidecar at upload/refresh
     time, strictly newer than the CSV, verified at write time) loads from the

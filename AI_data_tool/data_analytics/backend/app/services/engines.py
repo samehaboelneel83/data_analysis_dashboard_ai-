@@ -18,7 +18,10 @@ import json
 import threading
 from collections import OrderedDict
 
-from sqlalchemy import create_engine
+import contextvars
+from contextlib import contextmanager
+
+from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 
 from ..core.config import settings
@@ -94,11 +97,54 @@ def get_metadata_engine(cfg: dict) -> Engine:
                           max_overflow=0, pool_timeout=30)
 
         engine = create_engine(url, **kwargs)
+        _install_statement_limit(engine, cfg)
         _ENGINE_REGISTRY[key] = engine
         while len(_ENGINE_REGISTRY) > settings.directquery_engine_pool_maxsize:
             _, victim = _ENGINE_REGISTRY.popitem(last=False)
             victim.dispose()
         return engine
+
+
+#: Set while a query is being RETRIED after the source ran short of shared
+#: memory. Postgres takes dynamic shared memory only for parallel workers, so
+#: a transaction that starts with them switched off cannot hit that wall. A
+#: context variable rather than an argument: dozens of call sites open their
+#: own connection, and the retry wraps all of them at once.
+_NO_PARALLEL: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "dq_no_parallel", default=False)
+
+
+@contextmanager
+def parallel_workers_off():
+    """Every Postgres transaction begun inside this block runs without
+    parallel workers (SET LOCAL, so it ends with the transaction)."""
+    token = _NO_PARALLEL.set(True)
+    try:
+        yield
+    finally:
+        _NO_PARALLEL.reset(token)
+
+
+def _install_parallel_switch(engine: Engine) -> None:
+    @event.listens_for(engine, "begin")
+    def _on_begin(conn):  # noqa: ANN001 -- SQLAlchemy event signature
+        if _NO_PARALLEL.get():
+            conn.exec_driver_sql("SET LOCAL max_parallel_workers_per_gather = 0")
+
+
+def _install_statement_limit(engine: Engine, cfg: dict) -> None:
+    """SQL Server (pyodbc) and Oracle take the query ceiling on the connection
+    itself: set on every new one (connectors.statement_limit_hook)."""
+    hook = connectors.statement_limit_hook(cfg)
+    if hook is None:
+        return
+
+    @event.listens_for(engine, "connect")
+    def _on_connect(dbapi_connection, _record):  # noqa: ANN001 -- SQLAlchemy event signature
+        try:
+            hook(dbapi_connection)
+        except Exception:                        # noqa: BLE001 -- a driver without the attribute still connects
+            pass
 
 
 def get_engine(cfg: dict) -> Engine:
@@ -117,6 +163,9 @@ def get_engine(cfg: dict) -> Engine:
             return engine
         engine = create_engine(_build_url(cfg), pool_pre_ping=True,
                                connect_args=connectors.connect_args(cfg))
+        if connectors.sql_family_of(cfg) == "postgresql":
+            _install_parallel_switch(engine)
+        _install_statement_limit(engine, cfg)
         _ENGINE_REGISTRY[key] = engine
         while len(_ENGINE_REGISTRY) > settings.directquery_engine_pool_maxsize:
             _, victim = _ENGINE_REGISTRY.popitem(last=False)   # least-recently-used

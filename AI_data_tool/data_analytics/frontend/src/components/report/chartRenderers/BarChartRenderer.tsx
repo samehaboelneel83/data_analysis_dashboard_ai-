@@ -3,7 +3,7 @@ import { TT, fmtStr, getFillFactory, COLORS, fillPattern, PatternDefs } from '..
 import type { ChartRendererProps } from './types'
 import { toBarSeries } from './barSeries'
 import { computeAnalyticsLines } from './analyticsLines'
-import { xAxisProps, yAxisProps, gridProps, legendProps, labelListProps, chartMargin } from './axisOptions'
+import { xAxisProps, yAxisProps, gridProps, legendProps, labelListProps, chartMargin, valueTick } from './axisOptions'
 import { useChartViewport } from './useChartViewport'
 import { seriesName } from './axisOptions'
 
@@ -38,12 +38,14 @@ function designAxes(cfg: ChartRendererProps['cfg']) {
   }
 }
 
-function monoTick(t: Record<string, unknown>) {
+function monoTick(t: Record<string, unknown> | false) {
+  // `false` (axis_ticks: false) means no tick labels at all -- keep it false.
+  if (t === false) return false
   return { ...t, style: { ...((t.style as object) ?? {}), ...MONO } }
 }
 
 export default function BarChartRenderer({ rows, data, cfg, rtl, broadcasts, localSelected, onClickPoint, measureFmt, ruleStyles, plotW, plotH, onBrushChange }: ChartRendererProps) {
-  const getFill = getFillFactory(broadcasts, localSelected, ruleStyles?.rows)
+  const getFill = getFillFactory(broadcasts, localSelected, ruleStyles?.rows, true)
   const look = designAxes(cfg)
   const mode = (cfg.bar_mode as string) || 'clustered'
   const { rows: seriesRows, series } = toBarSeries(data, mode)
@@ -86,8 +88,11 @@ export default function BarChartRenderer({ rows, data, cfg, rtl, broadcasts, loc
             axisLine={look.axisLine} />
           {(() => {
             const y = yAxisProps(cfg, rtl, measureFmt, isPercent ? undefined : axisValues, observedMin, { height: plotH, ...look.yOpts })
-            return <YAxis {...y} tick={monoTick(y.tick as Record<string, unknown>)}
-              tickFormatter={v => isPercent ? `${v}%` : fmtStr(v, measureFmt)} />
+            // A 100% stack is exactly 0-100: the automatic domain rounded it
+            // up to 120% (HR re-test 2026-10-02).
+            return <YAxis {...y} {...(isPercent ? { domain: [0, 100], allowDataOverflow: true } : {})}
+              tick={monoTick(y.tick as Record<string, unknown> | false)}
+              tickFormatter={v => isPercent ? `${v}%` : valueTick(cfg, measureFmt)(v)} />
           })()}
           {/* Each line names its series ("Online: 138"). The name used to be
               blanked, so a four-series tooltip was four bare numbers told
@@ -146,6 +151,37 @@ export default function BarChartRenderer({ rows, data, cfg, rtl, broadcasts, loc
   // 14th) is drawn faded with a dashed outline and says so in its tooltip, so a
   // half-month never reads as a collapse.
   const partialLabel: string | undefined = data?.partial_period?.label
+  // Bars lying down (`orientation: "horizontal"`): the way to rank a handful of
+  // named things -- each name is read whole on its own line instead of tilted
+  // under a column. One series only; targets and cross-highlights keep the
+  // upright drawing, which is where their marks are placed.
+  if (cfg.orientation === 'horizontal' && !hasTargets && !hasHighlights) {
+    const names = view.visible.map((r: any) => String(r.name))
+    const gutter = Math.min(Math.max(48, ...names.map(n => n.length * 6.6 + 12)), Math.max(60, (plotW ?? 320) * 0.4))
+    return (
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={[...view.visible]} layout="vertical" barCategoryGap="26%" maxBarSize={44}
+          margin={chartMargin(rtl, { top: 4, right: labels ? 56 : 12, bottom: 4, left: 0 })}
+          onClick={broadcasts ? (d: any) => d?.activePayload?.[0] && onClickPoint(d.activePayload[0].payload.name) : undefined}
+          style={{ cursor: broadcasts ? 'pointer' : 'default' }}>
+          {grid && <CartesianGrid {...grid} horizontal={false} vertical />}
+          <XAxis type="number" reversed={rtl} axisLine={false} tickLine={false}
+            tick={{ fontSize: 10, fill: 'var(--muted)', ...MONO }} tickFormatter={valueTick(cfg, measureFmt)} />
+          <YAxis type="category" dataKey="name" width={gutter} orientation={rtl ? 'right' : 'left'} axisLine={false} tickLine={false}
+            tick={{ fontSize: 11, fill: 'var(--text)' }} interval={0} />
+          <Tooltip contentStyle={TT} cursor={{ fill: 'var(--surface2)' }} formatter={(v: unknown) => [fmtStr(v, measureFmt), seriesName(cfg)]} />
+          <Bar dataKey="value" radius={rtl ? [6, 0, 0, 6] : [0, 6, 6, 0]} data-testid="bars-horizontal">
+            {view.visible.map((r: any, j: number) => {
+              const f = getFill(r.name, view.start + j)
+              return <Cell key={j} fill={f.fill} opacity={f.opacity} stroke={f.stroke} strokeWidth={f.strokeWidth} />
+            })}
+            {labels && <LabelList dataKey="value" position={rtl ? 'left' : 'right'} offset={6}
+              formatter={(v: unknown) => fmtStr(v, measureFmt)} style={labels.style} />}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    )
+  }
   return (
     <ResponsiveContainer width="100%" height="100%">
       <BarChart data={rows} margin={chartMargin(rtl, { top: labels ? 20 : 4, right: 8, bottom: 20, left: 0 })}
@@ -158,7 +194,7 @@ export default function BarChartRenderer({ rows, data, cfg, rtl, broadcasts, loc
         {grid && <CartesianGrid {...grid} />}
         <XAxis dataKey="name" {...xAxisProps(look.xCfg, rtl, view.visible.map((r: any) => String(r.name)), plotW, look.xOpts)}
           axisLine={look.axisLine} />
-        <YAxis {...y} tick={monoTick(y.tick as Record<string, unknown>)} tickFormatter={v => fmtStr(v, measureFmt)} />
+        <YAxis {...y} tick={monoTick(y.tick as Record<string, unknown> | false)} tickFormatter={valueTick(cfg, measureFmt)} />
         <Tooltip contentStyle={TT} cursor={{ fill: 'var(--surface2)' }} formatter={(v: unknown) => [fmtStr(v, measureFmt), seriesName(cfg)]}
           labelFormatter={(l: unknown) => partialLabel != null && String(l) === partialLabel
             ? `${String(l)} (partial — data to ${data.partial_period.through})` : String(l)} />

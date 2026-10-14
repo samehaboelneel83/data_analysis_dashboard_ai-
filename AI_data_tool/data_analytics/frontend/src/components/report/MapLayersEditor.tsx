@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react'
 import type { DatasetColumn } from '../../services/api'
 import { boundarySetsApi } from '../../services/api'
 import { COLORS } from './chartUtils'
+import { useT } from '../../i18n'
 
 export type MapLayerKind = 'regions' | 'bubbles' | 'points' | 'lines'
 export interface MapLayerCfg {
@@ -24,12 +25,12 @@ export interface MapLayerCfg {
   color?: string
 }
 
-const KINDS: { value: MapLayerKind; label: string }[] = [
-  { value: 'regions', label: 'Regions (filled shapes)' },
-  { value: 'bubbles', label: 'Bubbles on regions' },
-  { value: 'points', label: 'Points (latitude / longitude)' },
-  { value: 'lines', label: 'Lines (from → to)' },
-]
+const KINDS = [
+  { value: 'regions', key: 'pg.modelsMaps.ml.regions' },
+  { value: 'bubbles', key: 'pg.modelsMaps.ml.bubbles' },
+  { value: 'points', key: 'pg.modelsMaps.ml.points' },
+  { value: 'lines', key: 'pg.modelsMaps.ml.lines' },
+] as const satisfies readonly { value: MapLayerKind; key: string }[]
 export const MAX_LAYERS = 6
 
 let seq = 0
@@ -43,6 +44,7 @@ export default function MapLayersEditor({ value, onChange, columns }: {
   onChange: (next: MapLayerCfg[]) => void
   columns: DatasetColumn[]
 }) {
+  const t = useT()
   const [sets, setSets] = useState<{ id: number; name: string }[]>([])
   useEffect(() => {
     Promise.resolve().then(() => boundarySetsApi.list?.()).then(s => setSets(Array.isArray(s) ? s : [])).catch(() => {})
@@ -56,9 +58,9 @@ export default function MapLayersEditor({ value, onChange, columns }: {
   }
   const col = (i: number, key: keyof MapLayerCfg, label: string, list: DatasetColumn[], optional = false) => (
     <label style={lbl}>{label}{optional ? '' : ' *'}
-      <select aria-label={`Layer ${i + 1} ${label}`} style={sel} value={(value[i][key] as string) ?? ''}
+      <select aria-label={t('pg.modelsMaps.ml.layerField', { n: i + 1, field: label })} style={sel} value={(value[i][key] as string) ?? ''}
         onChange={e => patch(i, { [key]: e.target.value || undefined } as Partial<MapLayerCfg>)}>
-        <option value="">{optional ? '— none —' : '— select column —'}</option>
+        <option value="">{optional ? t('pg.modelsMaps.ml.none') : t('pg.modelsMaps.ml.selectColumn')}</option>
         {list.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
       </select>
     </label>
@@ -66,66 +68,63 @@ export default function MapLayersEditor({ value, onChange, columns }: {
   return (
     <div data-testid="map-layers-editor" style={{ marginTop: 10 }}>
       <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
-        Layers {value.length > 0 && <span style={{ fontWeight: 400, textTransform: 'none' }}>(bottom first)</span>}
+        {t('pg.modelsMaps.ml.layers')} {value.length > 0 && <span style={{ fontWeight: 400, textTransform: 'none' }}>{t('pg.modelsMaps.ml.bottomFirst')}</span>}
       </div>
       {value.length === 0 && (
-        <p style={{ fontSize: 10.5, color: 'var(--muted)', margin: '4px 0' }}>
-          No layer stack yet — the map draws the region and point fields above. Add layers to stack
-          regions, bubbles, points and lines, each with its own fields.
-        </p>
+        <p style={{ fontSize: 10.5, color: 'var(--muted)', margin: '4px 0' }}>{t('pg.modelsMaps.ml.empty')}</p>
       )}
       {value.map((l, i) => (
         <div key={l.id} style={{ border: '1px solid var(--border)', borderInlineStart: `3px solid ${l.color || COLORS[i % COLORS.length]}`,
           borderRadius: 6, padding: 6, marginTop: 6, background: 'var(--surface2)' }}>
           <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-            <input aria-label={`Layer ${i + 1} title`} value={l.title ?? ''} placeholder={`Layer ${i + 1}`}
+            <input aria-label={t('pg.modelsMaps.ml.titleAria', { n: i + 1 })} value={l.title ?? ''} placeholder={t('pg.modelsMaps.ml.layerN', { n: i + 1 })}
               onChange={e => patch(i, { title: e.target.value })} style={{ ...sel, flex: 1 }} />
-            <button type="button" className="btn btn-sm" aria-label={`Move layer ${i + 1} down`} disabled={i === 0}
+            <button type="button" className="btn btn-sm" aria-label={t('pg.modelsMaps.ml.moveDown', { n: i + 1 })} disabled={i === 0}
               onClick={() => move(i, -1)}>↓</button>
-            <button type="button" className="btn btn-sm" aria-label={`Move layer ${i + 1} up`} disabled={i === value.length - 1}
+            <button type="button" className="btn btn-sm" aria-label={t('pg.modelsMaps.ml.moveUp', { n: i + 1 })} disabled={i === value.length - 1}
               onClick={() => move(i, 1)}>↑</button>
-            <button type="button" className="btn btn-sm" aria-label={`Remove layer ${i + 1}`}
+            <button type="button" className="btn btn-sm" aria-label={t('pg.modelsMaps.ml.remove', { n: i + 1 })}
               onClick={() => onChange(value.filter((_, j) => j !== i))}>×</button>
           </div>
-          <label style={lbl}>Type
-            <select aria-label={`Layer ${i + 1} type`} style={sel} value={l.kind}
+          <label style={lbl}>{t('pg.modelsMaps.ml.type')}
+            <select aria-label={t('pg.modelsMaps.ml.typeAria', { n: i + 1 })} style={sel} value={l.kind}
               onChange={e => patch(i, { kind: e.target.value as MapLayerKind })}>
-              {KINDS.map(k => <option key={k.value} value={k.value}>{k.label}</option>)}
+              {KINDS.map(k => <option key={k.value} value={k.value}>{t(k.key)}</option>)}
             </select>
           </label>
           {(l.kind === 'regions' || l.kind === 'bubbles') && <>
-            {col(i, 'category', 'Region', columns)}
-            {col(i, 'measure', 'Value (blank = count rows)', numeric, true)}
-            <label style={lbl}>Boundaries
-              <select aria-label={`Layer ${i + 1} boundaries`} style={sel} value={l.boundary_set_id ?? ''}
+            {col(i, 'category', t('pg.modelsMaps.ml.region'), columns)}
+            {col(i, 'measure', t('pg.modelsMaps.ml.value'), numeric, true)}
+            <label style={lbl}>{t('pg.modelsMaps.ml.boundaries')}
+              <select aria-label={t('pg.modelsMaps.ml.boundariesAria', { n: i + 1 })} style={sel} value={l.boundary_set_id ?? ''}
                 onChange={e => patch(i, { boundary_set_id: e.target.value ? Number(e.target.value) : null })}>
-                <option value="">Countries (built in)</option>
+                <option value="">{t('pg.modelsMaps.ml.countries')}</option>
                 {sets.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </label>
           </>}
           {l.kind === 'points' && <>
-            {col(i, 'lat', 'Latitude', numeric)}
-            {col(i, 'lon', 'Longitude', numeric)}
-            {col(i, 'measure', 'Size', numeric, true)}
+            {col(i, 'lat', t('pg.modelsMaps.ml.latitude'), numeric)}
+            {col(i, 'lon', t('pg.modelsMaps.ml.longitude'), numeric)}
+            {col(i, 'measure', t('pg.modelsMaps.ml.size'), numeric, true)}
           </>}
           {l.kind === 'lines' && <>
-            {col(i, 'lat', 'From latitude', numeric)}
-            {col(i, 'lon', 'From longitude', numeric)}
-            {col(i, 'lat2', 'To latitude', numeric)}
-            {col(i, 'lon2', 'To longitude', numeric)}
-            {col(i, 'measure', 'Width', numeric, true)}
+            {col(i, 'lat', t('pg.modelsMaps.ml.fromLat'), numeric)}
+            {col(i, 'lon', t('pg.modelsMaps.ml.fromLon'), numeric)}
+            {col(i, 'lat2', t('pg.modelsMaps.ml.toLat'), numeric)}
+            {col(i, 'lon2', t('pg.modelsMaps.ml.toLon'), numeric)}
+            {col(i, 'measure', t('pg.modelsMaps.ml.width'), numeric, true)}
           </>}
-          <label style={{ ...lbl, display: 'flex', alignItems: 'center', gap: 6 }}>Colour
-            <input type="color" aria-label={`Layer ${i + 1} colour`} value={l.color || COLORS[i % COLORS.length]}
+          <label style={{ ...lbl, display: 'flex', alignItems: 'center', gap: 6 }}>{t('pg.modelsMaps.ml.colour')}
+            <input type="color" aria-label={t('pg.modelsMaps.ml.colourAria', { n: i + 1 })} value={l.color || COLORS[i % COLORS.length]}
               onChange={e => patch(i, { color: e.target.value })} />
           </label>
         </div>
       ))}
       <button type="button" className="btn btn-sm" style={{ marginTop: 6 }} disabled={value.length >= MAX_LAYERS}
-        title={value.length >= MAX_LAYERS ? `A map draws at most ${MAX_LAYERS} layers` : undefined}
+        title={value.length >= MAX_LAYERS ? t('pg.modelsMaps.ml.max', { n: MAX_LAYERS }) : undefined}
         onClick={() => onChange([...value, { id: newId(), kind: value.length ? 'points' : 'regions' }])}>
-        + Add layer
+        {t('pg.modelsMaps.ml.add')}
       </button>
     </div>
   )

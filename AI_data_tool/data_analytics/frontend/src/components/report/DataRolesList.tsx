@@ -1,6 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import type { RoleField } from '../../types/report'
 import { useModalDialog } from '../ui/useModalDialog'
+import { useT } from '../../i18n'
+import { useRoleLabel } from './panelLabels'
 
 /**
  * The Data roles pane as SAS VA lays it out: one collapsible section per role,
@@ -57,6 +59,8 @@ export function FieldIcon({ kind }: { kind: FieldKind }) {
 export default function DataRolesList({ specs, values, kindOf, displayName, onAdd, onRemove, renderDetails, addBlocked }: DataRolesListProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [open, setOpen] = useState<string | null>(null)
+  const t = useT()
+  const role = useRoleLabel()
   const toggleRole = (role: string) => setCollapsed(prev => {
     const next = new Set(prev)
     if (next.has(role)) next.delete(role); else next.add(role)
@@ -66,7 +70,10 @@ export default function DataRolesList({ specs, values, kindOf, displayName, onAd
   return (
     <div data-testid="data-roles-list">
       {specs.map(rf => {
-        const { heading, hint } = splitLabel(rf)
+        const split = splitLabel(rf)
+        // Shown in the reader's language; ids and the role keys stay English.
+        const heading = role(split.heading)
+        const hint = split.hint && role(split.hint)
         const fields = values[rf.role] ?? []
         const isCollapsed = collapsed.has(rf.role)
         // A single-field role is full once it has its field. SAS still shows
@@ -87,23 +94,23 @@ export default function DataRolesList({ specs, values, kindOf, displayName, onAd
                   transform: isCollapsed ? 'rotate(-90deg)' : 'none', transition: 'transform .12s' }}>⌄</span>
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{heading}</span>
                 {rf.required && fields.length === 0 && (
-                  <span style={{ fontSize: 11, color: 'var(--danger, #c0392b)' }} title="Required">*</span>
+                  <span style={{ fontSize: 11, color: 'var(--danger, #c0392b)' }} title={t('bc.canvas.roleRequired')}>*</span>
                 )}
               </button>
-              <button type="button" onClick={() => onAdd(rf.role)} aria-label={`Add ${heading}`}
+              <button type="button" onClick={() => onAdd(rf.role)} aria-label={t('bc.canvas.addRole', { role: heading })}
                 disabled={!canAdd}
-                title={blocked ?? (canAdd ? undefined : `${heading} takes one field. Remove it to choose another.`)}
+                title={blocked ?? (canAdd ? undefined : t('bc.canvas.roleTakesOne', { role: heading }))}
                 style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none',
                   cursor: canAdd ? 'pointer' : 'default', font: 'inherit', fontSize: 13, padding: '2px 4px',
                   color: canAdd ? 'var(--text)' : 'var(--muted)', opacity: canAdd ? 1 : 0.55 }}>
-                <span aria-hidden style={{ fontSize: 16, lineHeight: 1 }}>+</span> Add
+                <span aria-hidden style={{ fontSize: 16, lineHeight: 1 }}>+</span> {t('bc.canvas.add')}
               </button>
             </div>
             {!isCollapsed && (
               <ul id={sectionId} style={{ listStyle: 'none', margin: 0, padding: '0 0 0 18px' }}>
                 {fields.length === 0 && (
                   <li style={{ fontSize: 12, color: 'var(--muted)', padding: '2px 0' }}>
-                    {rf.required ? 'Required' : 'None'}
+                    {rf.required ? t('bc.canvas.roleRequired') : t('bc.canvas.roleNone')}
                   </li>
                 )}
                 {fields.map(f => {
@@ -118,8 +125,8 @@ export default function DataRolesList({ specs, values, kindOf, displayName, onAd
                         {/* Named with its role: "sales, Measure" -- the same field can
                             sit in two roles, and the field list beside the canvas
                             has a "sales" button of its own. */}
-                        <button type="button" aria-expanded={details !== null ? isOpen : undefined}
-                          aria-label={`${name}, ${heading}`}
+                        <button type="button" aria-expanded={details !== null ? isOpen : undefined} dir="auto"
+                          aria-label={t('bc.canvas.fieldInRole', { field: name, role: heading })}
                           onClick={() => setOpen(isOpen ? null : key)}
                           style={{ flex: 1, minWidth: 0, textAlign: 'start', background: 'none', border: 'none', padding: 0,
                             font: 'inherit', fontSize: 13, color: 'var(--accent)',
@@ -127,8 +134,8 @@ export default function DataRolesList({ specs, values, kindOf, displayName, onAd
                             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {name}
                         </button>
-                        <button type="button" onClick={() => onRemove(rf.role, f)} aria-label={`Remove ${f} from ${heading}`}
-                          title="Remove"
+                        <button type="button" onClick={() => onRemove(rf.role, f)} aria-label={t('bc.canvas.removeFieldFromRole', { field: f, role: heading })}
+                          title={t('bc.canvas.remove')}
                           style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)',
                             fontSize: 14, lineHeight: 1, padding: '0 2px' }}>×</button>
                       </div>
@@ -162,6 +169,7 @@ export function AssignDataDialog({ objectName, focusRole, onClose, children }: {
   children: ReactNode
 }) {
   const ref = useModalDialog<HTMLDivElement>(onClose)
+  const t = useT()
   useEffect(() => {
     if (!focusRole) return
     const row = ref.current?.querySelector<HTMLElement>(`[data-roles-section="${focusRole}"]`)
@@ -172,25 +180,25 @@ export function AssignDataDialog({ objectName, focusRole, onClose, children }: {
     <div onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}
       style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center',
         justifyContent: 'center', background: 'rgba(0,0,0,.45)', padding: 16 }}>
-      <div ref={ref} role="dialog" aria-modal="true" aria-label={`Assign data: ${objectName}`}
+      <div ref={ref} role="dialog" aria-modal="true" aria-label={t('bc.canvas.assignDataFor', { name: objectName })}
         style={{ width: 'min(460px, 100%)', maxHeight: 'min(640px, calc(100vh - 32px))', display: 'flex',
           flexDirection: 'column', background: 'var(--surface)', border: '1px solid var(--border)',
           borderRadius: 'var(--radius)', boxShadow: '0 16px 48px rgba(0,0,0,.35)', color: 'var(--text)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 16px 10px',
           borderBottom: '1px solid var(--border)' }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 650, fontSize: 15 }}>Assign data</div>
+            <div style={{ fontWeight: 650, fontSize: 15 }}>{t('bc.canvas.assignData')}</div>
             <div style={{ fontSize: 12, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap' }}>{objectName}</div>
+              whiteSpace: 'nowrap' }}><bdi>{objectName}</bdi></div>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close" className="btn btn-ghost btn-sm">×</button>
+          <button type="button" onClick={onClose} aria-label={t('bc.canvas.close')} className="btn btn-ghost btn-sm">×</button>
         </div>
         <div style={{ overflowY: 'auto', padding: '14px 16px', fontSize: 13 }}>
           {children}
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '10px 16px',
           borderTop: '1px solid var(--border)' }}>
-          <button type="button" className="btn btn-primary btn-sm" onClick={onClose}>Done</button>
+          <button type="button" className="btn btn-primary btn-sm" onClick={onClose}>{t('bc.canvas.done')}</button>
         </div>
       </div>
     </div>
@@ -216,6 +224,10 @@ export function AddFieldDialog({ heading, multi, choices, selected, onApply, onC
   onClose: () => void
 }) {
   const ref = useModalDialog<HTMLDivElement>(onClose)
+  const t = useT()
+  const role = useRoleLabel()
+  // The caller passes the role's English short name; it is shown translated.
+  const shownHeading = role(heading)
   const [picked, setPicked] = useState<string[]>(selected)
   const [q, setQ] = useState('')
   const needle = q.trim().toLowerCase()
@@ -228,36 +240,36 @@ export function AddFieldDialog({ heading, multi, choices, selected, onApply, onC
     <div onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}
       style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center',
         justifyContent: 'center', background: 'rgba(0,0,0,.45)', padding: 16 }}>
-      <div ref={ref} role="dialog" aria-modal="true" aria-label={`Add ${heading}`}
+      <div ref={ref} role="dialog" aria-modal="true" aria-label={t('bc.canvas.addRole', { role: shownHeading })}
         style={{ width: 'min(380px, 100%)', maxHeight: 'min(560px, calc(100vh - 32px))', display: 'flex',
           flexDirection: 'column', background: 'var(--surface)', border: '1px solid var(--border)',
           borderRadius: 'var(--radius)', boxShadow: '0 16px 48px rgba(0,0,0,.35)', color: 'var(--text)' }}>
         <div style={{ padding: '14px 16px 10px', borderBottom: '1px solid var(--border)' }}>
-          <div style={{ fontWeight: 650, fontSize: 15, marginBottom: 2 }}>Add {heading}</div>
+          <div style={{ fontWeight: 650, fontSize: 15, marginBottom: 2 }}>{t('bc.canvas.addRole', { role: shownHeading })}</div>
           <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
-            {multi ? 'Choose one or more fields.' : 'Choose a field.'}
+            {multi ? t('bc.canvas.chooseFields') : t('bc.canvas.chooseField')}
           </div>
-          <input type="search" value={q} onChange={e => setQ(e.target.value)} aria-label="Search fields"
-            placeholder="Search fields…" style={{ width: '100%' }} />
+          <input type="search" value={q} onChange={e => setQ(e.target.value)} aria-label={t('bc.canvas.searchFields')}
+            placeholder={t('bc.canvas.searchFieldsPh')} style={{ width: '100%' }} />
         </div>
-        <div role={multi ? 'group' : 'listbox'} aria-label={`${heading} fields`}
+        <div role={multi ? 'group' : 'listbox'} aria-label={t('bc.canvas.roleFields', { role: shownHeading })}
           style={{ overflowY: 'auto', padding: '6px 8px', fontSize: 13 }}>
           {shown.length === 0 && (
             <div style={{ padding: '10px 8px', color: 'var(--muted)', fontSize: 12 }}>
-              {choices.length === 0 ? (emptyText ?? 'No field in this data fits this role.') : 'No field matches.'}
+              {choices.length === 0 ? (emptyText ?? t('bc.canvas.noFieldFits')) : t('bc.canvas.noFieldMatches')}
             </div>
           )}
           {groups.map(g => (
             <div key={g || '_'}>
               {g && <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase',
-                letterSpacing: '.06em', padding: '8px 8px 4px' }}>{g}</div>}
+                letterSpacing: '.06em', padding: '8px 8px 4px' }}>{role(g)}</div>}
               {shown.filter(c => (c.group ?? '') === g).map(c => {
                 const on = picked.includes(c.value)
                 return multi ? (
                   <label key={c.value} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px',
                     borderRadius: 6, cursor: 'pointer' }}>
                     <input type="checkbox" checked={on} onChange={() => toggle(c.value)} />
-                    <span style={{ flex: 1 }}>{c.label}</span>
+                    <span style={{ flex: 1 }} dir="auto">{c.label}</span>
                     {on && <span style={{ fontSize: 11, color: 'var(--accent)' }}>#{picked.indexOf(c.value) + 1}</span>}
                   </label>
                 ) : (
@@ -274,10 +286,10 @@ export function AddFieldDialog({ heading, multi, choices, selected, onApply, onC
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '10px 16px',
           borderTop: '1px solid var(--border)' }}>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>{t('bc.canvas.cancel')}</button>
           {multi && (
             <button type="button" className="btn btn-primary btn-sm" disabled={!changed}
-              onClick={() => { onApply(picked); onClose() }}>Add</button>
+              onClick={() => { onApply(picked); onClose() }}>{t('bc.canvas.add')}</button>
           )}
         </div>
       </div>

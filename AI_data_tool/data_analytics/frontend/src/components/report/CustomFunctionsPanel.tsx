@@ -3,6 +3,7 @@ import { customFunctionsApi } from '../../services/api'
 import type { CustomFunction } from '../../services/api'
 import { useConfirm } from '../ui/ConfirmDialog'
 import { useT } from '../../i18n'
+import { richT } from '../../i18n/builder/panes'
 
 /**
  * Management surface for a dataset's custom calculated-column functions --
@@ -46,14 +47,14 @@ export default function CustomFunctionsPanel({ datasetId, onChanged }: {
         { name: editing.name.trim(), params, expression: editing.expression.trim() })
       setFunctions(updated); onChanged(updated); setEditing(null)
     } catch (err: any) {
-      setError(err?.response?.data?.detail ?? 'Could not save this function')
+      setError(err?.response?.data?.detail ?? tr('pg.panelsA.fn.saveFailed'))
     }
   }
 
   const del = async (name: string) => {
     if (!await confirm({
-      title: `Delete the custom function "${name}"?`,
-      body: 'Any calculated column calling it stops working. This cannot be undone.',
+      title: tr('pg.panelsA.fn.deleteTitle', { name }),
+      body: tr('pg.panelsA.fn.deleteBody'),
     })) return
     const updated = await customFunctionsApi.delete(datasetId, name)
     setFunctions(updated); onChanged(updated)
@@ -73,9 +74,9 @@ export default function CustomFunctionsPanel({ datasetId, onChanged }: {
         return [k, v.trim() !== '' && !Number.isNaN(n) ? n : v]
       }))
       const r = await customFunctionsApi.preview(datasetId, params, editing.expression.trim(), coerced)
-      setPreviewResult(r.ok ? String(r.result) : (r.error ?? 'Preview failed'))
+      setPreviewResult(r.ok ? String(r.result) : (r.error ?? tr('pg.panelsA.previewFailed')))
     } catch (err: any) {
-      setPreviewResult(err?.response?.data?.detail ?? 'Preview failed')
+      setPreviewResult(err?.response?.data?.detail ?? tr('pg.panelsA.previewFailed'))
     } finally {
       setTesting(false)
     }
@@ -97,12 +98,12 @@ export default function CustomFunctionsPanel({ datasetId, onChanged }: {
         <div key={fn.name} style={{ display:'flex', alignItems:'center', gap:5, padding:'5px 7px',
           background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:5, marginBottom:4 }}>
           <div style={{ flex:1, minWidth:0 }}>
-            <div style={{ fontSize:12, fontWeight:600 }}>{`${fn.name}(${fn.params.join(', ')})`}</div>
-            <div style={{ fontSize: 11, color:'var(--muted)', fontFamily:'var(--mono)' }}>{fn.expression}</div>
+            <div style={{ fontSize:12, fontWeight:600 }}><bdi dir="ltr">{`${fn.name}(${fn.params.join(', ')})`}</bdi></div>
+            <div style={{ fontSize: 11, color:'var(--muted)', fontFamily:'var(--mono)' }}><bdi dir="ltr">{fn.expression}</bdi></div>
           </div>
           <button style={{ background:'none', border:'none', cursor:'pointer', color:'var(--muted)', fontSize:12, padding:'0 3px' }}
-            title="Edit" onClick={() => openEdit(fn)}>✏</button>
-          <button title="Delete" onClick={() => del(fn.name)}
+            title={tr('pg.panelsA.edit')} onClick={() => openEdit(fn)}>✏</button>
+          <button title={tr('pg.panelsA.delete')} onClick={() => del(fn.name)}
             style={{ background:'none', border:'none', cursor:'pointer', color:'var(--muted)', fontSize:14 }}>×</button>
         </div>
       ))}
@@ -115,21 +116,22 @@ export default function CustomFunctionsPanel({ datasetId, onChanged }: {
 
       {editing !== null && (
         <div style={{ border:'1px solid var(--border)', borderRadius:7, padding:10, marginTop:8 }}>
-          <label htmlFor="cf-name" style={{ display:'block', fontSize: 11, color:'var(--muted)', marginBottom:3 }}>Function name</label>
+          <label htmlFor="cf-name" style={{ display:'block', fontSize: 11, color:'var(--muted)', marginBottom:3 }}>{tr('pg.panelsA.fn.name')}</label>
           <input id="cf-name" value={editing.name} onChange={e => setEditing({ ...editing, name: e.target.value })}
             style={{ width:'100%', fontSize:12, marginBottom:6 }} />
 
-          <label htmlFor="cf-params" style={{ display:'block', fontSize: 11, color:'var(--muted)', marginBottom:3 }}>Parameters (comma-separated)</label>
+          <label htmlFor="cf-params" style={{ display:'block', fontSize: 11, color:'var(--muted)', marginBottom:3 }}>{tr('pg.panelsA.fn.params')}</label>
           <input id="cf-params" value={editing.params} onChange={e => setEditing({ ...editing, params: e.target.value })}
-            placeholder="revenue, cost" style={{ width:'100%', fontSize:12, marginBottom:6 }} />
+            placeholder="revenue, cost" // i18n-ok: parameter names, a code sample
+            dir="ltr" style={{ width:'100%', fontSize:12, marginBottom:6 }} />
 
-          <label htmlFor="cf-expr" style={{ display:'block', fontSize: 11, color:'var(--muted)', marginBottom:3 }}>Expression</label>
+          <label htmlFor="cf-expr" style={{ display:'block', fontSize: 11, color:'var(--muted)', marginBottom:3 }}>{tr('pg.panelsA.fn.expression')}</label>
           <textarea id="cf-expr" value={editing.expression} onChange={e => setEditing({ ...editing, expression: e.target.value })}
             style={{ width:'100%', fontSize:12, fontFamily:'var(--mono)', marginBottom:6 }} rows={2} />
 
           {params.map(p => (
             <div key={p} style={{ marginBottom: 4 }}>
-              <label htmlFor={`cf-sample-${p}`} style={{ fontSize: 11, color:'var(--muted)' }}>Sample value for {p}</label>
+              <label htmlFor={`cf-sample-${p}`} style={{ fontSize: 11, color:'var(--muted)' }}>{richT(tr, 'pg.panelsA.fn.sampleFor', { p })}</label>
               <input id={`cf-sample-${p}`} value={sampleValues[p] ?? ''}
                 onChange={e => setSampleValues({ ...sampleValues, [p]: e.target.value })}
                 style={{ width:'100%', fontSize:12 }} />
@@ -140,11 +142,11 @@ export default function CustomFunctionsPanel({ datasetId, onChanged }: {
           {previewResult !== null && <p style={{ fontSize:12 }}>{previewResult}</p>}
 
           <div style={{ display:'flex', gap:6, marginTop:6 }}>
-            <button className="btn btn-ghost btn-sm" onClick={() => setEditing(null)} style={{ fontSize:11 }}>Cancel</button>
-            <button className="btn btn-ghost btn-sm" onClick={test} disabled={testing || !editing.expression.trim()} title={!editing.expression.trim() ? 'Write the function body first' : undefined} style={{ fontSize:11 }}>
-              {testing ? 'Testing…' : 'Test'}
+            <button className="btn btn-ghost btn-sm" onClick={() => setEditing(null)} style={{ fontSize:11 }}>{tr('pg.panelsA.fn.cancel')}</button>
+            <button className="btn btn-ghost btn-sm" onClick={test} disabled={testing || !editing.expression.trim()} title={!editing.expression.trim() ? tr('pg.panelsA.fn.bodyFirst') : undefined} style={{ fontSize:11 }}>
+              {testing ? tr('pg.panelsA.testing') : tr('pg.panelsA.test')}
             </button>
-            <button className="btn btn-primary btn-sm" onClick={save} style={{ fontSize:11, marginInlineStart:'auto' }}>Save</button>
+            <button className="btn btn-primary btn-sm" onClick={save} style={{ fontSize:11, marginInlineStart:'auto' }}>{tr('pg.panelsA.save')}</button>
           </div>
         </div>
       )}

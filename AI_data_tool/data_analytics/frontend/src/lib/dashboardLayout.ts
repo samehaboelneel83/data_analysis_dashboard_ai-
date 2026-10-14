@@ -288,10 +288,35 @@ export function dropPacked(
     const from = { x: moving.layout.x, y: moving.layout.y }
     moving.layout = clampLayout(moving.widget_type, { ...moving.layout, x: swapWith.layout.x, y: swapWith.layout.y })
     swapWith.layout = clampLayout(swapWith.widget_type, { ...swapWith.layout, x: from.x, y: from.y })
+    pushCollisionsDown(next, [moving.id, swapWith.id])
   } else {
     moving.layout = proposed
+    pushCollisionsDown(next, [moving.id])
   }
-  return compact(next)
+  // QA3 A7: no page-wide compaction here. It floated a widget dropped in
+  // empty space up to the first free row, and slid unrelated widgets into
+  // the hole it left: the drop cell is where it lands, and a widget moves
+  // only when something now sits on it.
+  return toMap(next)
+}
+
+/** Push every widget that overlaps a settled one down below it, cascading:
+ *  a pushed widget is settled in turn, so it pushes what it lands on. */
+function pushCollisionsDown(items: LayoutItem[], settledIds: number[]): void {
+  const settled = new Set(settledIds)
+  for (let n = 0; n < items.length * items.length + 1; n++) {
+    let moved = false
+    for (const fixed of byReadingOrder(items.filter(i => settled.has(i.id)))) {
+      for (const other of byReadingOrder(items.filter(i => !settled.has(i.id)))) {
+        if (overlaps(fixed.layout, other.layout)) {
+          other.layout = { ...other.layout, y: fixed.layout.y + fixed.layout.h }
+          settled.add(other.id)
+          moved = true
+        }
+      }
+    }
+    if (!moved) break
+  }
 }
 
 function pushOverlapsDown(items: LayoutItem[], resizedId: number): void {
@@ -406,4 +431,21 @@ export function layoutChanged(a: GridLayout, b: GridLayout): boolean {
 
 export function isPackedMode(mode: string | null | undefined): boolean {
   return mode !== 'free'
+}
+
+/**
+ * QA3 N3: what the canvas draws for a page, without writing anything.
+ * A page with no layout mode (v1's dashboards) is shown in the default
+ * automatic layout; a packed page whose stored widgets overlap is shown
+ * compacted. Either used to be SAVED the moment the page opened in Edit, one
+ * request per widget -- a burst of versions for opening a dashboard. Now it
+ * is only drawn, and stored on the first real layout edit. Empty: the stored
+ * layouts are what is drawn.
+ */
+export function shownLayouts(page: { layout_mode?: string | null; widgets: { id: number; widget_type: string; layout: GridLayout }[] }): Record<number, GridLayout> {
+  if (!page.widgets.length) return {}
+  const items = toLayoutItems(page.widgets)
+  if (needsAutoPack(page.layout_mode)) return applyRecipe(items, DEFAULT_RECIPE)
+  if (isPackedMode(page.layout_mode) && itemsOverlap(items)) return compact(items)
+  return {}
 }

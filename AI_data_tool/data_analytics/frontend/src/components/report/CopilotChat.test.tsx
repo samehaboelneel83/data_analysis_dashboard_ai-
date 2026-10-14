@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import CopilotChat from './CopilotChat'
-import { insightsApi, reportsApi } from '../../services/api'
+import { api, insightsApi, llmApi, reportsApi } from '../../services/api'
 import { axeViolations } from '../../test/axe'
 
 /** The page copilot panel: opens without touching the canvas, sends the
@@ -286,5 +286,70 @@ describe('CopilotChat', () => {
     expect(await axeViolations(container)).toEqual([])
     openPanel()
     expect(await axeViolations(container)).toEqual([])
+  })
+})
+
+describe('CopilotChat while the model server is unreachable (redesign 7e5)', () => {
+  const endpoints = (ok: boolean) => ({ data: {
+    llm_enabled: true, default: 'main', auto_pick: null, source: 'saved',
+    endpoints: [{ id: 'main', name: 'Main', model: 'm', enabled: true, is_default: true, strength: 5, context: null, status: { ok } }],
+  } })
+
+  it('says so in one line and locks the box, then unlocks when it is back', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue(endpoints(false) as any)
+    mount()
+    await act(async () => { await llmApi.endpoints() })
+    openPanel()
+    expect(await screen.findByTestId('copilot-offline')).toHaveTextContent('The model server isn’t reachable, so new questions are paused.')
+    const box = screen.getByLabelText('Message to Ask AI')
+    expect(box).toBeDisabled()
+    expect(box).toHaveAttribute('placeholder', 'New questions are paused while the model server is unreachable')
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
+    vi.mocked(api.get).mockResolvedValue(endpoints(true) as any)
+    await act(async () => { await llmApi.endpoints() })
+    await waitFor(() => expect(screen.queryByTestId('copilot-offline')).not.toBeInTheDocument())
+    expect(screen.getByLabelText('Message to Ask AI')).not.toBeDisabled()
+  })
+})
+
+
+describe('the Ask AI button stays over the canvas (QA3 B1)', () => {
+  it('keeps clear of everything beside the canvas column: panel, pinned Properties and rail', () => {
+    const col = document.createElement('div')
+    col.setAttribute('data-canvas-scroll', '')
+    col.getBoundingClientRect = () => ({ left: 320, right: 1000, top: 0, bottom: 800, width: 680, height: 800, x: 320, y: 0, toJSON: () => ({}) })
+    document.body.append(col)
+    try {
+      const { container } = render(<CopilotChat reportId={9} pageId={4} onApplied={vi.fn()} />)
+      const box = container.querySelector('.dl-askai') as HTMLElement
+      // window 1024 wide in jsdom: 24 px of room plus the button's own 24
+      expect(box.style.insetInlineEnd).toBe(`${window.innerWidth - 1000 + 24}px`)
+    } finally { col.remove() }
+  })
+})
+
+describe('CopilotChat with no model', () => {
+  it('offers each ready chart as a button that adds it to the page', async () => {
+    vi.spyOn(reportsApi, 'copilot').mockResolvedValue({
+      reply: 'The whole answer\n- Amount by group: which is largest', lead: 'The words without the list',
+      applied: [], notes: [], results: [], without_ai: true,
+      suggestions: [{ title: 'Amount by group', sentence: 'which is largest', widget_type: 'bar',
+                      config: { dimension: 'group', measure: 'amount', aggregation: 'sum' } }],
+    })
+    const add = vi.spyOn(reportsApi, 'addWidget').mockResolvedValue({} as never)
+    const onApplied = mount()
+    openPanel()
+    type('amount by group')
+    await waitFor(() => expect(screen.getByText('The words without the list')).toBeInTheDocument())
+    // The list is the buttons, not a second copy in the text.
+    expect(screen.queryByText(/The whole answer/)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Add to page: Amount by group' }))
+    await waitFor(() => expect(add).toHaveBeenCalledTimes(1))
+    expect(add.mock.calls[0].slice(0, 2)).toEqual([9, 4])
+    expect(add.mock.calls[0][2]).toMatchObject({
+      widget_type: 'bar', title: 'Amount by group',
+      config: { dimension: 'group', measure: 'amount', aggregation: 'sum' } })
+    await waitFor(() => expect(onApplied).toHaveBeenCalledTimes(1))
+    expect(screen.getByRole('button', { name: 'Add to page: Amount by group' })).toBeDisabled()
   })
 })

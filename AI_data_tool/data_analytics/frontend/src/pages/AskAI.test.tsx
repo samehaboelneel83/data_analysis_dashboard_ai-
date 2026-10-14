@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import AskAI from './AskAI'
+import { renderWithProviders } from '../test/renderWithProviders'
 
 /**
  * The page's whole job is scope resolution: turn a URL or a picker choice
@@ -9,18 +10,25 @@ import AskAI from './AskAI'
  * mocked to a probe that reports what it was given.
  */
 
-vi.mock('../components/chat/ChatPane', () => ({
-  default: (props: { dataSourceId?: number; datasetIds?: number[]; conversationId?: number | null
-                     onConversationCreated?: (c: { id: number; title: string }) => void }) => (
-    <div data-testid="chat-pane">
+vi.mock('../components/chat/ChatPane', async () => {
+  const { useState } = await vi.importActual<typeof import('react')>('react')
+  return {
+  default: function Probe(props: { dataSourceId?: number; datasetIds?: number[]; conversationId?: number | null
+                     onConversationCreated?: (c: { id: number; title: string }) => void; initialInput?: string }) {
+    // What the real pane does: the box takes the question once, on mount.
+    const [initial] = useState(props.initialInput ?? '')
+    return (
+    <div data-testid="chat-pane" data-initial={initial}>
       {props.dataSourceId != null ? `source:${props.dataSourceId}` : `datasets:${props.datasetIds?.join(',')}`}
       {` conversation:${props.conversationId === undefined ? 'unset' : String(props.conversationId)}`}
       <button onClick={() => props.onConversationCreated?.({ id: 99, title: 'Made by pane' })}>
         probe-create
       </button>
     </div>
-  ),
-}))
+    )
+  },
+  }
+})
 
 vi.mock('../services/api', () => ({
   datasetsApi: { list: vi.fn() },
@@ -46,14 +54,14 @@ beforeEach(() => {
   vi.mocked(agentApi.remove).mockResolvedValue(undefined)
 })
 
-const renderAt = (path: string) => render(
+const renderAt = (path: string) => renderWithProviders(
   <MemoryRouter initialEntries={[path]}><AskAI /></MemoryRouter>,
 )
 
 describe('AskAI', () => {
   it('mounts nothing until a scope is picked -- a question needs a target', async () => {
     renderAt('/ask')
-    expect(await screen.findByText(/Pick a dataset or connection/)).toBeInTheDocument()
+    expect(await screen.findByText('Choose your data')).toBeInTheDocument()
     expect(screen.queryByTestId('chat-pane')).not.toBeInTheDocument()
   })
 
@@ -69,19 +77,16 @@ describe('AskAI', () => {
 
   it('picking a scope in the picker mounts the pane for it', async () => {
     renderAt('/ask')
-    const trigger = await screen.findByRole('button', { name: 'What to ask about' })
-    await waitFor(() => expect(trigger).not.toBeDisabled())
-    fireEvent.click(trigger)
+    // The empty page's chooser is always open (owner's change to Part A).
     fireEvent.click(await screen.findByRole('option', { name: /Orders/ }))
     expect(await screen.findByTestId('chat-pane')).toHaveTextContent('datasets:32')
   })
 
   it('the picker searches, and says what each choice is', async () => {
     renderAt('/ask')
-    const trigger = await screen.findByRole('button', { name: 'What to ask about' })
-    await waitFor(() => expect(trigger).not.toBeDisabled())
-    fireEvent.click(trigger)
+    // The empty page's chooser is always open (owner's change to Part A).
     const search = await screen.findByRole('combobox', { name: /search/i })
+    await screen.findByRole('option', { name: /Warehouse/ })
     expect(screen.getAllByRole('option').map(o => o.textContent)).toEqual(
       expect.arrayContaining([expect.stringMatching(/Warehouse/)]))
     fireEvent.change(search, { target: { value: 'ware' } })
@@ -90,11 +95,14 @@ describe('AskAI', () => {
     expect(await screen.findByTestId('chat-pane')).toHaveTextContent('source:3')
   })
 
-  it('shows the question box before a scope is picked, locked', async () => {
+  it('before a scope is picked, shows Step 1 and the question box locked (step 10 design)', async () => {
+    // The design shows the box at the foot from the start, locked, so the
+    // order of things is obvious; it cannot be typed in until data is chosen.
     renderAt('/ask')
     expect(await screen.findByRole('heading', { name: 'Ask your data anything' })).toBeInTheDocument()
+    expect(screen.getByText('Choose your data')).toBeInTheDocument()
+    expect(screen.getByText('Step 1')).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Your question' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
   })
 
   it('a failed dataset list is an error, never "no data yet"', async () => {
@@ -146,14 +154,15 @@ describe('AskAI — the conversation list', () => {
   ]
   beforeEach(() => vi.mocked(agentApi.listConversations).mockResolvedValue(CONVS))
 
-  it('lists only the threads about the current scope and opens the newest', async () => {
+  it('lists only the threads about the current scope, and opens a new chat (step 10)', async () => {
     renderAt('/ask?dataset=32')
     const list = await screen.findByRole('list', { name: /conversations/i })
     expect(list).toHaveTextContent('Orders by city')
     expect(list).toHaveTextContent('Older orders chat')
     expect(list).not.toHaveTextContent('Warehouse chat')
     expect(list).not.toHaveTextContent('Other dataset')
-    expect(screen.getByTestId('chat-pane')).toHaveTextContent('conversation:55')
+    // The design's "dataset picked" state: the threads are one click away.
+    expect(screen.getByTestId('chat-pane')).toHaveTextContent('conversation:null')
   })
 
   it('a source scope lists the source threads', async () => {
@@ -161,7 +170,7 @@ describe('AskAI — the conversation list', () => {
     const list = await screen.findByRole('list', { name: /conversations/i })
     expect(list).toHaveTextContent('Warehouse chat')
     expect(list).not.toHaveTextContent('Orders by city')
-    expect(screen.getByTestId('chat-pane')).toHaveTextContent('conversation:40')
+    expect(screen.getByTestId('chat-pane')).toHaveTextContent('conversation:null')
   })
 
   it('picking another thread hands its id to the pane', async () => {
@@ -185,7 +194,7 @@ describe('AskAI — the conversation list', () => {
 
   it('with no thread for the scope yet, the pane starts empty', async () => {
     renderAt('/ask?dataset=7')
-    expect(await screen.findByTestId('chat-pane')).toHaveTextContent('conversation:12')
+    expect(await screen.findByTestId('chat-pane')).toHaveTextContent('conversation:null')
     vi.mocked(agentApi.listConversations).mockResolvedValue([])
     renderAt('/ask?dataset=8')
     await waitFor(() =>
@@ -205,10 +214,12 @@ describe('AskAI — the conversation list', () => {
   })
 
   it('deletes a thread after confirming, and empties the pane if it was open', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     renderAt('/ask?dataset=32')
     await screen.findByRole('list', { name: /conversations/i })
     fireEvent.click(screen.getByRole('button', { name: /delete orders by city/i }))
+    // The app's own dialog, not window.confirm.
+    const dialog = await screen.findByRole('alertdialog', { name: 'Delete this conversation?' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
     await waitFor(() => expect(agentApi.remove).toHaveBeenCalledWith(55))
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: /^Orders by city/ })).not.toBeInTheDocument())
@@ -216,10 +227,12 @@ describe('AskAI — the conversation list', () => {
   })
 
   it('a declined confirm deletes nothing', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false)
     renderAt('/ask?dataset=32')
     await screen.findByRole('list', { name: /conversations/i })
     fireEvent.click(screen.getByRole('button', { name: /delete orders by city/i }))
+    const dialog = await screen.findByRole('alertdialog', { name: 'Delete this conversation?' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
     expect(agentApi.remove).not.toHaveBeenCalled()
   })
 
@@ -233,12 +246,49 @@ describe('AskAI — the conversation list', () => {
       { id: 167, name: 'Live orders', mode: 'directquery', filename: null } as any,
     ])
     renderAt('/ask')
-    const trigger = await screen.findByRole('button', { name: 'What to ask about' })
-    await waitFor(() => expect(trigger).not.toBeDisabled())
-    fireEvent.click(trigger)
+    // The empty page's chooser is always open (owner's change to Part A).
     await waitFor(() => expect(screen.getByText('Orders')).toBeInTheDocument(),
                   { timeout: 5000 })
     expect(screen.queryByText('Live orders')).not.toBeInTheDocument()
     expect(screen.getByText('Warehouse')).toBeInTheDocument()
+  })
+})
+
+
+/**
+ * Home's question box hands its question over as `/ask?q=`. It is put in the
+ * question box -- never sent for the person -- and leaves the URL so a reload
+ * does not bring it back.
+ */
+describe('a question handed over from Home', () => {
+  it('waits in the hero until data is chosen', async () => {
+    renderAt('/ask?q=Which%20region%20grew')
+    expect(await screen.findByTestId('ask-pending-q')).toHaveTextContent('Which region grew')
+    expect(screen.queryByTestId('chat-pane')).not.toBeInTheDocument()
+  })
+
+  it('goes into the question box of the scoped chat, unsent', async () => {
+    renderAt('/ask?dataset=32&q=Total%20sales%20by%20region')
+    const pane = await screen.findByTestId('chat-pane')
+    expect(pane).toHaveAttribute('data-initial', 'Total sales by region')
+    expect(pane).toHaveTextContent('datasets:32')
+  })
+})
+
+/**
+ * QA B2 (7-QA): a dataset the picker hides as test-looking ("ID only (test)")
+ * could still be opened by link -- from Home's Ask AI action or its starters
+ * -- and the chat answered about it, but the picker said "Choose a dataset".
+ * The picker must name the dataset the page is about, hidden or not.
+ */
+describe('a test-looking dataset opened by link (QA B2)', () => {
+  it('is named in the picker', async () => {
+    vi.mocked(datasetsApi.list).mockResolvedValue([
+      { id: 32, name: 'Orders', mode: 'import', filename: 'orders.csv' } as any,
+      { id: 8, name: 'ID only (test)', mode: 'import', filename: 'id_only_test.csv' } as any,
+    ])
+    renderAt('/ask?dataset=8')
+    await screen.findByTestId('chat-pane')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'What to ask about' })).toHaveTextContent('ID only (test)'))
   })
 })

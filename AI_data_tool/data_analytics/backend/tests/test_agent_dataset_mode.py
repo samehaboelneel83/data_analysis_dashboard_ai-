@@ -599,3 +599,21 @@ class TestTheAgentComputesTheDatasetsOwnMeasures:
         ds, user = await self._world(db_session, tmp_path, denied=["profit"])
         prompt = await self._prompt(db_session, ds, user)
         assert "Margin %" not in prompt and "profit" not in prompt
+
+
+class TestPreparedRows:
+    async def test_ask_reads_the_rows_the_charts_read(self, db_session, single_world):
+        # Persona test 2026-10-12 (plan 1.12): Ask AI answered from the raw
+        # rows while the dashboard on the same dataset read the cleaned ones.
+        from app.services.prep import PREP_STEPS_KEY
+        orders = single_world["orders"]
+        orders.column_meta = {PREP_STEPS_KEY: [{"kind": "filter_rows", "expression": "total > 15"}]}
+        await db_session.commit()
+        client = ScriptedClient(classify=[NOT_AMBIGUOUS], plan=[ONE_STEP],
+                                generate=[{"sql": "SELECT id, total FROM orders"}])
+        run = await run_agent(db_session, question="list the orders", datasets=[orders],
+                              user=single_world["user"], client=client)
+        await db_session.commit()
+        assert run.status == "ok"
+        step = (await db_session.execute(select(AgentStep))).scalar_one()
+        assert step.rows_returned == 1                # 2 raw rows, 1 after the Prepare step

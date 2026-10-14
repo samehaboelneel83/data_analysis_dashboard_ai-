@@ -36,7 +36,7 @@ async function openAndImport() {
   vi.mocked(dataSourcesApi.preview).mockResolvedValue({ columns: ['region'], rows: [['east']], total: 1 })
   render(<MemoryRouter><SchemaBrowser ds={DS} onClose={() => {}} /></MemoryRouter>)
   fireEvent.click(await screen.findByText('sales'))
-  await screen.findByText(/1 rows preview/)
+  await screen.findByText(/1 row preview/)
   fireEvent.click(screen.getByText(/Import as Dataset/))
 }
 
@@ -91,7 +91,7 @@ describe('SchemaBrowser follows its import job', () => {
     vi.mocked(dataSourcesApi.import).mockResolvedValue({ id: 5, name: 'sales', row_count: 0, col_count: 1, mode: 'directquery' })
     render(<MemoryRouter><SchemaBrowser ds={DS} onClose={() => {}} /></MemoryRouter>)
     fireEvent.click(await screen.findByText('sales'))
-    await screen.findByText(/1 rows preview/)
+    await screen.findByText(/1 row preview/)
     fireEvent.click(screen.getByText('DirectQuery'))
     fireEvent.click(screen.getByText(/Create DirectQuery Dataset/))
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/datasets/5?new=1'))
@@ -158,6 +158,22 @@ describe('ImportQueue', () => {
     expect(screen.getByText('Live DB · orders → Orders')).toBeInTheDocument()
     expect(screen.getByText('Failed')).toBeInTheDocument()
     expect(screen.getByText('Done')).toBeInTheDocument()
+  })
+
+  it('tucks away finished imports older than a day, and dismissed ones (5.4)', async () => {
+    try { localStorage.removeItem('datalytics:import-dismissed') } catch { /* */ }
+    const old = new Date(Date.now() - 3 * 24 * 3600_000).toISOString()
+    vi.mocked(jobsApi.list).mockResolvedValue([
+      job({ id: 3, state: 'succeeded', subject: 'Fresh import', created_at: new Date().toISOString() }),
+      job({ id: 2, state: 'failed', subject: 'kjhkjhkjh', created_at: old }),
+    ])
+    render(<MemoryRouter><ImportQueue /></MemoryRouter>)
+    expect(await screen.findByText('Fresh import')).toBeInTheDocument()
+    expect(screen.queryByText('kjhkjhkjh')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss Fresh import' }))
+    expect(screen.queryByText('Fresh import')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Show 2 older or dismissed imports' }))
+    expect(screen.getByText('kjhkjhkjh')).toBeInTheDocument()
   })
 })
 

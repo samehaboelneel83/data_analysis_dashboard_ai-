@@ -101,3 +101,24 @@ describe('sentences', () => {
     expect(changedKeys({ a: [1, 2] }, { a: [1, 2] })).toEqual([])
   })
 })
+
+describe('undo sentences never print objects or lists (QA4 T4)', () => {
+  it('English: a list is its count, nothing is "none"', () => {
+    expect(describeConfigChange('KPI 4', { display_rules: [{ id: 'a' }, { id: 'b' }, { id: 'c' }] }, {}, 'KPI 4', 'KPI 4'))
+      .toBe('Change display rules of "KPI 4" from 3 rules to none')
+    expect(describeConfigChange('KPI 4', {}, { filters: [{ column: 'region' }] }, 'KPI 4', 'KPI 4'))
+      .toBe('Change filters of "KPI 4" from none to 1 item')
+  })
+  it('Arabic: the setting by its panel name, the count in words', async () => {
+    const { translate } = await import('../../i18n')
+    const t = ((k: string, v?: Record<string, string | number>) => translate('ar', k as never, v)) as never
+    document.documentElement.lang = 'ar'
+    try {
+      const s = describeConfigChange('KPI 4', { display_rules: [{ id: 'a' }, { id: 'b' }, { id: 'c' }] }, {}, 'KPI 4', 'KPI 4', t)
+      expect(s).toContain('قواعد العرض')
+      expect(s).toContain('3 قواعد')
+      expect(s).toContain('لا شيء')
+      expect(s).not.toMatch(/[[{]/)
+    } finally { document.documentElement.lang = '' }
+  })
+})

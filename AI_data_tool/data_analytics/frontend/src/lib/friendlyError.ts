@@ -24,6 +24,9 @@ export function friendlyMessage(message: string): string {
   if (/could not translate host name|Name or service not known|getaddrinfo|nodename nor servname|Unknown host/i.test(m)) {
     return 'The database server could not be found. Check the host name.'
   }
+  if (/unable to open database file|file is not a database|No such file or directory/i.test(m)) {
+    return 'The database file could not be opened. Edit the connection and check the file path.'
+  }
   if (/on socket .*failed/i.test(m)) {
     return 'No database server was named. Fill in the host (and port).'
   }

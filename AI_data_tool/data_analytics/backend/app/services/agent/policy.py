@@ -102,8 +102,14 @@ async def load_policies(db, context, user) -> dict[str, str]:
     # org_id is a plain column on the already-loaded user (cheap); org NAME would need
     # a separate Organization lookup, which isn't worth paying here for every policy row
     # -- ORGNAME() stays unresolved in this path (source-object row policies, not RLS).
-    policies = {name: apply_user_context(pol.predicate, email=user.email,
-                                         user_id=user.id, org_id=user.org_id)
+    # MYSCOPE() -- "this user's org units and everything under them" -- is
+    # expanded here too. It was only expanded for DATASET rules, so a
+    # connection rule written with it reached the SQL unresolved and failed
+    # closed for everyone (HR evaluation, item 2.1).
+    from ...core.rls import apply_scope, scope_values_for
+    scope = await scope_values_for(db, user)
+    policies = {name: apply_scope(apply_user_context(pol.predicate, email=user.email,
+                                                     user_id=user.id, org_id=user.org_id), scope)
                 for pol, name in rows}
     for table, predicate in (await _dataset_rule_predicates(db, context, user)).items():
         policies[table] = f"({policies[table]}) AND ({predicate})" if table in policies else predicate
@@ -184,4 +190,32 @@ async def _dataset_rule_predicates(db, context, user) -> dict[str, str]:
                 tables = {ANY_TABLE}
             for table in tables or {ANY_TABLE}:
                 out.setdefault(table, []).append(_NO_ROWS)
+                # Said, not silent: the answer tells the reader WHY these rows
+                # are missing and where they can ask instead (graph adds it as
+                # a concern when a step reads one of these tables).
+                try:
+                    closed = getattr(context, "closed_by", None)
+                    if closed is None:
+                        closed = {}
+                        setattr(context, "closed_by", closed)
+                    closed.setdefault(table, set()).add(ds.name)
+                except Exception:  # noqa: BLE001 -- a note, never a reason to open
+                    pass
     return {t: " AND ".join(f"({p})" for p in preds) for t, preds in out.items()}
+
+
+
+def closed_table_note(sql: str, context) -> str | None:
+    """Why a step's rows may be missing: it read a table this reader may only
+    see through a dataset (see `_dataset_rule_predicates`)."""
+    closed = getattr(context, "closed_by", None) or {}
+    if not closed or not sql:
+        return None
+    low = sql.lower()
+    hit = sorted({name for table, names in closed.items()
+                  if table != ANY_TABLE and table.lower() in low for name in names})
+    if not hit:
+        return None
+    named = ", ".join(f"'{n}'" for n in hit)
+    return (f"your access rules hide rows of this connection that are only shared with "
+            f"you through the dataset {named}; ask that dataset to see the rows you may read")

@@ -1,3 +1,5 @@
+import { useT } from '../../i18n'
+import { richT } from '../../i18n/builder/panes'
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { translationsApi } from '../../services/api'
@@ -13,6 +15,7 @@ export default function TranslationsPane({ report, onSaved }: {
   report: Report
   onSaved?: () => void
 }) {
+  const t = useT()
   const [all, setAll] = useState<Record<string, Record<string, string>>>({})
   const [locale, setLocale] = useState('')
   const [draft, setDraft] = useState<Record<string, string>>({})
@@ -36,9 +39,11 @@ export default function TranslationsPane({ report, onSaved }: {
         else delete next[locale]
         return next
       })
-      toast.success(Object.keys(saved).length ? `Saved ${locale} translations` : `Removed ${locale}`)
+      toast.success(Object.keys(saved).length
+        ? t('bc.panes.translations.saved', { locale })
+        : t('bc.panes.translations.removed', { locale }))
       onSaved?.()
-    } catch { toast.error('Could not save translations') }
+    } catch { toast.error(t('bc.panes.translations.saveFailed')) }
   }
 
   const widgets: { w: Widget; page: string }[] = report.pages.flatMap(p =>
@@ -48,14 +53,14 @@ export default function TranslationsPane({ report, onSaved }: {
   return (
     <div style={{ padding: 12, overflowY: 'auto', height: '100%' }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>
-        Translations
+        {t('builder.pane.translations')}
       </div>
       <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>
-        Viewers whose browser locale matches see these instead of the authored text. Blank entries fall back.
+        {t('bc.panes.translations.help')}
       </p>
       <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
-        <input aria-label="Locale" value={locale} onChange={e => pick(e.target.value.trim())}
-          placeholder="locale, e.g. ar or fr" style={{ fontSize: 12, width: 110 }} />
+        <input aria-label={t('bc.panes.translations.locale')} value={locale} onChange={e => pick(e.target.value.trim())}
+          placeholder={t('bc.panes.translations.localePh')} style={{ fontSize: 12, width: 110 }} />
         {Object.keys(all).map(loc => (
           <button key={loc} className="btn" style={{ fontSize: 11 }} onClick={() => pick(loc)}>{loc}</button>
         ))}
@@ -66,16 +71,16 @@ export default function TranslationsPane({ report, onSaved }: {
           {titled.map(({ w, page }) => (
             <div key={w.id} style={{ marginBottom: 8 }}>
               <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>
-                {page} · {w.title || w.widget_type}
+                <bdi>{page}</bdi> · <bdi>{w.title || w.widget_type}</bdi>
               </div>
               {w.title && (
-                <input aria-label={`Translation of ${w.title}`} value={draft[`w${w.id}`] ?? ''}
+                <input aria-label={t('bc.panes.translations.of', { name: w.title })} value={draft[`w${w.id}`] ?? ''}
                   placeholder={w.title}
                   onChange={e => setDraft(p => ({ ...p, [`w${w.id}`]: e.target.value }))}
                   style={{ fontSize: 12, width: '100%' }} />
               )}
               {w.widget_type === 'text' && (
-                <textarea aria-label={`Translation of text ${w.id}`} rows={2}
+                <textarea aria-label={t('bc.panes.translations.ofText', { id: w.id })} rows={2}
                   value={draft[`c${w.id}`] ?? ''}
                   placeholder={String((w.config as { content?: string })?.content ?? '')}
                   onChange={e => setDraft(p => ({ ...p, [`c${w.id}`]: e.target.value }))}
@@ -84,7 +89,7 @@ export default function TranslationsPane({ report, onSaved }: {
             </div>
           ))}
           <button className="btn btn-primary" style={{ fontSize: 11 }} onClick={() => void save()}>
-            Save {locale}
+            {richT(t, 'bc.panes.translations.saveLocale', { locale })}
           </button>
         </>
       )}

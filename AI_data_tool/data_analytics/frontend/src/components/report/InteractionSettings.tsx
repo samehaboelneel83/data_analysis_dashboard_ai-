@@ -1,19 +1,29 @@
 ﻿import { useEffect } from 'react'
 import type { Widget } from '../../types/report'
 import { useCrossFilter } from './CrossFilterContext'
+import { useT, type MessageKey } from '../../i18n'
+import { useDirection } from '../../contexts/DirectionContext'
 
 interface Props { widget: Widget; pageWidgets?: Widget[] }
 
-const MODES = [
-  { label: 'Two-way ⇄',        broadcasts: true,  receives: true  },
-  { label: 'Broadcast only →', broadcasts: true,  receives: false },
-  { label: 'Receive only ←',   broadcasts: false, receives: true  },
-  { label: 'Isolated —',        broadcasts: false, receives: false },
+// The arrows are part of each translation: they point the way the data
+// flows, so they turn round in a right-to-left reading.
+const MODES: { key: MessageKey; broadcasts: boolean; receives: boolean }[] = [
+  { key: 'bc.canvas.ix.twoWay',    broadcasts: true,  receives: true  },
+  { key: 'bc.canvas.ix.broadcast', broadcasts: true,  receives: false },
+  { key: 'bc.canvas.ix.receive',   broadcasts: false, receives: true  },
+  { key: 'bc.canvas.ix.isolated',  broadcasts: false, receives: false },
 ]
 
 export default function InteractionSettings({ widget, pageWidgets }: Props) {
   const { setInteraction, initInteraction, interactions } = useCrossFilter()
   const current = interactions[widget.id] ?? { broadcasts: true, receives: true }
+  const t = useT()
+  // Letter-spacing pulls Arabic's joined letters apart, and the uppercase
+  // headings must wrap rather than run past the panel's edge.
+  const { language } = useDirection()
+  const heading: React.CSSProperties = { fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase',
+    letterSpacing: language === 'ar' ? 0 : '.06em', overflowWrap: 'anywhere', whiteSpace: 'normal' }
 
   useEffect(() => {
     // Initialize only when absent: re-opening the panel must not stomp a
@@ -32,12 +42,12 @@ export default function InteractionSettings({ widget, pageWidgets }: Props) {
 
   return (
     <div style={{ borderTop: '1px solid var(--border)', padding: '12px 14px' }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
-        Interaction mode
+      <div style={{ ...heading, marginBottom: 8 }}>
+        {t('bc.canvas.ix.mode')}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         {MODES.map((m, i) => (
-          <button key={i} onClick={() => setInteraction(widget.id, { ...current, ...m })}
+          <button key={i} onClick={() => setInteraction(widget.id, { ...current, broadcasts: m.broadcasts, receives: m.receives })}
             style={{
               display: 'flex', alignItems: 'center', gap: 6, padding: '6px 9px',
               background: i === activeIdx ? 'color-mix(in srgb, var(--accent) 12%, transparent)' : 'transparent',
@@ -45,12 +55,12 @@ export default function InteractionSettings({ widget, pageWidgets }: Props) {
               borderRadius: 6, cursor: 'pointer', color: i === activeIdx ? 'var(--accent)' : 'var(--muted)',
               fontFamily: 'var(--sans)', fontSize: 12, textAlign: 'start', transition: 'all .15s',
             }}>
-            {m.label}
+            {t(m.key)}
           </button>
         ))}
       </div>
-      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', margin: '12px 0 6px' }}>
-        When receiving a selection
+      <div style={{ ...heading, margin: '12px 0 6px' }}>
+        {t('bc.canvas.ix.whenReceiving')}
       </div>
       <div style={{ display: 'flex', gap: 6 }}>
         {(['filter', 'highlight'] as const).map(m => (
@@ -63,12 +73,12 @@ export default function InteractionSettings({ widget, pageWidgets }: Props) {
               borderRadius: 6, cursor: 'pointer', color: receiveMode === m ? 'var(--accent)' : 'var(--muted)',
               fontFamily: 'var(--sans)', fontSize: 12, transition: 'all .15s',
             }}>
-            {m === 'filter' ? 'Filter' : 'Highlight'}
+            {m === 'filter' ? t('bc.canvas.ix.filter') : t('bc.canvas.ix.highlight')}
           </button>
         ))}
       </div>
       <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-        Highlight keeps every bar and saturates the selected share (bar charts).
+        {t('bc.canvas.ix.highlightHint')}
       </span>
 
       {/* Named per-pair actions (SAS's Actions pane): choose which specific
@@ -77,11 +87,11 @@ export default function InteractionSettings({ widget, pageWidgets }: Props) {
       {(pageWidgets ?? []).filter(w => w.id !== widget.id &&
           !['text', 'button', 'image', 'shape', 'container', 'web_content', 'custom_visual'].includes(w.widget_type)).length > 0 && (
         <>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', margin: '12px 0 6px' }}>
-            Actions on specific widgets
+          <div style={{ ...heading, margin: '12px 0 6px' }}>
+            {t('bc.canvas.ix.actions')}
           </div>
           <span style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>
-            Setting any action makes this widget's selections reach only the listed widgets.
+            {t('bc.canvas.ix.actionsHint')}
           </span>
           {(pageWidgets ?? [])
             .filter(w => w.id !== widget.id &&
@@ -90,10 +100,10 @@ export default function InteractionSettings({ widget, pageWidgets }: Props) {
               const act = current.actions?.find(a => a.targetId === w.id)
               return (
                 <div key={w.id} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                  <span style={{ flex: 1, fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span dir="auto" style={{ flex: 1, minWidth: 0, fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {w.title || w.widget_type}
                   </span>
-                  <select aria-label={`Action on ${w.title || w.widget_type}`}
+                  <select aria-label={t('bc.canvas.ix.actionOn', { name: w.title || w.widget_type })}
                     value={act?.mode ?? ''}
                     onChange={e => {
                       const mode = e.target.value as '' | 'filter' | 'highlight'
@@ -102,9 +112,9 @@ export default function InteractionSettings({ widget, pageWidgets }: Props) {
                       setInteraction(widget.id, { ...current, actions: actions.length ? actions : undefined })
                     }}
                     style={{ fontSize: 11, width: 110 }}>
-                    <option value="">— default —</option>
-                    <option value="filter">Filter</option>
-                    <option value="highlight">Highlight</option>
+                    <option value="">{t('bc.canvas.ix.default')}</option>
+                    <option value="filter">{t('bc.canvas.ix.filter')}</option>
+                    <option value="highlight">{t('bc.canvas.ix.highlight')}</option>
                   </select>
                 </div>
               )

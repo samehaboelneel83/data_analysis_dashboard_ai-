@@ -21,6 +21,23 @@ describe('ModelRenderer', () => {
     expect(screen.getByRole('tab', { name: 'Fit' }).getAttribute('aria-selected')).toBe('true')
   })
 
+  it('lists key influencers with what each group shows and how far from usual', () => {
+    render(<ModelRenderer {...base} data={{
+      type: 'model', status: 'ok', model: 'influencers', target: 'state', event: 'closed', predictors: ['kind'],
+      measure: 'rate', baseline: 0.25, value_format: 'percent', population: pop,
+      fit: { name: 'Overall rate', value: 0.25, secondary: {} },
+      result: { caveats: ['These factors move with the outcome; that is not proof they cause it.'] },
+      influencers: [{ factor: 'kind', group: 'c', value: 0.6, lift: 2.4, rows: 400, share_of_rows: 0.33 },
+                    { factor: 'kind', group: 'a', value: 0.1, lift: 0.4, rows: 380, share_of_rows: 0.32 }],
+      rows: [],
+    }} />)
+    expect(screen.getByText('Key influencers', { exact: false })).toBeTruthy()
+    expect(screen.getAllByTestId('influencer')).toHaveLength(2)
+    expect(screen.getByText(/60\.0%/)).toBeTruthy()
+    expect(screen.getByText(/2\.4. the usual/)).toBeTruthy()
+    expect(screen.getByText(/not proof they cause it/)).toBeTruthy()
+  })
+
   it('shows a refusal with its reason instead of a chart', () => {
     render(<ModelRenderer {...base} data={{ type: 'model', status: 'refused', reason: 'Only 3 complete rows.' }} />)
     expect(screen.getByText('This model could not be fitted')).toBeTruthy()
@@ -83,5 +100,73 @@ describe('ModelRenderer', () => {
     }} />)
     expect(screen.getByText(/On the training rows: Explains 46%/)).toBeTruthy()
     expect(screen.getByText(/validated on 569/)).toBeTruthy()
+  })
+
+  it('lists association rules with lift, confidence and the base rate beside it', () => {
+    const rule = { if: 'dept_name=Sales', then: 'title=Senior Staff', if_items: [['dept_name', 'Sales']],
+      then_items: [['title', 'Senior Staff']], lift: 3.086, confidence: 0.179, base_rate: 0.058, support_rows: 179 }
+    render(<ModelRenderer {...base} data={{
+      type: 'model', status: 'ok', model: 'rules', variables: ['dept_name', 'title'], focus: 'title',
+      banded: { salary: '4 equal-count bands' }, rules: [rule],
+      result: { meta: { params: { min_support_rows: 20, min_lift: 1.2 } } },
+      population: { rows_total: 3000, rows_used: 3000, rows_dropped: 0, dropped_by: {} },
+      fit: { name: 'strongest lift', value: 3.086, secondary: {} }, rows: [],
+    }} />)
+    expect(screen.getByText('Association rules')).toBeTruthy()
+    expect(screen.getByTestId('model-widget').textContent).toContain('conclusions about title')
+    expect(screen.getByText('1 rule found', { exact: false })).toBeTruthy()
+    const table = screen.getByTestId('rule-table')
+    expect(table.textContent).toContain('Senior Staff')
+    expect(table.textContent).toContain('3.09×')
+    expect(table.textContent).toContain('17.9%')
+    expect(table.textContent).toContain('5.8%')
+    fireEvent.click(screen.getByRole('tab', { name: 'Fit' }))
+    expect(screen.getByText(/equal-count bands: salary/)).toBeTruthy()
+  })
+
+  it('says plainly when no values travel together', () => {
+    render(<ModelRenderer {...base} data={{
+      type: 'model', status: 'ok', model: 'rules', variables: ['a', 'b'], rules: [], result: {},
+      population: { rows_total: 50, rows_used: 50, rows_dropped: 0, dropped_by: {} },
+      fit: { name: 'strongest lift', value: null, secondary: {} }, rows: [],
+    }} />)
+    expect(screen.getAllByText(/more often than chance/).length).toBeGreaterThan(0)
+  })
+  it('draws the groups as a picture when the server placed the rows in two dimensions', () => {
+    const cluster = (projection?: unknown) => ({
+      type: 'model', status: 'ok', model: 'cluster', variables: ['a', 'b', 'c'], population: pop,
+      fit: { name: 'silhouette', value: 0.6, secondary: { segments: 2 } }, rows: [],
+      result: { meta: { centroids: [{ cluster: 0, size: 5, a: 1, b: 2, c: 3 }, { cluster: 1, size: 4, a: 9, b: 8, c: 7 }],
+        ...(projection ? { projection } : {}) } },
+    })
+    const { unmount } = render(<ModelRenderer {...base} data={cluster()} />)
+    expect(screen.queryByRole('tab', { name: 'Picture' }) ?? screen.queryByText('Picture')).toBeNull()   // nothing to draw: no tab
+    unmount()
+    render(<ModelRenderer {...base} data={cluster({
+      points: [[0, 0, 0], [1, 1, 0], [5, 5, 1], [6, 5, 1]], centers: [[0.5, 0.5, 0], [5.5, 5, 1]], shown: 4, of: 9,
+      axes: [{ share: 0.71, variables: [{ name: 'a', weight: 0.7 }, { name: 'b', weight: 0.6 }] },
+        { share: 0.2, variables: [{ name: 'c', weight: 0.9 }] }],
+    })} />)
+    fireEvent.click(screen.getByText('Picture'))
+    const map = screen.getByTestId('cluster-map')
+    expect(map.querySelectorAll('circle').length).toBe(6)                      // four rows and two centres
+    expect(map.textContent).toContain('71% of the differences between rows, mostly a, b')
+    expect(map.textContent).toContain('4 of 9 rows drawn')
+  })
+  it('draws the rules as a network when there is more than one to connect', () => {
+    const rules = [{ if: 'c=a', then: 'c=b', lift: 2.4, confidence: 0.8, base_rate: 0.3, support_rows: 90 },
+      { if: 'c=a', then: 'c=d', lift: 1.4, confidence: 0.5, base_rate: 0.3, support_rows: 40 }]
+    render(<ModelRenderer {...base} data={{
+      type: 'model', status: 'ok', model: 'rules', variables: ['g', 'c'], rules, population: pop, rows: [],
+      fit: { name: 'strongest lift', value: 2.4, secondary: {} }, result: { meta: {} },
+      network: { nodes: [{ id: 'c=a', column: 'c', label: 'a', rules: 2 }, { id: 'c=b', column: 'c', label: 'b', rules: 1 },
+        { id: 'c=d', column: 'c', label: 'd', rules: 1 }],
+        edges: [{ source: 'c=a', target: 'c=b', lift: 2.4, confidence: 0.8 }, { source: 'c=a', target: 'c=d', lift: 1.4, confidence: 0.5 }] },
+    }} />)
+    fireEvent.click(screen.getByText('Network'))
+    const net = screen.getByTestId('rule-network')
+    expect(net.querySelectorAll('circle').length).toBe(3)
+    expect(net.querySelectorAll('line').length).toBe(2)
+    expect(net.textContent).toContain('is not one causing the other')
   })
 })

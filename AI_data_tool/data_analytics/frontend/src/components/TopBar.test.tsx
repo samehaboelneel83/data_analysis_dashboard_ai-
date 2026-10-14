@@ -19,6 +19,8 @@ vi.mock('../contexts/AuthContext', () => ({
 }))
 // The bell fetches on mount; it has its own tests.
 vi.mock('./NotificationsBell', () => ({ default: () => <div data-testid="bell" /> }))
+// The model light polls the API; it has its own tests (LlmPicker.test.tsx).
+vi.mock('./LlmPicker', () => ({ default: () => <div data-testid="llm-picker" /> }))
 
 const renderAt = (path: string) =>
   render(<MemoryRouter initialEntries={[path]}><TopBar /></MemoryRouter>)
@@ -90,6 +92,19 @@ describe('TopBar', () => {
     expect(screen.getByText(/Admin · Acme/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('menuitem', { name: /Log out/ }))
     expect(logout).toHaveBeenCalledTimes(1)
+  })
+
+  it('turns "Always show details" on and off from the account menu', () => {
+    localStorage.clear()
+    renderAt('/')
+    fireEvent.click(screen.getByRole('button', { name: 'Account menu' }))
+    const item = screen.getByRole('menuitemcheckbox', { name: /Always show details/ })
+    expect(item).toHaveAttribute('aria-checked', 'false')
+    fireEvent.click(item)
+    expect(item).toHaveAttribute('aria-checked', 'true')
+    expect(localStorage.getItem('datalytics.alwaysShowDetails')).toBe('1')
+    fireEvent.click(item)
+    expect(item).toHaveAttribute('aria-checked', 'false')
   })
 
   it('Escape closes the account menu', () => {

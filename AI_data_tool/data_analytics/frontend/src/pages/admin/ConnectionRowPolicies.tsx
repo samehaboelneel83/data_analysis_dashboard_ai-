@@ -4,6 +4,7 @@ import {
   type ConnectionRowPolicy,
 } from '../../services/api'
 import { adminRolesApi as rolesApi } from '../../services/api'
+import { useT } from '../../i18n'
 
 /** Row rules for a CONNECTION — the ones Ask AI obeys.
  *
@@ -20,6 +21,7 @@ import { adminRolesApi as rolesApi } from '../../services/api'
  *  So the page is deliberately blunt about what it is for. A security control
  *  nobody knows about protects nobody. */
 export default function ConnectionRowPolicies() {
+  const t = useT()
   const [sources, setSources] = useState<{ id: number; name: string }[]>([])
   const [sourceId, setSourceId] = useState<number | null>(null)
   const [objects, setObjects] = useState<{ id: number; name: string }[]>([])
@@ -58,7 +60,7 @@ export default function ConnectionRowPolicies() {
   const add = async () => {
     setError('')
     if (!objectId || !roleId || !predicate.trim()) {
-      setError('Pick a table and a role, and write the rule.')
+      setError(t('pg.adminSecurity.crp.incomplete'))
       return
     }
     setBusy(true)
@@ -74,7 +76,7 @@ export default function ConnectionRowPolicies() {
       // reason is more useful than anything this form could guess.
       const detail = (e as { response?: { data?: { detail?: string } } })
         ?.response?.data?.detail
-      setError(detail || 'Could not save that rule.')
+      setError(detail || t('pg.adminSecurity.crp.saveFailed'))
     } finally {
       setBusy(false)
     }
@@ -91,22 +93,19 @@ export default function ConnectionRowPolicies() {
   return (
     <div style={{ maxWidth: 980 }}>
       <h1 className="dl-page-title" style={{ margin: 0 }}>
-        Connection rules — what Ask AI can see
+        {t('pg.adminSecurity.crp.title')}
       </h1>
 
       <p style={{
         marginTop: 12, padding: '12px 14px', borderRadius: 6, fontSize: 13,
         background: 'var(--surface2)', borderInlineStart: '3px solid var(--accent)',
       }}>
-        <strong>Row Security rules narrow a dataset. They do not reach Ask AI.</strong>{' '}
-        Ask AI queries the connection directly, so a person who is limited to their
-        own rows on a dashboard can still ask the assistant for everybody&rsquo;s.
-        The rules below are the ones the assistant obeys. Set them for every role
-        that has a dataset rule.
+        <strong>{t('pg.adminSecurity.crp.warnStrong')}</strong>{' '}
+        {t('pg.adminSecurity.crp.warnBody')}
       </p>
 
       <div style={{ marginTop: 20 }}>
-        <label htmlFor="crp-source" style={label}>Connection</label>
+        <label htmlFor="crp-source" style={label}>{t('pg.adminSecurity.crp.connection')}</label>
         <select id="crp-source" value={sourceId ?? ''}
                 onChange={e => setSourceId(Number(e.target.value))}
                 style={{ minWidth: 320 }}>
@@ -114,30 +113,30 @@ export default function ConnectionRowPolicies() {
         </select>
       </div>
 
-      <h2 style={{ fontSize: 15, fontWeight: 700, marginTop: 24 }}>Rules on this connection</h2>
+      <h2 style={{ fontSize: 15, fontWeight: 700, marginTop: 24 }}>{t('pg.adminSecurity.crp.rulesHeading')}</h2>
       {policies.length === 0 ? (
         <p style={{ fontSize: 13, color: 'var(--danger, #b4232a)', marginTop: 8 }}>
-          No rules. Every role that can open Ask AI on this connection sees every row.
+          {t('pg.adminSecurity.crp.noRules')}
         </p>
       ) : (
         <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 8 }}>
           <thead>
             <tr>
-              <th style={{ ...cell, textAlign: 'start' }}>Table</th>
-              <th style={{ ...cell, textAlign: 'start' }}>Role</th>
-              <th style={{ ...cell, textAlign: 'start' }}>Rule</th>
+              <th style={{ ...cell, textAlign: 'start' }}>{t('pg.adminSecurity.crp.table')}</th>
+              <th style={{ ...cell, textAlign: 'start' }}>{t('pg.adminSecurity.crp.role')}</th>
+              <th style={{ ...cell, textAlign: 'start' }}>{t('pg.adminSecurity.crp.rule')}</th>
               <th style={cell} />
             </tr>
           </thead>
           <tbody>
             {policies.map(p => (
               <tr key={p.id}>
-                <td style={cell}>{p.object_name}</td>
-                <td style={cell}>{p.role_name}</td>
-                <td style={{ ...cell, fontFamily: 'monospace' }}>{p.predicate}</td>
+                <td style={cell}><bdi>{p.object_name}</bdi></td>
+                <td style={cell}><bdi>{p.role_name}</bdi></td>
+                <td style={{ ...cell, fontFamily: 'monospace' }}><bdi dir="ltr">{p.predicate}</bdi></td>
                 <td style={cell}>
                   <button onClick={() => { void agentPoliciesApi.remove(p.id).then(reload) }}
-                          style={{ fontSize: 12, cursor: 'pointer' }}>Remove</button>
+                          style={{ fontSize: 12, cursor: 'pointer' }}>{t('pg.adminSecurity.crp.remove')}</button>
                 </td>
               </tr>
             ))}
@@ -145,27 +144,27 @@ export default function ConnectionRowPolicies() {
         </table>
       )}
 
-      <h2 style={{ fontSize: 15, fontWeight: 700, marginTop: 28 }}>Add a rule</h2>
+      <h2 style={{ fontSize: 15, fontWeight: 700, marginTop: 28 }}>{t('pg.adminSecurity.crp.addHeading')}</h2>
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 8, alignItems: 'end' }}>
         <div>
-          <label htmlFor="crp-table" style={label}>Table</label>
+          <label htmlFor="crp-table" style={label}>{t('pg.adminSecurity.crp.table')}</label>
           <select id="crp-table" value={objectId} onChange={e => setObjectId(e.target.value)}
                   style={{ minWidth: 220 }}>
-            <option value="">— choose —</option>
+            <option value="">{t('pg.adminSecurity.crp.choose')}</option>
             {objects.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
           </select>
         </div>
         <div>
-          <label htmlFor="crp-role" style={label}>Role</label>
+          <label htmlFor="crp-role" style={label}>{t('pg.adminSecurity.crp.role')}</label>
           <select id="crp-role" value={roleId} onChange={e => setRoleId(e.target.value)}
                   style={{ minWidth: 180 }}>
-            <option value="">— choose —</option>
+            <option value="">{t('pg.adminSecurity.crp.choose')}</option>
             {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
         </div>
         <div style={{ flex: 1, minWidth: 260 }}>
-          <label htmlFor="crp-predicate" style={label}>Rule</label>
-          <input id="crp-predicate" value={predicate} placeholder="userid = USERID()"
+          <label htmlFor="crp-predicate" style={label}>{t('pg.adminSecurity.crp.rule')}</label>
+          <input id="crp-predicate" value={predicate} placeholder="userid = USERID()" // i18n-ok: an expression
                  onChange={e => setPredicate(e.target.value)} style={{ width: '100%' }} />
         </div>
         <button onClick={() => void add()} disabled={busy}
@@ -173,7 +172,7 @@ export default function ConnectionRowPolicies() {
                   padding: '7px 14px', borderRadius: 6, border: 'none', fontSize: 13,
                   background: 'var(--accent)', color: 'var(--mc-accent-fg)', cursor: 'pointer',
                 }}>
-          {busy ? 'Saving…' : 'Add rule'}
+          {busy ? t('pg.adminSecurity.c.saving') : t('pg.adminSecurity.crp.addRule')}
         </button>
       </div>
       {error && (

@@ -1,4 +1,5 @@
 import { useState, useEffect, type CSSProperties } from 'react'
+import { LOOK_EVENT, type LookMode } from '../lib/lookChrome'
 import { useDirection } from '../contexts/DirectionContext'
 import { Outlet, NavLink, useLocation } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
@@ -48,17 +49,54 @@ const DRAWER_BREAKPOINT = 900
 export default function Layout() {
   const [theme, setTheme] = useState<'dark' | 'light'>(getInitialTheme)
   const { direction, setDirection } = useDirection()
-  const [expanded, setExpanded] = useState(() => localStorage.getItem('rail-expanded') !== '0')
+  // Remembered PER USER (5.1): one global key let a previous user's (or an
+  // old test's) collapsed rail greet every newcomer on this browser as a
+  // strip of unlabelled icons. A user with no choice yet starts expanded.
+  const { user: railUser } = useAuth()
+  const railKey = railUser?.id != null ? `rail-expanded:${railUser.id}` : null
+  const readRail = (key: string | null) => {
+    try { return key ? localStorage.getItem(key) !== '0' : true } catch { return true }
+  }
+  const [railState, setRail] = useState(() => ({ key: railKey, expanded: readRail(railKey) }))
+  // A different person signed in: read THEIR choice before anything is saved.
+  if (railState.key !== railKey) setRail({ key: railKey, expanded: readRail(railKey) })
+  const expanded = railState.key === railKey ? railState.expanded : readRail(railKey)
+  const setExpanded = (v: boolean | ((x: boolean) => boolean)) =>
+    setRail(r => ({ key: r.key, expanded: typeof v === 'function' ? v(r.expanded) : v }))
+  // The builder opens with the icon rail (redesign 7e, S6): while it asks, the
+  // rail folds to icons for this visit only -- the saved choice is untouched,
+  // and the rail's own toggle lifts the fold so the user can still expand it.
+  const [builderCompact, setBuilderCompact] = useState(false)
+  useEffect(() => {
+    const on = (e: Event) => setBuilderCompact(!!(e as CustomEvent<boolean>).detail)
+    window.addEventListener('datalytics:builder-compact', on)
+    return () => window.removeEventListener('datalytics:builder-compact', on)
+  }, [])
   const [narrow, setNarrow] = useState(() => window.innerWidth < DRAWER_BREAKPOINT)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [folds, setFolds] = useState<Record<string, boolean>>(getInitialFolds)
   const { pathname } = useLocation()
 
+  // An open dashboard's look may ask for the other mode (lib/lookChrome):
+  // the shell follows it while the dashboard is open. Only the person's own
+  // choice is remembered.
+  const [lookMode, setLookMode] = useState<LookMode>(null)
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme)
+    const on = (e: Event) => setLookMode((e as CustomEvent<LookMode>).detail ?? null)
+    window.addEventListener(LOOK_EVENT, on)
+    return () => window.removeEventListener(LOOK_EVENT, on)
+  }, [])
+  const shown = lookMode ?? theme
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', shown)
+  }, [shown])
+  useEffect(() => {
     localStorage.setItem('theme', theme)
   }, [theme])
-  useEffect(() => { localStorage.setItem('rail-expanded', expanded ? '1' : '0') }, [expanded])
+  useEffect(() => {
+    if (!railState.key) return
+    try { localStorage.setItem(railState.key, railState.expanded ? '1' : '0') } catch { /* blocked storage: not remembered */ }
+  }, [railState])
   useEffect(() => {
     try { localStorage.setItem('rail-folded', JSON.stringify(folds)) } catch { /* storage full or blocked: folds just won't persist */ }
   }, [folds])
@@ -83,7 +121,12 @@ export default function Layout() {
   // enforces exactly this).
   const drawerRef = useModalDialog<HTMLElement>(() => setDrawerOpen(false))
 
-  const toggle = () => setTheme(t => t === 'dark' ? 'light' : 'dark')
+  // Pressed while a dashboard's look is in charge: the person takes over,
+  // going to the other of what they SEE, for the rest of this visit.
+  const toggle = () => {
+    if (lookMode) { setTheme(lookMode === 'dark' ? 'light' : 'dark'); setLookMode(null); return }
+    setTheme(t => t === 'dark' ? 'light' : 'dark')
+  }
   // The command palette's "Switch theme" command: the shell owns the theme,
   // so the palette asks rather than writing the attribute itself.
   useEffect(() => {
@@ -96,7 +139,7 @@ export default function Layout() {
 
   // In the drawer the rail is always labeled: an icon-only overlay would be a
   // hieroglyph sheet floating over the page.
-  const labeled = expanded || (narrow && drawerOpen)
+  const labeled = (expanded && !builderCompact) || (narrow && drawerOpen)
 
   // NavLink hands the active flag to a className function; the rest of the
   // treatment (hover, the leading accent bar, the icons-only centring) lives
@@ -185,9 +228,9 @@ export default function Layout() {
         ...(narrow ? { position: 'fixed', insetBlock: 0, insetInlineStart: 0, zIndex: 1100 } : null) }}>
       <div className="dl-rail__brand">
         <span className="dl-rail__mark" title="Datalytics" aria-hidden>D</span>
-        {labeled && <span className="dl-rail__wordmark">datalytics</span>}
+        {labeled && <span className="dl-rail__wordmark">datalytics</span>} {/* i18n-ok */}
         {labeled && (
-          <button onClick={() => narrow ? setDrawerOpen(false) : setExpanded(e => !e)}
+          <button onClick={() => narrow ? setDrawerOpen(false) : builderCompact ? setBuilderCompact(false) : setExpanded(e => !e)}
             aria-label={narrow ? t('nav.close') : t('nav.collapse')}
             title={narrow ? t('nav.close') : t('nav.collapse')}
             className="dl-rail__iconbtn" style={{ marginInlineStart: 'auto' }}>
@@ -199,7 +242,7 @@ export default function Layout() {
           no room beside the mark, and a button crushed against it reads as
           part of the logo. */}
       {!labeled && (
-        <button onClick={() => setExpanded(true)} aria-label={t('nav.expand')}
+        <button onClick={() => { setBuilderCompact(false); setExpanded(true) }} aria-label={t('nav.expand')}
           title={t('nav.expand')} className="dl-rail__iconbtn"
           style={{ alignSelf: 'center' }}>
           <ChevronsRight size={16} aria-hidden />
@@ -257,7 +300,7 @@ export default function Layout() {
 
       <div className="dl-shell__main">
         <TopBar onOpenNav={narrow ? () => setDrawerOpen(true) : undefined}
-          theme={theme} onToggleTheme={toggle} />
+          theme={shown} onToggleTheme={toggle} />
         {/* The padding is published as a custom property as well as applied,
             so a page that must bleed to the edges (the report builder) can
             cancel exactly THIS value instead of hard-coding a number that

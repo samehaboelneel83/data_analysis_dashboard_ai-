@@ -113,3 +113,14 @@ describe('CustomGraphRenderer', () => {
     expect(screen.getByText(/add a layer/i)).toBeInTheDocument()
   })
 })
+
+describe('CustomGraphRenderer: QA2 N5', () => {
+  it('passes each layer its key directly, not inside a spread object (React warns, red in the console)', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      render(<CustomGraphRenderer {...props({ ...twoLayers, layers: [...twoLayers.layers,
+        { key: 's2', label: 'units', mark: 'area', axis: 'left' }, { key: 's3', label: 'pts', mark: 'scatter', axis: 'left' }] })} />)
+      expect(err.mock.calls.map(c => String(c[0])).filter(m => /key/i.test(m))).toEqual([])
+    } finally { err.mockRestore() }
+  })
+})

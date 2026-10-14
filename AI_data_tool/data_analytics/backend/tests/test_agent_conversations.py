@@ -253,33 +253,27 @@ async def dq_dataset(db_session, two_orgs):
     return ds
 
 
-class TestDirectQueryDatasetsAreRefused:
-    """Dataset mode answers out of a FILE frame (`run_agent`'s dataset_frames).
-    A DirectQuery dataset has no file, so it used to reach `abspath(None)` and
-    raise -- a 500 the browser then reported as a CORS violation, which sends
-    whoever is reading it to the wrong file entirely. The connection is the
-    supported way to ask about live data and the same picker already offers
-    it, so the refusal names the dataset it is refusing."""
+class TestDirectQueryDatasetsAreAskedLive:
+    """HR evaluation 2026-10-01, blocker 3: refusing live datasets sent every
+    question to the CONNECTION, whose raw tables hold every salary a person
+    ever had -- so "average salary by title" joined all history and reported a
+    false pay gap. A live dataset is now read through its own SQL."""
 
-    async def test_a_conversation_cannot_be_scoped_to_a_directquery_dataset(
+    async def test_a_conversation_can_be_scoped_to_a_directquery_dataset(
             self, client, auth_headers, dq_dataset):
         r = await client.post("/api/v1/agent/conversations",
                               json={"dataset_ids": [dq_dataset.id]},
                               headers=auth_headers["a"])
-        assert r.status_code == 400, r.text
-        assert "live_orders" in r.json()["detail"]
+        assert r.status_code == 200, r.text
 
-    async def test_asking_in_a_stored_directquery_conversation_is_refused(
+    async def test_an_unreachable_live_source_fails_cleanly_not_500(
             self, client, auth_headers, db_session, two_orgs, dq_dataset,
             scripted):
-        """Conversations bound before this guard existed must not 500 either:
-        a create-time check alone leaves every stored one crashing."""
         conv = Conversation(org_id=two_orgs["a"]["org"].id,
                             user_id=two_orgs["a"]["user"].id,
                             dataset_ids=[dq_dataset.id], title="stored")
         db_session.add(conv)
         await db_session.commit()
         r = await client.post(f"/api/v1/agent/conversations/{conv.id}/ask",
-                              json={"question": "hi"}, headers=auth_headers["a"])
-        assert r.status_code == 400, r.text
-        assert scripted == []  # refused before the agent ran at all
+                              json={"question": "how many orders"}, headers=auth_headers["a"])
+        assert r.status_code < 500, r.text

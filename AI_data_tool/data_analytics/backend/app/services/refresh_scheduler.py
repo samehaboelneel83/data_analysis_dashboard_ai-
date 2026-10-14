@@ -68,6 +68,20 @@ def backoff_minutes(attempts: int) -> int:
     return BACKOFF_MINUTES[min(attempts, len(BACKOFF_MINUTES)) - 1]
 
 
+async def _acting_user(session, user_id):
+    """The user a background run acts as, WITH its role loaded. A plain
+    `session.get(User, id)` left `user.role` to load lazily, which async
+    SQLAlchemy cannot do: the row-security lookup (`user.role.is_org_admin`)
+    raised "greenlet_spawn has not been called" and every scheduled dataflow
+    and derived rebuild failed (found on the data-engineer tour, 2026-10-10)."""
+    if not isinstance(user_id, int):
+        return None
+    from sqlalchemy.orm import selectinload
+    from ..models.models import User
+    return (await session.execute(select(User).options(selectinload(User.role))
+                                  .where(User.id == user_id))).scalar_one_or_none()
+
+
 async def _failure_row(session, kind: str, item_id: int):
     from ..models.models import ScheduleFailure
     return (await session.execute(
@@ -360,6 +374,18 @@ async def _unlock(session, key: int) -> None:
     await session.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": key})
 
 
+async def _discard(session, *keep) -> None:
+    """Roll back a failed run's half-applied changes, then reload the rows the
+    caller still holds. A rollback expires every instance in the session; the
+    next plain attribute read on one would be lazy IO outside a greenlet."""
+    await session.rollback()
+    for obj in keep:
+        try:
+            await session.refresh(obj)
+        except Exception:  # noqa: BLE001 -- a row deleted meanwhile has nothing to reload
+            pass
+
+
 async def _rebuild_derived(session, ds) -> bool:
     """Re-run a materialized dataset's recipe on its schedule.
 
@@ -374,8 +400,12 @@ async def _rebuild_derived(session, ds) -> bool:
     the identity is threaded through anyway, because that refusal is a policy
     that could be relaxed later and this code would silently become wrong.
 
-    Failures are logged and swallowed, like every other scheduled refresh: one
-    broken recipe must not stop the loop, and there is no request to answer.
+    Failures never escape, like every other scheduled refresh: one broken
+    recipe must not stop the loop, and there is no request to answer. They are
+    recorded (backoff, a failed `RefreshRun`) and `last_refreshed_at` is left
+    alone, so the dataset does not read as fresh (pipeline plan, phase 1).
+    The file is swapped in atomically: a crash mid-write used to leave a
+    truncated CSV behind a dataset that still looked ready.
     """
     import asyncio as _asyncio
 
@@ -384,6 +414,16 @@ async def _rebuild_derived(session, ds) -> bool:
     from .frame_cache import write_parquet_sidecar
     from .prep import apply_prep_steps, derived_from_of, resolve_join_frames
     from .widget_data import apply_rls_filter
+    from .dataset_refresh import write_csv_atomic
+    from .refresh_runs import finish_run, start_run
+
+    ds_id = ds.id
+    run_id = await start_run(session, "dataset", ds_id, ds.org_id)
+
+    async def _failed(msg: str, code: str) -> bool:
+        await record_failure(session, "dataset", ds_id, msg)
+        await finish_run(session, run_id, "failed", error=msg, error_code=code)
+        return True
 
     prov = derived_from_of(ds) or {}
     steps = prov.get("steps") or []
@@ -392,19 +432,16 @@ async def _rebuild_derived(session, ds) -> bool:
     if base is None or base.org_id != ds.org_id or not base.filename:
         log.warning("Scheduled rebuild skipped for dataset %s: source %s is gone",
                     ds.id, base_id)
-        # Advanced anyway so a permanently broken recipe retries on its schedule
-        # rather than on every tick.
-        ds.last_refreshed_at = datetime.utcnow()
-        await session.commit()
-        return True
+        # Backoff, not the stamp, keeps a permanently broken recipe from
+        # retrying on every tick.
+        return await _failed("The dataset this one is built from no longer exists.",
+                             "source_gone")
 
-    builder = await session.get(User, prov.get("built_by_user_id")) \
-        if isinstance(prov.get("built_by_user_id"), int) else None
+    builder = await _acting_user(session, prov.get("built_by_user_id"))
     if builder is None:
         log.warning("Scheduled rebuild skipped for dataset %s: builder is gone", ds.id)
-        ds.last_refreshed_at = datetime.utcnow()
-        await session.commit()
-        return True
+        return await _failed("The person who built this dataset no longer exists, so it "
+                             "cannot be rebuilt as them.", "builder_gone")
 
     try:
         from ..core.rls import resolve_denied_columns, resolve_rls_expr
@@ -422,9 +459,24 @@ async def _rebuild_derived(session, ds) -> bool:
 
         out = await _asyncio.to_thread(_run)
 
+        # Phase 3: the dataset's checks run before the rebuild replaces it.
+        from .data_checks import (ChecksBlocked, blocking_failures, describe,
+                                  known_types, load_checks, make_validator)
+        outcome: dict = {}
+        validate = make_validator(await load_checks(session, ds_id), ds.row_count,
+                                  await known_types(session, ds_id), outcome)
+        try:
+            validate(out)
+        except ChecksBlocked as e:
+            msg = "Not published: " + "; ".join(describe(r) for r in blocking_failures(e.results))
+            await record_failure(session, "dataset", ds_id, msg)
+            await finish_run(session, run_id, "blocked", error=msg, error_code="checks_blocked",
+                             checks=e.results)
+            return True
+
         # Written in place: the dataset keeps its path, so every report and
         # widget pointing at it picks the new rows up with no rewiring.
-        await _asyncio.to_thread(lambda: out.to_csv(ds.filename, index=False))
+        await _asyncio.to_thread(write_csv_atomic, out, ds.filename)
         await _asyncio.to_thread(write_parquet_sidecar, str(ds.filename))
         type_map = await _asyncio.to_thread(detect_types, out)
 
@@ -450,10 +502,15 @@ async def _rebuild_derived(session, ds) -> bool:
         ds.column_meta = meta
         flag_modified(ds, "column_meta")
     except Exception as e:  # noqa: BLE001 -- never-die, as elsewhere in this loop
-        log.warning("Scheduled rebuild failed for dataset %s: %s", ds.id, e)
+        log.warning("Scheduled rebuild failed for dataset %s: %s", ds_id, e)
+        await _discard(session, ds)
+        return await _failed(f"Rebuild failed: {e}", "rebuild_failed")
 
     ds.last_refreshed_at = datetime.utcnow()
+    rows = int(ds.row_count or 0)
     await session.commit()
+    await clear_failure(session, "dataset", ds_id)
+    await finish_run(session, run_id, "ok", rows=rows, checks=outcome.get("checks"))
     return True
 
 
@@ -481,7 +538,9 @@ async def refresh_dataflow(session, flow) -> bool:
 
     Never raises: one broken recipe must not stop the loop, and there is no
     request to answer. The failure is recorded on the dataflow itself so it is
-    visible in the UI rather than only in a log.
+    visible in the UI rather than only in a log, AND as a `ScheduleFailure`
+    (backoff) and a failed `RefreshRun` (history). Outputs are swapped in
+    atomically (pipeline plan, phase 1).
     """
     import asyncio as _asyncio
 
@@ -490,7 +549,10 @@ async def refresh_dataflow(session, flow) -> bool:
     from .frame_cache import write_parquet_sidecar
     from .ingest import detect_types, load_file
     from .widget_data import apply_rls_filter
+    from .dataset_refresh import write_csv_atomic
+    from .refresh_runs import finish_run, start_run
 
+    flow_id = flow.id
     now = datetime.utcnow()
     outputs = [d for d in (await session.execute(
         select(Dataset).where(Dataset.org_id == flow.org_id))).scalars().all()
@@ -502,37 +564,49 @@ async def refresh_dataflow(session, flow) -> bool:
 
     if not outputs:
         # Nothing to write into yet. Advance the clock so a dataflow nobody has
-        # run stays quiet instead of retrying on every single tick.
+        # run stays quiet instead of retrying on every single tick -- and record
+        # the skip ONCE, not every hour: 411 identical "no outputs yet" rows
+        # buried the real failures in the run history (role tour, 2026-10-10).
+        already = flow.last_run_status == "skipped" and flow.last_run_error == "no outputs yet"
         _finish("skipped", "no outputs yet")
         await session.commit()
+        if not already:
+            run_id = await start_run(session, "dataflow", flow_id, flow.org_id)
+            await finish_run(session, run_id, "skipped", error="No outputs yet: run it once by hand.")
         return True
 
+    run_id = await start_run(session, "dataflow", flow_id, flow.org_id)
+
     src = await session.get(Dataset, flow.source_dataset_id) if flow.source_dataset_id else None
-    builder = await session.get(User, flow.created_by) if flow.created_by else None
-    if src is None or not src.filename or builder is None:
+    builder = await _acting_user(session, flow.created_by)
+    if src is None or builder is None or not (
+            src.filename or (src.mode == "directquery" and src.data_source_id)):
         _finish("failed", "source dataset or creator is gone")
         await session.commit()
+        await record_failure(session, "dataflow", flow_id, "source dataset or creator is gone")
+        await finish_run(session, run_id, "failed", error="The source dataset or the "
+                         "dataflow's creator no longer exists.", error_code="source_gone")
         return True
 
     try:
-        from ..core.rls import resolve_denied_columns, resolve_rls_expr
-        rls = await resolve_rls_expr(session, builder, src.id)
-        denied = await resolve_denied_columns(session, builder, src.id)
-        aux = await resolve_join_frames(session, builder, flow.steps or [])
-
-        def _run():
-            frame = load_file(src.filename)
-            frame = apply_rls_filter(frame, rls)
-            present = [c for c in (denied or []) if c in frame.columns]
-            if present:
-                frame = frame.drop(columns=present)
-            return apply_prep_steps(frame, flow.steps or [], aux)
-
-        out = await _asyncio.to_thread(_run)
+        from .snapshot_flow import merge as merge_snapshot, snapshot_rows, source_frame, validate_spec
+        # 4.6: the same reader the manual run uses -- a file, or a live source
+        # read through its connection -- as the dataflow's creator.
+        out = await source_frame(session, builder, src, flow.steps or [])
+        spec = validate_spec(flow.snapshot, set(out.columns)) if getattr(flow, "snapshot", None) else None
+        if spec is not None:
+            out = snapshot_rows(out, spec)
+        run_rows = out
         type_map = await _asyncio.to_thread(detect_types, out)
 
         for ds in outputs:
-            await _asyncio.to_thread(lambda p=ds.filename: out.to_csv(p, index=False))
+            if spec is not None:
+                try:
+                    existing = await _asyncio.to_thread(load_file, ds.filename)
+                except Exception:  # noqa: BLE001 -- a missing file starts the history afresh
+                    existing = None
+                out = merge_snapshot(existing, run_rows)
+            await _asyncio.to_thread(write_csv_atomic, out, ds.filename)
             await _asyncio.to_thread(write_parquet_sidecar, str(ds.filename))
             ds.row_count, ds.col_count = len(out), len(out.columns)
             ds.last_refreshed_at = now
@@ -552,10 +626,20 @@ async def refresh_dataflow(session, flow) -> bool:
                     missing_pct=round(out[name].isnull().mean() * 100, 2), stats={}))
         _finish("ok", None, int(len(out)))
     except Exception as e:  # noqa: BLE001 -- never-die, as elsewhere in this loop
-        log.warning("Scheduled dataflow %s failed: %s", flow.id, e)
+        log.warning("Scheduled dataflow %s failed: %s", flow_id, e)
+        # Outputs already written stay written (each swap is atomic); the
+        # half-applied ORM changes are discarded before recording.
+        await _discard(session, flow, *outputs)
         _finish("failed", str(e)[:500])
+        await session.commit()
+        await record_failure(session, "dataflow", flow_id, str(e))
+        await finish_run(session, run_id, "failed", error=f"Dataflow failed: {e}",
+                         error_code="dataflow_failed")
+        return True
 
     await session.commit()
+    await clear_failure(session, "dataflow", flow_id)
+    await finish_run(session, run_id, "ok", rows=flow.last_run_rows)
     return True
 
 
@@ -599,7 +683,9 @@ async def rescan_insights(session, ds) -> bool:
         df = apply_prep_steps(df, steps, {})
         if ds.calculated_columns:
             df = apply_calculated_columns(df, ds.calculated_columns, ds.custom_functions)
-        return generate_insights(df, detect_types(df), ds.column_meta or {})
+        from . import column_classes
+        meta, _ = column_classes.classified(df, ds.column_meta or {})
+        return generate_insights(df, detect_types(df), meta)
 
     try:
         result = await asyncio.to_thread(_scan)
@@ -625,12 +711,21 @@ async def rescan_insights(session, ds) -> bool:
 async def refresh_one(session, ds: Dataset) -> bool:
     """Refresh a single dataset's cached file. Returns whether it actually ran.
 
-    Failures are logged and swallowed: one unreachable source must not stop the loop
-    from refreshing every other dataset, and there is no user request to return an
-    error to. `last_refreshed_at` is advanced either way, so a permanently broken
-    source is retried on its schedule rather than on every tick.
+    Failures never escape: one unreachable source must not stop the loop from
+    refreshing every other dataset, and there is no user request to return an
+    error to. But every failure is RECORDED, three ways: a `ScheduleFailure`
+    row (which puts the dataset in backoff, so a broken source is retried at
+    5 min, 15 min, 1 h ... rather than on every tick), a failed `RefreshRun`,
+    and an unchanged `last_refreshed_at`.
+
+    That last one is the fix of pipeline plan phase 1 (2026-10-03). The stamp
+    used to advance on failure too, as the way to stop a retry storm -- so a
+    dataset whose source had been down for a week read as refreshed a minute
+    ago, and every staleness label agreed. Backoff now does that job, and the
+    stamp means what it says: the last time the data actually changed.
     """
-    from .dataset_refresh import rewrite_dataset_file, write_materialization
+    from .dataset_refresh import rewrite_dataset_file, rows_of, write_materialization
+    from .refresh_runs import finish_run, start_run
 
     # E12: a queued manual refresh of this dataset owns it until it ends; the
     # schedule catches up on its next tick instead of writing the file too.
@@ -640,11 +735,20 @@ async def refresh_one(session, ds: Dataset) -> bool:
     key = advisory_lock_key(ds.id)
     if not await _try_lock(session, key):
         return False
+    ds_id, org_id = ds.id, ds.org_id
+
+    async def _failed(run_id, msg: str, code: str) -> bool:
+        await record_failure(session, "dataset", ds_id, msg)
+        await finish_run(session, run_id, "failed", error=msg, error_code=code)
+        return True
+
     try:
         from .prep import derived_from_of
         if derived_from_of(ds) is not None:
             return await _rebuild_derived(session, ds)
 
+        run_id = await start_run(session, "dataset", ds_id, org_id)
+        ds = await session.get(Dataset, ds_id)
         is_aggregate = ds.aggregate_of_dataset_id is not None
         if is_aggregate:
             # An aggregate is governed by its SOURCE's rules at read time,
@@ -665,11 +769,8 @@ async def refresh_one(session, ds: Dataset) -> bool:
             bad = rls_columns_outside_grain([r for r, _ in rows], (ds.aggregate_spec or {}).get("grain") or [], known)
             if bad:
                 names = {r.role_id: n for r, n in rows}
-                msg = uncovered_message(bad, names, when="refresh")
-                await record_failure(session, "dataset", ds.id, msg)
-                ds.last_refreshed_at = datetime.utcnow()
-                await session.commit()
-                return True
+                return await _failed(run_id, uncovered_message(bad, names, when="refresh"),
+                                     "aggregate_rls")
 
             # The source may since have grown a report-level filter expression
             # (an aggregate would ignore it) or been re-pointed at a different
@@ -683,18 +784,12 @@ async def refresh_one(session, ds: Dataset) -> bool:
             source = await session.get(Dataset, ds.aggregate_of_dataset_id)
             stale = aggregate_staleness(source, ds)
             if stale:
-                await record_failure(session, "dataset", ds.id, stale)
-                ds.last_refreshed_at = datetime.utcnow()
-                await session.commit()
-                return True
-            # clear_failure is deliberately NOT called here -- it waits until
-            # AFTER a successful rewrite below, so a previously recorded
-            # failure cannot vanish before the rewrite that follows has
-            # actually succeeded.
+                return await _failed(run_id, stale, "aggregate_stale")
 
         src = await session.get(DataSource, ds.data_source_id)
         if src is None:
-            return False
+            return await _failed(run_id, "The dataset's connection no longer exists.",
+                                 "source_gone")
         cfg = dict(src.config or {})
         cfg["type"] = src.type
         # E05: the columns something on this dataset names. A rewrite that
@@ -709,42 +804,82 @@ async def refresh_one(session, ds: Dataset) -> bool:
         # Passed only when something is required, so a dataset nothing uses
         # makes exactly the call it always made.
         guard = {"required_columns": required} if required else {}
+        filename, table, query = ds.filename, ds.source_table, ds.source_query
+        # Phase 3: the dataset's saved checks run on the fetched frame before
+        # it replaces the file; a blocking failure keeps the old one.
+        from .data_checks import ChecksBlocked, describe, blocking_failures, load_checks, known_types, make_validator
+        outcome: dict = {}
+        validate = make_validator(await load_checks(session, ds_id), ds.row_count,
+                                  await known_types(session, ds_id), outcome)
+        # Phase 4: a dataset set to incremental loads follows its watermark --
+        # only rows past the cursor, merged on the key when it has one --
+        # with a full reload every `full_reload_days` to correct what an
+        # incremental table cannot see (deleted rows).
+        from ..models.models import Watermark
+        from .dataset_refresh import refresh_dataset
+        wm = (await session.execute(select(Watermark).where(
+            Watermark.dataset_id == ds_id))).scalar_one_or_none()
+        incremental = bool(wm and wm.strategy == "incremental" and wm.cursor_column)
+        if incremental and wm.full_reload_days:
+            last_full = _as_utc_naive(wm.last_full_at)
+            if last_full is None or datetime.utcnow() - last_full >= timedelta(days=wm.full_reload_days):
+                incremental = False
+        wm_cursor = (wm.cursor_column, wm.cursor_value, wm.key_column, wm.lookback_hours,
+                     bool(wm.reconcile_deletes)) if wm else None
         try:
-            df, _type_map = await asyncio.to_thread(
-                rewrite_dataset_file, cfg, ds.filename, ds.source_table, ds.source_query, **guard)
-            # O3: rewrite_dataset_file is always a full rewrite (no watermark
-            # here -- see module docstring), so the manifest kind is "full"
-            # and there is no cursor value to carry.
-            if ds.filename:
+            if wm is not None and wm.cursor_column:
+                cursor_col, cursor_val, key_col, lookback, reconcile = wm_cursor
+                result = await asyncio.to_thread(
+                    refresh_dataset, cfg, filename, table, query,
+                    "incremental" if incremental else "full", cursor_col, cursor_val,
+                    set(known), guard.get("required_columns"), None, True, validate,
+                    key_col, lookback, reconcile)
+                df, load_kind = result["df"], result["mode"]
+                wm = await session.get(Watermark, wm.id)
+                wm.cursor_value = result["cursor_value"]
+                if load_kind == "full":
+                    wm.last_full_at = datetime.utcnow()
+            else:
+                df, _type_map = await asyncio.to_thread(
+                    rewrite_dataset_file, cfg, filename, table, query, validate=validate, **guard)
+                load_kind, result = "full", None
+                if wm is not None:
+                    wm = await session.get(Watermark, wm.id)
+                    wm.last_full_at = datetime.utcnow()
+            if filename:
                 await write_materialization(
-                    session, ds.id, ds.filename, "full", len(df), list(df.columns), None)
+                    session, ds_id, filename, load_kind, rows_of(df), list(df.columns),
+                    result["cursor_value"] if result else None)
         except SchemaBreak as e:
-            log.warning("Scheduled refresh refused for dataset %s: %s", ds.id, e)
-            await record_failure(session, "dataset", ds.id,
-                                 f"Not refreshed: {e}, still used on this dataset. "
-                                 "Refresh it by hand to map the new column names.")
-            ds.last_refreshed_at = datetime.utcnow()
-            await session.commit()
+            log.warning("Scheduled refresh refused for dataset %s: %s", ds_id, e)
+            await _discard(session, ds)
+            return await _failed(run_id, f"Not refreshed: {e}, still used on this dataset. "
+                                 "Refresh it by hand to map the new column names.",
+                                 "schema_break")
+        except ChecksBlocked as e:
+            log.warning("Scheduled refresh blocked for dataset %s: %s", ds_id, e)
+            await _discard(session, ds)
+            msg = "Not published: " + "; ".join(describe(r) for r in blocking_failures(e.results))
+            await record_failure(session, "dataset", ds_id, msg)
+            await finish_run(session, run_id, "blocked", error=msg, error_code="checks_blocked",
+                             checks=e.results)
             return True
         except Exception as e:  # noqa: BLE001 - see docstring
-            log.warning("Scheduled refresh failed for dataset %s: %s", ds.id, e)
-            if is_aggregate:
-                # Said, not only logged. run_scheduler clears this item's
-                # failure after refresh_one returns unless the item is in
-                # backoff; a swallowed error that recorded nothing would
-                # leave a prior failure due for retry, and the tick would
-                # erase it. Recording puts the item in backoff, keeps the
-                # row, and shows the real error in the Aggregates tab.
-                await record_failure(session, "dataset", ds.id, f"Refresh failed: {e}")
-        else:
-            if is_aggregate:
-                await clear_failure(session, "dataset", ds.id)
+            log.warning("Scheduled refresh failed for dataset %s: %s", ds_id, e)
+            await _discard(session, ds)
+            return await _failed(run_id, f"Refresh failed: {e}", "refresh_failed")
+
+        ds = await session.get(Dataset, ds_id)
         ds.last_refreshed_at = datetime.utcnow()
+        # The scheduled path used to leave these as they were at upload.
+        ds.row_count, ds.col_count = rows_of(df), int(len(df.columns))
         await session.commit()
+        await clear_failure(session, "dataset", ds_id)
+        await finish_run(session, run_id, "ok", rows=rows_of(df), checks=outcome.get("checks"))
         # The data just changed; the stored insight baseline describes the OLD
         # data. Still under this dataset's advisory lock, so a user-triggered
         # scan cannot interleave.
-        await rescan_insights(session, ds)
+        await rescan_insights(session, await session.get(Dataset, ds_id))
         return True
     finally:
         await _unlock(session, key)
@@ -886,6 +1021,11 @@ async def run_scheduler(session_factory) -> None:
                         await session.rollback()
                         await record_failure(session, "dataset", ds_id, str(e), now)
 
+                # Pipeline plan, phase 2: each dataset that has just gone
+                # past its freshness target is announced, once.
+                from .pipeline_alerts import check_freshness
+                await check_freshness(session, now)
+
                 # E13: each champion's daily drift check, queued as a job
                 # (services/model_drift.py); the worker runs it.
                 if settings.job_worker_enabled:
@@ -910,10 +1050,31 @@ async def run_scheduler(session_factory) -> None:
                         if flow_row is None:
                             continue
                         await refresh_dataflow(session, flow_row)
-                        await clear_failure(session, "dataflow", flow_id)
+                        # refresh_dataflow records its own failure; clearing
+                        # unconditionally here used to erase it on every tick.
                     except Exception as e:  # noqa: BLE001 - never-die, per item
                         await session.rollback()
                         await record_failure(session, "dataflow", flow_id, str(e), now)
+
+                # Phase 4: dataflows and rebuilt datasets set to run after
+                # their source, whose source has refreshed since. Cleared
+                # BEFORE the run, so a run that fails is not retried every
+                # tick -- the next source refresh marks it again.
+                from .pipeline_deps import clear_pending, pending_items
+                for kind, item_id in (await pending_items(session))[:MAX_ITEMS_PER_TICK]:
+                    try:
+                        await clear_pending(session, kind, item_id)
+                        if kind == "dataflow":
+                            flow_row = await session.get(Dataflow, item_id)
+                            if flow_row is not None:
+                                await refresh_dataflow(session, flow_row)
+                        else:
+                            ds_row = await session.get(Dataset, item_id)
+                            if ds_row is not None:
+                                await refresh_one(session, ds_row)
+                    except Exception as e:  # noqa: BLE001 - never-die, per item
+                        await session.rollback()
+                        await record_failure(session, kind, item_id, str(e), now)
 
                 scheds = (await session.execute(
                     select(ReportSchedule).where(ReportSchedule.interval_minutes.isnot(None))
@@ -945,25 +1106,10 @@ async def run_scheduler(session_factory) -> None:
             await run_items(session_factory, due_alert_ids, DataAlert,
                             2_000_000_000, check_alert, "alert")
 
-            # Power Pi automation: ONE step of ONE run per tick. It shares this
-            # loop for the reason stated above -- a second scheduler would be a
-            # second place for the tick, the advisory-lock discipline and the
-            # never-die contract to drift. Its own try/except because the two
-            # are independent: an orchestrator bug must not stop tonight's
-            # dataset refreshes, and a broken refresh must not stall the
-            # automation queue.
-            #
-            # Deliberately one step per tick rather than "drain what's ready":
-            # a real step is a profile or a report composition, and the
-            # refreshes above are waiting behind it.
-            try:
-                from .automation_runner import tick as automation_tick
-                async with session_factory() as automation_session:
-                    await automation_tick(automation_session, now)
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:  # noqa: BLE001 - never-die, same contract
-                log.warning("Automation runner tick failed: %s", e)
+            # Automations used to take ONE step per tick of this loop, which put
+            # a minute of idle time between every two steps. 5.21: they advance
+            # on their own loop (automation_runner.run_automation_loop), still
+            # one step per tick and under the same per-run advisory lock.
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001 - a bad tick must not kill the loop

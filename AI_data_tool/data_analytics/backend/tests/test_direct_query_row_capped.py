@@ -32,7 +32,7 @@ def test_plan_row_fetch_rejects_non_row_capped_widget_type():
 
 def test_plan_row_fetch_rejects_unsupported_filter_operator():
     with pytest.raises(DirectQueryUnsupported):
-        plan_row_fetch({"filters": [{"column": "region", "op": "like", "value": "e"}]}, "bubble")
+        plan_row_fetch({"filters": [{"column": "region", "op": "regex", "value": "e"}]}, "bubble")
 
 
 def test_build_row_fetch_sql_unsampled_has_no_order_by():
@@ -119,3 +119,35 @@ def _spy_dataset():
     from types import SimpleNamespace
     return SimpleNamespace(source_table="t", source_query=None,
                            columns=[SimpleNamespace(name="a")])
+
+
+class TestAGroupedTableReadsTheAnalysisCap:
+    """Live QA 2026-10-03: a table of average price per order status, on a live
+    source bigger than the 10,000-row drawing cap, gave two identical widgets
+    different averages -- each a random sample. Its rows are aggregates, so it
+    reads the analysis cap like a bubble chart does; a raw table keeps the
+    drawing cap."""
+
+    def _cap_for(self, config, widget_type):
+        import app.services.direct_query as dq
+        captured = {}
+        original = dq._run_row_capped
+        dq._run_row_capped = lambda *a, **_kw: captured.__setitem__("cap", a[5]) or {"rows": [], "total": 0}
+        try:
+            dq.run_direct_query({"type": "sqlite", "filepath": ":memory:"},
+                                _spy_dataset(), config, widget_type=widget_type,
+                                cache_ttl_seconds=0)
+        finally:
+            dq._run_row_capped = original
+        return captured["cap"]
+
+    @pytest.mark.parametrize("widget_type", ["table", "list"])
+    def test_grouped_rows_are_not_sampled_at_the_drawing_cap(self, widget_type):
+        from app.core.config import settings
+        cap = self._cap_for({"dimension": "region", "measure": "amount",
+                             "aggregation": "avg"}, widget_type)
+        assert cap == int(getattr(settings, "analysis_row_cap", 250_000) or 250_000)
+
+    def test_a_raw_table_keeps_the_drawing_cap(self):
+        import app.services.direct_query as dq
+        assert self._cap_for({}, "table") == dq.DEFAULT_ROW_CAP

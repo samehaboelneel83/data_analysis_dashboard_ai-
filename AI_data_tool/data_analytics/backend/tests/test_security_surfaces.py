@@ -235,6 +235,13 @@ SURFACES: list[Surface] = [
             denied_variant={"body": {"dataset_id": "{ds}", "dimensions": ["salary"]}}),
     Surface("semantic rows", "GET", "/api/v1/semantic/datasets/{ds}/rows"),
     Surface("dependents", "GET", "/api/v1/datasets/{ds}/dependents", params={"name": "headcount"}),
+    # The discovery engine's doors (docs/discovery/PLAN.md): what the data
+    # supports and shows, its column cards, its health, the shape of a decision.
+    Surface("opportunities", "GET", "/api/v1/datasets/{ds}/opportunities", params={"depth": 1, "fresh": "true"}),
+    Surface("column profile cards", "GET", "/api/v1/datasets/{ds}/profile"),
+    Surface("health checks", "GET", "/api/v1/datasets/{ds}/health"),
+    Surface("decision problems", "GET", "/api/v1/datasets/{ds}/decision-problems"),
+    Surface("column lineage", "GET", "/api/v1/datasets/{ds}/column-lineage", params={"name": "headcount"}),
 ]
 
 #: `/datasets/{dataset_id}/...` routes deliberately NOT walked here, each with
@@ -249,6 +256,22 @@ EXCUSED_ROUTES = {
     ("POST", "/api/v1/datasets/{dataset_id}/prediction-models/{model_id}/drift-checks"): "the drift check (usable_model + secured frame) kept on the card; test_model_drift_history.py",
     ("GET", "/api/v1/datasets/{dataset_id}/prediction-models/{model_id}/drift-history"): "only through a model the caller may use (usable_model); test_model_drift_history.py",
     ("POST", "/api/v1/datasets/{dataset_id}/widget-data/reconcile"): "multipart upload; resolves the widget through _resolve_widget_data as widget-data does (row rules, denied columns, other orgs); test_widget_reconcile.py",
+    # HR evaluation follow-up (3.1, 4.5, 4.7):
+    ("POST", "/api/v1/datasets/{dataset_id}/alerts/test"): "one number, no rows: the alert's metric over alerts.alert_frame, which applies the caller's row rules and denied columns like every frame read; test_alert_changes.py",
+    ("POST", "/api/v1/datasets/{dataset_id}/live-count"): "a row COUNT only, before row rules -- the same total an imported dataset's row_count shows every reader on the list; needs dataset read; test_live_counts.py",
+    ("POST", "/api/v1/datasets/{dataset_id}/certify"): "admin-only metadata toggle (column_meta.__certified__); returns no row content; test_live_counts.py",
+    # Pipeline plan, phases 2-3:
+    ("GET", "/api/v1/datasets/{dataset_id}/pipeline-health"): "refresh status and the freshness target; error text, owners and recipients only for editors; no row content; test_pipeline_alerts.py",
+    ("GET", "/api/v1/datasets/{dataset_id}/checks"): "the saved check definitions an editor wrote; no row content; test_data_checks.py",
+    ("POST", "/api/v1/datasets/{dataset_id}/checks"): "creates a check definition (edit capability); no row content; test_data_checks.py",
+    ("POST", "/api/v1/datasets/{dataset_id}/checks/try"): "editors only; check results are counts and column names, never values from the data (services/data_checks.py); test_data_checks.py",
+    ("GET", "/api/v1/datasets/{dataset_id}/refresh-runs"): "editors only; run status, row totals and count-only check results; test_data_checks.py",
+    ("GET", "/api/v1/datasets/{dataset_id}/incremental"): "load settings; the watermark (the newest cursor value loaded) only for editors; test_incremental_merge.py",
+    # Discovery plan:
+    ("POST", "/api/v1/datasets/{dataset_id}/decision-problems/specification"): "returns the problem as the caller described it -- column names, counts and checks, never a row; 403 when a denied column is named; computed over alerts.alert_frame (the caller's row rules and denied columns); test_decision_problem.py",
+    ("GET", "/api/v1/datasets/{dataset_id}/allow-ai"): "the 'Allow AI' setting and who decides it; no row content; test_dataset_allow_ai.py",
+    ("GET", "/api/v1/datasets/{dataset_id}/column-lineage"): "where a column comes from and what uses it -- names and definitions, the SQL only for editors; no row content (docs/pipeline/PLAN.md, P5)",
+    ("POST", "/api/v1/datasets/{dataset_id}/column-meta/classify-again"): "data capability required; re-reads what each number IS (kinds, not values) with denied columns left out of what the model is shown; returns column_meta as the dataset detail does; test_column_classes.py",
 }
 
 

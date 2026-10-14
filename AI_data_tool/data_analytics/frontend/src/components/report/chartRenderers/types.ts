@@ -30,4 +30,8 @@ export interface ChartRendererProps {
   /** Overview-axis zoom, reported so the widget can show it as a widget-local
    *  filter (the transparency pane, a "zoomed" chip with reset). */
   onBrushChange?: (range: import('./axisOptions').BrushRange | null) => void
+  /** A tree widget's ticked branches (hierarchy plan, step 4): read from the
+   *  page's filters, sent back as one exact "paths" filter. */
+  treePaths?: string[][] | null
+  onTreeChange?: (paths: string[][] | null) => void
 }

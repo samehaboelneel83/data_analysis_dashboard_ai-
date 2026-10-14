@@ -73,16 +73,39 @@ describe('ConfirmDialog', () => {
     expect(screen.getByRole('alertdialog')).toBeInTheDocument()
   })
 
-  it('focuses the affirmative action so the dialog is operable by keyboard at once', async () => {
-    await open()
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Delete' })).toHaveFocus())
+  it('opens a destructive dialog on Cancel, so Enter never deletes (QA5b S1)', async () => {
+    const onResult = vi.fn()
+    await open(onResult)
+    const cancel = screen.getByRole('button', { name: 'Cancel' })
+    await waitFor(() => expect(cancel).toHaveFocus())
+    // Enter on a focused button is a click on that button.
+    fireEvent.keyDown(cancel, { key: 'Enter' }); fireEvent.click(cancel)
+    await waitFor(() => expect(onResult).toHaveBeenCalledWith(false))
+    expect(onResult).not.toHaveBeenCalledWith(true)
+  })
+
+  it('opens a benign confirmation on its action, unless the caller asks for Cancel', async () => {
+    function Benign({ focusCancel }: { focusCancel?: boolean }) {
+      const confirm = useConfirm()
+      return <button onClick={() => confirm({ title: 'Move?', confirmLabel: 'Move', destructive: false, focusCancel })}>go</button>
+    }
+    const { unmount } = render(<ConfirmProvider><Benign /></ConfirmProvider>)
+    fireEvent.click(screen.getByRole('button', { name: 'go' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Move' })).toHaveFocus())
+    unmount()
+    render(<ConfirmProvider><Benign focusCancel /></ConfirmProvider>)
+    fireEvent.click(screen.getByRole('button', { name: 'go' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus())
   })
 
   it('keeps Tab inside the dialog rather than letting focus escape to the page behind', async () => {
     await open()
     const del = screen.getByRole('button', { name: 'Delete' })
     const cancel = screen.getByRole('button', { name: 'Cancel' })
+    await waitFor(() => expect(cancel).toHaveFocus())
 
+    fireEvent.keyDown(window, { key: 'Tab' })          // from Cancel to Delete
+    expect(del).toHaveFocus()
     fireEvent.keyDown(window, { key: 'Tab' })          // from Delete (last) wraps to Cancel
     expect(cancel).toHaveFocus()
     fireEvent.keyDown(window, { key: 'Tab', shiftKey: true })

@@ -293,7 +293,9 @@ export function EmptyState({ msg, action }: {
     // widget on every surface, and a restyle here is an app-wide change.
     <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12, flexDirection: 'column', gap: 6 }}>
       <span style={{ fontSize: 24, opacity: .4 }}>◻</span>
-      <span>{msg}</span>
+      {/* dir="auto": a message takes the direction of its own text, so its
+          punctuation lands at the right end in either layout. */}
+      <span dir="auto" style={{ textAlign: 'center', maxWidth: '100%' }}>{msg}</span>
       {action && (
         <button type="button" onClick={action.onClick} className="btn btn-ghost btn-sm"
           style={{ fontSize: 11, padding: '3px 10px' }}>
@@ -311,9 +313,13 @@ export function getFillFactory(
   broadcasts: boolean,
   localSelected: unknown,
   ruleRowStyles?: (RuleStyle | null)[],
+  /** One series (a bar per group of ONE measure): every mark takes the first
+   *  colour, so a rainbow never suggests the groups differ in kind. Parts of a
+   *  whole (donut, pie, funnel) keep a colour each. */
+  oneSeries = false,
 ) {
   return (name: unknown, i: number) => {
-    const color = ruleRowStyles?.[i]?.fill ?? COLORS[i % COLORS.length]
+    const color = ruleRowStyles?.[i]?.fill ?? COLORS[oneSeries ? 0 : i % COLORS.length]
     if (!broadcasts || localSelected === null) return { fill: color, opacity: 1 }
     return localSelected === name
       ? { fill: color, opacity: 1, strokeWidth: 2, stroke: SELECTED_STROKE }

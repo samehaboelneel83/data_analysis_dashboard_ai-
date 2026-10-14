@@ -189,3 +189,60 @@ describe('the last visible page', () => {
     expect((screen.getByDisplayValue('hidden') as HTMLInputElement).disabled).toBe(false)
   })
 })
+
+describe('a rename made elsewhere (QA3 A5)', () => {
+  it('shows in Tab name at once, without saving it again', () => {
+    vi.useFakeTimers()
+    const onUpdate = vi.fn()
+    const { rerender } = render(<PagePropertiesPanel page={page()} columns={[]} onUpdate={onUpdate} />)
+    rerender(<PagePropertiesPanel page={page({ name: 'Renamed on the tab' })} columns={[]} onUpdate={onUpdate} />)
+    expect(screen.getByLabelText(/tab name/i)).toHaveValue('Renamed on the tab')
+    act(() => { vi.advanceTimersByTime(600) })
+    expect(onUpdate).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it('the save of what is being typed does not roll the field back', () => {
+    vi.useFakeTimers()
+    const onUpdate = vi.fn()
+    const { rerender } = render(<PagePropertiesPanel page={page()} columns={[]} onUpdate={onUpdate} />)
+    fireEvent.change(screen.getByLabelText(/tab name/i), { target: { value: 'Over' } })
+    act(() => { vi.advanceTimersByTime(600) })
+    fireEvent.change(screen.getByLabelText(/tab name/i), { target: { value: 'Overview' } })
+    rerender(<PagePropertiesPanel page={page({ name: 'Over' })} columns={[]} onUpdate={onUpdate} />)
+    expect(screen.getByLabelText(/tab name/i)).toHaveValue('Overview')
+    vi.useRealTimers()
+  })
+})
+
+describe('PagePropertiesPanel in Arabic (QA3 Batch C)', () => {
+  it('shows the page settings in Arabic while the controls keep their ids', async () => {
+    localStorage.setItem('datalytics.language', 'ar')
+    try {
+      const { DirectionProvider } = await import('../../contexts/DirectionContext')
+      render(<DirectionProvider><PagePropertiesPanel page={page()} columns={[]} onUpdate={vi.fn()} /></DirectionProvider>)
+      expect(screen.getByRole('button', { name: 'مخصص' })).toBeInTheDocument()
+      // The label is Arabic; the id it points at is still built from the English.
+      const bg = screen.getByLabelText('صورة الخلفية')
+      expect(bg.id).toBe('page-background-image')
+      expect(bg).toHaveAttribute('placeholder', 'https://… أو /uploads/…')
+      expect(screen.getByText(/تظهر الصورة من خلال العناصر ذات الخلفية الشفافة/)).toBeInTheDocument()
+      expect(screen.getByText('عادية')).toBeInTheDocument()
+      expect(document.body.textContent).not.toMatch(/Custom|Objects with a transparent|Normal|Standard visible tab|no prompt/)
+    } finally { localStorage.removeItem('datalytics.language') }
+  })
+
+  it('finds a group by the Arabic heading the reader sees', async () => {
+    localStorage.setItem('datalytics.language', 'ar')
+    try {
+      const { DirectionProvider } = await import('../../contexts/DirectionContext')
+      render(<DirectionProvider><PagePropertiesPanel page={page()} columns={[]} onUpdate={vi.fn()} /></DirectionProvider>)
+      fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'التخطيط' } })
+      expect(screen.queryByText(/لا يوجد إعداد يطابق/)).not.toBeInTheDocument()
+      expect(screen.getByLabelText('صورة الخلفية')).toBeInTheDocument()
+      fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'zzzz' } })
+      expect(screen.getByText('zzzz').tagName).toBe('BDI')
+      expect(screen.getByText(/لا يوجد إعداد يطابق/).textContent).toBe('لا يوجد إعداد يطابق «zzzz».')
+    } finally { localStorage.removeItem('datalytics.language') }
+  })
+})

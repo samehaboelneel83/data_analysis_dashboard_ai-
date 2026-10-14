@@ -9,6 +9,7 @@ import {
   resizeFree,
   resizePacked,
   RECIPES,
+  shownLayouts,
 } from './dashboardLayout'
 import type { LayoutItem } from './dashboardLayout'
 
@@ -118,6 +119,35 @@ describe('dropPacked', () => {
     expect(next[1].y).toBe(0)
     assertNoOverlap(next)
   })
+
+  it('QA3 A7: lands on the drop cell; widgets it does not touch stay put', () => {
+    const items = [
+      item(1, 'kpi', { x: 0, y: 0, w: 3, h: 2 }),
+      item(2, 'kpi', { x: 3, y: 0, w: 3, h: 2 }),
+      item(3, 'bar', { x: 0, y: 2, w: 6, h: 5 }),
+    ]
+    // KPI 1 dropped into empty space below everything
+    const next = dropPacked(items, 1, { x: 6, y: 9 })
+    expect(next[1]).toMatchObject({ x: 6, y: 9 })
+    expect(next[2]).toMatchObject({ x: 3, y: 0 })
+    expect(next[3]).toMatchObject({ x: 0, y: 2 })
+  })
+
+  it('QA3 A7: a collision pushes only the widgets in the way, cascading', () => {
+    const items = [
+      item(1, 'kpi', { x: 0, y: 0, w: 3, h: 2 }),
+      item(2, 'kpi', { x: 3, y: 0, w: 3, h: 2 }),
+      item(3, 'bar', { x: 0, y: 2, w: 6, h: 5 }),
+      item(4, 'bar', { x: 0, y: 7, w: 6, h: 5 }),
+    ]
+    // the first bar moved down a row: one row of overlap is under the swap threshold
+    const next = dropPacked(items, 3, { x: 0, y: 3 })
+    expect(next[3]).toMatchObject({ x: 0, y: 3 })
+    expect(next[4].y).toBe(8)
+    expect(next[1]).toMatchObject({ x: 0, y: 0 })
+    expect(next[2]).toMatchObject({ x: 3, y: 0 })
+    assertNoOverlap(next)
+  })
 })
 
 describe('resizePacked', () => {
@@ -179,5 +209,21 @@ describe('recipes', () => {
         expect(l.h).toBeGreaterThanOrEqual(minSize(type).h)
       }
     }
+  })
+})
+
+describe('shownLayouts (QA3 N3): drawn, not saved', () => {
+  const w = (id: number, x: number, y: number, ww = 6, h = 5, t = 'bar') => ({ id, widget_type: t, layout: { x, y, w: ww, h } })
+  it('a page with no layout mode is shown in the automatic layout', () => {
+    const shown = shownLayouts({ layout_mode: null, widgets: [w(1, 0, 0, 12), w(2, 0, 5, 12)] })
+    expect(Object.keys(shown)).toHaveLength(2)
+  })
+  it('a packed page whose widgets overlap is shown compacted, without overlaps', () => {
+    const shown = shownLayouts({ layout_mode: 'packed', widgets: [w(1, 0, 0), w(2, 3, 2)] })
+    expect(overlaps(shown[1], shown[2])).toBe(false)
+  })
+  it('a page laid out cleanly is drawn as stored', () => {
+    expect(shownLayouts({ layout_mode: 'packed', widgets: [w(1, 0, 0), w(2, 6, 0)] })).toEqual({})
+    expect(shownLayouts({ layout_mode: 'free', widgets: [w(1, 0, 0), w(2, 3, 2)] })).toEqual({})
   })
 })

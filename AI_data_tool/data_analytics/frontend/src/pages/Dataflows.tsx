@@ -2,11 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { formatTimeAgo, useT } from '../i18n'
-import { dataflowsApi, datasetsApi, type Dataflow, type Dataset, type DatasetColumn, type PrepStep } from '../services/api'
+import { dataflowsApi, datasetsApi, type Dataflow, type DataflowSnapshot, type Dataset, type DatasetColumn, type PrepStep } from '../services/api'
 import PrepPipelinePanel from '../components/report/PrepPipelinePanel'
 import LoadError from '../components/ui/LoadError'
 import LoadingState from '../components/ui/LoadingState'
 import { useConfirm } from '../components/ui/ConfirmDialog'
+import DatasetListFilter, { useCleanDatasets } from '../components/dataset/DatasetListFilter'
 
 /**
  * Dataflows (E12): a recipe that reads one dataset, transforms it, and keeps
@@ -24,6 +25,9 @@ const SCHEDULES: { minutes: number; key: 'flows.scheduleOff' | 'flows.hourly' | 
   { minutes: 1440, key: 'flows.daily' }, { minutes: 10080, key: 'flows.weekly' },
 ]
 
+/** The schedule choice "after its source refreshes" (pipeline phase 4). */
+const AFTER_SOURCE = -1
+
 const detail = (e: unknown, fallback: string) =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? fallback
 
@@ -39,6 +43,28 @@ export default function Dataflows() {
   const [newName, setNewName] = useState('')
   const [newSource, setNewSource] = useState('')
   const [busy, setBusy] = useState(false)
+  // 4.6: "Monthly snapshot" -- a history from a source that only shows today.
+  const [kind, setKind] = useState<'transform' | 'snapshot'>('transform')
+  const [srcCols, setSrcCols] = useState<string[]>([])
+  const [snapGroup, setSnapGroup] = useState('')
+  const [snapCount, setSnapCount] = useState('')   // '' = rows, else distinct of this column
+  const [snapAs, setSnapAs] = useState('row_count')
+  const [snapBackfill, setSnapBackfill] = useState(false)
+  const [bfFrom, setBfFrom] = useState('')
+  const [bfTo, setBfTo] = useState('')
+  const [bfStart, setBfStart] = useState(`${new Date().getFullYear() - 1}-01-01`)
+  useEffect(() => {
+    if (!newSource) { setSrcCols([]); return }
+    let live = true
+    datasetsApi.get(Number(newSource)).then(d => {
+      if (!live) return
+      const cols = (d.columns ?? []).map(c => c.name)
+      setSrcCols(cols)
+      setBfFrom(cols.find(c => /^(from|start|valid_from|begin)_?(date|dt)?$/i.test(c)) ?? '')
+      setBfTo(cols.find(c => /^(to|end|valid_to|until)_?(date|dt)?$/i.test(c)) ?? '')
+    }).catch(() => { if (live) setSrcCols([]) })
+    return () => { live = false }
+  }, [newSource])
 
   const load = () => {
     setLoading(true); setLoadError(null)
@@ -49,7 +75,10 @@ export default function Dataflows() {
   }
   useEffect(load, [])
 
-  const sources = useMemo(() => datasets.filter(d => d.mode !== 'directquery'), [datasets])
+  // Live datasets feed dataflows too (4.6) -- a snapshot of one is the point.
+  // 4.7: certified first, test-looking leftovers out of sight.
+  const clean = useCleanDatasets(datasets)
+  const sources = clean.visible
   const nameOf = (id: number | null) => datasets.find(d => d.id === id)?.name ?? `#${id}`
   const open = (id: number | null) => setParams(id ? { flow: String(id) } : {})
 
@@ -57,8 +86,14 @@ export default function Dataflows() {
     if (!newName.trim() || !newSource) return
     setBusy(true)
     try {
-      const flow = await dataflowsApi.create({ name: newName.trim(), source_dataset_id: Number(newSource), steps: [] })
-      setNewName(''); setNewSource('')
+      const snapshot: DataflowSnapshot | null = kind === 'snapshot' ? {
+        every: 'month', group_by: snapGroup ? [snapGroup] : [],
+        measure: snapCount || null, agg: snapCount ? 'nunique' : 'count', as: snapAs.trim() || 'row_count',
+        backfill: snapBackfill && bfFrom && bfTo ? { from_column: bfFrom, to_column: bfTo, start: bfStart } : null,
+      } : null
+      const flow = await dataflowsApi.create({ name: newName.trim(), source_dataset_id: Number(newSource), steps: [],
+        ...(snapshot ? { snapshot, refresh_interval_minutes: 1440 } : {}) })
+      setNewName(''); setNewSource(''); setKind('transform')
       setFlows(fs => [flow, ...fs])
       open(flow.id)
     } catch (e) {
@@ -94,12 +129,61 @@ export default function Dataflows() {
             <span style={{ display: 'block', fontWeight: 600, marginBottom: 4 }}>{t('flows.source')}</span>
             <select value={newSource} onChange={e => setNewSource(e.target.value)} style={{ minWidth: 240 }}>
               <option value="">{t('flows.pickSource')}</option>
-              {sources.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+              {sources.map(d => <option key={d.id} value={d.id}>{d.name}{d.mode === 'directquery' ? ` · ${t('datasets.live')}` : ''}</option>)}
             </select>
           </label>
+          <DatasetListFilter state={clean} />
+          <fieldset style={{ border: 'none', padding: 0, margin: 0, fontSize: 13, display: 'flex', gap: 10 }}>
+            <legend style={{ fontWeight: 600, marginBottom: 4, padding: 0 }}>{t('flows.kind')}</legend>
+            <label><input type="radio" name="flow-kind" checked={kind === 'transform'} onChange={() => setKind('transform')} /> {t('flows.kindTransform')}</label>
+            <label><input type="radio" name="flow-kind" checked={kind === 'snapshot'} onChange={() => setKind('snapshot')} /> {t('flows.kindSnapshot')}</label>
+          </fieldset>
           <button className="btn btn-primary btn-sm" disabled={busy || !newName.trim() || !newSource}
             onClick={() => void create()}>{t('flows.create')}</button>
         </div>
+        {kind === 'snapshot' && (
+          <div data-testid="snapshot-form" style={{ marginTop: 12, display: 'grid', gap: 8, fontSize: 13 }}>
+            <p style={{ margin: 0, color: 'var(--muted)', fontSize: 12.5 }}>{t('flows.snapshotLead')}</p>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <label>
+                <span style={{ display: 'block', fontWeight: 600, marginBottom: 4 }}>{t('flows.snapCount')}</span>
+                <select value={snapCount} onChange={e => setSnapCount(e.target.value)}>
+                  <option value="">{t('flows.snapRows')}</option>
+                  {srcCols.map(c => <option key={c} value={c}>{t('flows.snapDistinct', { col: c })}</option>)}
+                </select>
+              </label>
+              <label>
+                <span style={{ display: 'block', fontWeight: 600, marginBottom: 4 }}>{t('flows.snapGroup')}</span>
+                <select value={snapGroup} onChange={e => setSnapGroup(e.target.value)}>
+                  <option value="">{t('flows.snapNoGroup')}</option>
+                  {srcCols.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </label>
+              <label>
+                <span style={{ display: 'block', fontWeight: 600, marginBottom: 4 }}>{t('flows.snapAs')}</span>
+                <input value={snapAs} onChange={e => setSnapAs(e.target.value)} style={{ width: 140 }} />
+              </label>
+            </div>
+            <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <input type="checkbox" checked={snapBackfill} onChange={e => setSnapBackfill(e.target.checked)} />
+              {t('flows.snapBackfill')}
+            </label>
+            {snapBackfill && (
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                <label><span style={{ display: 'block', fontWeight: 600, marginBottom: 4 }}>{t('flows.bfFrom')}</span>
+                  <select value={bfFrom} onChange={e => setBfFrom(e.target.value)}>
+                    <option value="">—</option>{srcCols.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select></label>
+                <label><span style={{ display: 'block', fontWeight: 600, marginBottom: 4 }}>{t('flows.bfTo')}</span>
+                  <select value={bfTo} onChange={e => setBfTo(e.target.value)}>
+                    <option value="">—</option>{srcCols.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select></label>
+                <label><span style={{ display: 'block', fontWeight: 600, marginBottom: 4 }}>{t('flows.bfStart')}</span>
+                  <input type="date" value={bfStart} onChange={e => setBfStart(e.target.value)} /></label>
+              </div>
+            )}
+          </div>
+        )}
       </section>
 
       <section className="card dl-table-card" style={{ marginTop: 16 }}>
@@ -123,8 +207,9 @@ export default function Dataflows() {
                     <div className="dl-cell-sub">{t('flows.steps', { n: f.steps.length })}</div>
                   </td>
                   <td>{f.source_dataset_id ? <Link to={`/datasets/${f.source_dataset_id}`}>{nameOf(f.source_dataset_id)}</Link> : '—'}</td>
-                  <td>{t(SCHEDULES.find(s => s.minutes === (f.refresh_interval_minutes ?? 0))?.key ?? 'flows.custom',
-                    { n: f.refresh_interval_minutes ?? 0 })}</td>
+                  <td>{f.run_after_source ? t('flows.afterSource')
+                    : t(SCHEDULES.find(s => s.minutes === (f.refresh_interval_minutes ?? 0))?.key ?? 'flows.custom',
+                      { n: f.refresh_interval_minutes ?? 0 })}</td>
                   <td className={f.last_run_status === 'failed' ? 'dl-fresh--bad' : undefined}>{lastRun(f)}</td>
                   <td>
                     {f.outputs.length === 0 ? <span style={{ color: 'var(--muted)' }}>{t('flows.noOutputs')}</span>
@@ -180,9 +265,12 @@ function FlowEditor({ flow, datasets, onChanged, onDeleted, onReload, confirm }:
     }
   }
 
+  /** -1 = after the source refreshes (phase 4); 0 = off; else a timer. */
   const setSchedule = async (minutes: number) => {
     try {
-      const f = await dataflowsApi.update(flow.id, { refresh_interval_minutes: minutes })
+      const f = await dataflowsApi.update(flow.id, minutes === AFTER_SOURCE
+        ? { run_after_source: true }
+        : { refresh_interval_minutes: minutes, ...(minutes === 0 ? { run_after_source: false } : {}) })
       onChanged({ ...flow, ...f, outputs: flow.outputs })
     } catch (e) {
       toast.error(detail(e, t('flows.saveFailed')))
@@ -217,6 +305,15 @@ function FlowEditor({ flow, datasets, onChanged, onDeleted, onReload, confirm }:
     <section className="card" style={{ padding: 16, marginTop: 16 }} aria-labelledby="flow-editor">
       <h2 id="flow-editor" style={{ fontSize: 15, marginTop: 0 }}>{flow.name}</h2>
       {!canEdit && <p role="note" style={{ fontSize: 12.5, color: 'var(--muted)' }}>{t('flows.viewOnly')}</p>}
+      {flow.snapshot && (
+        <p data-testid="snapshot-summary" style={{ fontSize: 12.5, marginTop: 0 }}>
+          {t('flows.snapSummary', {
+            what: flow.snapshot.measure ? t('flows.snapDistinct', { col: flow.snapshot.measure }) : t('flows.snapRows'),
+            by: flow.snapshot.group_by?.length ? flow.snapshot.group_by.join(', ') : t('flows.snapNoGroup'),
+            as: flow.snapshot.as ?? 'rows' })}
+          {flow.snapshot.backfill ? ` ${t('flows.snapBackfilled', { start: flow.snapshot.backfill.start })}` : ''}
+        </p>
+      )}
 
       <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         <div style={{ flex: '1 1 380px', minWidth: 0 }}>
@@ -230,9 +327,10 @@ function FlowEditor({ flow, datasets, onChanged, onDeleted, onReload, confirm }:
         <div style={{ flex: '0 1 300px', display: 'flex', flexDirection: 'column', gap: 12 }}>
           <label style={{ fontSize: 13 }}>
             <span style={{ display: 'block', fontWeight: 600, marginBottom: 4 }}>{t('flows.schedule')}</span>
-            <select value={flow.refresh_interval_minutes ?? 0} disabled={!canEdit}
+            <select value={flow.run_after_source ? AFTER_SOURCE : flow.refresh_interval_minutes ?? 0} disabled={!canEdit}
               onChange={e => void setSchedule(Number(e.target.value))} style={{ width: '100%' }}>
               {SCHEDULES.map(s => <option key={s.minutes} value={s.minutes}>{t(s.key)}</option>)}
+              {flow.source_dataset_id != null && <option value={AFTER_SOURCE}>{t('flows.afterSource')}</option>}
               {flow.refresh_interval_minutes && !SCHEDULES.some(s => s.minutes === flow.refresh_interval_minutes) && (
                 <option value={flow.refresh_interval_minutes}>{t('flows.custom', { n: flow.refresh_interval_minutes })}</option>
               )}

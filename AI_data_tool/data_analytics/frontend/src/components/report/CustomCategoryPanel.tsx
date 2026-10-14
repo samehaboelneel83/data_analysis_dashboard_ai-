@@ -1,8 +1,11 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, type ReactNode } from 'react'
 import { calcColumnsApi, widgetDataApi } from '../../services/api'
 import type { CalcColumn, DatasetColumn } from '../../services/api'
 import { groupingExpression, binningExpression, defaultBinEdges } from '../../lib/customCategories'
 import type { ValueGroup } from '../../lib/customCategories'
+import { useT } from '../../i18n'
+import { dtypeName } from '../../lib/dtypeName'
+import { useDirection } from '../../contexts/DirectionContext'
 
 /**
  * Custom categories — SAS's "custom category", Power BI's New group / New bin.
@@ -23,12 +26,21 @@ interface Props {
   onSaved: (cols: CalcColumn[]) => void
 }
 
+/** The catch-all group's NAME, written into the expression: data, never translated. */
 const OTHER = 'Other'
+/** A translated sentence with one `{slot}` filled by an element. */
+const slot = (text: string, name: string, node: ReactNode) => {
+  const [before, after = ''] = text.split(`{${name}}`)
+  return <>{before}{node}{after}</>
+}
 /** Values listed for grouping, most common first. More than this is not a
  *  list anyone assigns by hand; the cap is disclosed, not silent. */
 export const GROUP_VALUE_LIMIT = 1000
 
 export default function CustomCategoryPanel({ datasetId, columns, onSaved }: Props) {
+  const t = useT()
+  const { language } = useDirection()
+  const sep = language === 'ar' ? '، ' : ', '
   const [source, setSource] = useState('')
   const [name, setName] = useState('')
   const [assignments, setAssignments] = useState<Record<string, string>>({})
@@ -115,9 +127,9 @@ export default function CustomCategoryPanel({ datasetId, columns, onSaved }: Pro
     : groupingExpression(source, groups, OTHER)
 
   const create = async () => {
-    if (!name.trim()) { setError('The new column needs a name'); return }
+    if (!name.trim()) { setError(t('pg.panelsA.cc.needName')); return }
     if (!expression) {
-      setError(isNumeric ? 'Pick at least two bin edges' : 'Assign at least one value to a group')
+      setError(isNumeric ? t('pg.panelsA.cc.needEdges') : t('pg.panelsA.cc.needGroup'))
       return
     }
     setBusy(true)
@@ -129,7 +141,7 @@ export default function CustomCategoryPanel({ datasetId, columns, onSaved }: Pro
       setAssignments({})
       setSource('')
     } catch (e: any) {
-      setError(e?.response?.data?.detail ?? 'Could not create this column')
+      setError(e?.response?.data?.detail ?? t('pg.panelsA.cc.createFailed'))
     } finally {
       setBusy(false)
     }
@@ -141,29 +153,28 @@ export default function CustomCategoryPanel({ datasetId, columns, onSaved }: Pro
     <div>
       <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase',
         letterSpacing: '.06em', marginBottom: 8 }}>
-        ⊞ Group &amp; Bin
+        {t('pg.panelsA.cc.title')}
       </div>
       <p style={{ fontSize: 10.5, color: 'var(--muted)', margin: '0 0 8px', lineHeight: 1.45 }}>
-        Bucket a column's values into named groups, or a numeric column into intervals.
-        Saved as a calculated column, so it works anywhere a column does.
+        {t('pg.panelsA.cc.intro')}
       </p>
 
       <div style={{ marginBottom: 6 }}>
-        <label style={lbl} htmlFor="cc-source">Source column</label>
+        <label style={lbl} htmlFor="cc-source">{t('pg.panelsA.cc.source')}</label>
         <select id="cc-source" value={source} onChange={e => { setSource(e.target.value); setAssignments({}); setError(null) }}
           style={{ width: '100%', fontSize: 11 }}>
-          <option value="">— pick a column —</option>
+          <option value="">{t('pg.panelsA.cc.pick')}</option>
           {columns.filter(c => c.dtype !== 'calculated').map(c => (
-            <option key={c.name} value={c.name}>{c.name} ({c.dtype})</option>
+            <option key={c.name} value={c.name}>{c.name} ({dtypeName(t, c.dtype)})</option>
           ))}
         </select>
       </div>
 
       {source && (
         <div style={{ marginBottom: 6 }}>
-          <label style={lbl} htmlFor="cc-name">New column name</label>
+          <label style={lbl} htmlFor="cc-name">{t('pg.panelsA.cc.newName')}</label>
           <input id="cc-name" value={name} onChange={e => setName(e.target.value)}
-            placeholder={isNumeric ? 'e.g. Sales Band' : 'e.g. Continent'}
+            placeholder={isNumeric ? t('pg.panelsA.cc.phBand') : t('pg.panelsA.cc.phGroup')}
             style={{ width: '100%', fontSize: 11 }} />
         </div>
       )}
@@ -171,16 +182,16 @@ export default function CustomCategoryPanel({ datasetId, columns, onSaved }: Pro
       {/* Numeric -> interval binning */}
       {source && isNumeric && (
         <div style={{ marginBottom: 6 }}>
-          <label style={lbl} htmlFor="cc-bins">Number of bins</label>
+          <label style={lbl} htmlFor="cc-bins">{t('pg.panelsA.cc.bins')}</label>
           <input id="cc-bins" type="number" min={1} max={20} value={bins}
             onChange={e => setBins(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
             style={{ width: '100%', fontSize: 11 }} />
           <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 3, fontFamily: 'var(--mono)' }}>
-            {rangeState === 'loading' ? 'reading the range…'
-              : rangeState === 'failed' ? 'could not read this column’s range'
+            {rangeState === 'loading' ? t('pg.panelsA.cc.reading')
+              : rangeState === 'failed' ? t('pg.panelsA.cc.readFailed')
               : range && range.min === range.max
-                ? `every value is the same (${range.min}) — nothing to bin`
-                : `edges: ${edges.join(', ') || '—'}`}
+                ? t('pg.panelsA.cc.allSame', { v: String(range.min) })
+                : t('pg.panelsA.cc.edges', { list: edges.join(', ') || '—' })}
           </div>
         </div>
       )}
@@ -193,16 +204,18 @@ export default function CustomCategoryPanel({ datasetId, columns, onSaved }: Pro
         const pct = total ? Math.floor((grouped / total) * 100) : 0
         return (
           <div data-testid="category-coverage" role="status" style={{ marginBottom: 6, fontSize: 10.5 }}>
-            <b>{pct}%</b> of rows go to a named group
+            {slot(t('pg.panelsA.cc.covered'), 'pct', <b>{pct}%</b>)}
             {rest.length > 0 && (
               <span style={{ color: 'var(--muted)' }}>
-                {' '}· {(total - grouped).toLocaleString()} rows ({rest.length} value{rest.length === 1 ? '' : 's'}) fall to “{OTHER}”
-                {rest.length <= 3 ? `: ${rest.join(', ')}` : `, most: ${rest.slice(0, 3).join(', ')}…`}
+                {' '}{t(rest.length <= 3 ? 'pg.panelsA.cc.restFew' : 'pg.panelsA.cc.restMany', {
+                  rows: (total - grouped).toLocaleString(), n: rest.length, other: OTHER,
+                  list: (rest.length <= 3 ? rest : rest.slice(0, 3)).join(sep),
+                })}
               </span>
             )}
             {capped && (
               <div style={{ color: 'var(--muted)' }}>
-                Listing the {capped.shown.toLocaleString()} most common of {capped.of.toLocaleString()} values; the rest fall to “{OTHER}”.
+                {t('pg.panelsA.cc.capped', { shown: capped.shown.toLocaleString(), of: capped.of.toLocaleString(), other: OTHER })}
               </div>
             )}
           </div>
@@ -216,10 +229,10 @@ export default function CustomCategoryPanel({ datasetId, columns, onSaved }: Pro
           {distinct.map(v => (
             <div key={v} style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 3 }}>
               <span style={{ flex: 1, fontSize: 10.5, overflow: 'hidden', textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap' }} title={v}>{v}
+                whiteSpace: 'nowrap' }} title={v}><bdi>{v}</bdi>
                 {counts[v] != null && <span style={{ color: 'var(--muted)' }}> · {counts[v].toLocaleString()}</span>}
               </span>
-              <input aria-label={`Group for ${v}`} value={assignments[v] ?? ''}
+              <input aria-label={t('pg.panelsA.cc.groupFor', { v })} value={assignments[v] ?? ''}
                 onChange={e => setAssignments(a => ({ ...a, [v]: e.target.value }))}
                 placeholder={OTHER} list="cc-group-names"
                 style={{ width: 96, fontSize: 11 }} />
@@ -235,7 +248,7 @@ export default function CustomCategoryPanel({ datasetId, columns, onSaved }: Pro
       {expression && (
         <div style={{ marginBottom: 6, fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--muted)',
           background: 'var(--surface2)', borderRadius: 4, padding: '5px 7px', wordBreak: 'break-all' }}>
-          {expression}
+          <bdi dir="ltr">{expression}</bdi>
         </div>
       )}
 
@@ -244,7 +257,7 @@ export default function CustomCategoryPanel({ datasetId, columns, onSaved }: Pro
       {source && (
         <button className="btn btn-primary btn-sm" style={{ fontSize: 11, width: '100%' }}
           disabled={busy} onClick={create}>
-          Create
+          {t('pg.panelsA.cc.create')}
         </button>
       )}
     </div>

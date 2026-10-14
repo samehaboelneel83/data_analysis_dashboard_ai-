@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { useT } from '../../i18n'
 
 export interface ConfirmOptions {
   /** Short question. Rendered as the dialog's accessible name. */
@@ -11,6 +12,10 @@ export interface ConfirmOptions {
   /** Styles the affirmative button as destructive and is the default, since every
    *  current caller is a delete. Pass false for a benign confirmation. */
   destructive?: boolean
+  /** Open with focus on Cancel, so Enter answers "no". The default for every
+   *  destructive dialog; a delete styled as benign (it loses nothing) or an
+   *  overwrite like a version restore passes true as well. */
+  focusCancel?: boolean
 }
 
 type Resolver = (ok: boolean) => void
@@ -36,9 +41,12 @@ export function useConfirm() {
 }
 
 export function ConfirmProvider({ children }: { children: React.ReactNode }) {
+  // QA3 C5: the default buttons in the reader's language (they were always English).
+  const t = useT()
   const [opts, setOpts] = useState<ConfirmOptions | null>(null)
   const resolverRef = useRef<Resolver | null>(null)
   const confirmBtnRef = useRef<HTMLButtonElement>(null)
+  const cancelBtnRef = useRef<HTMLButtonElement>(null)
   const restoreFocusRef = useRef<Element | null>(null)
 
   const confirm = useCallback((next: ConfirmOptions) => {
@@ -57,10 +65,14 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
     if (restore instanceof HTMLElement) restore.focus()
   }, [])
 
-  // Focus the affirmative action on open so the dialog is immediately operable by
-  // keyboard, and so the focus ring announces which button Enter will press.
+  // Focus a button on open so the dialog is immediately operable by keyboard,
+  // and so the focus ring announces which button Enter will press. QA5b S1:
+  // for anything destructive that is Cancel -- Enter (or a key repeat from
+  // the Enter that opened the dialog) must never delete.
   useEffect(() => {
-    if (opts) confirmBtnRef.current?.focus()
+    if (!opts) return
+    const safe = opts.focusCancel ?? opts.destructive !== false
+    ;(safe ? cancelBtnRef : confirmBtnRef).current?.focus()
   }, [opts])
 
   useEffect(() => {
@@ -124,6 +136,7 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
             )}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button
+                ref={cancelBtnRef}
                 type="button"
                 onClick={() => settle(false)}
                 style={{
@@ -132,7 +145,7 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
                   border: '1px solid var(--border)', borderRadius: 6,
                 }}
               >
-                {opts.cancelLabel ?? 'Cancel'}
+                {opts.cancelLabel ?? t('common.cancel')}
               </button>
               <button
                 ref={confirmBtnRef}
@@ -144,7 +157,7 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
                   color: opts.destructive === false ? 'var(--mc-accent-fg, #fff)' : 'var(--mc-danger-fg, #fff)', border: '1px solid transparent', borderRadius: 6,
                 }}
               >
-                {opts.confirmLabel ?? 'Delete'}
+                {opts.confirmLabel ?? t('bc.shell.c.delete')}
               </button>
             </div>
           </div>

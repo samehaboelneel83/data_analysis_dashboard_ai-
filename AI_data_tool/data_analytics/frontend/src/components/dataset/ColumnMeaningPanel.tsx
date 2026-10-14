@@ -1,7 +1,13 @@
-import { useState } from 'react'
-import { Pencil } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { ChevronDown, Pencil, Search } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { columnMetaApi, datasetsApi, type ColumnMeta, type Dataset } from '../../services/api'
+import { columnMetaApi, datasetsApi, discoveryApi, type ColumnMeta, type ColumnProfileCard, type Dataset } from '../../services/api'
+import { defaultSummary, nonAdditiveKind } from '../../lib/semanticGuard'
+import { localDigits } from '../../lib/arabicFormats'
+import { typeTag, useColumnProfile, type Analysis } from '../../pages/datasetDetail/columnProfile'
+import '../../pages/datasetDetail/columns.css'
+import { useT, type MessageKey } from '../../i18n'
+import ColumnLineage from './ColumnLineage'
 
 /**
  * What a column IS, for every engine that reads it.
@@ -13,14 +19,33 @@ import { columnMetaApi, datasetsApi, type ColumnMeta, type Dataset } from '../..
  * `categorical` was charted as one bar per distinct comment; an id column was
  * summed into a total with no referent.
  */
-const ROLES: { value: NonNullable<ColumnMeta['role']>; label: string; why: string }[] = [
-  { value: 'measure',    label: 'Measure',    why: 'a number worth summing or averaging' },
-  { value: 'category',   label: 'Category',   why: 'something to group or break down by' },
-  { value: 'temporal',   label: 'Date/time',  why: 'can carry a trend or a forecast' },
-  { value: 'geography',  label: 'Geography',  why: 'can be drawn on a map' },
-  { value: 'freetext',   label: 'Free text',  why: 'prose - never a chart axis; topic analysis reads it' },
-  { value: 'identifier', label: 'Identifier', why: 'counted, never summed' },
+const ROLES: NonNullable<ColumnMeta['role']>[] = ['measure', 'category', 'temporal', 'geography', 'freetext', 'identifier']
+
+/** How a measure rolls up when a chart, an insight or an alert does not say.
+ *  "Average" for a salary is what keeps "M has 60% of salary" off the page. */
+const SUMMARIES = ['sum', 'avg', 'median', 'min', 'max', 'countd']
+/** What a number is, for every engine that reads it. Mirrors NUMBER_KINDS in
+ *  services/semantic_guard.py. */
+const NUMBER_KIND_OPTIONS: NonNullable<ColumnMeta['number']>[] = ['amount', 'count', 'level', 'duration', 'score', 'share', 'code']
+/** Mirrors GEO_LEVELS in services/semantic_guard.py. */
+const GEO_LEVEL_OPTIONS: { value: NonNullable<ColumnMeta['geo_level']>; numeric: boolean }[] = [
+  { value: 'country', numeric: false }, { value: 'region', numeric: false }, { value: 'city', numeric: false },
+  { value: 'postcode', numeric: false }, { value: 'latitude', numeric: true }, { value: 'longitude', numeric: true },
 ]
+const isSummary = (v: string) => SUMMARIES.includes(v)
+/** The summary as a lower-case word ("average"), for a sentence. */
+const summaryWord = (v: string, t: ReturnType<typeof useT>) => (isSummary(v) ? t(`cols3.agg.${v}` as MessageKey) : v)
+
+/** A short code that needs a gloss ("d001", "M", "CS") -- not a value already
+ *  written in words. Mirrors `is_code_like` in services/insights.py. */
+export function isCodeLike(v: string): boolean {
+  const t = v.trim()
+  if (!t || t.includes(' ')) return false
+  if (/\d/.test(t)) return true
+  if (t.length === 1) return true
+  return t.length <= 4 && t === t.toUpperCase()
+}
+
 
 /**
  * What each column MEANS, and where that sentence lives.
@@ -46,20 +71,79 @@ export interface ColumnMeaningPanelProps {
   canEdit: boolean
   /** Reload the dataset so the resolved descriptions come back fresh. */
   onSaved?: () => void
+  /** The saved profile, for the Distribution and Summary columns (redesign 3c). */
+  analysis?: Analysis
 }
 
+type Kind = 'all' | 'text' | 'number' | 'date'
+const kindOf = (dtype: string): Exclude<Kind, 'all'> =>
+  dtype === 'numeric' ? 'number' : dtype === 'datetime' ? 'date' : 'text'
+
+/** What the column is used as, in the words of the board's pill. */
+function useAs(name: string, dtype: string, meta: ColumnMeta | undefined, t: ReturnType<typeof useT>): { label: string; measure: boolean } {
+  const role = meta?.role
+  // What the column IS is its stored classification first (the server's
+  // reading of its values, the AI's, or the author's); the name only after.
+  const classed = meta ? { [name]: meta } : undefined
+  if (role === 'measure' || (!role && dtype === 'numeric' && nonAdditiveKind(name, classed) === null)) {
+    const agg = meta?.aggregation ?? defaultSummary(name, classed)
+    const aggWord = summaryWord(agg, t)
+    return { label: t('cols3.use.measure', { agg: aggWord }), measure: true }
+  }
+  if (role === 'temporal' || (!role && dtype === 'datetime')) return { label: t('cols3.use.time'), measure: false }
+  if (role === 'identifier' || (!role && nonAdditiveKind(name, classed) === 'identifier')) return { label: t('cols3.use.id'), measure: false }
+  if (role === 'freetext') return { label: t('cols3.use.text'), measure: false }
+  if (role === 'geography') return { label: t('cols3.use.geo'), measure: false }
+  return { label: t('cols3.use.dim'), measure: false }
+}
+
+/**
+ * The Columns tab (redesign step 3c): one row per column -- name and type,
+ * what it means (the description editor), its distribution, how much is empty,
+ * a summary, and what it is used as. The role, summary, outcome, suggestion
+ * and hidden settings open under the row from its "Use as" pill. Hidden
+ * columns are listed apart, behind "Hidden columns (n)".
+ */
 export default function ColumnMeaningPanel(
-  { dataset, canEdit, onSaved }: ColumnMeaningPanelProps,
+  { dataset, canEdit, onSaved, analysis = null }: ColumnMeaningPanelProps,
 ) {
+  const t = useT()
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
+  // Each column's profile card, measured once per version of the data and
+  // served as this reader may see it (server: services/discovery/profile.py).
+  const [profile, setProfile] = useState<Record<string, ColumnProfileCard>>({})
+  useEffect(() => {
+    let live = true
+    discoveryApi?.profile?.(dataset.id)
+      ?.then(r => { if (live) setProfile(Object.fromEntries(r.columns.map(c => [c.column, c]))) })
+      ?.catch(() => { /* the profile is an extra: the tab works without it */ })
+    return () => { live = false }
+  }, [dataset.id])
+  const [query, setQuery] = useState('')
+  const [kind, setKind] = useState<Kind>('all')
+  const [open, setOpen] = useState<string | null>(null)
+  const [showHidden, setShowHidden] = useState(false)
 
   const described = dataset.column_descriptions ?? {}
   const labels = dataset.value_labels ?? {}
   const targets = dataset.column_targets ?? {}
   const ineligible = new Set(dataset.ineligible_columns ?? [])
   const meta = dataset.column_meta ?? {}
+  const cols = dataset.columns ?? []
+  const hidden = cols.filter(c => meta[c.name]?.hidden)
+  const visible = cols.filter(c => !meta[c.name]?.hidden)
+  const counts = useMemo(() => ({
+    all: visible.length,
+    text: visible.filter(c => kindOf(c.dtype) === 'text').length,
+    number: visible.filter(c => kindOf(c.dtype) === 'number').length,
+    date: visible.filter(c => kindOf(c.dtype) === 'date').length,
+  }), [visible])
+  const shown = (showHidden ? hidden : visible)
+    .filter(c => kind === 'all' || kindOf(c.dtype) === kind)
+    .filter(c => !query.trim() || `${c.name} ${described[c.name] ?? ''}`.toLowerCase().includes(query.trim().toLowerCase()))
+  const describedCount = cols.filter(c => described[c.name]).length
 
   /** Merge one column's change into the WHOLE map and send it back.
    *
@@ -77,7 +161,7 @@ export default function ColumnMeaningPanel(
       toast.success(note)
       onSaved?.()
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail ?? 'Could not save')
+      toast.error(e?.response?.data?.detail ?? t('i2d.cm.saveFailed'))
     } finally { setBusy(false) }
   }
 
@@ -93,165 +177,338 @@ export default function ColumnMeaningPanel(
       // Said plainly, because it is the surprising half: the sentence just
       // became the answer for every dataset built from that table.
       toast.success(r.shared
-        ? `Saved. ${r.object}.${r.column} now reads this way in every dataset built from it.`
-        : 'Saved for this dataset.')
+        ? t('i2d.cm.savedShared', { source: `${r.object}.${r.column}` })
+        : t('i2d.cm.savedHere'))
       setEditing(null)
       onSaved?.()
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail ?? 'Could not save the description')
+      toast.error(e?.response?.data?.detail ?? t('i2d.cm.descFailed'))
     } finally { setBusy(false) }
   }
 
-  const input: React.CSSProperties = {
-    width: '100%', fontSize: 12, padding: '5px 8px', boxSizing: 'border-box',
-    background: 'var(--surface2)', border: '1px solid var(--border)',
-    borderRadius: 4, color: 'var(--text)',
-  }
-
   return (
-    <section>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 8 }}>
-        <h3 style={{ margin: 0, fontSize: 14 }}>What the columns mean</h3>
-        <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-          Read by the dashboard designer, the agent and the insights engine. A
-          column that came from a connected table is described once, for every
-          dataset built from it.
-        </span>
-      </div>
-
+    <section className="dl-cols" aria-label={t('i2d.cm.section')}>
       {dataset.grain && (
-        <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 10px' }}>
-          <strong style={{ color: 'var(--text)' }}>
-            {dataset.business_name || dataset.name}
-          </strong>{' — '}{dataset.grain}
+        <p className="dl-cols__grain">
+          <strong>{dataset.business_name || dataset.name}</strong>{' — '}{dataset.grain}
         </p>
       )}
+      <div className="dl-cols__toolbar">
+        <label className="dl-cols__search">
+          <Search size={14} aria-hidden />
+          <input type="search" value={query} onChange={e => setQuery(e.target.value)}
+            placeholder={t('cols3.find')} aria-label={t('cols3.find')} />
+        </label>
+        <span className="dl-cols__seg" role="radiogroup" aria-label={t('cols3.kind')}>
+          {(['all', 'text', 'number', 'date'] as Kind[]).map(k => (
+            <button key={k} type="button" role="radio" aria-checked={kind === k} onClick={() => setKind(k)}>
+              {t(`cols3.kind.${k}` as MessageKey)} <span>{localDigits(String(counts[k]))}</span>
+            </button>
+          ))}
+        </span>
+        <span className="dl-cols__muted">{t('cols3.described', { n: localDigits(String(describedCount)), total: localDigits(String(cols.length)) })}</span>
+        <button type="button" className="btn btn-sm" disabled={busy}
+          title={t('cm.askAgainTip')}
+          onClick={async () => {
+            setBusy(true)
+            try {
+              const got = await columnMetaApi.classifyAgain(dataset.id)
+              toast.success(got.asked ? t('cm.askedAgain', { n: got.classified, total: got.asked }) : t('cm.aiUnavailable'))
+              onSaved?.()
+            } catch (e: any) {
+              toast.error(e?.response?.data?.detail ?? t('cm.askFailed'))
+            } finally { setBusy(false) }
+          }}>
+          {t('cm.askAgain')}
+        </button>
+        <button type="button" className="btn btn-sm dl-cols__hidden-btn" aria-pressed={showHidden}
+          onClick={() => setShowHidden(v => !v)}>
+          {showHidden ? t('cols3.showVisible') : t('cols3.hidden', { n: localDigits(String(hidden.length)) })}
+        </button>
+      </div>
 
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-        <tbody>
-          {dataset.columns.map(c => {
-            const values = labels[c.name]
-            return (
-              <tr key={c.name} style={{ borderTop: '1px solid var(--border)' }}>
-                <td style={{ padding: '6px 8px', width: 200, verticalAlign: 'top' }}>
-                  <div style={{ fontWeight: 600 }}>{c.name}</div>
-                  <div style={{ color: 'var(--muted)', fontSize: 11 }}>{c.dtype}</div>
-                </td>
-                <td style={{ padding: '6px 8px', verticalAlign: 'top' }}>
-                  {editing === c.name ? (
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <input style={input} value={draft} autoFocus disabled={busy}
-                        placeholder="What is this column for?"
-                        onChange={e => setDraft(e.target.value)}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter') void save(c.name)
-                          if (e.key === 'Escape') setEditing(null)
-                        }} />
-                      <button onClick={() => void save(c.name)} disabled={busy}
-                        style={{ fontSize: 12, padding: '4px 10px', borderRadius: 6,
-                          border: 'none', background: 'var(--accent, #2563eb)',
-                          color: 'var(--mc-accent-fg)', cursor: 'pointer' }}>
-                        {busy ? 'Saving…' : 'Save'}
-                      </button>
-                      <button onClick={() => setEditing(null)} disabled={busy}
-                        style={{ fontSize: 12, padding: '4px 10px', borderRadius: 6,
-                          border: '1px solid var(--border)', background: 'var(--surface)',
-                          color: 'var(--text)', cursor: 'pointer' }}>
-                        Cancel
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      <span style={{ color: described[c.name] ? 'var(--text)' : 'var(--muted)' }}>
-                        {described[c.name] || 'Not described yet'}
-                      </span>
-                      {canEdit && (
-                        <button aria-label={`Describe ${c.name}`} onClick={() => start(c.name)}
-                          style={{ background: 'none', border: 'none', cursor: 'pointer',
-                            color: 'var(--muted)', padding: '0 6px' }}>
-                          <Pencil size={12} />
-                        </button>
-                      )}
-                    </>
-                  )}
-                  {values && (
-                    <div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 2 }}>
-                      {Object.entries(values).slice(0, 8)
-                        .map(([raw, label]) => `${raw} = ${label}`).join(', ')}
-                    </div>
-                  )}
-
-                  {canEdit && (
-                    <div style={{ display: 'flex', gap: 14, alignItems: 'center',
-                      marginTop: 6, flexWrap: 'wrap' }}>
-                      <label style={{ fontSize: 11, color: 'var(--muted)',
-                        display: 'flex', alignItems: 'center', gap: 4 }}>
-                        Treat as
-                        <select disabled={busy} value={meta[c.name]?.role ?? ''}
-                          aria-label={`Role for ${c.name}`}
-                          onChange={e => void patchMeta(
-                            c.name,
-                            { role: (e.target.value || undefined) as ColumnMeta['role'] },
-                            e.target.value
-                              ? `${c.name} is now a ${e.target.value}`
-                              : `${c.name} goes back to what detection found`)}
-                          style={{ fontSize: 11, padding: '2px 4px',
-                            background: 'var(--surface2)', color: 'var(--text)',
-                            border: '1px solid var(--border)', borderRadius: 4 }}>
-                          <option value="">detected</option>
-                          {ROLES.map(r => (
-                            <option key={r.value} value={r.value} title={r.why}>
-                              {r.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-
-                      {/* An OUTCOME worth explaining. This is what lets the
-                          "what drives X" analyses run without being told what X
-                          is -- the alternative is guessing from flag-shaped
-                          columns, which cannot know which question anybody has. */}
-                      <label style={{ fontSize: 11, color: 'var(--muted)',
-                        display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <input type="checkbox" disabled={busy}
-                          aria-label={`Explain ${c.name}`}
-                          checked={targets[c.name] !== undefined}
-                          onChange={e => void patchMeta(
-                            c.name,
-                            { target_candidate_priority: e.target.checked ? 10 : undefined },
-                            e.target.checked
-                              ? `The analyses will look for what drives ${c.name}`
-                              : `${c.name} is no longer treated as an outcome`)} />
-                        Worth explaining
-                        {targets[c.name] !== undefined && (
-                          <span style={{ opacity: .7 }}>({targets[c.name]})</span>
-                        )}
-                      </label>
-
-                      {/* Not the same as hiding it, and the tooltip has to say
-                          so or the two controls read as duplicates. */}
-                      <label style={{ fontSize: 11, color: 'var(--muted)',
-                        display: 'flex', alignItems: 'center', gap: 4 }}
-                        title="Still usable by anyone who asks for it. This only stops the platform offering charts of it unprompted.">
-                        <input type="checkbox" disabled={busy}
-                          aria-label={`Suggest ${c.name}`}
-                          checked={!ineligible.has(c.name)}
-                          onChange={e => void patchMeta(
-                            c.name,
-                            { eligible_for_suggestion: e.target.checked ? undefined : false },
-                            e.target.checked
-                              ? `${c.name} can be suggested again`
-                              : `${c.name} will not be suggested - it stays usable`)} />
-                        May be suggested
-                      </label>
-                    </div>
-                  )}
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
+      <div className="dl-cols__card">
+        <table className="dl-cols__table">
+          <thead>
+            <tr>
+              <th>{t('ov3.glance.column')}</th><th>{t('cols3.means')}</th><th>{t('ov3.glance.dist')}</th>
+              <th className="dl-ov__num">{t('ov3.glance.empty')}</th><th>{t('ov3.glance.summary')}</th><th>{t('cols3.useAs')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.length === 0 && (
+              <tr><td colSpan={6} className="dl-cols__none">{showHidden ? t('cols3.noHidden') : t('cols3.noMatch')}</td></tr>
+            )}
+            {shown.map(c => (
+              <ColumnRow key={c.name} dataset={dataset} name={c.name} dtype={c.dtype} missing={c.missing_pct ?? 0}
+                analysis={analysis} meta={meta[c.name]} description={described[c.name]} values={labels[c.name]}
+                canEdit={canEdit} busy={busy} editing={editing === c.name} draft={draft} setDraft={setDraft}
+                onStart={() => start(c.name)} onSave={() => void save(c.name)} onCancel={() => setEditing(null)}
+                open={open === c.name} onToggle={() => setOpen(o => (o === c.name ? null : c.name))}
+                target={targets[c.name]} eligible={!ineligible.has(c.name)} patchMeta={patchMeta} profile={profile[c.name]} />
+            ))}
+          </tbody>
+        </table>
+      </div>
     </section>
+  )
+}
+
+/** A column's profile in a line of plain facts: how much of it is usable,
+ *  what is wrong with the rest, and what its values look like. Value-level
+ *  facts are simply absent for a reader who may not see every row. */
+function ColumnProfileFacts({ card }: { card: ColumnProfileCard }) {
+  const t = useT()
+  const n = (v: number) => v.toLocaleString()
+  const facts: [string, string][] = [
+    [t('cm.pf.valid'), `${n(card.valid.count)} (${card.valid.pct}%)`],
+    [t('cm.pf.missing'), `${n(card.missing.count)} (${card.missing.pct}%)`],
+  ]
+  if (card.mistyped.count) {
+    facts.push([t(card.mistyped.holds === 'number' ? 'cm.pf.notNumber' : 'cm.pf.numbersInText'), `${n(card.mistyped.count)} (${card.mistyped.pct}%)`])
+  }
+  facts.push([t('cm.pf.distinct'), n(card.distinct)], [t('cm.pf.once'), `${n(card.unique.count)} (${card.unique.pct}%)`])
+  if (card.most_common) facts.push([t('cm.pf.most'), `${card.most_common[0]} (${n(card.most_common[1])})`])
+  if (card.least) facts.push([t('cm.pf.least'), `${card.least[0]} (${n(card.least[1])})`])
+  if (card.len_max != null) {
+    facts.push([t('cm.pf.length'), card.len_min === card.len_max ? t('cm.pf.chars', { n: card.len_max })
+      : t('cm.pf.charsRange', { a: card.len_min ?? 0, b: card.len_max })])
+  }
+  if (card.pattern) facts.push([t('cm.pf.shape'), card.pattern])
+  if (card.kind === 'date' && card.delay_hours != null) {
+    const days = card.delay_hours / 24
+    facts.push([t('cm.pf.newest'), days < 2 ? t('cm.pf.hoursAgo', { n: Math.round(card.delay_hours) })
+      : t('cm.pf.daysAgo', { n: Math.round(days).toLocaleString() })])
+  }
+  return (
+    <dl data-testid="column-profile-facts" style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 18px', margin: 0, fontSize: 12 }}>
+      {facts.map(([k, v]) => (
+        <div key={k} style={{ display: 'inline-flex', gap: 5 }}>
+          <dt style={{ color: 'var(--muted)' }}>{k}</dt><dd style={{ margin: 0, fontVariantNumeric: 'tabular-nums' }}><bdi>{v}</bdi></dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+function ColumnRow(p: {
+  dataset: Dataset; name: string; dtype: string; missing: number; analysis: Analysis; meta?: ColumnMeta
+  description?: string; values?: Record<string, string>; canEdit: boolean; busy: boolean
+  editing: boolean; draft: string; setDraft: (v: string) => void; onStart: () => void; onSave: () => void; onCancel: () => void
+  open: boolean; onToggle: () => void; target?: number; eligible: boolean
+  patchMeta: (column: string, change: Partial<ColumnMeta>, note: string) => Promise<void>
+  profile?: ColumnProfileCard
+}) {
+  const t = useT()
+  const { dist, sum } = useColumnProfile(p.dataset, p.name, p.analysis)
+  const use = useAs(p.name, p.dtype, p.meta, t)
+  const c = { name: p.name, dtype: p.dtype }
+  // Only glosses that SAY something: "d001 = Marketing", never
+  // "Marketing = Marketing" (HR evaluation).
+  const useful = Object.entries(p.values ?? {})
+    .filter(([raw, label]) => isCodeLike(raw) && String(label).trim().toLowerCase() !== raw.trim().toLowerCase())
+  return (
+    <>
+      <tr data-open={p.open || undefined}>
+        <td className="dl-cols__name">
+          <span className="dl-ov__colname" dir="auto">{p.name}</span>
+          <span className="dl-ov__tag">{typeTag(t, p.dtype)}</span>
+        </td>
+        <td className="dl-cols__means">
+          {p.editing ? (
+            <div className="dl-cols__edit">
+              <input value={p.draft} autoFocus disabled={p.busy} placeholder={t('i2d.cm.descPh')}
+                onChange={e => p.setDraft(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') p.onSave(); if (e.key === 'Escape') p.onCancel() }} />
+              <button type="button" className="btn btn-primary btn-sm" onClick={p.onSave} disabled={p.busy}>
+                {p.busy ? t('i2d.c.saving') : t('i2d.c.save')}
+              </button>
+              <button type="button" className="btn btn-sm" onClick={p.onCancel} disabled={p.busy}>{t('common.cancel')}</button>
+            </div>
+          ) : p.canEdit ? (
+            <button type="button" className={`dl-cols__desc${p.description ? '' : ' dl-cols__desc--empty'}`}
+              aria-label={t('i2d.cm.describe', { col: p.name })} onClick={p.onStart} dir="auto">
+              {p.description || t('cols3.addDescription')} <Pencil size={11} aria-hidden />
+            </button>
+          ) : (
+            <span className={p.description ? '' : 'dl-cols__muted'} dir="auto">{p.description || t('i2d.cm.notDescribed')}</span>
+          )}
+          {useful.length > 0 && (
+            <div className="dl-cols__gloss">{useful.slice(0, 8).map(([raw, label]) => `${raw} = ${label}`).join(', ')}</div>
+          )}
+        </td>
+        <td>{dist}</td>
+        <td className="dl-ov__num">{localDigits(`${Math.round(p.missing)}%`)}</td>
+        <td className="dl-ov__sum">{sum}</td>
+        <td>
+          {p.canEdit ? (
+            <button type="button" className={`dl-cols__use${use.measure ? ' dl-cols__use--measure' : ''}`}
+              aria-expanded={p.open} aria-label={t('cols3.editUse', { col: p.name })} onClick={p.onToggle}>
+              {use.label} <ChevronDown size={11} aria-hidden />
+            </button>
+          ) : (
+            <span className={`dl-cols__use${use.measure ? ' dl-cols__use--measure' : ''}`}>{use.label}</span>
+          )}
+        </td>
+      </tr>
+      {p.open && p.profile && (
+        <tr className="dl-cols__settings">
+          <td colSpan={6}><ColumnProfileFacts card={p.profile} /></td>
+        </tr>
+      )}
+      {p.open && p.canEdit && (
+        <tr className="dl-cols__settings">
+          <td colSpan={6}>
+            <div>
+              <label>
+                {t('i2d.cm.treatAs')}
+                <select disabled={p.busy} value={p.meta?.role ?? ''} aria-label={t('i2d.cm.roleFor', { col: c.name })}
+                  onChange={e => void p.patchMeta(c.name, { role: (e.target.value || undefined) as ColumnMeta['role'] },
+                    e.target.value ? t(`meaning.now.${e.target.value}` as MessageKey, { col: c.name }) : t('meaning.now.detected', { col: c.name }))}>
+                  <option value="">{t('i2d.cm.detected')}</option>
+                  {ROLES.map(r => <option key={r} value={r} title={t(`i2d.cm.why.${r}` as MessageKey)}>{t(`i2d.cm.role.${r}` as MessageKey)}</option>)}
+                </select>
+              </label>
+              {(c.dtype === 'numeric' || p.meta?.role === 'measure') && p.meta?.role !== 'identifier' && p.meta?.role !== 'category' && (
+                <label title={t('i2d.cm.summaryTitle')}>
+                  {t('i2d.cm.summariseAs')}
+                  <select disabled={p.busy} value={p.meta?.aggregation ?? ''} aria-label={t('i2d.cm.summaryFor', { col: c.name })}
+                    onChange={e => void p.patchMeta(c.name, { aggregation: e.target.value || undefined },
+                      e.target.value
+                        ? t('meaning.summaryNow', { col: c.name, how: summaryWord(e.target.value, t) })
+                        : t('meaning.summaryAuto', { col: c.name }))}>
+                    {/* The automatic summary of what this column IS (its stored class), not of its name alone. */}
+                    {(() => {
+                      const auto = defaultSummary(c.name, p.meta ? { [c.name]: { ...p.meta, aggregation: undefined } } : undefined)
+                      return <option value="">{t('i2d.cm.auto', { how: isSummary(auto) ? summaryWord(auto, t) : t('cols3.agg.sum') })}</option>
+                    })()}
+                    {SUMMARIES.map(x => <option key={x} value={x}>{t(`i2d.cm.sum.${x}` as MessageKey)}</option>)}
+                  </select>
+                </label>
+              )}
+              {/* The stored classification (docs/suggestions/PLAN.md): decided
+                  once by the platform, corrected here, read by every engine --
+                  insights, suggestions, the dashboard designers, the data
+                  check. A correction is marked the author's and is never
+                  overwritten by a later measurement. */}
+              {c.dtype === 'numeric' && p.meta?.role !== 'category' && (
+                <>
+                  <label title={t('cm.numberTip')}>
+                    {t('cm.numberIs')}
+                    <select disabled={p.busy} value={p.meta?.number ?? ''} aria-label={t('cm.numberFor', { c: c.name })}
+                      onChange={e => void p.patchMeta(c.name,
+                        { number: (e.target.value || undefined) as ColumnMeta['number'], class_source: 'confirmed' },
+                        e.target.value ? t('cm.nowReadAs', { c: c.name, kind: t(`cm.numShort.${e.target.value}` as MessageKey) }) : t('cm.nowDetected', { c: c.name }))}>
+                      <option value="">{t('cm.notClassified')}</option>
+                      {NUMBER_KIND_OPTIONS.map(k => <option key={k} value={k}>{t(`cm.num.${k}` as MessageKey)}</option>)}
+                    </select>
+                  </label>
+                  <label title={t('cm.directionTip')}>
+                    {t('cm.higherIs')}
+                    <select disabled={p.busy} value={p.meta?.direction ?? 'neither'} aria-label={t('cm.directionFor', { c: c.name })}
+                      onChange={e => void p.patchMeta(c.name,
+                        { direction: e.target.value as ColumnMeta['direction'], class_source: 'confirmed' },
+                        t('cm.savedFor', { c: c.name }))}>
+                      <option value="higher_better">{t('cm.better')}</option>
+                      <option value="higher_worse">{t('cm.worse')}</option>
+                      <option value="neither">{t('cm.neither')}</option>
+                    </select>
+                  </label>
+                  <label title={t('cm.targetTip')}>
+                    {t('cm.target')}
+                    <input type="number" step="any" disabled={p.busy} aria-label={t('cm.targetFor', { c: c.name })}
+                      defaultValue={p.meta?.target ?? ''} key={`t${p.meta?.target ?? ''}`} style={{ width: 110 }}
+                      onBlur={e => {
+                        const raw = e.target.value.trim()
+                        const next = raw === '' ? null : Number(raw)
+                        if (next !== null && !Number.isFinite(next)) return
+                        if ((p.meta?.target ?? null) === next) return
+                        void p.patchMeta(c.name, { target: next }, next === null ? t('cm.targetRemoved', { c: c.name }) : t('cm.targetSaved', { c: c.name }))
+                      }} />
+                  </label>
+                  {p.meta?.target != null && (
+                    <label title={t('cm.targetPeriodTip')}>
+                      {t('cm.targetForWhat')}
+                      <select disabled={p.busy} value={p.meta?.target_period ?? ''} aria-label={t('cm.targetPeriodFor', { c: c.name })}
+                        onChange={e => void p.patchMeta(c.name,
+                          { target_period: (e.target.value || null) as ColumnMeta['target_period'] }, t('cm.savedFor', { c: c.name }))}>
+                        <option value="">{t('cm.tp.all')}</option>
+                        <option value="month">{t('cm.tp.month')}</option>
+                        <option value="quarter">{t('cm.tp.quarter')}</option>
+                        <option value="year">{t('cm.tp.year')}</option>
+                      </select>
+                    </label>
+                  )}
+                </>
+              )}
+              {c.dtype !== 'numeric' && c.dtype !== 'datetime' && (
+                <>
+                  <label title={t('cm.orderTip')}>
+                    {t('cm.order')}
+                    <input type="text" disabled={p.busy} defaultValue={(p.meta?.order ?? []).join(', ')}
+                      aria-label={t('cm.orderFor', { c: c.name })} placeholder={t('cm.orderExample')}
+                      onBlur={e => {
+                        const order = e.target.value.split(',').map(x => x.trim()).filter(Boolean)
+                        if (order.join('|') === (p.meta?.order ?? []).join('|')) return
+                        void p.patchMeta(c.name, order.length >= 2
+                          ? { level: 'ordinal', order, class_source: 'confirmed' }
+                          : { level: 'nominal', order: undefined, class_source: 'confirmed' },
+                          order.length >= 2 ? t('cm.orderSet', { c: c.name }) : t('cm.orderNone', { c: c.name }))
+                      }} />
+                  </label>
+                  <label title={t('cm.outcomeTip')}>
+                    <input type="checkbox" disabled={p.busy} aria-label={t('cm.outcomeFor', { c: c.name })} checked={!!p.meta?.outcome}
+                      onChange={e => void p.patchMeta(c.name,
+                        { outcome: e.target.checked ? true : undefined, class_source: 'confirmed' },
+                        e.target.checked ? t('cm.outcomeOn', { c: c.name }) : t('cm.outcomeOff', { c: c.name }))} />
+                    {t('cm.outcome')}
+                  </label>
+                </>
+              )}
+              {/* A place. Country names get a map; a region or a city gets its
+                  place in a hierarchy (country > region > city) and is never
+                  mistaken for an ordinary measure or code. */}
+              {c.dtype !== 'datetime' && (
+                <label title={t('cm.placeTip')}>
+                  {t('cm.place')}
+                  <select disabled={p.busy} value={p.meta?.geo_level ?? ''} aria-label={t('cm.placeFor', { c: c.name })}
+                    onChange={e => void p.patchMeta(c.name,
+                      { geo_level: (e.target.value || undefined) as ColumnMeta['geo_level'], class_source: 'confirmed' },
+                      e.target.value ? t('cm.placeSet', { c: c.name, kind: t(`cm.geo.${e.target.value}` as MessageKey) }) : t('cm.placeNone', { c: c.name }))}>
+                    <option value="">{t('cm.notPlace')}</option>
+                    {GEO_LEVEL_OPTIONS.filter(g => (c.dtype === 'numeric') === g.numeric || g.value === 'postcode')
+                      .map(g => <option key={g.value} value={g.value}>{t(`cm.geo.${g.value}` as MessageKey)}</option>)}
+                  </select>
+                </label>
+              )}
+              {/* An OUTCOME worth explaining: what lets the "what drives X"
+                  analyses run without being told what X is. */}
+              <label>
+                <input type="checkbox" disabled={p.busy} aria-label={t('i2d.cm.explain', { col: c.name })} checked={p.target !== undefined}
+                  onChange={e => void p.patchMeta(c.name, { target_candidate_priority: e.target.checked ? 10 : undefined },
+                    e.target.checked ? t('meaning.outcomeOn', { col: c.name }) : t('meaning.outcomeOff', { col: c.name }))} />
+                {t('i2d.cm.worth')}{p.target !== undefined && <span className="dl-cols__muted"> ({localDigits(String(p.target))})</span>}
+              </label>
+              {/* Not the same as hiding it, and the tooltip has to say so or
+                  the two controls read as duplicates. */}
+              <label title={t('i2d.cm.suggestTitle')}>
+                <input type="checkbox" disabled={p.busy} aria-label={t('i2d.cm.suggest', { col: c.name })} checked={p.eligible}
+                  onChange={e => void p.patchMeta(c.name, { eligible_for_suggestion: e.target.checked ? undefined : false },
+                    e.target.checked ? t('meaning.suggestOn', { col: c.name }) : t('meaning.suggestOff', { col: c.name }))} />
+                {t('i2d.cm.maySuggest')}
+              </label>
+              <label title={t('cols3.hideTitle')}>
+                <input type="checkbox" disabled={p.busy} aria-label={t('i2d.cm.hide', { col: c.name })} checked={!!p.meta?.hidden}
+                  onChange={e => void p.patchMeta(c.name, { hidden: e.target.checked ? true : undefined },
+                    e.target.checked ? t('cols3.hiddenNow', { col: c.name }) : t('cols3.shownNow', { col: c.name }))} />
+                {t('cols3.hide')}
+              </label>
+              {/* Where it comes from and what uses it (docs/pipeline/PLAN.md, P5). */}
+              <ColumnLineage datasetId={p.dataset.id} name={c.name} />
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   )
 }

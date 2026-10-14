@@ -1,6 +1,6 @@
 from datetime import datetime
-from typing import Any, Optional
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Literal, Any, Optional
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
 class DatasetColumnOut(BaseModel):
@@ -14,6 +14,14 @@ class DatasetColumnOut(BaseModel):
     # so codeless authoring surfaces (S0b's RLS builder) can pre-suggest user/owner
     # columns without a separate round trip through the review endpoints.
     semantic_type: Optional[str] = None
+
+    @computed_field
+    @property
+    def personal(self) -> Optional[str]:
+        """The personal-data type (email, person_name, national_id ...), from the
+        detected type or the name -- the "personal data" mark (persona test 3.7)."""
+        from ..services.pii import personal_type
+        return personal_type(self.name, self.semantic_type)
 
 
 class CalcColumnFormat(BaseModel):
@@ -45,6 +53,20 @@ class SuggestDashboardsRequest(BaseModel):
     """
     goal: Optional[str] = Field(default=None, max_length=2000)
     count: int = Field(default=3, ge=1, le=5)
+    #: "quick" is one designer call; "panel" asks several analyst lenses, draws
+    #: every idea, and keeps the `size` best by what the data actually shows.
+    mode: Literal["quick", "panel"] = "quick"
+    #: With the box left empty, let the person's profile description stand in
+    #: for it (services/ai_context.py). Off for callers that must not wait on
+    #: a model.
+    use_profile: bool = True
+    size: int = Field(default=24, ge=6, le=60)
+    #: Panel only: queue it as a job and answer with its id at once. The
+    #: dialog polls the job and can be closed and reopened meanwhile.
+    background: bool = False
+    #: Panel only: "suggest again" -- ask the analysts afresh instead of
+    #: reusing their kept answers for this data (analyst_panel lens cache).
+    fresh: bool = False
 
 
 class CalcColumnPreviewRequest(BaseModel):
@@ -80,6 +102,32 @@ class CustomFunctionPreviewRequest(BaseModel):
 
 class RefreshScheduleUpdate(BaseModel):
     interval_minutes: Optional[int] = None
+    # Pipeline plan, phase 4: a dataset rebuilt from another can run when that
+    # source refreshes, instead of on a timer.
+    after_source: Optional[bool] = None
+
+
+class IncrementalSettings(BaseModel):
+    """Phase 4: how scheduled refreshes load this dataset. `strategy`
+    full | incremental; an incremental load reads rows past `cursor_column`,
+    merges on `key_column` when set, re-reads `lookback_hours` behind a date
+    cursor (needs a key), and does a full reload every `full_reload_days`."""
+    strategy: str = "full"
+    cursor_column: Optional[str] = None
+    key_column: Optional[str] = None
+    lookback_hours: Optional[int] = None
+    full_reload_days: Optional[int] = None
+    #: 2026-10-10: with a key, also remove rows the source no longer has.
+    reconcile_deletes: bool = False
+
+
+class PipelineWatchUpdate(BaseModel):
+    """Pipeline plan, phase 2: a dataset's freshness target and who besides
+    its owner hears about failures. Fields not sent are left as they are."""
+    freshness_hours: Optional[int] = None
+    recipients: Optional[list[str]] = None
+    #: True adds the caller to the in-app notices, False removes them.
+    follow: Optional[bool] = None
 
 
 class DatasetRefreshRequest(BaseModel):
@@ -93,6 +141,9 @@ class DatasetRefreshRequest(BaseModel):
     # (new name -> the old name everything uses); `force` refreshes anyway.
     column_map: Optional[dict[str, str]] = None
     force: bool = False
+    # Pipeline plan, phase 3: a blocking data check that fails answers 409
+    # `checks_blocked` with every check's result; this publishes anyway.
+    publish_anyway: bool = False
 
 
 class ColumnMeta(BaseModel):
@@ -130,11 +181,40 @@ class ColumnMeta(BaseModel):
     #: heuristic cannot know that `readmitted_30d` is the question this hospital
     #: actually cares about.
     target_candidate_priority: Optional[int] = None
+    # ── The stored classification (docs/suggestions/PLAN.md, phase 1) ────────
+    # What the column IS, decided once -- measured on the rows, named by the
+    # model, corrected by the author -- and read by every engine through
+    # services/semantic_guard.py instead of each one guessing from the name.
+    #: What a NUMBER is: amount | count (add up) · level | duration | score |
+    #: share (average, never total) · code (never calculate).
+    number: Optional[str] = None
+    #: Its unit, when known: "EGP", "kg", "days".
+    unit: Optional[str] = None
+    #: higher_better | higher_worse | neither -- which way "best" points.
+    direction: Optional[str] = None
+    #: Measurement level: nominal | ordinal | interval | ratio.
+    level: Optional[str] = None
+    #: The values of an ORDINAL column in their real order (Low, Medium, High).
+    order: Optional[list[str]] = None
+    #: country | region | city | postcode | latitude | longitude.
+    geo_level: Optional[str] = None
+    #: True for a column that says what became of a row (late, returned): its
+    #: share is measured, and groups are compared by that share.
+    outcome: Optional[bool] = None
+    #: Who decided the classification: measured | ai | confirmed. A confirmed
+    #: entry is the author's and is never overwritten.
+    class_source: Optional[str] = None
+    #: The number the author says this column should reach -- never guessed,
+    #: never set by a model. `target_period` says what it is a target FOR:
+    #: each month | quarter | year, or (absent) the whole of what is shown.
+    target: Optional[float] = None
+    target_period: Optional[str] = None
 
 
 class DataViewDefault(BaseModel):
     """Whether this view is the one applied to newly uploaded datasets."""
     default: bool
+
 
 
 class ColumnMetaUpdate(BaseModel):
@@ -197,10 +277,15 @@ class DatasetOut(BaseModel):
     last_refreshed_at:        Optional[datetime] = None
     aggregate_of_dataset_id: int | None = None
     aggregate_spec: dict | None = None
+    # 4.7: who made it, for the "Mine" filter on dataset pickers.
+    created_by: Optional[int] = None
     # E06: transient, on the list only -- what the dataset is (upload,
     # connection copy, live, derived, aggregate) and how current. See
     # services/catalog.py.
     catalog: dict | None = None
+    #: Public / Internal / Confidential / Restricted, or None when unlabelled:
+    #: the dataset's own label raised to its connection's (dataset list only).
+    sensitivity_label: str | None = None
     # F3: transient — set on the response of a manual refresh when the requested
     # mode fell back (e.g. incremental with no/invalid watermark column). Never
     # persisted; absent on every other read of a dataset.
@@ -430,6 +515,9 @@ class ReportUpdate(BaseModel):
     additional_dataset_ids: Optional[list[int]] = None
     theme: Optional[str] = None
     display_rules: Optional[list[dict]] = None
+    #: The dashboard's look (fonts, borders, corners...); unknown keys and
+    #: values out of range are dropped on the way in.
+    style: Optional[dict] = None
 
 
 class ReportOut(BaseModel):
@@ -441,6 +529,7 @@ class ReportOut(BaseModel):
     additional_dataset_ids: list[int] = []
     theme: str = "default"
     display_rules: list[dict] = []
+    style: Optional[dict] = None
     # Bumped by every mutation to this report or anything nested under it, so a
     # client can tell that another session changed the report underneath it.
     revision: int = 0
@@ -468,6 +557,14 @@ class ReportOut(BaseModel):
     # authoritative answer for "can others see it" is my_capability on their
     # side. Unowned legacy rows carry False and ignore the regime entirely.
     published: bool = False
+    # Publication details (routers/publishing): how a reader finds it, when it
+    # went out, whether it is archived, and whether viewers may download.
+    category: Optional[str] = None
+    tags: Optional[list] = None
+    published_at: Optional[datetime] = None
+    archived_at: Optional[datetime] = None
+    viewers_may_export: bool = True
+    review_state: str = "none"
     # Sensitivity label (Public/Internal/Confidential/Restricted) or None. Lives in
     # its own table; the read endpoint sets it as a transient attribute, like above.
     classification: Optional[str] = None
@@ -560,6 +657,12 @@ class DataSourceCreate(BaseModel):
     type: str
     config: dict = {}
     custom_connector_id: Optional[int] = None
+    sensitivity: Optional[str] = None
+    # Whether the model may read sample rows to describe this source. On by
+    # default (guided setup, decision D1): without it the first sync writes no
+    # description and the setup has nothing to explain. The person adding the
+    # connection can turn it off in the form, and an admin later on the review page.
+    allow_llm_sampling: bool = True
 
 class DataSourceUpdate(BaseModel):
     name: Optional[str] = None
@@ -567,6 +670,8 @@ class DataSourceUpdate(BaseModel):
     config: Optional[dict] = None
     cache_ttl_seconds: Optional[int] = None
     custom_connector_id: Optional[int] = None
+    #: "" clears the label; None leaves it unchanged.
+    sensitivity: Optional[str] = None
 
 class DataSourceOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -577,6 +682,7 @@ class DataSourceOut(BaseModel):
     cache_ttl_seconds: int = 60
     created_at: datetime
     custom_connector_id: Optional[int] = None
+    sensitivity: Optional[str] = None
     custom_connector_label: Optional[str] = None    # Transient, set only on the response to a CREATE: the metadata sync that
     # started for this connection, so the client can send the user straight to
     # the review page with progress already running instead of announcing a
@@ -670,6 +776,8 @@ class UserOut(BaseModel):
     id: int
     email: str
     is_active: bool
+    #: What the person wrote about themselves (services/ai_context.py).
+    about: Optional[str] = None
     organization: OrganizationOut
     role: RoleOut
     # Platform super-admin (config allowlist), set transiently by the read endpoint so
@@ -752,13 +860,24 @@ class RlsAutoGenerateRequest(BaseModel):
 
 
 class DatasetShareCreate(BaseModel):
-    user_id: int
+    """Exactly one of user_id / role_id / org_unit_id."""
+    user_id: Optional[int] = None
+    role_id: Optional[int] = None
+    org_unit_id: Optional[int] = None
+    level: str = "view"
 
 
 class DatasetShareOut(BaseModel):
     id: int
-    user_id: int
-    email: str
+    #: 'user' | 'role' | 'org_unit' -- which kind of grantee.
+    kind: str = "user"
+    user_id: Optional[int] = None
+    email: Optional[str] = None
+    role_id: Optional[int] = None
+    org_unit_id: Optional[int] = None
+    #: The grantee's display name (email, role name or unit name).
+    name: Optional[str] = None
+    level: str = "edit"
     created_at: datetime
 
 

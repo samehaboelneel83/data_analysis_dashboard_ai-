@@ -1,4 +1,7 @@
+import { useT } from '../../i18n'
 import type { ReportPage, Widget } from '../../types/report'
+import { useDirection } from '../../contexts/DirectionContext'
+import { readingOrder } from '../../lib/readingOrder'
 
 interface Props {
   page: ReportPage
@@ -9,7 +12,10 @@ interface Props {
 export default function MobileLayoutEditor({ page, widgets, onUpdate }: Props) {
   const known = new Set(widgets.map(w => w.id))
   const savedOrder = (page.mobile_layout?.order ?? []).filter(id => known.has(id))
-  const missing = widgets.map(w => w.id).filter(id => !savedOrder.includes(id))
+  // QA3 A8: widgets with no saved place follow in reading order.
+  const { rtl } = useDirection()
+  const t = useT()
+  const missing = readingOrder(widgets, rtl).map(w => w.id).filter(id => !savedOrder.includes(id))
   const order = [...savedOrder, ...missing]
   const hidden = page.mobile_layout?.hidden ?? []
 
@@ -37,10 +43,10 @@ export default function MobileLayoutEditor({ page, widgets, onUpdate }: Props) {
   return (
     <div style={{ padding: '14px 14px 0' }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
-        Mobile layout
+        {t('builder.pane.mobile')}
       </div>
       <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>
-        Reorder and hide widgets for narrow-screen viewing. This does not affect the desktop layout.
+        {t('bc.panes.mobile.help')}
       </p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         {order.map((id, idx) => {
@@ -52,7 +58,7 @@ export default function MobileLayoutEditor({ page, widgets, onUpdate }: Props) {
               style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 7px',
                 background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6,
                 opacity: isHidden ? 0.5 : 1 }}>
-              <input type="checkbox" checked={!isHidden} onChange={() => toggleHidden(id)} title="Show on mobile" />
+              <input type="checkbox" checked={!isHidden} onChange={() => toggleHidden(id)} title={t('bc.panes.mobile.show')} />
               <span style={{ flex: 1, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {w.title || w.widget_type}
               </span>
@@ -67,7 +73,7 @@ export default function MobileLayoutEditor({ page, widgets, onUpdate }: Props) {
             </div>
           )
         })}
-        {order.length === 0 && <span style={{ fontSize: 12, color: 'var(--muted)' }}>No widgets on this page.</span>}
+        {order.length === 0 && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{t('bc.panes.noWidgets')}</span>}
       </div>
     </div>
   )

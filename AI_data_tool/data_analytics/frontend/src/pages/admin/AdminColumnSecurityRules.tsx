@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { fieldStyle } from '../../components/ui/fieldStyle'
 import { useT } from '../../i18n'
+import { dtypeName } from '../../lib/dtypeName'
+import { nodesT } from '../../i18n/pages/adminSecurity'
 import { EyeOff, Plus } from 'lucide-react'
 import { columnSecurityApi, adminRolesApi, datasetsApi } from '../../services/api'
 import type { ColumnSecurityRuleRow, Role, Dataset } from '../../services/api'
@@ -31,6 +33,7 @@ function RuleModal({ roles, datasets, onSaved, onClose }: {
   onSaved: (r: ColumnSecurityRuleRow) => void
   onClose: () => void
 }) {
+  const t = useT()
   const dialogRef = useModalDialog<HTMLDivElement>(onClose)
   const [roleId, setRoleId] = useState<number | ''>(roles[0]?.id ?? '')
   const [datasetId, setDatasetId] = useState<number | ''>(datasets[0]?.id ?? '')
@@ -53,8 +56,8 @@ function RuleModal({ roles, datasets, onSaved, onClose }: {
   const inp = { style: fieldStyle }
 
   const handleSave = async () => {
-    if (roleId === '' || datasetId === '') { toast.error('Role and dataset are required'); return }
-    if (denied.size === 0) { toast.error('Pick at least one column to hide'); return }
+    if (roleId === '' || datasetId === '') { toast.error(t('pg.adminSecurity.c.roleAndDatasetRequired')); return }
+    if (denied.size === 0) { toast.error(t('pg.adminSecurity.cls.pickColumn')); return }
     setSaving(true)
     try {
       const { id } = await columnSecurityApi.create({
@@ -63,45 +66,45 @@ function RuleModal({ roles, datasets, onSaved, onClose }: {
       })
       onSaved({ id, role_id: roleId as number, dataset_id: datasetId as number,
         denied_columns: Array.from(denied) })
-      toast.success('Rule created')
+      toast.success(t('pg.adminSecurity.c.ruleCreated'))
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail ?? 'Save failed')
+      toast.error(e?.response?.data?.detail ?? t('pg.adminSecurity.c.saveFailed'))
     } finally { setSaving(false) }
   }
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', display: 'flex',
       alignItems: 'center', justifyContent: 'center', zIndex: Z_OVERLAY }}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="New column-security rule"
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={t('pg.adminSecurity.cls.newAria')}
         style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12,
         padding: 24, width: 460, maxWidth: '90vw', maxHeight: '85vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>New Column-Security Rule</h2>
-          <button onClick={onClose} aria-label="Close"
+          <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>{t('pg.adminSecurity.cls.newTitle')}</h2>
+          <button onClick={onClose} aria-label={t('pg.adminSecurity.c.close')}
             style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: 'var(--muted)' }}>×</button>
         </div>
 
         <label style={{ display: 'block', marginBottom: 12 }}>
-          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Role *</div>
-          <select aria-label="Role *" value={roleId}
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{t('pg.adminSecurity.c.roleReq')}</div>
+          <select aria-label={t('pg.adminSecurity.c.roleReq')} value={roleId}
             onChange={e => setRoleId(e.target.value ? Number(e.target.value) : '')} {...inp}>
-            <option value="">Select a role…</option>
+            <option value="">{t('pg.adminSecurity.c.selectRole')}</option>
             {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
         </label>
 
         <label style={{ display: 'block', marginBottom: 12 }}>
-          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Dataset *</div>
-          <select aria-label="Dataset *" value={datasetId}
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{t('pg.adminSecurity.c.datasetReq')}</div>
+          <select aria-label={t('pg.adminSecurity.c.datasetReq')} value={datasetId}
             onChange={e => setDatasetId(e.target.value ? Number(e.target.value) : '')} {...inp}>
-            <option value="">Select a dataset…</option>
+            <option value="">{t('pg.adminSecurity.c.selectDataset')}</option>
             {datasets.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select>
         </label>
 
-        <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Columns to hide *</div>
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{t('pg.adminSecurity.cls.columnsLabel')}</div>
         {dsColumns.length === 0 ? (
-          <p style={{ fontSize: 12, color: 'var(--muted)' }}>Pick a dataset to list its columns.</p>
+          <p style={{ fontSize: 12, color: 'var(--muted)' }}>{t('pg.adminSecurity.cls.pickDataset')}</p>
         ) : (
           <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8,
             padding: 10, marginBottom: 16, maxHeight: 220, overflowY: 'auto' }}>
@@ -109,24 +112,23 @@ function RuleModal({ roles, datasets, onSaved, onClose }: {
               <label key={c.name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12,
                 padding: '4px 0', cursor: 'pointer' }}>
                 <input type="checkbox" checked={denied.has(c.name)} onChange={() => toggle(c.name)} />
-                <span style={{ fontFamily: 'var(--mono)', flex: 1 }}>{c.name}</span>
-                <span style={{ color: 'var(--muted)', fontSize: 11 }}>{c.dtype}</span>
+                <span style={{ fontFamily: 'var(--mono)', flex: 1 }}><bdi>{c.name}</bdi></span>
+                <span style={{ color: 'var(--muted)', fontSize: 11 }}>{dtypeName(t, c.dtype)}</span>
               </label>
             ))}
           </div>
         )}
 
         <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 16 }}>
-          For that role, these columns cease to exist — in widgets, previews, profiles,
-          expressions and exports alike. There is no "hidden but fetchable".
+          {t('pg.adminSecurity.cls.explain')}
         </p>
 
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn-primary" onClick={handleSave}
-            disabled={saving || roleId === '' || datasetId === '' || denied.size === 0} title={roleId === '' ? 'Choose a role first' : datasetId === '' ? 'Choose a dataset first' : denied.size === 0 ? 'Tick at least one column to hide' : undefined} style={{ flex: 1 }}>
-            {saving ? 'Saving…' : 'Create rule'}
+            disabled={saving || roleId === '' || datasetId === '' || denied.size === 0} title={roleId === '' ? t('pg.adminSecurity.c.chooseRoleFirst') : datasetId === '' ? t('pg.adminSecurity.c.chooseDatasetFirst') : denied.size === 0 ? t('pg.adminSecurity.cls.tickOne') : undefined} style={{ flex: 1 }}>
+            {saving ? t('pg.adminSecurity.c.saving') : t('pg.adminSecurity.cls.createRule')}
           </button>
-          <button className="btn btn-ghost" onClick={onClose} style={{ fontSize: 12, padding: '6px 14px' }}>Cancel</button>
+          <button className="btn btn-ghost" onClick={onClose} style={{ fontSize: 12, padding: '6px 14px' }}>{t('common.cancel')}</button>
         </div>
       </div>
     </div>
@@ -155,22 +157,23 @@ export default function AdminColumnSecurityRules() {
   }
   useEffect(load, [])
 
-  const roleName = (id: number) => roles.find(r => r.id === id)?.name ?? `Role #${id}`
-  const datasetName = (id: number) => datasets.find(d => d.id === id)?.name ?? `Dataset #${id}`
+  const roleName = (id: number) => roles.find(r => r.id === id)?.name ?? t('pg.adminSecurity.c.roleFallback', { id })
+  const datasetName = (id: number) => datasets.find(d => d.id === id)?.name ?? t('pg.adminSecurity.c.datasetFallback', { id })
 
   const confirm = useConfirm()
   const handleDelete = async (r: ColumnSecurityRuleRow) => {
     if (!await confirm({
-      title: 'Delete this column-security rule?',
-      body: `Role "${roleName(r.role_id)}" on dataset "${datasetName(r.dataset_id)}". ` +
-        `The hidden columns (${r.denied_columns.join(', ')}) become visible to that role.`,
+      title: t('pg.adminSecurity.cls.deleteTitle'),
+      body: t('pg.adminSecurity.cls.deleteBody', {
+        role: roleName(r.role_id), dataset: datasetName(r.dataset_id), cols: r.denied_columns.join(', '),
+      }),
     })) return
     try {
       await columnSecurityApi.remove(r.id)
       setRules(prev => prev.filter(x => x.id !== r.id))
-      toast.success('Deleted')
+      toast.success(t('pg.adminSecurity.c.deleted'))
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail ?? 'Delete failed')
+      toast.error(e?.response?.data?.detail ?? t('pg.adminSecurity.c.deleteFailed'))
     }
   }
 
@@ -180,31 +183,29 @@ export default function AdminColumnSecurityRules() {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
         <h1 className="dl-page-title" style={{ flex: 1 }}>{t('nav.columnSecurity')}</h1>
-        <button className="btn btn-primary" onClick={() => setShowModal(true)} disabled={!canCreate} title={!canCreate ? 'Needs at least one role and one dataset' : undefined}>
+        <button className="btn btn-primary" onClick={() => setShowModal(true)} disabled={!canCreate} title={!canCreate ? t('pg.adminSecurity.c.needsRoleAndDataset') : undefined}>
           <Plus size={16} aria-hidden /> {t('admin.newRule')}
         </button>
       </div>
       <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 24, maxWidth: 640 }}>
-        A rule hides named columns from one role on one dataset — everywhere: widgets,
-        data previews, profiles, expressions and exports. Enforcement is server-side;
-        this page only writes the rules.
+        {t('pg.adminSecurity.cls.intro')}
       </p>
 
       {loading && <LoadingState />}
 
       {!loading && loadError != null && (
-        <LoadError what="column-security rules" error={loadError} onRetry={load} />
+        <LoadError what="column-security rules" title={t('pg.adminSecurity.cls.loadErr')} retryLabel={t('pg.adminSecurity.c.retry')} error={loadError} onRetry={load} />
       )}
 
       {!loading && loadError == null && !canCreate && (
         <div className="dl-conn-notice">
-          You need at least one role and one dataset before creating a rule.
+          {t('pg.adminSecurity.c.needRoleAndDatasetNotice')}
         </div>
       )}
 
       {!loading && loadError == null && rules.length === 0 && canCreate && (
-        <EmptyState icon={EyeOff} title="No column-security rules yet"
-          description="Roles with no rule for a dataset see every column within their org." />
+        <EmptyState icon={EyeOff} title={t('pg.adminSecurity.cls.emptyTitle')}
+          description={t('pg.adminSecurity.cls.emptyBody')} />
       )}
 
       <div className="dl-rows">
@@ -212,10 +213,14 @@ export default function AdminColumnSecurityRules() {
           <div key={r.id} className="dl-rows__row">
             <div className="dl-rows__main">
               <div className="dl-rows__title">
-                {roleName(r.role_id)} <span style={{ color: 'var(--muted)', fontWeight: 400 }}>on</span> {datasetName(r.dataset_id)}
+                {nodesT(t, 'pg.adminSecurity.c.ruleTitle', {
+                  role: <bdi>{roleName(r.role_id)}</bdi>,
+                  on: <span style={{ color: 'var(--muted)', fontWeight: 400 }}>{t('pg.adminSecurity.c.on')}</span>,
+                  dataset: <bdi>{datasetName(r.dataset_id)}</bdi>,
+                })}
               </div>
               <div className="dl-rows__meta dl-rows__meta--mono">
-                hides: {r.denied_columns.join(', ')}
+                {t('pg.adminSecurity.cls.hides', { cols: r.denied_columns.join(', ') })}
               </div>
             </div>
             <button className="btn btn-ghost btn-sm dl-danger-item" onClick={() => handleDelete(r)}>{t('admin.delete')}</button>

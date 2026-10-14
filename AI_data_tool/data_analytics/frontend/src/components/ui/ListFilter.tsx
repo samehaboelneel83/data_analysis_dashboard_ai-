@@ -37,6 +37,9 @@ export function useListFilter<T>(
   items: T[],
   fields: (item: T) => (string | null | undefined)[],
   label: string,
+  /** `always`: show the box whatever the count -- even before the list has
+   *  arrived, so a click there lands (QA2 B8, the Dashboards list). */
+  opts?: { always?: boolean },
 ) {
   const [query, setQuery] = useState('')
 
@@ -51,7 +54,7 @@ export function useListFilter<T>(
 
   // Only worth showing once the list is long enough to be hard to scan. Below
   // that the box is chrome competing with the content it filters.
-  const worthShowing = items.length >= 8
+  const worthShowing = !!opts?.always || items.length >= 8
 
   const input = worthShowing ? (
     <input
@@ -60,6 +63,9 @@ export function useListFilter<T>(
       onChange={e => setQuery(e.target.value)}
       aria-label={label}
       placeholder={label}
+      // Typed text sets its own direction ("QA-" in the Arabic UI showed as
+      // "-QA"); the empty box keeps the page's, so the placeholder does too.
+      dir={query ? 'auto' : undefined}
       style={{
         padding: '6px 10px', fontSize: 12, borderRadius: 6,
         border: '1px solid var(--border)', background: 'var(--surface)',
@@ -74,6 +80,8 @@ export function useListFilter<T>(
     /** The search box, or null when the list is short enough not to need one. */
     input,
     query,
+    /** Clears or replaces the search ("Clear search" on a no-match state). */
+    setQuery,
     /** True when a search is active but matched nothing -- distinct from an
      *  empty collection, which needs the page's own "nothing yet" copy. */
     noMatches: query.trim().length > 0 && filtered.length === 0,

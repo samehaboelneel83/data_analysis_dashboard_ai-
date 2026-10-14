@@ -168,7 +168,9 @@ class TestBudget:
 
 @pytest.fixture
 async def source(db_session, two_orgs):
-    src = DataSource(name="wh-a", type="postgresql", org_id=two_orgs["a"]["org"].id)
+    # "Allow AI" on: with it off no model is asked at all (services/ai_policy.py),
+    # and there is nothing to meter.
+    src = DataSource(name="wh-a", type="postgresql", org_id=two_orgs["a"]["org"].id, allow_llm_sampling=True)
     db_session.add(src)
     await db_session.commit()
     return src
@@ -280,7 +282,7 @@ class TestAsk:
 
 
 async def _source_b(db_session, two_orgs):
-    src = DataSource(name="wh-b", type="postgresql", org_id=two_orgs["b"]["org"].id)
+    src = DataSource(name="wh-b", type="postgresql", org_id=two_orgs["b"]["org"].id, allow_llm_sampling=True)
     db_session.add(src)
     await db_session.commit()
     return src
@@ -403,3 +405,43 @@ class TestPlatform:
         r = await client.put(f"/api/v1/platform/organizations/{two_orgs['b']['org'].id}/quota",
                              json={"max_ai_tokens_per_day": -1}, headers=auth_headers["a"])
         assert r.status_code == 422
+
+
+class TestPerPersonBudget:
+    """settings.ai_tokens_per_user_per_day: one person cannot spend everyone's
+    budget (docs/discovery/PLAN.md §AX). Off (0) unless an administrator sets it."""
+
+    async def _spend(self, db_session, org_id, user_id, tokens):
+        db_session.add(AiUsage(org_id=org_id, user_id=user_id, feature="ask", calls=1,
+                               tokens_in=tokens, tokens_out=0))
+        await db_session.commit()
+
+    async def test_off_by_default(self, db_session, two_orgs):
+        org, user = two_orgs["a"]["org"], two_orgs["a"]["user"]
+        await self._spend(db_session, org.id, user.id, 10_000_000)
+        meter = await quotas.open_ai_meter(db_session, org.id, user.id, "ask")
+        assert meter.remaining is None and not meter.spent
+
+    async def test_a_person_past_their_own_limit_is_refused_and_a_colleague_is_not(
+            self, db_session, two_orgs, monkeypatch):
+        monkeypatch.setattr(settings, "ai_tokens_per_user_per_day", 1_000)
+        org, user = two_orgs["a"]["org"], two_orgs["a"]["user"]
+        await self._spend(db_session, org.id, user.id, 1_200)
+        mine = await quotas.open_ai_meter(db_session, org.id, user.id, "ask")
+        assert mine.spent and mine.limit_kind == "ai_tokens_per_user_per_day"
+        with pytest.raises(quotas.QuotaExceeded) as e:
+            quotas.enforce_ai_budget(mine)
+        assert "Your own AI budget" in str(e.value.detail)
+        other = await quotas.open_ai_meter(db_session, org.id, user.id + 1000, "ask")
+        assert other.remaining == 1_000 and not other.spent
+        # Scheduled work has nobody to charge: the organisation's budget only.
+        nobody = await quotas.open_ai_meter(db_session, org.id, None, "automation")
+        assert nobody.remaining is None
+
+    async def test_the_tighter_of_the_two_limits_binds(self, db_session, two_orgs, monkeypatch):
+        monkeypatch.setattr(settings, "ai_tokens_per_user_per_day", 5_000)
+        org, user = two_orgs["a"]["org"], two_orgs["a"]["user"]
+        await _set_quota(db_session, org.id, max_ai_tokens_per_day=1_000)
+        await self._spend(db_session, org.id, user.id, 400)
+        meter = await quotas.open_ai_meter(db_session, org.id, user.id, "ask")
+        assert (meter.remaining, meter.limit_kind) == (600, "ai_tokens_per_day")

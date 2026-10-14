@@ -70,6 +70,18 @@ function actionReaches(
       twoway  every widget broadcasts and receives; filters accumulate */
 export type PageInteractionMode = 'manual' | 'linked' | 'oneway' | 'twoway'
 
+/** Where a reader has drilled one widget's hierarchy (hierarchy plan, step 1,
+ *  2026-10-10): the values clicked on the way down, and how many levels are
+ *  expanded side by side. Held here -- not inside each widget -- so a bookmark
+ *  can save and restore it; it is still never written to the report itself. */
+export interface DrillStep { column: string; granularity?: string; value: unknown; label: string }
+export interface DrillState {
+  path: DrillStep[]; expand: number
+  /** A hierarchical crosstab's open branches, as path keys (step 3). */
+  open?: { rows: string[]; cols: string[] }
+}
+const NO_DRILL: DrillState = { path: [], expand: 0 }
+
 interface CrossFilterState {
   activeFilters:   ActiveFilter[]
   interactions:    Record<number, WidgetInteraction>
@@ -100,6 +112,13 @@ interface CrossFilterState {
   getFiltersFor:   (widgetId: number, currentPageId: number) => ActiveFilter[]  // only filters from OTHER widgets, scoped to this page unless synced
   canBroadcast:    (widgetId: number) => boolean
   canReceive:      (widgetId: number) => boolean
+
+  drillStates:     Record<number, DrillState>
+  drillOf:         (widgetId: number) => DrillState
+  /** null resets the widget to its top level. */
+  setDrill:        (widgetId: number, state: DrillState | null) => void
+  /** A bookmark's drill positions, replacing all current ones. */
+  restoreDrills:   (states: Record<number, DrillState>) => void
 }
 
 const CrossFilterContext = createContext<CrossFilterState | null>(null)
@@ -143,6 +162,18 @@ export function CrossFilterProvider(
   },
 ) {
   const [activeFilters, setActiveFiltersRaw] = useState<ActiveFilter[]>([])
+  const [drillStates, setDrillStates] = useState<Record<number, DrillState>>({})
+  const drillOf = useCallback((widgetId: number) => drillStates[widgetId] ?? NO_DRILL, [drillStates])
+  const setDrill = useCallback((widgetId: number, state: DrillState | null) => {
+    setDrillStates(prev => {
+      const next = { ...prev }
+      const anyOpen = !!(state?.open && (state.open.rows.length || state.open.cols.length))
+      if (!state || (state.path.length === 0 && state.expand === 0 && !anyOpen)) delete next[widgetId]
+      else next[widgetId] = state
+      return next
+    })
+  }, [])
+  const restoreDrills = useCallback((states: Record<number, DrillState>) => setDrillStates({ ...(states ?? {}) }), [])
   // Selection history for the reader's undo. Refs, not state updaters with
   // side effects: a React StrictMode double-invoke must not record twice.
   const current = useRef<ActiveFilter[]>([])
@@ -289,10 +320,11 @@ export function CrossFilterProvider(
     emitFilter, emitMultiFilter, clearFilter, clearAllFilters, carryFiltersTo,
     undoSelection, redoSelection, undoLabel, redoLabel,
     setInteraction, initInteraction, getFiltersFor, canBroadcast, canReceive,
+    drillStates, drillOf, setDrill, restoreDrills,
   }), [activeFilters, interactions, pageMode, getReceiveMode, emitFilter, emitMultiFilter, clearFilter,
        clearAllFilters, carryFiltersTo, undoSelection, redoSelection, undoLabel, redoLabel,
        setInteraction, initInteraction, getFiltersFor,
-       canBroadcast, canReceive])
+       canBroadcast, canReceive, drillStates, drillOf, setDrill, restoreDrills])
 
   return (
     <CrossFilterContext.Provider value={value}>

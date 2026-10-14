@@ -65,6 +65,7 @@ from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from ..models.models import Job, User
+from .readback import Said, _s
 
 log = logging.getLogger(__name__)
 
@@ -94,7 +95,8 @@ HANDLERS: dict[str, Handler] = {}
 #: `enqueue` know every kind without depending on import order elsewhere.
 HANDLER_MODULES = ("app.services.source_import", "app.services.refresh_jobs",
                    "app.services.delivery_jobs", "app.services.model_scoring",
-                   "app.services.model_drift")
+                   "app.services.model_drift", "app.services.suggest_jobs",
+                   "app.services.analysis_jobs")
 
 
 def load_handlers() -> None:
@@ -125,6 +127,10 @@ class JobError(Exception):
 
     def __init__(self, message: str, code: str = "refused", detail: dict | None = None):
         super().__init__(message)
+        #: The sentence's key and pieces when the message is a keyed one
+        #: (readback.Said): stored beside the English text, so the job's page
+        #: can say it in the reader's language whenever it is opened.
+        self.said = message.as_i18n() if isinstance(message, Said) else None
         self.code = code
         self.detail = detail
 
@@ -296,9 +302,9 @@ async def claim(db, worker_id: str, now: datetime | None = None,
                                           lease_owner=None, lease_expires_at=None,
                                           progress={"stage": settled})
             if settled == FAILED:
-                values.update(error_code="interrupted",
-                              error=f"The server stopped while this ran, {attempt} time(s). "
-                                    "Retry it when the server is stable.")
+                said = _s("job.interrupted", "The server stopped while this ran, {n} time(s). "
+                          "Retry it when the server is stable.", n=attempt)
+                values.update(error_code="interrupted", error=str(said), progress=_failed(said.as_i18n()))
             await db.execute(update(Job).where(Job.id == job_id, _claimable(now)).values(**values))
             await db.commit()
             continue
@@ -417,8 +423,19 @@ async def _heartbeat(session_factory, job_id: int, token: str) -> None:
             log.warning("Job %s heartbeat failed: %s", job_id, e)
 
 
+def _failed(said: dict | None = None) -> dict:
+    """The progress record of a failed job; the error's key rides in it."""
+    return {"stage": "failed", **({"error_i18n": said} if said else {})}
+
+
 async def _settle(session_factory, job_id: int, token: str, **values) -> None:
     now = _utcnow()
+    # An error written as a keyed sentence is stored as its English text, and
+    # its key in the progress record (no column of its own was needed).
+    error = values.get("error")
+    if isinstance(error, Said):
+        values["error"] = str(error)
+        values["progress"] = {**(values.get("progress") or {"stage": "failed"}), "error_i18n": error.as_i18n()}
     values.setdefault("finished_at", now)
     values.setdefault("updated_at", now)
     values.setdefault("lease_expires_at", None)
@@ -440,12 +457,33 @@ async def execute(session_factory, job_id: int, token: str) -> str | None:
     handler = HANDLERS.get(ctx.kind)
     if handler is None:
         await _settle(session_factory, job_id, token, state=FAILED, error_code="unexpected",
-                      error=f"This server cannot run '{ctx.kind}' jobs")
+                      error=_s("job.noHandler", "This server cannot run '{kind}' jobs", kind=ctx.kind))
         return FAILED
 
     beat = asyncio.create_task(_heartbeat(session_factory, job_id, token))
     try:
-        await handler(ctx)
+        # A worker runs job after job in one task: the previous job's "AI is
+        # off for this data" must not carry over (services/ai_policy.py).
+        from . import llm as _llm
+        _llm.allow_ai()
+        from ..core.config import settings as _settings
+        limit = int(getattr(_settings, "job_time_limit_s", 0) or 0)
+        if limit:
+            try:
+                await asyncio.wait_for(handler(ctx), timeout=limit)
+            except asyncio.TimeoutError:
+                # The handler's coroutine is cancelled; work it handed to a
+                # thread (a model fit, a driver call) finishes on its own, but
+                # the job and the worker are free.
+                log.warning("Job %s (%s) passed its time limit of %ss", job_id, ctx.kind, limit)
+                await _settle(session_factory, job_id, token, state=FAILED, error_code="timeout",
+                              error=_s("job.timeLimit", "The job took longer than the limit of {n} minutes and was "
+                                       "stopped. Try it on less data, or ask an administrator to raise the limit "
+                                       "(Settings, Longest background job).", n=limit // 60 or 1),
+                              progress={"stage": "failed"})
+                return FAILED
+        else:
+            await handler(ctx)
         if not ctx.completed:
             # A handler with no effects to commit still has to end its job.
             async with session_factory() as s:
@@ -461,7 +499,7 @@ async def execute(session_factory, job_id: int, token: str) -> str | None:
         return None
     except JobError as e:
         await _settle(session_factory, job_id, token, state=FAILED, error_code=e.code,
-                      error=sanitize_error(e), progress={"stage": "failed"},
+                      error=sanitize_error(e), progress=_failed(e.said),
                       **({"result": e.detail} if e.detail is not None else {}))
         return FAILED
     except asyncio.CancelledError:
@@ -471,9 +509,9 @@ async def execute(session_factory, job_id: int, token: str) -> str | None:
     except Exception:  # noqa: BLE001 - one job's crash must not kill the worker
         log.exception("Job %s (%s) crashed", job_id, ctx.kind)
         await _settle(session_factory, job_id, token, state=FAILED, error_code="unexpected",
-                      error="The job stopped because of an unexpected server error. "
-                            "Retry it; if it fails again, ask an administrator to check "
-                            "the server log.",
+                      error=_s("job.unexpected", "The job stopped because of an unexpected server error. "
+                               "Retry it; if it fails again, ask an administrator to check "
+                               "the server log."),
                       progress={"stage": "failed"})
         return FAILED
     finally:

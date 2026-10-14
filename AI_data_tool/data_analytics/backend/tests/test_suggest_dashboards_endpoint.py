@@ -18,6 +18,15 @@ from app.models.models import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _the_model_proposes_its_own_charts(monkeypatch):
+    """These tests are of the "free" way of designing (the model proposes,
+    lens by lens); the default is now "cards" (tests/test_suggest_cards.py)."""
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "suggest_ai_selection", "free")
+
+
+
 @pytest.fixture
 def clinic_csv(tmp_path):
     p = tmp_path / "clinic.csv"
@@ -105,7 +114,7 @@ class TestTheAnswer:
         ds, headers = await _dataset(db_session, two_orgs["a"]["org"], clinic_csv)
         r = await client.post(f"/api/v1/datasets/{ds.id}/suggest-dashboards",
                               json={"goal": "I run the clinic"}, headers=headers)
-        widget = r.json()["proposals"][0]["widgets"][0]
+        widget = next(w for w in r.json()["proposals"][0]["widgets"] if w["widget_type"] != "slicer")
         assert widget["row_count"] == 3          # three departments
 
     async def test_the_persons_words_reach_the_model(self, client, db_session,
@@ -174,6 +183,18 @@ class TestAnEmptyGoalUsesNoModel:
         r = await client.post(f"/api/v1/datasets/{ds.id}/suggest-dashboards",
                               json={"goal": ""}, headers=headers)
         assert r.json()["source"] == "insights"
+
+    async def test_without_a_goal_the_statistics_build_pages(self, client, db_session, two_orgs,
+                                                             clinic_csv, fake_model):
+        """No goal, no model: the panel's own statistics, a page per section
+        (five-dataset review: one page of findings covered 41%)."""
+        ds, headers = await _dataset(db_session, two_orgs["a"]["org"], clinic_csv)
+        r = await client.post(f"/api/v1/datasets/{ds.id}/suggest-dashboards",
+                              json={}, headers=headers)
+        body = r.json()
+        assert body["source"] == "insights" and fake_model.seen == []
+        assert all(p.get("section") for p in body["proposals"])
+        assert body["panel"]["from_model"] == 0 and "derived" in body
 
     async def test_a_goal_still_reaches_the_model(self, client, db_session, two_orgs,
                                                   clinic_csv, fake_model):
@@ -435,3 +456,174 @@ class TestWhenNothingCanBeDesigned:
                               json={"goal": "anything"}, headers=headers)
         assert r.status_code == 200, r.text
         assert r.json()["question"] is None
+
+
+class LensClient:
+    """The panel's lens calls, replaced: each lens proposes the same bar."""
+
+    def __init__(self):
+        self.seen = []
+
+    async def complete_json(self, messages, schema, **kw):
+        self.seen.append(messages)
+        return {"widgets": [{"question": "Where does the queue build?", "widget_type": "bar",
+                             "title": "Average wait by department", "value": 5,
+                             "config": {"dimension": "department", "measure": "wait_minutes",
+                                        "aggregation": "avg"}}]}
+
+
+@pytest.mark.asyncio
+class TestThePanelMode:
+    async def test_lenses_propose_and_the_data_selects(self, client, db_session, two_orgs,
+                                                       clinic_csv, monkeypatch):
+        lens = LensClient()
+        monkeypatch.setattr("app.services.llm.get_client", lambda *a, **k: lens)
+        ds, headers = await _dataset(db_session, two_orgs["a"]["org"], clinic_csv)
+        r = await client.post(f"/api/v1/datasets/{ds.id}/suggest-dashboards",
+                              json={"goal": "I run the clinic", "mode": "panel", "size": 12},
+                              headers=headers)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["source"] == "panel" and body["panel"]["size"] == 12
+        # One call per lens, plus the person's questions first (a goal was given).
+        assert len(lens.seen) == len(body["panel"]["lenses"]) + 1 >= 2
+        widgets = [w for p in body["proposals"] for w in p["widgets"]]
+        # the same idea from every lens is offered once, with what it showed
+        assert [w["title"] for w in widgets].count("Average wait by department") == 1
+        bar = next(w for w in widgets if w["title"] == "Average wait by department")
+        assert bar["row_count"] == 3 and "evidence" in bar and bar["takeaway"]
+        assert body["facts"]
+
+    async def test_a_denied_column_never_reaches_a_lens(self, client, db_session, two_orgs,
+                                                       clinic_csv, monkeypatch):
+        lens = LensClient()
+        monkeypatch.setattr("app.services.llm.get_client", lambda *a, **k: lens)
+        ds, headers = await _dataset(db_session, two_orgs["a"]["org"], clinic_csv, deny=["salary"])
+        r = await client.post(f"/api/v1/datasets/{ds.id}/suggest-dashboards",
+                              json={"mode": "panel", "size": 12}, headers=headers)
+        assert r.status_code == 200, r.text
+        for messages in lens.seen:
+            assert "salary" not in " ".join(m["content"] for m in messages)
+        widgets = [w for p in r.json()["proposals"] for w in p["widgets"]]
+        assert all("salary" not in str(w["config"]) for w in widgets)
+
+    async def test_size_is_bounded(self, client, db_session, two_orgs, clinic_csv, fake_model):
+        ds, headers = await _dataset(db_session, two_orgs["a"]["org"], clinic_csv)
+        r = await client.post(f"/api/v1/datasets/{ds.id}/suggest-dashboards",
+                              json={"mode": "panel", "size": 500}, headers=headers)
+        assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+class TestThePanelAsAJob:
+    """Minutes of work, queued: the dialog can be closed and reopened."""
+
+    @pytest.fixture
+    def factory(self, db_session):
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+        return async_sessionmaker(db_session.bind, class_=AsyncSession, expire_on_commit=False)
+
+    async def test_queued_then_run_with_progress_and_a_result(self, client, db_session, two_orgs,
+                                                              clinic_csv, monkeypatch, factory):
+        from app.models.models import Job
+        from app.services import jobs
+        lens = LensClient()
+        monkeypatch.setattr("app.services.llm.get_client", lambda *a, **k: lens)
+        ds, headers = await _dataset(db_session, two_orgs["a"]["org"], clinic_csv)
+        r = await client.post(f"/api/v1/datasets/{ds.id}/suggest-dashboards",
+                              json={"goal": "I run the clinic", "mode": "panel", "size": 12,
+                                    "background": True}, headers=headers)
+        assert r.status_code == 200, r.text
+        job_id = r.json()["job_id"]
+        assert lens.seen == []                                # nothing ran in the request
+        assert await jobs.run_next(factory, "w1") == jobs.SUCCEEDED
+        job = await db_session.get(Job, job_id)
+        await db_session.refresh(job)
+        res = job.result
+        assert res["source"] == "panel" and res["dataset_id"] == ds.id
+        widgets = [w for p in res["proposals"] for w in p["widgets"]]
+        assert any(w["title"] == "Average wait by department" for w in widgets)
+        assert all("layout" in w for w in widgets)
+        got = await client.get(f"/api/v1/jobs/{job_id}", headers=headers)
+        assert got.status_code == 200 and got.json()["state"] == "succeeded"
+
+    async def test_suggesting_again_asks_the_analysts_afresh(self, client, db_session, two_orgs,
+                                                             clinic_csv, monkeypatch, factory):
+        """The first panel reuses kept lens answers; "suggest again" (fresh)
+        asks every lens anew, sampling, and the new answers are kept."""
+        from app.services import jobs
+        lens = LensClient()
+        kws = []
+        orig = lens.complete_json
+
+        async def spy(messages, schema, **kw):
+            kws.append(kw)
+            return await orig(messages, schema, **kw)
+        lens.complete_json = spy
+        monkeypatch.setattr("app.services.llm.get_client", lambda *a, **k: lens)
+        ds, headers = await _dataset(db_session, two_orgs["a"]["org"], clinic_csv)
+
+        async def run(fresh):
+            r = await client.post(f"/api/v1/datasets/{ds.id}/suggest-dashboards",
+                                  json={"goal": "I run the clinic", "mode": "panel", "size": 12,
+                                        "background": True, "fresh": fresh}, headers=headers)
+            assert r.status_code == 200, r.text
+            assert await jobs.run_next(factory, "w1") == jobs.SUCCEEDED
+        await run(False)
+        first = len(kws)
+        assert first and all(k["temperature"] == 0.0 for k in kws)
+        await run(False)
+        assert len(kws) == first                              # kept answers reused
+        await run(True)
+        assert len(kws) == 2 * first                          # asked afresh
+        assert all(k["temperature"] > 0 for k in kws[first:])
+
+    async def test_the_job_sees_only_what_the_person_may(self, client, db_session, two_orgs,
+                                                         clinic_csv, monkeypatch, factory):
+        from app.models.models import Job
+        from app.services import jobs
+        lens = LensClient()
+        monkeypatch.setattr("app.services.llm.get_client", lambda *a, **k: lens)
+        ds, headers = await _dataset(db_session, two_orgs["a"]["org"], clinic_csv, deny=["salary"])
+        r = await client.post(f"/api/v1/datasets/{ds.id}/suggest-dashboards",
+                              json={"mode": "panel", "background": True}, headers=headers)
+        assert await jobs.run_next(factory, "w1") == jobs.SUCCEEDED
+        job = await db_session.get(Job, r.json()["job_id"])
+        await db_session.refresh(job)
+        assert "salary" not in str(job.result["proposals"]) and "salary" not in str(job.result["facts"])
+        for messages in lens.seen:
+            assert "salary" not in " ".join(m["content"] for m in messages)
+
+    async def test_a_dataset_gone_by_run_time_fails_the_job(self, client, db_session, two_orgs,
+                                                           clinic_csv, monkeypatch, factory):
+        from app.models.models import Job
+        from app.services import jobs
+        monkeypatch.setattr("app.services.llm.get_client", lambda *a, **k: LensClient())
+        ds, headers = await _dataset(db_session, two_orgs["a"]["org"], clinic_csv)
+        r = await client.post(f"/api/v1/datasets/{ds.id}/suggest-dashboards",
+                              json={"mode": "panel", "background": True}, headers=headers)
+        await db_session.delete(ds)
+        await db_session.commit()
+        assert await jobs.run_next(factory, "w1") == jobs.FAILED
+        job = await db_session.get(Job, r.json()["job_id"])
+        await db_session.refresh(job)
+        assert job.error_code == "not_found"
+
+
+@pytest.mark.asyncio
+async def test_a_panel_job_that_fails_says_why(client, db_session, two_orgs, clinic_csv, monkeypatch):
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+    from app.models.models import Job
+    from app.services import jobs
+
+    async def boom(*a, **k):
+        raise ValueError("the facts could not be measured")
+    monkeypatch.setattr("app.services.suggest_inputs.panel", boom)
+    ds, headers = await _dataset(db_session, two_orgs["a"]["org"], clinic_csv)
+    r = await client.post(f"/api/v1/datasets/{ds.id}/suggest-dashboards",
+                          json={"mode": "panel", "background": True}, headers=headers)
+    factory = async_sessionmaker(db_session.bind, class_=AsyncSession, expire_on_commit=False)
+    assert await jobs.run_next(factory, "w1") == jobs.FAILED
+    job = await db_session.get(Job, r.json()["job_id"])
+    await db_session.refresh(job)
+    assert job.error_code == "panel_failed" and "the facts could not be measured" in job.error

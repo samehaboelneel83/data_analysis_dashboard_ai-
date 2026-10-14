@@ -47,7 +47,7 @@ def _numeric_series(s: pd.Series) -> pd.Series:
     return s
 
 
-def analyze_numeric(df: pd.DataFrame, cols: list[str]) -> dict:
+def analyze_numeric(df: pd.DataFrame, cols: list[str], column_meta: dict | None = None) -> dict:
     if not cols:
         return {}
     result = {"columns": {}}
@@ -72,7 +72,7 @@ def analyze_numeric(df: pd.DataFrame, cols: list[str]) -> dict:
     # of the one real relationship (live QA 2026-09-28). A constant column has
     # no correlation at all. Their statistics above stay.
     from .semantic_guard import is_quantity
-    measures = [c for c in cols if is_quantity(c) and df[c].nunique(dropna=True) > 1]
+    measures = [c for c in cols if is_quantity(c, column_meta) and df[c].nunique(dropna=True) > 1]
     if len(measures) >= 2:
         corr = df[measures].apply(_numeric_series).corr(method="pearson").round(4)
         result["correlation"] = {c: {r: _safe(corr.loc[c, r]) for r in corr.columns} for c in corr.index}
@@ -157,14 +157,14 @@ def analyze_datetime(df: pd.DataFrame, cols: list[str]) -> dict:
     return result
 
 
-def run_full_analysis(df: pd.DataFrame) -> dict:
+def run_full_analysis(df: pd.DataFrame, column_meta: dict | None = None) -> dict:
     type_map = detect_types(df)
     num_cols = [c for c,t in type_map.items() if t == "numeric"]
     cat_cols = [c for c,t in type_map.items() if t == "categorical"]
     dt_cols  = [c for c,t in type_map.items() if t == "datetime"]
     return {
         "type_map":    type_map,
-        "numeric":     analyze_numeric(df, num_cols),
+        "numeric":     analyze_numeric(df, num_cols, column_meta),
         "categorical": analyze_categorical(df, cat_cols),
         "datetime":    analyze_datetime(df, dt_cols),
         "overview": {

@@ -107,4 +107,12 @@ describe('useListFilter', () => {
     render(<Harness items={many(8)} />)
     expect(screen.getByLabelText('Search rows')).toBeInTheDocument()
   })
+
+  it('typed text sets its own direction; the empty box keeps the page direction (QA V3)', () => {
+    // "QA-" typed in the Arabic UI showed as "-QA".
+    render(<Harness items={many(8)} />)
+    expect(search()).not.toHaveAttribute('dir')
+    fireEvent.change(search(), { target: { value: 'QA-' } })
+    expect(search()).toHaveAttribute('dir', 'auto')
+  })
 })

@@ -1,3 +1,4 @@
+import { useT } from '../../../i18n'
 import { useMemo, useState } from 'react'
 import { seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
@@ -19,6 +20,7 @@ const METRICS = ['degree', 'closeness', 'betweenness', 'reach'] as const
  * the metrics ARE the analysis, so they are never more than a hover away.
  */
 export default function NetworkGraphRenderer({ data, cfg }: ChartRendererProps) {
+  const t9 = useT()
   const [hover, setHover] = useState<string | null>(null)
   const nodes: NetNode[] = (data as { nodes?: NetNode[] })?.nodes ?? []
   const links: NetLink[] = (data as { links?: NetLink[] })?.links ?? []
@@ -41,13 +43,13 @@ export default function NetworkGraphRenderer({ data, cfg }: ChartRendererProps) 
   const touches = (l: NetLink) => hover != null && (l.source === hover || l.target === hover)
 
   if (nodes.length === 0) {
-    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--muted)', fontSize: 12 }}>No links to draw</div>
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--muted)', fontSize: 12 }}>{t9('cr.noLinks')}</div>
   }
   const hovered = nodes.find(n => n.id === hover)
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: '100%' }} role="img" aria-label="Network graph">
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: '100%' }} role="img" aria-label={t9('cr.network')}>
         {links.map((l, i) => {
           const a = pos[l.source], b = pos[l.target]
           if (!a || !b) return null
@@ -86,14 +88,14 @@ export default function NetworkGraphRenderer({ data, cfg }: ChartRendererProps) 
         <div style={{ position: 'absolute', top: 8, right: 8, fontSize: 10,
           display: 'flex', alignItems: 'center', gap: 8 }}>
           {communities > 1 && (
-            <span style={{ color: 'var(--muted)' }}>{communities} communities</span>
+            <span style={{ color: 'var(--muted)' }}>{t9('cr.communities', { n: communities })}</span>
           )}
           {suggested.length > 0 && (
             <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
               <input type="checkbox" checked={showSuggested}
                 onChange={e => setShowSuggested(e.target.checked)} />
               <span style={{ color: 'var(--muted)' }}>
-                Suggested links ({suggested.length})
+                {t9('cr.suggestedLinks', { n: suggested.length })}
               </span>
             </label>
           )}
@@ -105,12 +107,12 @@ export default function NetworkGraphRenderer({ data, cfg }: ChartRendererProps) 
           <strong>{hovered.id}</strong>
           {METRICS.map(m => (
             <div key={m} style={{ color: m === metric ? 'var(--accent)' : 'var(--muted)' }}>
-              {m}: {hovered[m].toFixed(3)}{m === metric ? ' ← size' : ''}
+              {m}: {hovered[m].toFixed(3)}{m === metric ? ` ← ${t9('cr.size')}` : ''}
             </div>
           ))}
           {hovered.community != null && (
             <div style={{ color: seriesColor(hovered.community) }}>
-              community: {hovered.community} ← colour
+              {t9('cr.communityColour', { c: String(hovered.community) })}
             </div>
           )}
         </div>

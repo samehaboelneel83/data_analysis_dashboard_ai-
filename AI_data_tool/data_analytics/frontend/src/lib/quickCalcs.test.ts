@@ -103,3 +103,17 @@ describe('naming', () => {
       ['Average revenue', 'Average revenue (2)'])).toBe('Average revenue (3)')
   })
 })
+
+describe('a quantity that cannot be added up (Fields plan F8)', () => {
+  it('offers no "% of total" for a price', () => {
+    // A share of the total of all prices means nothing.
+    const keys = quickCalcsFor({ name: 'price_egp', dtype: 'numeric', numeric: true, additive: false }).map(q => q.key)
+    expect(keys).not.toContain('percent_of_total')
+    expect(keys).toContain('average')
+  })
+
+  it('still offers it for an amount', () => {
+    expect(quickCalcsFor({ name: 'revenue', dtype: 'numeric', numeric: true, additive: true }).map(q => q.key))
+      .toContain('percent_of_total')
+  })
+})

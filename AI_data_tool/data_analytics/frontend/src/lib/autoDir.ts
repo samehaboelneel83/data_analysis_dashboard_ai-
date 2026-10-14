@@ -17,8 +17,8 @@
  */
 
 const TEXT_TYPES = new Set(['', 'text', 'search', 'email', 'url', 'tel'])
-const RTL_CHAR = /[֐-ࣿיִ-﷿ﹰ-﻿]/
-const LTR_CHAR = /[A-Za-zÀ-ɏͰ-ϿЀ-ӿ]/
+export const RTL_CHAR = /[֐-ࣿיִ-﷿ﹰ-﻿]/
+export const LTR_CHAR = /[A-Za-zÀ-ɏͰ-ϿЀ-ӿ]/
 const MANAGED = 'data-autodir'
 
 function firstStrongDir(text: string): 'ltr' | 'rtl' | null {
@@ -27,6 +27,48 @@ function firstStrongDir(text: string): 'ltr' | 'rtl' | null {
     if (LTR_CHAR.test(ch)) return 'ltr'
   }
   return null
+}
+
+/**
+ * The direction of model-written text by MAJORITY script (redesign step 1c).
+ *
+ * `dir="auto"` takes the first strong character, so an Arabic answer that
+ * opens with a data value ("Medicine الأعلى بمتوسط 83.9") was laid out LTR.
+ * Counts Arabic/Hebrew letters against Latin ones; `fallback` (the UI
+ * direction) wins a tie and text with no letters. User-typed text -- questions,
+ * titles -- keeps `dir="auto"`.
+ */
+export function majorityDir(text: string, fallback: 'ltr' | 'rtl'): 'ltr' | 'rtl' {
+  let rtl = 0
+  let ltr = 0
+  for (const ch of text ?? '') {
+    if (!/\p{L}/u.test(ch)) continue
+    if (RTL_CHAR.test(ch)) rtl++
+    else if (LTR_CHAR.test(ch)) ltr++
+  }
+  return rtl > ltr ? 'rtl' : ltr > rtl ? 'ltr' : fallback
+}
+
+/**
+ * The direction of a sentence by its WORDS (QA V8). An Arabic answer is full
+ * of English data names ("margin_pct", "Asia Pacific", "North America"), so
+ * counting letters let the names outvote the sentence around them. A word is
+ * a run of letters, digits and underscores, counted by its first letter; a
+ * tie goes to the first strong letter, then to `fallback`.
+ */
+export function proseDir(text: string, fallback: 'ltr' | 'rtl'): 'ltr' | 'rtl' {
+  let rtl = 0
+  let ltr = 0
+  let first: 'ltr' | 'rtl' | null = null
+  for (const w of (text ?? '').match(/[\p{L}\p{N}_]+/gu) ?? []) {
+    const ch = [...w].find(c => /\p{L}/u.test(c))
+    if (!ch) continue
+    const d = RTL_CHAR.test(ch) ? 'rtl' : LTR_CHAR.test(ch) ? 'ltr' : null
+    if (!d) continue
+    first ??= d
+    if (d === 'rtl') rtl++; else ltr++
+  }
+  return rtl > ltr ? 'rtl' : ltr > rtl ? 'ltr' : first ?? fallback
 }
 
 function fix(el: Element): void {

@@ -1,4 +1,4 @@
-import { Home, Bot, Database, GitBranch, Waypoints, LayoutDashboard, Sparkles, RefreshCw, Mail, Activity, Users, Shield, Lock, EyeOff, Download, Key, Fingerprint, ScrollText, Building2, Network, Upload, Plug, Map as MapIcon, Workflow, CalendarDays, ArrowRightLeft, Settings as SettingsIcon, SlidersHorizontal, type LucideIcon } from 'lucide-react'
+import { LayoutTemplate, LibraryBig, Home, Bot, Database, GitBranch, Waypoints, BookOpen, LayoutDashboard, Sparkles, RefreshCw, Mail, Activity, Users, Shield, Lock, EyeOff, Download, Key, Fingerprint, ScrollText, Building2, Network, Upload, Plug, Map as MapIcon, Workflow, CalendarDays, ArrowRightLeft, Settings as SettingsIcon, SlidersHorizontal, type LucideIcon } from 'lucide-react'
 
 /**
  * The navigation tree, as data.
@@ -65,6 +65,7 @@ export const NAVIGATION: NavSection[] = [
     items: [
       { to: '/datasets', label: 'Datasets', icon: Database, permission: 'member', end: true },
       { to: '/lineage', label: 'Lineage', icon: Waypoints, permission: 'member' },
+      { to: '/glossary', label: 'Glossary', icon: BookOpen, permission: 'member' },
       { to: '/dataflows', label: 'Dataflows', icon: GitBranch, permission: 'member' },
     ],
   },
@@ -85,6 +86,10 @@ export const NAVIGATION: NavSection[] = [
     permission: 'member',
     items: [
       { to: '/reports', label: 'Dashboards', icon: LayoutDashboard, permission: 'member' },
+      // The reader's side: only what this person may open, found and kept at hand.
+      { to: '/portal', label: 'My dashboards', icon: LibraryBig, permission: 'member' },
+      // Dashboards as reusable specifications: the platform's, the organisation's, your own.
+      { to: '/templates', label: 'Templates', icon: LayoutTemplate, permission: 'member' },
       { to: '/insights', label: 'Insights', icon: Sparkles, permission: 'member' },
       { to: '/automation', label: 'Automations', icon: Workflow, permission: 'member' },
       // E17: the old estate, item by item; owners sign off here, so members see it.

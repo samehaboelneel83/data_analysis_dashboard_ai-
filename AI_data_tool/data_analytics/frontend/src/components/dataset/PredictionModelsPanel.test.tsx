@@ -20,6 +20,12 @@ import PredictionModelsPanel from './PredictionModelsPanel'
 import { jobsApi, predictionModelsApi } from '../../services/api'
 import { MemoryRouter } from 'react-router-dom'
 
+// QA5b S1: deleting a model now asks first; the answer is set per test.
+const confirmAnswer = vi.hoisted(() => ({ ok: true, asked: [] as string[] }))
+vi.mock('../ui/ConfirmDialog', () => ({
+  useConfirm: () => (o: { title: string }) => { confirmAnswer.asked.push(o.title); return Promise.resolve(confirmAnswer.ok) },
+}))
+
 vi.mock('../../services/api', async (orig) => ({
   ...(await orig<Record<string, unknown>>()),
   predictionModelsApi: {
@@ -52,6 +58,19 @@ beforeEach(() => {
 const panel = () => render(<PredictionModelsPanel datasetId={1} columns={columns} />)
 
 describe('PredictionModelsPanel', () => {
+  it('asks before deleting a model, and a "no" deletes nothing (QA5b S1)', async () => {
+    vi.mocked(predictionModelsApi.list).mockResolvedValue([model()])
+    panel()
+    const del = await screen.findByRole('button', { name: 'Delete Churn model' })
+    confirmAnswer.ok = false; confirmAnswer.asked = []
+    fireEvent.click(del)
+    await waitFor(() => expect(confirmAnswer.asked).toEqual(['Delete "Churn model"?']))
+    expect(predictionModelsApi.remove).not.toHaveBeenCalled()
+    confirmAnswer.ok = true
+    fireEvent.click(del)
+    await waitFor(() => expect(predictionModelsApi.remove).toHaveBeenCalledWith(1, expect.anything()))
+  })
+
   it('says what a saved model is for when there are none', async () => {
     panel()
     expect(await screen.findByText(/no saved models/i)).toBeInTheDocument()
@@ -149,10 +168,12 @@ describe('on a DirectQuery dataset', () => {
   const dq = () => render(
     <PredictionModelsPanel datasetId={1} columns={columns} mode="directquery" />)
 
-  it('says training is not available rather than offering the form', async () => {
+  it('offers training on live data and says how it reads the rows', async () => {
+    // HR re-test 2026-10-01: refused here while every model widget fitted on
+    // the same live dataset.
     dq()
-    expect(await screen.findByText(/import-mode/i)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /train/i })).not.toBeInTheDocument()
+    expect(await screen.findByTestId('models-dq-note')).toHaveTextContent(/live/i)
+    expect(screen.getByRole('button', { name: /train/i })).toBeInTheDocument()
   })
 
   it('still lists models that already exist', async () => {
@@ -208,6 +229,18 @@ describe('on a DirectQuery dataset', () => {
       expect(c).toHaveTextContent('refit on all 300 usable rows')
       expect(screen.getByRole('table', { name: 'Candidates compared for Churn model v1' })).toHaveTextContent('logistic')
       expect(c).not.toHaveTextContent('has changed since')
+    })
+
+    it('lays its facts out beside it, with the approaches it also tried (redesign 3c)', async () => {
+      vi.mocked(predictionModelsApi.list).mockResolvedValue([v1])
+      render(<PredictionModelsPanel datasetId={1} columns={columns}
+        dataset={{ row_count: 360, content_sha256: null, last_refreshed_at: null }} />)
+      const m = await screen.findByTestId('model-7')
+      expect(m).toHaveTextContent('Approachrandom forest')
+      expect(m).toHaveTextContent('Tested on75 held-out rows')
+      expect(m).toHaveTextContent('Trained on300 rows')
+      expect(m).toHaveTextContent('Also tried: logistic (accuracy 0.840).')
+      expect(within(m).getByRole('status')).toHaveTextContent('The data changed since training.')
     })
 
     it('says when the dataset has changed since the model was trained', async () => {
