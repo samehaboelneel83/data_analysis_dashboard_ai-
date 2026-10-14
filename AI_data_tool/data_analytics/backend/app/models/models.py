@@ -10,6 +10,10 @@ class Dataset(Base):
     name        = Column(String(255), nullable=False)
     description = Column(Text)
     filename    = Column(String(500))
+    #: "Allow AI" for this dataset. None = follow the connection it was built
+    #: from, or the installation default for an upload; False always wins
+    #: (services/ai_policy.py).
+    allow_ai    = Column(Boolean, nullable=True)
     row_count   = Column(Integer, default=0)
     col_count   = Column(Integer, default=0)
     file_size   = Column(BigInteger, default=0)
@@ -196,6 +200,10 @@ class Report(Base):
     # Report-level display rules: applied to every object on every page, ahead of any
     # widget-level rules, which override them by list order. See services/display_rules.py.
     display_rules          = Column(JSON, default=list)
+    #: The dashboard's look beyond its palette: fonts, card borders, corners,
+    #: shadows, backgrounds (services/dashboard_templates/spec.STYLE_KEYS).
+    #: Empty = the app's own look.
+    style                  = Column(JSON, default=dict)
     # Monotonic counter bumped by every mutation to this report or anything nested
     # under it. Every edit here persists immediately with no explicit save, so this
     # is what lets a client notice another session moved the report underneath it.
@@ -224,6 +232,29 @@ class Report(Base):
     #: rather than a second column.
     origin                 = Column(String(20), nullable=False, default="user",
                                     server_default="user", index=True)
+    # ── Publication details (docs/publishing/PLAN.md) ────────────────────────
+    #: How a reader finds it in the portal: one category, any number of tags.
+    category               = Column(String(60), nullable=True, index=True)
+    tags                   = Column(JSON, default=list)
+    #: When it last went out, and who sent it (publish or release).
+    published_at           = Column(DateTime(timezone=True), nullable=True)
+    published_by           = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    #: Set = archived: kept, restorable, but closed to everyone except its
+    #: owner and administrators; its guest links and schedules stop.
+    archived_at            = Column(DateTime(timezone=True), nullable=True, index=True)
+    #: May someone who can only VIEW it take the data away (PDF, Excel, CSV,
+    #: a scheduled copy)? True keeps what the product always did. A grant can
+    #: narrow it for one person or team (ReportUserGrant.can_export).
+    viewers_may_export     = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    #: Approval, where the organisation asks for one (OrgReviewSettings.
+    #: require_approval): none | requested | approved | rejected, the revision
+    #: it was asked or decided at (an edit after approval needs a new one),
+    #: who asked, who decided, and the reviewer's note.
+    review_state           = Column(String(12), nullable=False, default="none", server_default="none")
+    review_revision        = Column(Integer, nullable=True)
+    review_requested_by    = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    review_decided_by      = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    review_note            = Column(String(500), nullable=True)
     org_id                 = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True)
     created_at             = Column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at             = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -512,6 +543,9 @@ class OrgReviewSettings(Base):
     id           = Column(Integer, primary_key=True)
     org_id       = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
     publish_gate = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    #: Publishing (and releasing changes to something already published) needs
+    #: an administrator's approval of that exact revision. Off = as before.
+    require_approval = Column(Boolean, nullable=False, default=False, server_default=text("false"))
     updated_by   = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     updated_at   = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -569,6 +603,10 @@ class User(Base):
     email         = Column(String(255), nullable=False, unique=True)
     password_hash = Column(String(255), nullable=False)
     is_active     = Column(Boolean, nullable=False, default=True)
+    #: What the person wrote about themselves: their work and what they look
+    #: at data for. Read by the designers that tailor a dashboard to them
+    #: (services/ai_context.py), and by nothing else.
+    about         = Column(Text, nullable=True)
     created_at    = Column(DateTime(timezone=True), default=datetime.utcnow)
     #: Login tokens issued before this instant are refused (migration 0038).
     #: Set when a password is reset, so a token minted with the old password
@@ -854,6 +892,54 @@ class PageTemplate(Base):
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
 
 
+class DashboardTemplate(Base):
+    """A dashboard as a reusable specification (services/dashboard_templates).
+
+    `spec` holds pages, layouts, widget settings, metric definitions, filters
+    and style with the columns replaced by named slots; using it on a dataset
+    maps each slot to a column. `visibility` is personal (its author only) or
+    org (everyone in the organisation). Every saved change keeps the version
+    before it in `dashboard_template_versions`.
+    """
+    __tablename__ = "dashboard_templates"
+    id          = Column(Integer, primary_key=True)
+    org_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    name        = Column(String(120), nullable=False)
+    description = Column(Text)
+    category    = Column(String(30), nullable=False, default="overview")
+    tags        = Column(JSON, default=list)
+    spec        = Column(JSON, nullable=False, default=dict)
+    visibility  = Column(String(20), nullable=False, default="personal")   # personal | org
+    version     = Column(Integer, nullable=False, default=1)
+    uses        = Column(Integer, nullable=False, default=0)
+    created_by  = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at  = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at  = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class DashboardTemplateVersion(Base):
+    """A template as it was before a change: restoring one makes a new version."""
+    __tablename__ = "dashboard_template_versions"
+    id          = Column(Integer, primary_key=True)
+    template_id = Column(Integer, ForeignKey("dashboard_templates.id", ondelete="CASCADE"), nullable=False, index=True)
+    version     = Column(Integer, nullable=False)
+    name        = Column(String(120), nullable=False)
+    spec        = Column(JSON, nullable=False, default=dict)
+    note        = Column(String(300))
+    created_by  = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at  = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class TemplateFavorite(Base):
+    """One person's starred template: `template_ref` is "builtin:<key>" or "t:<id>"."""
+    __tablename__ = "template_favorites"
+    __table_args__ = (UniqueConstraint("user_id", "template_ref", name="uq_template_favorite"),)
+    id           = Column(Integer, primary_key=True)
+    user_id      = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    template_ref = Column(String(80), nullable=False)
+    created_at   = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
 class RecentView(Base):
     """The last time ONE user opened ONE dashboard.
 
@@ -954,16 +1040,44 @@ class ReportUserGrant(Base):
 
     Levels reuse the capability vocabulary: 'view' (see a draft), 'edit'
     (design: move widgets, add pages), 'data' (edit plus dataset authoring).
+
+    Since the publishing work (docs/publishing/PLAN.md) a grant may name a
+    ROLE or a TEAM (org unit) instead of a person -- exactly one of the three,
+    router-enforced like WorkspaceFolderGrant -- and carries what a level
+    alone cannot say: when it ends, whether its holder may take the data
+    away, and whether they may pass the dashboard on. It stays ONE table: a
+    second one for teams would be a second place for the same permission.
     """
     __tablename__ = "report_user_grants"
     id         = Column(Integer, primary_key=True)
     report_id  = Column(Integer, ForeignKey("reports.id", ondelete="CASCADE"), nullable=False, index=True)
-    user_id    = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id    = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    role_id    = Column(Integer, ForeignKey("roles.id", ondelete="CASCADE"), nullable=True, index=True)
+    org_unit_id = Column(Integer, ForeignKey("org_units.id", ondelete="CASCADE"), nullable=True, index=True)
     level      = Column(String(5), nullable=False, default="edit")
+    #: After this moment the grant gives nothing (kept, so its owner sees it lapsed).
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    #: May the holder download or schedule what they can see? Only narrows:
+    #: never more than the dataset's own export policy and sensitivity allow.
+    can_export = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    #: May the holder share it on -- to people, view-only, never above their own level?
+    can_share  = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     __table_args__ = (
         UniqueConstraint("report_id", "user_id", name="uq_report_user_grant"),
     )
+
+
+class ReportFavorite(Base):
+    """A dashboard one person marked to find again (the portal's Favourites).
+    One row per (user, report); gone with either."""
+    __tablename__ = "report_favorites"
+    __table_args__ = (UniqueConstraint("user_id", "report_id", name="uq_report_favorite"),)
+    id         = Column(Integer, primary_key=True)
+    user_id    = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    report_id  = Column(Integer, ForeignKey("reports.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
 
 
 class ReportCapability(Base):
@@ -2580,3 +2694,118 @@ class SetupJourney(Base):
     designs        = Column(JSON, nullable=True)
     created_at     = Column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at     = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class DatasetProfile(Base):
+    """What is remembered about a dataset so it is not read again
+    (services/discovery/profile.py): each column's kind, counts, ranges,
+    category labels, date coverage -- measured once per version of the data.
+
+    A TABLE OF ITS OWN, deliberately. The first version kept this in
+    `DatasetColumn.stats` and `Dataset.column_meta`, which are returned with
+    every dataset payload: a reader under a row rule would have been handed
+    the ranges and labels of rows they may not see. Nothing serialises this
+    table; it is read only through `profile.for_reader`, which removes hidden
+    columns and withholds every value-level figure from a restricted reader.
+    """
+    __tablename__ = "dataset_profiles"
+    dataset_id  = Column(Integer, ForeignKey("datasets.id", ondelete="CASCADE"), primary_key=True)
+    #: The data's fingerprint when this was measured (profile.fingerprint).
+    version     = Column(String(120), nullable=False)
+    #: {"table": {...}, "columns": {name: stats}}
+    body        = Column(JSON, nullable=False, default=dict)
+    measured_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class SuggestionFeedback(Base):
+    """What a person did with a suggested chart (docs/suggestions/PLAN.md,
+    phase 4): dismissed it, or added it to a dashboard.
+
+    A dismissal used to live in one browser's storage: it came back on the
+    next device, and nothing anywhere knew which kinds of suggestion people
+    keep or throw away. Kept here per person and dataset, a dismissed idea
+    stays dismissed everywhere, and the counts per kind of chart rank what is
+    offered next -- counts only, no model.
+    """
+    __tablename__ = "suggestion_feedback"
+    __table_args__ = (UniqueConstraint("user_id", "dataset_id", "signature", name="uq_suggestion_feedback_sig"),)
+    id          = Column(Integer, primary_key=True)
+    org_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id     = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    dataset_id  = Column(Integer, ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False, index=True)
+    #: The chart's identity as the pane computes it (type + what it measures by what).
+    signature   = Column(String(600), nullable=False)
+    widget_type = Column(String(50), nullable=False)
+    #: dismissed | added -- the LAST thing the person did with it.
+    action      = Column(String(20), nullable=False)
+    created_at  = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class MeaningFact(Base):
+    """One checked fact about what a connection's data MEANS
+    (docs/meaning-map/PLAN.md) -- beside the catalog, which says what shape
+    it has.
+
+    A count says nothing until it is read against its base: 1,000 complaints
+    out of 1,000,000 shipments is nothing. No engine could know that from
+    tables and joins, so it is written down once per connection -- measured on
+    the database, named by the model, corrected by a person -- and read by
+    every step.
+
+    kind:  grain   what one row of a table is, and what kind of table it is
+           base    events counted against the rows they happen to
+           outcome a column saying what became of a row (late, returned)
+           number  what a numeric column is: amount, level, duration, score...
+    """
+    __tablename__ = "meaning_facts"
+    __table_args__ = (UniqueConstraint("data_source_id", "kind", "subject", name="uq_meaning_facts_subject"),)
+    id             = Column(Integer, primary_key=True)
+    org_id         = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    data_source_id = Column(Integer, ForeignKey("data_sources.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind           = Column(String(20), nullable=False)
+    #: "table", "table.column" or "events>base": what the fact is about.
+    subject        = Column(String(600), nullable=False)
+    body           = Column(JSON, nullable=False)
+    #: measured (counted on the database) | ai | confirmed (a person's word wins)
+    source         = Column(String(20), nullable=False, default="measured", server_default="measured")
+    #: active | rejected -- a person can say "not right"; it is then never used.
+    status         = Column(String(20), nullable=False, default="active", server_default="active")
+    measured_at    = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class SetupFlow(Base):
+    """One run of steps 2-4 of the guided setup (docs/guided-setup/PLAN_V2.md, part 1).
+
+    A person can want several things from one database: the journey keeps
+    what is shared (the Understand step's words), and each flow keeps its own
+    request, datasets, check and dashboard, so a second analysis never
+    replaces the first and two can be worked on side by side.
+    """
+    __tablename__ = "setup_flows"
+    id             = Column(Integer, primary_key=True)
+    org_id         = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id        = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    journey_id     = Column(Integer, ForeignKey("setup_journeys.id", ondelete="CASCADE"), nullable=False, index=True)
+    data_source_id = Column(Integer, ForeignKey("data_sources.id", ondelete="CASCADE"), nullable=False, index=True)
+    name           = Column(String(255), nullable=True)
+    #: data | check | dashboard | done
+    step           = Column(String(20), nullable=False, default="data", server_default="data")
+    #: {"work", "focus", "questions", "exclude"} -- what the person typed
+    brief          = Column(JSON, nullable=True)
+    #: What the person wants, written once from everything they said and
+    #: checked against the data (services/guided_setup/demand.py). Binding on
+    #: the check and the dashboard, unlike `brief`, which is only a hint.
+    demand         = Column(JSON, nullable=True)
+    dataset_ids    = Column(JSON, nullable=True)
+    #: The datasets this flow made itself: only these are cleaned automatically.
+    created_ids    = Column(JSON, nullable=True)
+    report_id      = Column(Integer, ForeignKey("reports.id", ondelete="SET NULL"), nullable=True)
+    proposals      = Column(JSON, nullable=True)
+    findings       = Column(JSON, nullable=True)
+    #: {"<dataset id>": {"actions": [...], "undone": [...], "rows_before", "rows_after"}}
+    cleaning       = Column(JSON, nullable=True)
+    designs        = Column(JSON, nullable=True)
+    archived       = Column(Boolean, nullable=False, default=False, server_default="0")
+    created_at     = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at     = Column(DateTime(timezone=True), default=datetime.utcnow)
+

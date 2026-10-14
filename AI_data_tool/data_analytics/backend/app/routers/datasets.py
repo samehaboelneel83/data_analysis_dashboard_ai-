@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from ..core.database import get_db
+from ..core.said_errors import refused
 from ..core.config import settings
 from ..core.org_scope import check_org
 from ..core.capability import (readable_dataset_ids, require_dataset_capability,
@@ -386,7 +387,7 @@ async def _ingest_upload_file(
     try:
         upload_store.allowed_suffix(source_filename)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
 
     file_path = upload_store.allocate_path(org_id, source_filename)
 
@@ -419,6 +420,11 @@ async def _ingest_upload_file(
     if file_path.suffix.lower() in EXCEL_SUFFIXES:
         file_path, content_sha256 = await asyncio.to_thread(
             _pick_sheet, file_path, org_id, sheet, content_sha256)
+
+    from ..services import upload_stream
+    if upload_stream.wanted(file_path, file_size):
+        return await _ingest_large_csv(db, org_id, file_path, name=name, description=description,
+                                       owner_id=owner_id, content_sha256=content_sha256)
 
     try:
         await asyncio.to_thread(_canonical_csv, file_path)
@@ -463,6 +469,50 @@ async def _ingest_upload_file(
     except Exception:
         file_path.unlink(missing_ok=True)
         remove_parquet_sidecar(str(file_path))
+        raise
+
+
+async def _ingest_large_csv(db: AsyncSession, org_id: int, csv_path: Path, *, name: str, description: str,
+                            owner_id: int | None, content_sha256: str) -> Dataset:
+    """A CSV too large to parse in memory: written to the dataset's parquet
+    file a chunk at a time (services/upload_stream.py). The uploaded CSV is
+    not kept. Types and personal-data kinds come from a random sample of the
+    rows; how many rows there are and how empty each column is, from all."""
+    import os
+    import shutil
+    import tempfile
+    from ..services import upload_stream
+    stream_dir = tempfile.mkdtemp(prefix="import_", dir=str(csv_path.parent))
+    target = upload_store.allocate_path(org_id, "upload.parquet")
+    try:
+        try:
+            got = await asyncio.to_thread(upload_stream.csv_to_parquet, csv_path, stream_dir)
+        except Exception as e:
+            raise HTTPException(400, f"Could not read file: {e}")
+        problem = "The file has no data rows" if not got.rows else _frame_problem(got.sample)
+        if problem:
+            raise HTTPException(400, problem)
+        os.replace(got.path, target)
+    finally:
+        shutil.rmtree(stream_dir, ignore_errors=True)
+        csv_path.unlink(missing_ok=True)
+    try:
+        type_map = await asyncio.to_thread(detect_types, got.sample)
+        ds = Dataset(last_refreshed_at=datetime.utcnow(),
+                     name=name, description=description or None, filename=str(target),
+                     row_count=int(got.rows), col_count=len(got.columns), file_size=target.stat().st_size,
+                     org_id=org_id, created_by=owner_id, content_sha256=content_sha256)
+        db.add(ds)
+        await db.flush()
+        for col_name, dtype in type_map.items():
+            db.add(DatasetColumn(
+                dataset_id=ds.id, name=col_name, dtype=dtype,
+                missing_pct=float(got.missing.get(col_name, 0.0)), stats={},
+                semantic_type=_semantic_type_of(got.sample[col_name])))
+        await _apply_default_data_view(db, ds, org_id)
+        return ds
+    except Exception:
+        target.unlink(missing_ok=True)
         raise
 
 
@@ -565,7 +615,7 @@ async def _ingest_access_file(
     try:
         upload_store.allowed_suffix(source_filename)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
 
     mdb_path = upload_store.allocate_path(org_id, source_filename)
     _copy_capped(stream, mdb_path)
@@ -580,7 +630,7 @@ async def _ingest_access_file(
         try:
             tables = await asyncio.to_thread(mdb.list_tables, str(mdb_path))
         except (mdb.MdbUnavailable, mdb.MdbReadError) as e:
-            raise HTTPException(400, str(e))
+            raise refused(400, e)
         if not tables:
             raise HTTPException(400, "This Access file contains no user tables")
 
@@ -1431,7 +1481,7 @@ async def _rename(dataset_id: int, kind: str, old: str, body: RenameRequest,
     try:
         rewritten = await rename_field(db, ds, kind, old, body.new_name)
     except RenameRefused as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     await db.commit()
     return {"old_name": old, "new_name": body.new_name.strip(), "rewritten": rewritten}
 
@@ -1498,7 +1548,7 @@ async def _validate_measure(measure: MeasureDef, ds: Dataset, db: AsyncSession) 
     try:
         _validate_expr_safety(measure.expression)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
 
     result = await db.execute(select(DatasetColumn.name).where(DatasetColumn.dataset_id == ds.id))
     column_names = {r[0] for r in result.all()}
@@ -1698,7 +1748,7 @@ async def save_custom_function(dataset_id: int, fn: CustomFunctionDef, db: Async
         validate_custom_function_def(fn.name, fn.params, fn.expression,
                                       column_names, calc_names, measure_names, existing)
     except CustomFunctionError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
 
     items = [f for f in (ds.custom_functions or []) if f.get("name") != fn.name]
     items.append(fn.model_dump())
@@ -1948,7 +1998,7 @@ async def create_data_check(dataset_id: int, body: DataCheckIn, db: AsyncSession
     try:
         params = validate_check(body.kind, body.column, body.params, body.severity)
     except InvalidCheck as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     await _check_reference(db, current_user, ds, body.kind, params)
     row = DataCheck(org_id=ds.org_id, dataset_id=ds.id, kind=body.kind,
                     column=(body.column or None) if body.kind in COLUMN_KINDS else None,
@@ -1975,7 +2025,7 @@ async def update_data_check(dataset_id: int, check_id: int, body: DataCheckIn,
     try:
         params = validate_check(body.kind, body.column, body.params, body.severity)
     except InvalidCheck as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     await _check_reference(db, current_user, ds, body.kind, params)
     row.kind, row.params, row.severity, row.enabled = body.kind, params, body.severity, body.enabled
     row.column = (body.column or None) if body.kind in COLUMN_KINDS else None
@@ -2257,6 +2307,31 @@ async def get_column_meta(dataset_id: int, db: AsyncSession = Depends(get_db), c
     return ds.column_meta or {}
 
 
+@router.post("/{dataset_id}/column-meta/classify-again")
+async def classify_columns_again(dataset_id: int, db: AsyncSession = Depends(get_db),
+                                 current_user: User = Depends(get_current_user)):
+    """Ask the AI again what each number of this dataset is.
+
+    What a column is, is asked ONCE and kept (services/column_classes.py);
+    this is the button that asks again. Everything worked out automatically is
+    dropped and re-read; what a person set by hand is left exactly as it is."""
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_capability(db, current_user, dataset_id, "data")
+    from sqlalchemy.orm.attributes import flag_modified as _flag
+    from ..services import column_classes as _cc
+    from ..services import ai_policy as _ai_policy
+    if not await _ai_policy.enter(db, datasets=[ds]):
+        raise HTTPException(409, "AI is switched off for this data")
+    ds.column_meta = _cc.forget(ds.column_meta)
+    _flag(ds, "column_meta")
+    await db.commit()
+    denied = await resolve_denied_columns(db, current_user, dataset_id)
+    numbers = await _cc.model_hints(db, ds, denied=set(denied or []))
+    return {"asked": len(((ds.column_meta or {}).get(_cc.AI_KEY) or {}).get("asked") or []),
+            "classified": len(numbers), "column_meta": ds.column_meta or {}}
+
+
 @router.put("/{dataset_id}/column-meta")
 async def set_column_meta(dataset_id: int, req: ColumnMetaUpdate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Replaces the whole map. That is deliberate: it makes a bulk edit across many
@@ -2293,6 +2368,20 @@ async def set_column_meta(dataset_id: int, req: ColumnMetaUpdate, db: AsyncSessi
             raise HTTPException(400, "target_candidate_priority must be zero or more")
         if meta.boundary_set_id is not None and meta.boundary_set_id < 1:
             raise HTTPException(400, "boundary_set_id must be a positive id")
+        # The stored classification: only values the engines know how to read.
+        from ..services import semantic_guard as _sg
+        if meta.number is not None and meta.number not in _sg.NUMBER_KINDS:
+            raise HTTPException(400, f"number must be one of {list(_sg.NUMBER_KINDS)}, got '{meta.number}'")
+        if meta.direction is not None and meta.direction not in _sg.DIRECTIONS:
+            raise HTTPException(400, f"direction must be one of {list(_sg.DIRECTIONS)}")
+        if meta.level is not None and meta.level not in _sg.LEVELS:
+            raise HTTPException(400, f"level must be one of {list(_sg.LEVELS)}")
+        if meta.geo_level is not None and meta.geo_level not in _sg.GEO_LEVELS:
+            raise HTTPException(400, f"geo_level must be one of {list(_sg.GEO_LEVELS)}")
+        if meta.class_source is not None and meta.class_source not in ("measured", "ai", "confirmed"):
+            raise HTTPException(400, "class_source must be measured, ai or confirmed")
+        if meta.order is not None and len(meta.order) > 60:
+            raise HTTPException(400, "an ordered scale has at most 60 values")
         if meta.aggregation is not None and meta.aggregation not in _VALID_AGGREGATIONS:
             # A bad aggregation would be silently ignored at query time and render a
             # plausible-looking wrong number, so refuse it at write time.
@@ -2345,7 +2434,9 @@ async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
             raise HTTPException(400, "This dataset has no rows to suggest from yet")
         from ..services import jobs as job_service
         from ..services.suggest_jobs import PANEL_JOB_KIND
-        goal = (req.goal or "").strip()
+        from ..services import ai_context
+        goal = (await ai_context.for_dataset(db, current_user, ds, req.goal)
+                if (req.goal or "").strip() or req.use_profile else "")
         job, _ = await job_service.enqueue(
             db, user=current_user, kind=PANEL_JOB_KIND,
             inputs={"dataset_id": dataset_id, "goal": goal, "size": req.size, "fresh": req.fresh},
@@ -2359,10 +2450,22 @@ async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
     df, type_map, profile = inputs.df, inputs.type_map, inputs.profile
     probe, drawn, know = inputs.probe, inputs.drawn, inputs.knowledge
 
-    goal = (req.goal or "").strip()
+    # Their own words, then what they and others have written about them and
+    # this data (profile, connection, dataset) -- services/ai_context.py.
+    from ..services import ai_context
+    goal = (await ai_context.for_dataset(db, current_user, ds, req.goal)
+            if (req.goal or "").strip() or req.use_profile else "")
     if req.mode == "panel":
         return await sug.panel(inputs, goal, req.size, fresh=req.fresh)
     fields: dict = {"facts": []}
+    from ..services.analyst_panel import selection_mode
+    if goal and selection_mode() == "cards":
+        # The validated set is the single source of truth: the model chooses
+        # among charts already built and drawn (the panel in "cards" mode --
+        # one question-reading call and one choosing call), instead of the
+        # quick designer inventing its own (settings.suggest_ai_selection).
+        out = await sug.panel(inputs, goal, 24, fresh=req.fresh)
+        return {**out, "question": None}
     if goal:
         # Measured facts, not column shapes: the designer proposes for the
         # differences that exist (HR analyst panel, 2026-10-02).
@@ -2384,6 +2487,20 @@ async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
         if fields["facts"]:
             facts = {**facts, "text": (facts.get("text") or "") + "\n" + "\n".join(
                 f"- Derived field: {t}." for t in fields["facts"])}
+        # What the connection's Meaning map measured (what is counted against
+        # what, what became of a row), for the columns this dataset kept: the
+        # same reading the guided setup designs with (docs/suggestions/PLAN.md).
+        if ds.data_source_id:
+            try:
+                from ..services.guided_setup import meaning
+                _map = await meaning.load(db, ds.data_source_id)
+                _reading = meaning.prompt_text(_map, None, {str(c) for c in inputs.df.columns})
+                if _reading:
+                    facts = {**facts, "text": (facts.get("text") or "") + "\nHow to read this data:\n" + _reading
+                             + "\nNever rank groups by a count of an outcome alone when its share per group "
+                               "can be drawn."}
+            except Exception:                                # noqa: BLE001 -- a help, never a gate
+                pass
         df, type_map, profile = inputs.df, inputs.type_map, inputs.profile
         probe, drawn = inputs.probe, inputs.drawn
         from ..services.suggest_dataset_dashboard import suggest_for_dataset
@@ -2535,6 +2652,10 @@ async def dataset_insights(dataset_id: int, db: AsyncSession = Depends(get_db),
     # neither -- no file and no connection is genuinely nothing to analyse.
     if not ds.filename and ds.mode != "directquery":
         raise HTTPException(400, "This dataset has no rows to analyse yet")
+    # "Allow AI" for this data, applied to every model call below
+    # (services/ai_policy.py).
+    from ..services import ai_policy as _ai_policy
+    await _ai_policy.enter(db, datasets=[ds])
     denied = await resolve_denied_columns(db, current_user, dataset_id)
     rls_expr = await resolve_rls_expr(db, current_user, dataset_id)
     from ..services.prep import apply_prep_steps, prep_steps_of, resolve_join_frames
@@ -2571,6 +2692,9 @@ async def dataset_insights(dataset_id: int, db: AsyncSession = Depends(get_db),
         except frames.FrameUnavailable as exc:
             raise HTTPException(400, str(exc))
 
+    from ..services import column_classes as _cc
+    _class_hints = await _cc.hints_for(db, ds, denied=set(denied or []))
+
     def _run():
         from ..services.analytics import detect_types
         from ..services.insights import generate_insights
@@ -2587,8 +2711,14 @@ async def dataset_insights(dataset_id: int, db: AsyncSession = Depends(get_db),
             provenance = frames.imported_frame(df)
         if ds.calculated_columns:
             df = apply_calculated_columns(df, ds.calculated_columns, ds.custom_functions)
-        result = generate_insights(df, detect_types(df), ds.column_meta or {},
+        # Each column classified once and kept (services/column_classes.py):
+        # the engine reads what a column IS from there, not from its name.
+        from ..services import column_classes
+        _meta, _changed = column_classes.classified(df, ds.column_meta or {}, *_class_hints)
+        result = generate_insights(df, detect_types(df), _meta,
                                    labels=_labels, value_labels=_value_labels)
+        if _changed:
+            result["_classes"] = _meta
         # Said, not implied. A reader comparing two datasets deserves to know
         # one was measured over every row and the other over a sample -- and
         # `insights.py` promises every number is computed rather than guessed,
@@ -2604,6 +2734,9 @@ async def dataset_insights(dataset_id: int, db: AsyncSession = Depends(get_db),
 
     try:
         result = await asyncio.to_thread(_run)
+        _classes = result.pop("_classes", None)
+        if _classes is not None:
+            await _cc.remember(db, ds, _classes)
     except FileNotFoundError:
         raise HTTPException(404, "Dataset file not found on server — please re-upload the file")
 
@@ -2650,7 +2783,8 @@ async def dataset_insights(dataset_id: int, db: AsyncSession = Depends(get_db),
     from ..services.insights import narrate_findings
     prose = await narrate_findings(result["findings"], row_count=result.get("row_count"))
     if prose:
-        result = {**result, "narrative": prose, "narrative_source": "llm"}
+        # The model's paragraph replaces the keyed one, so its key goes too.
+        result = {**result, "narrative": prose, "narrative_source": "llm", "narrative_i18n": None}
     else:
         result = {**result, "narrative_source": "template"}
 
@@ -2709,7 +2843,7 @@ async def goal_seek(dataset_id: int, x_column: str, y_column: str, target_y: flo
     except GoalSeekError as e:
         # The service raises ValueError subclasses; no service layer in this
         # codebase raises HTTP, so the translation happens here.
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     except FileNotFoundError:
         raise HTTPException(404, "Dataset file not found on server — please re-upload the file")
 
@@ -2728,6 +2862,10 @@ async def explain_column(dataset_id: int, column: str, body: dict | None = None,
     await require_dataset_read(db, current_user, dataset_id)
     if not ds.filename or ds.mode == "directquery":
         raise HTTPException(400, "Explanation is available for import-mode datasets only")
+    # "Allow AI" for this data, applied to every model call below
+    # (services/ai_policy.py).
+    from ..services import ai_policy as _ai_policy
+    await _ai_policy.enter(db, datasets=[ds])
     denied = await resolve_denied_columns(db, current_user, dataset_id)
     if column in (denied or []):
         raise HTTPException(404, f"Column '{column}' not found")
@@ -2888,7 +3026,7 @@ async def outlier_details(dataset_id: int, column: str, detector: str = "iqr",
         try:
             clean_mask, lo, hi = detect_anomalies(clean, detector)
         except AnomalyError as e:
-            raise HTTPException(400, str(e))
+            raise refused(400, e)
         mask = clean_mask.reindex(s.index, fill_value=False)
         out_vals = s[mask.fillna(False)]
         total = float(clean.sum())
@@ -3216,7 +3354,7 @@ async def set_prep_steps(dataset_id: int, steps: list[dict], db: AsyncSession = 
     try:
         validate_prep_steps(steps, known, join_columns)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
 
     meta = dict(ds.column_meta or {})
     if steps:
@@ -3335,6 +3473,207 @@ async def set_dataset_sensitivity(dataset_id: int, body: dict, db: AsyncSession 
     return await get_dataset_sensitivity(dataset_id, db, current_user)
 
 
+@router.get("/{dataset_id}/opportunities")
+async def dataset_opportunities(dataset_id: int, goal: str | None = None, depth: int = 1, limit: int = 24,
+                                fresh: bool = False, db: AsyncSession = Depends(get_db),
+                                current_user: User = Depends(get_current_user)):
+    """What is worth doing with this dataset, for this reader: the analyses
+    and charts its shape supports, and what its rows show -- decided without
+    a model (services/discovery, docs/discovery/PLAN.md).
+
+    `depth=0` answers from what is stored about the dataset (no row is read
+    once its profile is kept); `depth=1` also looks for evidence in the
+    reader's own rows. Each card says separately whether the data fits, how
+    strong the evidence is, what kind of claim it is and what it costs."""
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
+    if not ds.filename and ds.mode != "directquery":
+        raise HTTPException(400, "This dataset has no rows to analyse yet")
+    from ..services.discovery import engine as discovery
+    from ..services import analysis_frame as frames
+    try:
+        return await discovery.opportunities(db, current_user, ds, goal, depth=max(0, min(int(depth), 1)),
+                                             limit=max(1, min(int(limit), 60)), fresh=bool(fresh))
+    except frames.FrameUnavailable as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get("/{dataset_id}/profile")
+async def dataset_profile_cards(dataset_id: int, db: AsyncSession = Depends(get_db),
+                                current_user: User = Depends(get_current_user)):
+    """Each column's profile: how many values are valid, unique, mistyped or
+    missing; the most and least common value; text lengths; the shape values
+    share; how old the newest date is. Remembered per version of the data, so
+    it is measured once. A reader with hidden columns does not get them, and
+    a reader under a row rule gets counts but no value of any row."""
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
+    if not ds.filename and ds.mode != "directquery":
+        raise HTTPException(400, "This dataset has no rows to analyse yet")
+    from ..services import analysis_frame as frames
+    from ..services.discovery import engine as discovery
+    try:
+        return await discovery.column_profile(db, current_user, ds)
+    except frames.FrameUnavailable as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get("/{dataset_id}/health")
+async def dataset_health(dataset_id: int, db: AsyncSession = Depends(get_db),
+                         current_user: User = Depends(get_current_user)):
+    """The dataset's health: is it still arriving, is the latest month's
+    volume what its history made likely, did the columns change, are values
+    present and of the right kind, are rows copied -- each passed, worth a
+    look, or failed, with one sentence. Read off the stored profile."""
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
+    if not ds.filename and ds.mode != "directquery":
+        raise HTTPException(400, "This dataset has no rows to analyse yet")
+    from ..services import analysis_frame as frames
+    from ..services.discovery import engine as discovery
+    try:
+        return await discovery.dataset_health(db, current_user, ds)
+    except frames.FrameUnavailable as exc:
+        raise HTTPException(400, str(exc))
+
+
+class DecisionProblemIn(BaseModel):
+    """What the PERSON says about a decision recognised on a dataset: nothing
+    in it is inferred (services/discovery/decision.py)."""
+    problem: str
+    objective: str
+    direction: str
+    # choosing among options
+    key: str | None = None
+    limited: str | None = None
+    limit: float | None = None
+    at_most: int | None = None
+    # matching two sets
+    from_col: str | None = None
+    to_col: str | None = None
+    each_from: str | None = None
+    each_to_at_most: int | None = None
+    # levels to set, under the fitted what-if model
+    date_col: str | None = None
+    factors: list[str] | None = None
+    ranges: dict[str, list[float | None]] | None = None
+    granularity: str | None = None
+    periods: int | None = None
+
+
+@router.get("/{dataset_id}/decision-problems")
+async def decision_problems(dataset_id: int, db: AsyncSession = Depends(get_db),
+                            current_user: User = Depends(get_current_user)):
+    """The decisions this table has the SHAPE of -- options with amounts that
+    add up; every one of A against every one of B -- read off the stored
+    profile. Empty when it has neither. Nothing is solved here."""
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
+    if not ds.filename and ds.mode != "directquery":
+        raise HTTPException(400, "This dataset has no rows to analyse yet")
+    from ..services import analysis_frame as frames
+    from ..services.discovery import engine as discovery
+    try:
+        return await discovery.decision_problems(db, current_user, ds)
+    except frames.FrameUnavailable as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/{dataset_id}/decision-problems/specification")
+async def decision_problem_specification(dataset_id: int, body: DecisionProblemIn,
+                                         db: AsyncSession = Depends(get_db),
+                                         current_user: User = Depends(get_current_user)):
+    """The decision as the person described it, checked on the rows and
+    returned as a neutral, versioned document a solver elsewhere can read
+    (`schema: datalytics.decision-problem/1`). It is not solved, stored or
+    sent anywhere."""
+    import asyncio
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
+    from ..core.rls import resolve_denied_columns
+    from ..services import alerts
+    from ..services.discovery import decision
+    from ..services.discovery import profile as profile_store
+    try:
+        df = await alerts.alert_frame(db, ds, current_user)
+    except Exception:                                           # noqa: BLE001
+        raise HTTPException(400, "This dataset could not be read")
+    denied = {str(c).casefold() for c in await resolve_denied_columns(db, current_user, dataset_id) or []}
+    named = [c for c in (body.key, body.objective, body.limited, body.from_col, body.to_col, body.date_col,
+                         *(body.factors or [])) if c]
+    if any(c.casefold() in denied for c in named):
+        raise HTTPException(403, "One of those columns is not available to you")
+    choices = body.model_dump(exclude={"problem"}, exclude_none=True)
+    try:
+        return await asyncio.to_thread(
+            lambda: decision.specify(df, body.problem, dataset={"id": ds.id, "name": ds.name,
+                                                               "version": profile_store.fingerprint(ds)}, **choices))
+    except decision.DecisionProblemError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get("/capabilities/registry")
+async def capability_registry(current_user: User = Depends(get_current_user)):
+    """Every widget and analysis with what it needs of the data, what it costs
+    and what kind of claim its result is -- the one description the server,
+    the designers and the browser share (services/discovery/capabilities.py)."""
+    from ..services.discovery import capabilities as caps
+    return {"kinds": list(caps.KINDS), "claims": list(caps.CLAIMS),
+            "capabilities": [c.to_dict() for c in caps.all_capabilities().values()]}
+
+
+async def _allow_ai_state(db: AsyncSession, ds: Dataset) -> dict:
+    """Who decides "Allow AI" for this dataset, and what the answer is."""
+    from ..services import ai_policy
+    source = await db.get(DataSource, ds.data_source_id) if ds.data_source_id else None
+    return {
+        # The dataset's own choice: true / false, or null = not set here.
+        "own": ds.allow_ai,
+        "effective": await ai_policy.dataset_allows(db, ds),
+        # connection: the connection's switch decides unless this dataset says no;
+        # dataset: set here; default: an uploaded file nobody set a choice on.
+        "decided_by": ("dataset" if ds.allow_ai is False else "connection" if source is not None
+                       else "dataset" if ds.allow_ai is True else "default"),
+        "connection": source.name if source is not None else None,
+    }
+
+
+@router.get("/{dataset_id}/allow-ai")
+async def get_dataset_allow_ai(dataset_id: int, db: AsyncSession = Depends(get_db),
+                               current_user: User = Depends(get_current_user)):
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
+    return await _allow_ai_state(db, ds)
+
+
+@router.put("/{dataset_id}/allow-ai")
+async def set_dataset_allow_ai(dataset_id: int, body: dict, db: AsyncSession = Depends(get_db),
+                               current_user: User = Depends(get_current_user)):
+    """Whether AI may be used on this dataset: true, false, or null to follow
+    its connection (or, for an uploaded file, the installation default).
+    One switch for every AI feature (services/ai_policy.py). Needs data-level
+    access; audited. A dataset cannot switch on what its connection switched
+    off -- that is the connection owner's decision."""
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_write(db, current_user, ds, "data")
+    allow = body.get("allow")
+    if allow is not None and not isinstance(allow, bool):
+        raise HTTPException(400, "allow must be true, false or null")
+    ds.allow_ai = allow
+    await db.flush()
+    await audit(db, current_user, "dataset.allow_ai", "dataset", dataset_id,
+                "on" if allow is True else "off" if allow is False else "(follow)")
+    await db.commit()
+    return await _allow_ai_state(db, ds)
+
+
 @router.post("/{dataset_id}/join-check")
 async def check_join(dataset_id: int, body: dict, db: AsyncSession = Depends(get_db),
                      current_user: User = Depends(get_current_user)):
@@ -3414,7 +3753,7 @@ async def data_quality(dataset_id: int, body: QualityRequest = QualityRequest(),
         present = [c for c in (denied or []) if c in df.columns]
         if present:
             df = df.drop(columns=present)
-        report = quality_report(df, body.rules)
+        report = quality_report(df, body.rules, column_meta=ds.column_meta)
         # The example ROWS carry personal values; the column statistics do not.
         report["duplicate_examples"] = _mask_records(report["duplicate_examples"], personal)
         for check in report["rules"]:
@@ -3545,12 +3884,13 @@ async def _write_frame_as_dataset_file(db: AsyncSession, org_id: int, out):
 
     Returns (path, size, type_map). Raises after cleaning up its own bytes.
     """
-    from ..services.prep import MATERIALIZE_MAX_ROWS
+    from ..services.prep import materialize_limit
 
-    if len(out) > MATERIALIZE_MAX_ROWS:
+    limit = materialize_limit()
+    if limit is not None and len(out) > limit:
         raise HTTPException(
             400, f"The result has {len(out):,} rows, over the "
-                 f"{MATERIALIZE_MAX_ROWS:,} limit for a saved dataset. Add a "
+                 f"{limit:,} limit for a saved dataset. Add a "
                  f"filter or aggregate step, or use a narrower join.")
 
     path = upload_store.allocate_path(org_id, "joined.csv")
@@ -3610,7 +3950,7 @@ async def materialize_dataset(
     try:
         validate_prep_steps(steps, known, join_columns)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
 
     join_ids = collect_join_dataset_ids(steps)
     inherited = await _refuse_if_ungovernable(db, [dataset_id] + join_ids)
@@ -3717,7 +4057,7 @@ async def _build_aggregate_file(db: AsyncSession, current_user: User, ds: Datase
     from ..services.aggregates import (AggregateSpecError, compile_aggregate_sql,
                                        normalise_spec, rls_columns_outside_grain)
     from ..services.dataset_refresh import rewrite_dataset_file
-    from ..services.prep import MATERIALIZE_MAX_ROWS
+    from ..services.prep import materialize_limit
 
     if ds.default_filter_expr:
         raise HTTPException(400, "The source has a report-level filter expression; an aggregate "
@@ -3726,7 +4066,7 @@ async def _build_aggregate_file(db: AsyncSession, current_user: User, ds: Datase
     try:
         spec = normalise_spec({"grain": grain, "measures": measures}, known)
     except AggregateSpecError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     rules = await _source_rules(db, ds.id)
     bad = rls_columns_outside_grain([r for r, _ in rules], spec["grain"], known)
     if bad:
@@ -3747,12 +4087,13 @@ async def _build_aggregate_file(db: AsyncSession, current_user: User, ds: Datase
         path.unlink(missing_ok=True)
         remove_parquet_sidecar(str(path))
         raise HTTPException(400, f"The source rejected the aggregate query: {type(e).__name__}")
-    if len(df) > MATERIALIZE_MAX_ROWS:
+    limit = materialize_limit()
+    if limit is not None and len(df) > limit:
         path.unlink(missing_ok=True)
         remove_parquet_sidecar(str(path))
         raise HTTPException(
             400, f"The grain is too fine: this aggregate has {len(df):,} rows, over the "
-                 f"{MATERIALIZE_MAX_ROWS:,} limit for a saved dataset. Add a coarser grain "
+                 f"{limit:,} limit for a saved dataset. Add a coarser grain "
                  "column or fewer measures.")
     size = path.stat().st_size
     try:
@@ -4115,7 +4456,7 @@ async def data_preview(dataset_id: int, req: DataPreviewRequest, db: AsyncSessio
                 org_id=current_user.org_id,
             )
         except DirectQueryUnsupported as e:
-            raise HTTPException(400, str(e))
+            raise refused(400, e)
         cols = result.get("columns", [])
         rows = result.get("rows", [])
         if denied:
@@ -4354,7 +4695,7 @@ async def queue_refresh(
             subject=f"{dataset.name} · {what} from {src.name}",
             idempotency_key=idempotency_key)
     except job_service.IdempotencyConflict as e:
-        raise HTTPException(409, str(e))
+        raise refused(409, e)
     return JobOut.model_validate(job)
 
 

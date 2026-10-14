@@ -790,6 +790,7 @@ async def load_context(db, source_id: int, org_id: int) -> SchemaContext:
                 if obj_info is not None and (s.null_ratio or 0.0) >= HIGH_NULL_RATIO:
                     obj_info.high_null.add(col_name)
 
+
         rels = (await db.execute(select(SourceRelationship).where(
             SourceRelationship.data_source_id == source_id,
             SourceRelationship.org_id == org_id,
@@ -826,6 +827,33 @@ async def load_context(db, source_id: int, org_id: int) -> SchemaContext:
         ctx.entities.append(EntityInfo(
             name=e.name, business_name=e.business_name, grain=e.grain,
             description=e.description, primary_object=e.primary_object))
+    # The connection's Meaning map (docs/meaning-map/PLAN.md), said where the
+    # planner already reads: on the table and column descriptions. Without it
+    # "which branch has the most complaints" is answered by a count, and the
+    # biggest branch wins for being the biggest.
+    try:
+        from ..guided_setup import meaning
+        m = await meaning.load(db, source_id)
+        for b in m.bases:
+            info = ctx.objects.get(b["events"])
+            if info is not None and b["base"] in ctx.objects:
+                note = (f"Its rows happen to rows of `{b['base']}` (join {b['events']}.{b['via'][0]} = "
+                        f"{b['base']}.{b['via'][1]}; about {b['per_base'] * 1000:,.0f} per 1,000). To compare "
+                        f"groups, give the rate per `{b['base']}` of each group beside the count: a bigger "
+                        f"group has more of everything.")
+                info.description = f"{info.description} {note}".strip() if info.description else note
+        for (table, column), n in m.numbers.items():
+            info = ctx.objects.get(table)
+            if info is None or column not in info.columns or n.get("kind") in (None, "code"):
+                continue
+            way = {"higher_better": "; higher is better", "higher_worse": "; higher is worse"}.get(n.get("direction"), "")
+            how = "add it up" if n["kind"] in meaning.ADDITIVE else "average it, never total it"
+            note = f"[{n['kind']}: {how}{way}]"
+            have = info.descriptions.get(column)
+            info.descriptions[column] = f"{have} {note}" if have else note
+    except Exception:                                           # noqa: BLE001 -- the map is a help, never a gate
+        pass
+
     return ctx
 
 

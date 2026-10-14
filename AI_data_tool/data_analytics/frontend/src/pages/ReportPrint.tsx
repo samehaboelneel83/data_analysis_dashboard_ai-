@@ -11,6 +11,7 @@ import { StaticChartsContext } from '../components/report/chartRenderers/useChar
 import LoadError from '../components/ui/LoadError'
 import LoadingState from '../components/ui/LoadingState'
 import { applyTheme } from '../components/report/chartUtils'
+import { styleVars } from '../lib/dashboardStyle'
 
 /**
  * Print layout: every page of the report laid out linearly, one report page per
@@ -75,7 +76,7 @@ export default function ReportPrint() {
     // text -- in dark mode they were dark cards with near-black text.
     <div data-product="datalytics" data-theme="light" className="dl-paper"
       style={{ background: '#fff', color: '#111', minHeight: '100%', colorScheme: 'light' }}>
-      <style>{`
+      <style>{/* i18n-ok: CSS */`
         @media print {
           .print-toolbar { display: none !important; }
           .print-page { break-after: page; }
@@ -110,7 +111,8 @@ export default function ReportPrint() {
           <CrossFilterProvider>
             {/* Paper shows every point: no slider to drag, no window to leave data out. */}
             <StaticChartsContext.Provider value={true}>
-            <div data-print-canvas style={{ position: 'relative' }}>
+            <div data-print-canvas style={{ position: 'relative', ...styleVars(report?.style),
+              background: 'var(--dl-s-page-bg, transparent)' }}>
               {page.widgets.map(w => {
                 const l = w.layout ?? { x: 0, y: 0, w: 6, h: 4 }
                 // The builder's 12-column grid mapped onto a fixed print width. Absolute

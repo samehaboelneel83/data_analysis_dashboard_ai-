@@ -767,6 +767,9 @@ async def suggest_dashboard_for_role(source_id: int, body: SuggestDashboardIn,
     """
     src = await db.get(DataSource, source_id)
     check_org(src, current_user, "Data source not found")
+    # "Allow AI" for this connection (services/ai_policy.py).
+    from ..services import ai_policy as _ai_policy
+    await _ai_policy.enter(db, source=src)
 
     from ..services.suggest_dashboard import load_catalog, load_joins
     catalog = await load_catalog(db, source_id)
@@ -789,7 +792,14 @@ async def suggest_dashboard_for_role(source_id: int, body: SuggestDashboardIn,
             return str(exc)[:300]
 
     from ..services.suggest_dashboard import suggest_dashboard
-    suggestion, why = await suggest_dashboard(catalog, body.for_role, body.goal,
+    # Their words, then what they wrote about themselves and what this
+    # connection is described as (services/ai_context.py).
+    from ..core.config import settings as _settings
+    from ..services import ai_context
+    _goal = ai_context.compose(body.goal, llm_on=bool(_settings.llm_enabled),
+                               about=getattr(current_user, "about", None),
+                               connection=src.description, connection_name=src.name) or None
+    suggestion, why = await suggest_dashboard(catalog, body.for_role, _goal,
                                               probe=probe)
     if suggestion is None:
         # 200 with a reason, not an error: "the model is off" and "the model

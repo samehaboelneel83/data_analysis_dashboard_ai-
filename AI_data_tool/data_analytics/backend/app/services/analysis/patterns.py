@@ -33,6 +33,7 @@ import itertools
 import pandas as pd
 
 from ..analysis_contract import AnalysisContract
+from ..readback import _s
 
 RANDOM_STATE = 42
 
@@ -232,7 +233,7 @@ def association_rules(df: pd.DataFrame,
     if columns:
         missing = [c for c in columns if c not in df.columns]
         if missing:
-            raise PatternError(f"column '{missing[0]}' is not in this dataset")
+            raise PatternError(_s("no.change_drivers.1", "column '{a}' is not in this dataset", cap=False, a=missing[0]))
         usable = list(columns)
         if then_column and then_column not in usable:
             usable.append(then_column)
@@ -243,7 +244,7 @@ def association_rules(df: pd.DataFrame,
         if then_column and then_column in df.columns and then_column not in usable:
             usable.append(then_column)
     if then_column and then_column not in df.columns:
-        raise PatternError(f"column '{then_column}' is not in this dataset")
+        raise PatternError(_s("no.change_drivers.1", "column '{a}' is not in this dataset", cap=False, a=then_column))
 
     if len(usable) < 2:
         raise PatternError(
@@ -253,15 +254,13 @@ def association_rules(df: pd.DataFrame,
     n = len(df)
     if n < MIN_SUPPORT_COUNT * 2:
         raise PatternError(
-            f"need at least {MIN_SUPPORT_COUNT * 2} rows to mine rules; "
-            f"this has {n}")
+            _s("no.patterns.1", "need at least {a} rows to mine rules; this has {b}", cap=False, a=MIN_SUPPORT_COUNT * 2, b=n))
 
     dependent = _dependent_pairs(df, usable)
     ordered, masks = _items(df, usable)
     if len(ordered) < 2:
         raise PatternError(
-            "no value appears often enough to form a rule "
-            f"(each needs {MIN_SUPPORT_COUNT} rows)")
+            _s("no.patterns.2", "no value appears often enough to form a rule (each needs {a} rows)", cap=False, a=MIN_SUPPORT_COUNT))
 
     # ---- frequent itemsets, apriori-style ------------------------------------
     # Each level is built only from surviving items of the previous one: an
@@ -389,3 +388,103 @@ def association_rules(df: pd.DataFrame,
                          "min_lift": MIN_LIFT, "max_itemset_size": MAX_LEN}},
         warnings=caveats,
     )
+
+
+# ── things that occur together in the same group (basket analysis) ───────────
+#: A group holding more than this many different things is not a basket (it
+#: is a catalogue), and every pair inside it would count as "together".
+MAX_BASKET_ITEMS = 60
+
+
+def basket_rules(df: pd.DataFrame, basket: str, item: str) -> AnalysisContract:
+    """Which things turn up TOGETHER in the same group, for a table that has
+    one row per (group, thing): an order and its lines, a visit and its
+    procedures, a session and its pages, a document and its tags.
+
+    `association_rules` above reads one ROW as one case; here a case is every
+    row sharing a value of `basket`. For each pair of things: in how many
+    groups both occur (support), how often the second is there when the first
+    is (confidence), and how many times more often than chance (lift). Pairs
+    only: a pair is what a reader can check and what a network can draw.
+    Same thresholds as the row-wise rules -- 20 groups, lift 1.2."""
+    for col in (basket, item):
+        if col not in df.columns:
+            raise PatternError(_s("no.change_drivers.1", "column '{a}' is not in this dataset", cap=False, a=col))
+    if basket == item:
+        raise PatternError(_s("no.patterns.3", "the group and the thing must be two different columns", cap=False))
+    pairs = df[[basket, item]].dropna().astype({item: str}).drop_duplicates()
+    sizes = pairs.groupby(basket)[item].size()
+    n = int(len(sizes))
+    if n < MIN_SUPPORT_COUNT * 2:
+        raise PatternError(_s("no.patterns.4", "needs at least {a} different values of {b}; found {c}", cap=False, a=MIN_SUPPORT_COUNT * 2, b=basket, c=n))
+    several = sizes[(sizes >= 2) & (sizes <= MAX_BASKET_ITEMS)].index
+    if len(several) < MIN_SUPPORT_COUNT:
+        raise PatternError(_s("no.patterns.5", "almost every {a} holds a single {b}: nothing occurs together", cap=False, a=basket, b=item))
+    held = pairs.groupby(item)[basket].nunique()
+    frequent = held[held >= MIN_SUPPORT_COUNT].sort_values(ascending=False).head(MAX_ITEMS)
+    inside = pairs[pairs[basket].isin(several) & pairs[item].isin(frequent.index)]
+    both = inside.merge(inside, on=basket, suffixes=("_a", "_b"))
+    both = both[both[f"{item}_a"] < both[f"{item}_b"]]
+    together = both.groupby([f"{item}_a", f"{item}_b"]).size()
+
+    rows: list[dict] = []
+    for (a, b), joint in together.items():
+        joint = int(joint)
+        if joint < MIN_SUPPORT_COUNT:
+            continue
+        na, nb = int(frequent[a]), int(frequent[b])
+        lift = (joint / n) / ((na / n) * (nb / n))
+        if lift < MIN_LIFT:
+            continue
+        # Stated from the side that predicts the other better.
+        first, second, n_first, n_second = (a, b, na, nb) if joint / na >= joint / nb else (b, a, nb, na)
+        rows.append({
+            "if": f"{item}={first}", "then": f"{item}={second}",
+            "support_rows": joint, "support_pct": round(joint / n * 100, 2),
+            "confidence": round(joint / n_first, 4), "confidence_reverse": round(joint / n_second, 4),
+            "base_rate": round(n_second / n, 4), "lift": round(lift, 3),
+            "if_items": [[item, first]], "then_items": [[item, second]],
+        })
+    rows.sort(key=lambda r: (-r["lift"], -r["support_rows"], r["if"]))
+    rows = rows[:TOP_N]
+    return AnalysisContract(
+        kind="association_rules",
+        columns=[{"name": "if", "type": "text"}, {"name": "then", "type": "text"},
+                 {"name": "lift", "type": "number"}, {"name": "confidence", "type": "number"},
+                 {"name": "base_rate", "type": "number"}, {"name": "support_rows", "type": "number"}],
+        rows=rows,
+        meta={"mode": "baskets", "basket": basket, "item": item, "groups": n, "rows_scanned": int(len(pairs)),
+              "total_rows": int(len(df)), "sampled": False, "items_considered": int(len(frequent)),
+              "columns_considered": [basket, item],
+              "params": {"min_support_rows": MIN_SUPPORT_COUNT, "min_lift": MIN_LIFT, "max_len": 2},
+              "caveats": [
+                  "These are co-occurrences, not causes: the two appear in the same group more often than "
+                  "chance predicts, which says nothing about one producing the other.",
+                  f"Only pairs found together in at least {MIN_SUPPORT_COUNT} groups and at least {MIN_LIFT}x "
+                  "more often than chance are reported."]},
+        warnings=[])
+
+
+def rules_network(rows: list[dict], limit: int = 40) -> dict:
+    """The rules as a NETWORK: every value that appears in a rule is a node,
+    every rule an edge from what it starts with to what it concludes. A node's
+    size is how many rules touch it; an edge carries the rule's lift and
+    confidence. For drawing only -- nothing here is computed again."""
+    nodes: dict[str, dict] = {}
+    edges: list[dict] = []
+    for r in rows[:limit]:
+        sides = []
+        for key in ("if_items", "then_items"):
+            names = []
+            for col, val in r.get(key) or []:
+                node_id = f"{col}={val}"
+                nodes.setdefault(node_id, {"id": node_id, "column": col, "label": str(val), "rules": 0})
+                names.append(node_id)
+            sides.append(names)
+        for a in sides[0]:
+            for b in sides[1]:
+                nodes[a]["rules"] += 1
+                nodes[b]["rules"] += 1
+                edges.append({"source": a, "target": b, "lift": r.get("lift"), "confidence": r.get("confidence"),
+                              "support_rows": r.get("support_rows")})
+    return {"nodes": list(nodes.values()), "edges": edges}

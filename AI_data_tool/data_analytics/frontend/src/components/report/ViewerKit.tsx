@@ -12,6 +12,7 @@
  * Read-only and secured: every request goes through the same endpoints (row
  * security, column security) the widget itself does, and nothing persists.
  */
+import SaidItems, { saidOf } from '../analysis/SaidItems'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { describeSpec, parseSpec } from '../../lib/relativeDates'
 import { analysisCatalogueApi, differenceApi, explainApi, type DatasetColumn, type DifferenceCheck, type DifferenceTest } from '../../services/api'
@@ -226,7 +227,7 @@ export function ScenarioDialog({ datasetId, dateColumn, measure, candidates, onC
             </div>
           )}
           <ul style={{ margin: 0, paddingInlineStart: 18, fontSize: 11, color: 'var(--muted)' }}>
-            {res.caveats.map((c, i) => <li key={i} dir="auto">{c}</li>)}
+            <SaidItems texts={res.caveats} i18n={saidOf(res)} />
           </ul>
         </>
       )}

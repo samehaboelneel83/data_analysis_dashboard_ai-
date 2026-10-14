@@ -32,6 +32,7 @@ const GeoBubblesRenderer = lazy(() =>
   import('./GeoPointMapRenderer').then(m => ({ default: m.GeoBubblesRenderer })))
 import type { ChartRendererProps } from './types'
 import ModelRenderer from './ModelRenderer'
+import AnalysisResultRenderer from './AnalysisResultRenderer'
 import BarChartRenderer from './BarChartRenderer'
 import LineChartRenderer from './LineChartRenderer'
 import PieChartRenderer from './PieChartRenderer'
@@ -129,4 +130,6 @@ export const CHART_RENDERERS: Partial<Record<WidgetType, React.FC<ChartRendererP
   model_compare: ModelRenderer,
   model_score: ModelRenderer,
   model_rules: ModelRenderer,
+  model_influencers: ModelRenderer,
+  analysis_result: AnalysisResultRenderer,
 }

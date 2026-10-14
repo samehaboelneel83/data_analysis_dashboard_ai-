@@ -1,3 +1,4 @@
+import { useT } from '../../i18n'
 import { useState, type ReactNode } from 'react'
 import type { ReportPage, Widget } from '../../types/report'
 import { CrossFilterProvider } from './CrossFilterContext'
@@ -33,6 +34,7 @@ function initialSize(): Size {
  * × button) returns to the underlying page exactly as it was -- it never touched.
  */
 export default function PopupOverlay({ page, onClose, renderWidget, onExport }: Props) {
+  const t9 = useT()
   const [size, setSizeState] = useState<Size>(initialSize)
   const setSize = (v: Size) => { setSizeState(v); try { localStorage.setItem(SIZE_KEY, v) } catch { /* private mode */ } }
   // Escape and focus-restore were hand-rolled here and correct; the TAB TRAP
@@ -73,19 +75,19 @@ export default function PopupOverlay({ page, onClose, renderWidget, onExport }: 
           <span style={{ fontWeight: 600, fontSize: 13, flex: 1 }}>{page.title || page.name}</span>
           {/* Resize and export belong to the pop-up itself (SAS gives a pop-up
               page its own), so a reader can widen a dense table or keep it. */}
-          <select aria-label="Pop-up size" value={size} onChange={e => setSize(e.target.value as Size)}
+          <select aria-label={t9('cr.popupSize')} value={size} onChange={e => setSize(e.target.value as Size)}
             style={{ fontSize: 11, marginInlineEnd: 6 }}>
             {(Object.keys(SIZES) as Size[]).map(k => <option key={k} value={k}>{k}</option>)}
           </select>
           {onExport && (
             <button type="button" className="btn btn-ghost btn-sm" onClick={onExport}
-              title="Download this pop-up page as a PDF" style={{ fontSize: 11, marginInlineEnd: 6 }}>
+              title={t9('cr.popupPdf')} style={{ fontSize: 11, marginInlineEnd: 6 }}>
               <IconLabel icon={FileDown}>PDF</IconLabel>
             </button>
           )}
           {/* No ref needed: the hook focuses the first focusable control,
               which is this button. */}
-          <button aria-label="Close" onClick={onClose}
+          <button aria-label={t9('cr.close')} onClick={onClose}
             style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 18, lineHeight: 1, color: 'var(--muted)' }}>
             ×
           </button>
@@ -93,7 +95,7 @@ export default function PopupOverlay({ page, onClose, renderWidget, onExport }: 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 14 }}>
           <CrossFilterProvider pageMode={page.mobile_layout?.interaction_mode ?? 'manual'}>
             {page.widgets.length === 0 ? (
-              <span style={{ fontSize: 12, color: 'var(--muted)' }}>This page has no widgets yet</span>
+              <span style={{ fontSize: 12, color: 'var(--muted)' }}>{t9('cr.noWidgets')}</span>
             ) : (
               page.widgets.map(w => (
                 <div key={w.id} style={{ minHeight: 220 }}>

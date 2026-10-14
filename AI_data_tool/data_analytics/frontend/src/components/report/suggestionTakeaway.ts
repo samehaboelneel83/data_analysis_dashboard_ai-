@@ -29,7 +29,8 @@ export const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s)
 
 export function familyOf(widgetType: string): SugFamily {
   if (['kpi', 'card', 'gauge'].includes(widgetType)) return 'summary'
-  if (['line', 'area', 'step', 'stacked_area', 'combo'].includes(widgetType)) return 'trend'
+  // A forecast is a trend carried forward.
+  if (['line', 'area', 'step', 'stacked_area', 'combo', 'forecast'].includes(widgetType)) return 'trend'
   if (['histogram', 'box', 'boxplot', 'box_plot', 'violin'].includes(widgetType)) return 'dist'
   // Two things at once: a pair of numbers, two categories that travel
   // together, a model of what goes with what.
@@ -234,6 +235,14 @@ export function signature(widgetType: string, config: Record<string, unknown>): 
   // A box plot splits by a group; a histogram does not -- not the same chart.
   if (fam === 'dist') return `dist|${s(config.measure)}|${widgetType === 'box_plot' ? s(config.dimension) : ''}`
   if (fam === 'summary') return `summary|${s(config.measure)}|${s(config.aggregation)}`
+  // "How often X happens, per group" is one chart however it is drawn: bars
+  // stacked to 100% by X, or the average of X's percent column (the form the
+  // guided setup writes: `is_late_pct`). A page that already has the late rate
+  // by region is not offered the late share by region again.
+  const dim = s(config.dimension), d2 = s(config.dimension2), agg = s(config.aggregation).toLowerCase()
+  if (dim && d2 && s(config.bar_mode) === 'stacked100' && agg.startsWith('count')) return `rate|${dim}|${d2}`
+  const twin = /^(.+?)_(?:not_)?pct$/.exec(s(config.measure))
+  if (dim && !d2 && twin && (agg === 'avg' || agg === 'mean')) return `rate|${dim}|${twin[1]}`
   // A mix (stacked by a second column) is not the plain split it stacks.
   return `${fam}|${s(config.dimension)}|${s(config.measure)}|${s(config.dimension2)}`
 }

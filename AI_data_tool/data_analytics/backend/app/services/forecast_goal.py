@@ -45,6 +45,7 @@ which forecasts a frame first, and is therefore genuinely analytics -- lives in
 from __future__ import annotations
 
 from typing import Any
+from .readback import _s
 
 
 class ForecastGoalError(ValueError):
@@ -86,14 +87,14 @@ def forecast_goal(history: list[dict], forecast: list[dict], target: Any) -> dic
     """
     goal = _num(target)
     if goal is None:
-        raise ForecastGoalError("A numeric target is required")
+        raise ForecastGoalError(_s("no.forecast_goal.1", "A numeric target is required", cap=False))
     if not forecast:
-        raise ForecastGoalError("There is no forecast to search")
+        raise ForecastGoalError(_s("no.forecast_goal.2", "There is no forecast to search", cap=False))
 
     actuals = [p for p in history or [] if _num(p.get("value")) is not None]
     if not actuals:
         raise ForecastGoalError(
-            "There is no history to compare the target against")
+            _s("no.forecast_goal.3", "There is no history to compare the target against", cap=False))
 
     last_actual = _num(actuals[-1]["value"])
     # Equal counts as a rise: `>=` then answers "we are already there" rather

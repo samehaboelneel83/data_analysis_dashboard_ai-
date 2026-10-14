@@ -86,7 +86,8 @@ describe('WidgetRenderer element skins', () => {
   it('leaves the container unshadowed when no skin is set', () => {
     const { container } = renderWidget({ widget: barWidget({ config: { dimension: 'region' }, title: 'T' }) })
     const fig = container.querySelector('[role="figure"]') as HTMLElement
-    expect(fig.style.boxShadow === '' || fig.style.boxShadow === 'none').toBe(true)
+    // No skin: the dashboard's style may give a shadow (lib/dashboardStyle); with none set, there is none.
+    expect(['', 'none', 'var(--dl-s-shadow, none)']).toContain(fig.style.boxShadow)
   })
 })
 
@@ -1354,8 +1355,9 @@ describe('WidgetRenderer chrome styling', () => {
     // Check that unconfigured widget uses the default values
     expect(chrome.style.border).toContain('1px')
     expect(chrome.style.border).toContain('var(--border)')
-    expect(chrome.style.borderRadius).toBe('var(--radius)')
-    expect(chrome.style.background).toBe('var(--surface)')
+    // The app's default, behind the dashboard style's own value when it has one.
+    expect(chrome.style.borderRadius).toBe('var(--dl-s-radius, var(--radius))')
+    expect(chrome.style.background).toBe('var(--dl-s-card-bg, var(--surface))')
   })
 })
 
@@ -3018,5 +3020,27 @@ describe('hierarchy plan, step 4: a tree widget filters the page (2026-10-10)', 
     fireEvent.click(await screen.findByLabelText('Egypt › Giza'))
     expect(JSON.parse(screen.getByTestId('probe').textContent ?? '[]')).toEqual([['country',
       { paths: [['Egypt', 'Giza']], columns: ['country', 'city'], granularities: [null, null] }]])
+  })
+})
+
+describe('groups too small to rank (persona test, plan 1.6)', () => {
+  it('says how many groups the ranking leaves out', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({
+      type: 'series', dimension: 'zone', rows: [{ name: 'Big', value: 10 }],
+      small_groups: { hidden: 4, min_rows: 30 },
+    } as never)
+    renderWidget({ widget: barWidget() })
+    expect(await screen.findByTestId('small-groups-note'))
+      .toHaveTextContent('4 groups with fewer than 30 rows are not ranked')
+  })
+
+  it('says when the data is too small to rank any group, and hides none', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({
+      type: 'series', dimension: 'zone', rows: [{ name: 'A', value: 10 }, { name: 'B', value: 9 }],
+      small_groups: { hidden: 0, min_rows: 30, too_few: 2 },
+    } as never)
+    renderWidget({ widget: barWidget() })
+    expect(await screen.findByTestId('too-few-to-rank-note')).toHaveTextContent('fewer than 30 rows')
+    expect(screen.queryByTestId('small-groups-note')).not.toBeInTheDocument()
   })
 })

@@ -57,3 +57,13 @@ describe('labels_compact — the value axis too', () => {
     expect(valueTick({ labels_compact: false } as never)(6000000000)).not.toBe('6B')
   })
 })
+
+describe('value axes read compactly (persona test 3.5)', () => {
+  it('a value in the trillions is short, a small one is plain', async () => {
+    const { valueTick } = await import('./axisOptions')
+    const tick = valueTick({} as never)
+    expect(tick(45_000_000_000_000)).not.toContain(',')
+    expect(String(tick(45_000_000_000_000)).length).toBeLessThan(6)
+    expect(tick(950)).toBe('950')
+  })
+})

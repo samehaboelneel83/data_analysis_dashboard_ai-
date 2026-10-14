@@ -19,13 +19,99 @@ summary, honest about being template prose rather than an LLM's.
 """
 from __future__ import annotations
 
+import re
+
 import pandas as pd
-from .semantic_guard import default_summary, is_identifier, is_quantity
+from .readback import Said, _s, as_i18n
+
+
+def _d(key: str, template: str, **vars):
+    """A finding's detail sentence, keyed (`rb.ins.d.<key>`) and said verbatim."""
+    return _s("ins.d." + key, template, cap=False, **vars)
+
+
+def _p(p):
+    return _d("p", "p = {p}.", p=f"{p:.3g}") if p is not None else None
+
+
+def _then(*parts):
+    """Sentences one after another, each keeping its own key."""
+    parts = [x for x in parts if x]
+    if len(parts) == 1:
+        return parts[0]
+    return _s(f"seq.{len(parts)}", " ".join("{" + c + "}" for c in "abc"[:len(parts)]), cap=False,
+              **dict(zip("abc", parts)))
+from .semantic_guard import (default_summary, direction_of, is_identifier, is_outcome, is_quantity,
+                             value_order)
 
 MAX_MEASURES = 6
 MAX_CATEGORIES = 6
 MAX_LEVELS = 12
 MIN_ROWS = 20
+#: Outcome columns (late, returned ...) whose rate per group is examined.
+MAX_OUTCOMES = 4
+#: A group's share of a total must differ from its share of the ROWS by this
+#: much before the share is a finding; closer than this it only says the
+#: group is big (docs/meaning-map/PLAN.md).
+SIZE_MARGIN = 0.05
+#: A column label longer than this is a description, not a name for a sentence.
+LABEL_MAX = 40
+#: Findings of one kind kept in the ranked list, so twelve "outlying rows"
+#: lines cannot crowd out everything else. Unlisted kinds: PER_KIND_DEFAULT.
+PER_KIND = {"outlier_impact": 2, "data_quality": 3}
+PER_KIND_DEFAULT = 4
+#: A month's TOTAL that moved within this many points of how the month's ROW
+#: COUNT moved is the month's volume: the finding says so and ranks lower.
+VOLUME_MARGIN = 10.0
+#: A total with more than this share carried by outlying rows has no monthly
+#: trend worth reporting: the months differ by which of those rows they hold.
+OUTLIER_TOTAL = 0.5
+#: ... when those rows are at most this share of all rows.
+OUTLIER_FEW = 0.05
+#: Months a measure needs before its months are judged against each other.
+TIMELINE_MIN_PERIODS = 12
+#: A Pareto finding: at most this share of the groups carry this share of the total,
+#: in a category with at least this many groups.
+PARETO_FEW, PARETO_TARGET, PARETO_MIN_GROUPS = 0.35, 0.8, 6
+#: A closing month with under this share of the usual rows is the data's tail.
+THIN_MONTH = 0.2
+#: A group holding at least this share of a total is the only one that HAS the
+#: measure: a fact about the data's structure, not a comparison between groups.
+ONLY_ONE_SHARE = 0.99
+#: Standout / laggard findings kept about one measure.
+PER_MEASURE = 2
+#: Rows a group needs before its rate is compared with the others.
+RATE_MIN_BASE = 30
+#: A rate must be this many percentage points above the overall one to be said.
+RATE_MIN_GAP = 0.02
+
+
+def _filled_only_for(levels: pd.Series, hit: pd.Series, share: float = 0.95) -> bool:
+    """Whether a category is only filled in on the rows WITH the outcome: the
+    rows without it all hold one value (empty or a stand-in), which the rows
+    with it almost never hold. Its rates are then 100% by construction
+    (persona test 2026-10-12: "Changed mind -> 100% returned")."""
+    rest = levels[~hit.reindex(levels.index).fillna(False).astype(bool)]
+    if rest.empty:
+        return False
+    top = rest.value_counts(normalize=True)
+    if float(top.iloc[0]) < share:
+        return False
+    with_it = levels[hit.reindex(levels.index).fillna(False).astype(bool)]
+    return bool(len(with_it)) and float((with_it == top.index[0]).mean()) < 1 - share
+
+
+#: Columns this correlated, on the same scale, are one quantity read twice.
+SAME_QUANTITY_R = 0.99
+SAME_SCALE_RATIO = 1.25
+
+
+def _same_scale(a: pd.Series, b: pd.Series) -> bool:
+    """Medians within SAME_SCALE_RATIO of each other (and of one sign)."""
+    ma, mb = float(a.median()), float(b.median())
+    if not ma or not mb or (ma > 0) != (mb > 0):
+        return False
+    return max(abs(ma), abs(mb)) / min(abs(ma), abs(mb)) <= SAME_SCALE_RATIO
 
 
 def _month_is_partial(dt: pd.Series, month) -> bool:
@@ -113,7 +199,11 @@ def _apply_multiple_comparison_correction(findings: list[dict]) -> None:
     """
     tested = [f for f in findings if f.get("p_value") is not None]
     if len(tested) < 2:
-        return          # nothing to correct against
+        # A family of one: the adjusted value IS the value. Said, so a reader
+        # (and a test) can tell the correction looked at this finding.
+        for f in tested:
+            f["p_adjusted"] = round(float(f["p_value"]), 6)
+        return
     # `.analysis`, not `..analysis`: this module is app.services.insights, so
     # two dots resolve to app.analysis, which does not exist. The first version
     # of this had the wrong depth and the broad `except` below turned that typo
@@ -256,10 +346,9 @@ def _mean_standouts(v: pd.Series, levels: pd.Series, cat: str, m: str,
         out.append({
             "kind": "standout",
             "score": min((hi / overall - 1) * 2, 1.0) * (0.4 if weak else 1.0),
-            "title": f"{val_label(cat, hi_name)} has the highest average {col_label(m)}",
-            "detail": (f"{_fmt(hi)} against {_fmt(overall)} overall, across "
-                       f"{int(stats.loc[hi_name, 'count']):,} rows."
-                       + (f" p = {p:.3g}." if p is not None else "")),
+            "title": _s("ins.highest", "{g} has the highest average {m}", cap=False, g=val_label(cat, hi_name), m=col_label(m)),
+            "detail": _then(_d("vsOverall", "{v} against {o} overall, across {n} rows.", v=_fmt(hi), o=_fmt(overall),
+                               n=f"{int(stats.loc[hi_name, 'count']):,}"), _p(p)),
             "columns": [cat, m],
             "figures": {"mean": round(hi, 4), "overall_mean": round(overall, 4),
                         "member": str(hi_name), "ratio": round(hi / overall, 4)},
@@ -273,9 +362,9 @@ def _mean_standouts(v: pd.Series, levels: pd.Series, cat: str, m: str,
         out.append({
             "kind": "laggard",
             "score": min((1 - lo / overall) * 2, 0.9) * (0.4 if weak else 1.0),
-            "title": f"{val_label(cat, lo_name)} has the lowest average {col_label(m)}",
-            "detail": (f"{_fmt(lo)} against {_fmt(overall)} overall, across "
-                       f"{int(stats.loc[lo_name, 'count']):,} rows."),
+            "title": _s("ins.lowest", "{g} has the lowest average {m}", cap=False, g=val_label(cat, lo_name), m=col_label(m)),
+            "detail": _d("vsOverall", "{v} against {o} overall, across {n} rows.", v=_fmt(lo), o=_fmt(overall),
+                         n=f"{int(stats.loc[lo_name, 'count']):,}"),
             "columns": [cat, m],
             "figures": {"mean": round(lo, 4), "overall_mean": round(overall, 4),
                         "member": str(lo_name), "ratio": round(lo / overall, 4)},
@@ -336,8 +425,15 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
     # numeric Series, and a one-letter helper that a loop can shadow is a
     # TypeError waiting for whichever detector runs first.
     def col_label(column: str) -> str:
-        """What to call a column in a sentence a person reads."""
-        return names.get(column) or column
+        """What to call a column in a sentence a person reads. A LABEL, not a
+        description: "carries 44% of The numeric cost of the delivery service
+        in Egyptian Pounds." is a sentence inside a sentence -- a long or
+        full-stopped label is a description, and the column's own name reads
+        better."""
+        label = str(names.get(column) or "").strip()
+        if label and len(label) <= LABEL_MAX and not label.endswith(".") and len(label.split()) <= 6:
+            return label
+        return column
 
     def val_label(column: str, value) -> str:
         """What a coded value MEANS, when the catalog recorded it -- and only
@@ -349,18 +445,37 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
             return raw
         return (vmaps.get(column) or {}).get(raw, raw)
 
+    def group_label(column: str, value) -> str:
+        """A group named in a headline. "15800 has the highest average score"
+        names nothing: a value that is only a number is given its column."""
+        label = val_label(column, value)
+        try:
+            float(str(label).replace(",", ""))
+        except ValueError:
+            return label
+        return f"{col_label(column)} {label}"
+
     roles = effective_roles(type_map, column_meta)
     # The semantic veto: a numeric latitude, id or year is not a quantity, and
     # a "trend in latitude" or "year moves with revenue" is a finding about
     # nothing (services/semantic_guard.py).
+    # The column's STORED classification is read first (column_meta: number,
+    # level, order, direction, outcome -- services/column_classes.py); its
+    # name is the fallback for a column nobody classified.
     measures = drop_duplicate_measures(
-        df, [c for c, t in roles.items() if t == "numeric" and is_quantity(c)])[:MAX_MEASURES]
+        df, [c for c, t in roles.items() if t == "numeric" and is_quantity(c, column_meta)
+             # A true/false column is not a quantity, whatever its type was
+             # read as: it is an outcome, and the rate detector measures it.
+             and not (c in df.columns and pd.api.types.is_bool_dtype(df[c]))])[:MAX_MEASURES]
     categories = [c for c, t in roles.items() if t == "categorical"][:MAX_CATEGORIES]
+    # Columns that say what became of a row (late, returned, resolved): never
+    # a breakdown here -- they are what the rate detector measures.
+    outcomes = [c for c in df.columns if c in roles and is_outcome(c, column_meta)][:MAX_OUTCOMES]
     # The date a record HAPPENED on leads: the trend detector reads the first.
     # Olist's first date column was the estimated delivery -- a promise that runs
     # past the data, so "freight in 2018-09 ran 44% below its monthly average"
     # was the orders not yet placed (five-dataset review, 2026-10-02).
-    dates = order_event_dates([c for c, t in roles.items() if t == "datetime"])
+    dates = order_event_dates([c for c, t in roles.items() if t == "datetime"], df)
 
     if len(df) < MIN_ROWS:
         return {"findings": [], "narrative": "Too few rows to say anything with confidence."}
@@ -375,6 +490,13 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
     def m_words(m: str) -> str:
         return f"average {col_label(m)}" if m in intensive else col_label(m)
 
+    def m_said(m: str, cap: bool = False):
+        """`m_words` as a piece of a keyed sentence: "average X" has a key, a bare name is itself."""
+        if m in intensive:
+            return _s("ins.w.Avg" if cap else "ins.w.avg", ("Average" if cap else "average") + " {c}", cap=False, c=col_label(m))
+        name = col_label(m)
+        return name[:1].upper() + name[1:] if cap else name
+
     # 5.21: the five detector families read the same frame and write nothing
     # but their own findings, so they run side by side on a large frame
     # (pandas releases the GIL in its heavy kernels). Each fills its OWN list
@@ -385,9 +507,19 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
             dt = pd.to_datetime(df[dcol], errors="coerce")
             if dt.notna().sum() < MIN_ROWS:
                 continue
+            # Stray dates far outside the data's period are not months to compare with.
+            from .relative_dates import stray_dates
+            stray = stray_dates(dt)
+            if stray:
+                dt = dt.mask(stray["mask"])
             for m in measures[:3]:
                 v = pd.to_numeric(df[m], errors="coerce")
                 grouped = v.groupby(dt.dt.to_period("M"))
+                # A total -- or an average -- that a few extreme rows make up is
+                # those rows' calendar: "area ran 100% below its average" in a
+                # month that simply had none of the 159 rows carrying 96% of it.
+                if _outlier_share(v) > OUTLIER_TOTAL:
+                    continue
                 if m in intensive:
                     # An average over a handful of rows is noise, not a month: a
                     # month with too few rows behind it is not compared.
@@ -397,12 +529,24 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                     monthly = monthly[counts.reindex(monthly.index).fillna(0) >= floor]
                 else:
                     monthly = grouped.sum().dropna()
+                volume = grouped.count().reindex(monthly.index)
                 # The LAST FULL month. A month the data stops partway through is
                 # not a drop: a call log ending on 19 Sep "ran 96% below its monthly
                 # average" in September (live QA 2026-09-28). Partial means the
                 # data's own cadence would have put another date inside it.
                 if len(monthly) and _month_is_partial(dt, monthly.index[-1]):
                     monthly = monthly.iloc[:-1]
+                # A THIN last month is not a month either: a listing table with
+                # a handful of rows dated ahead "ran 100% below its average"
+                # (apartments, 2026-10-10). Months at the end holding under a
+                # fifth of the usual rows are the data's tail, not its trend.
+                while len(monthly) > 4:
+                    vols = volume.reindex(monthly.index)
+                    usual = float(vols.iloc[:-1].median())
+                    if usual and float(vols.iloc[-1]) < THIN_MONTH * usual:
+                        monthly = monthly.iloc[:-1]
+                    else:
+                        break
                 if len(monthly) < 4:
                     continue
                 last, prior = monthly.iloc[-1], monthly.iloc[:-1].mean()
@@ -411,17 +555,57 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                 change = (last - prior) / abs(prior) * 100
                 if abs(change) < 10:
                     continue
+                # THE SIZE CHECK, over time. A total that rose 30% in a month
+                # with 30% more rows is still news -- the business grew -- but
+                # it is news about the VOLUME, not about each row. The finding
+                # is kept, says so, and ranks below one where the measure
+                # itself moved. (Dropping it lost "revenue up last month".)
+                volume_note, volume_change = "", None
+                if m not in intensive:
+                    vol = volume.reindex(monthly.index)
+                    v_prior = float(vol.iloc[:-1].mean()) if len(vol) > 1 else 0.0
+                    if v_prior:
+                        volume_change = (float(vol.iloc[-1]) - v_prior) / abs(v_prior) * 100
+                        if abs(volume_change) >= 10 and abs(change - volume_change) < VOLUME_MARGIN:
+                            volume_note = _d("volume", "The number of rows moved the same way ({pct}%),"
+                                             " so this is the month's volume rather than a change per row.",
+                                             pct=f"{volume_change:+.0f}")
                 direction = "above" if change > 0 else "below"
+                # A last month that repeats its own month a year before is
+                # compared with THAT month: "84% above its average" is the
+                # season; "3% above last November" is the news.
+                from .analysis import timeline as _tl
+                if len(monthly) > 12 and _tl.repeats_a_year_before(monthly, len(monthly) - 1):
+                    then = monthly.index[-1] - 12
+                    was = float(monthly[then])
+                    if was:
+                        yoy = (float(last) - was) / abs(was) * 100
+                        side = "above" if yoy > 0 else "below"
+                        findings.append({
+                            "kind": "trend", "score": min(abs(yoy) / 100, 1.0) * 0.8,
+                            "title": _s(f"ins.trend.yoy.{side}", "{m} in {when} ran {pct}% " + side + " the same month a year before",
+                                        cap=False, m=m_said(m, True), when=str(monthly.index[-1]), pct=f"{abs(yoy):.0f}"),
+                            "detail": _d("vsYearBefore", "{v} against {was} in {then}.",
+                                         v=_fmt(float(last)), was=_fmt(was), then=str(then)),
+                            "columns": [m, dcol],
+                            "figures": {"delta_pct": round(float(yoy), 2), "value": round(float(last), 4),
+                                        "direction": "up" if yoy > 0 else "down", "year_before": round(was, 4)},
+                        })
+                        continue
                 findings.append({
-                    "kind": "trend", "score": min(abs(change) / 100, 1.0),
-                    "title": f"{m_words(m)[:1].upper() + m_words(m)[1:]} in {monthly.index[-1]} ran {abs(change):.0f}% {direction} its monthly average",
-                    "detail": f"{_fmt(float(last))} against an average of {_fmt(float(prior))} over the prior {len(monthly) - 1} months.",
+                    "kind": "trend", "score": min(abs(change) / 100, 1.0) * (0.6 if volume_note else 1.0),
+                    "title": _s(f"ins.trend.{direction}", "{m} in {when} ran {pct}% " + direction + " its monthly average", cap=False,
+                                m=m_said(m, True), when=str(monthly.index[-1]), pct=f"{abs(change):.0f}"),
+                    "detail": _then(_d("vsPrior", "{v} against an average of {avg} over the prior {k} months.",
+                                       v=_fmt(float(last)), avg=_fmt(float(prior)), k=len(monthly) - 1), volume_note),
                     "columns": [m, dcol],
                     # The evidence boundary: the numbers as DATA. A consumer must
                     # never have to regex a finding's own sentence to draw a badge.
                     "figures": {"delta_pct": round(float(change), 2),
                                 "value": round(float(last), 4),
-                                "direction": "up" if change > 0 else "down"},
+                                "direction": "up" if change > 0 else "down",
+                                **({"volume_pct": round(volume_change, 2), "follows_volume": bool(volume_note)}
+                                   if volume_change is not None else {})},
                 })
 
     def _standouts(findings: list) -> None:
@@ -434,7 +618,7 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
             for m in measures[:2]:
                 v = pd.to_numeric(df[m], errors="coerce")
                 if m in intensive:
-                    findings.extend(_mean_standouts(v, levels, cat, m, col_label, val_label))
+                    findings.extend(_mean_standouts(v, levels, cat, m, col_label, group_label))
                     continue
                 shares = v.groupby(levels).sum()
                 total = shares.sum()
@@ -443,6 +627,20 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                 frac = shares / total
                 uniform = 1.0 / n_levels
                 top_name, top_frac = frac.idxmax(), float(frac.max())
+                # THE SIZE CHECK. "Cairo carries 45% of fees" when Cairo has 45%
+                # of the rows says Cairo is big, not that Cairo stands out: a
+                # big group has more of everything. A share is a finding only
+                # when it departs from the group's share of the ROWS; when it
+                # does not, what CAN stand out is the amount per row.
+                of_rows = levels[v.notna()].value_counts(normalize=True)
+                follows_size = abs(top_frac - float(of_rows.get(top_name, 0.0))) < SIZE_MARGIN
+                if follows_size:
+                    per_row = _mean_standouts(v, levels, cat, m, col_label, group_label)
+                    for f in per_row:
+                        f["title"] = f["title"].replace(" average ", " ") + " per row"
+                        f["figures"]["per_row"] = True
+                    findings.extend(per_row)
+                    continue
                 if top_frac > uniform * 1.6 and top_frac > 0.3:
                     # Is the concentration more than sampling noise? A chi-square
                     # goodness-of-fit against an even split answers exactly that,
@@ -450,23 +648,27 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                     # the confidence of a finding.
                     p = _uniformity_p(shares)
                     weak = p is not None and p >= SIGNIFICANCE_ALPHA
-                    detail = (f"{n_levels} values of {cat} would average "
-                              f"{uniform * 100:.0f}% each; {top_name} holds "
-                              f"{_fmt(float(shares.max()))} of {_fmt(float(total))}.")
-                    if p is not None:
-                        detail += f" p = {p:.3g}."
-                    if weak:
-                        detail += (" The split is not distinguishable from an even "
-                                   "one at this sample size.")
+                    detail = _then(
+                        _d("share", "{k} values of {c} would average {u}% each; {g} holds {v} of {t} with {r}% of the rows.",
+                           k=n_levels, c=cat, u=f"{uniform * 100:.0f}", g=top_name, v=_fmt(float(shares.max())),
+                           t=_fmt(float(total)), r=f"{float(of_rows.get(top_name, 0.0)) * 100:.0f}"),
+                        _p(p),
+                        weak and _d("evenish", "The split is not distinguishable from an even one at this sample size."))
                     findings.append({
                         "kind": "standout",
-                        "score": min((top_frac - uniform) * 2, 1.0) * (0.4 if weak else 1.0),
-                        "title": f"{val_label(cat, top_name)} carries {top_frac * 100:.0f}% of {col_label(m)}",
+                        "score": min((top_frac - uniform) * 2, 1.0) * (0.4 if weak else 1.0)
+                                 * (0.3 if top_frac >= ONLY_ONE_SHARE else 1.0),
+                        "title": (_s("ins.almostAll", "Almost all {m} is in {g}", cap=False, m=col_label(m),
+                                     g=group_label(cat, top_name))
+                                  if top_frac >= ONLY_ONE_SHARE else
+                                  _s("ins.carries", "{g} carries {pct}% of {m}", cap=False, g=group_label(cat, top_name),
+                                     pct=f"{top_frac * 100:.0f}", m=col_label(m))),
                         "detail": detail,
                         "columns": [cat, m],
                         "figures": {"share_pct": round(top_frac * 100, 2),
                                     "member": str(top_name),
-                                    "value": round(float(shares.max()), 4)},
+                                    "value": round(float(shares.max()), 4),
+                                    "rows_share_pct": round(float(of_rows.get(top_name, 0.0)) * 100, 2)},
                         "p_value": None if p is None else round(float(p), 6),
                         "significant": None if p is None else (not weak),
                         # The evidence chip (Phase 7.2): which test, over how many rows.
@@ -475,11 +677,15 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                             "effect": f"{top_frac * 100:.0f}% vs {uniform * 100:.0f}% expected"},
                     })
                 low_name, low_frac = frac.idxmin(), float(frac.min())
-                if 0 < low_frac < uniform * 0.45 and n_levels <= 8:
+                # A small group trails on everything; that is its size again.
+                low_follows = abs(low_frac - float(of_rows.get(low_name, 0.0))) < SIZE_MARGIN
+                if 0 < low_frac < uniform * 0.45 and n_levels <= 8 and not low_follows:
                     findings.append({
                         "kind": "laggard", "score": min((uniform - low_frac) * 2, 0.9),
-                        "title": f"{val_label(cat, low_name)} trails the other {col_label(cat)} values on {col_label(m)}",
-                        "detail": f"{low_frac * 100:.0f}% of {m}, against an even share of {uniform * 100:.0f}%.",
+                        "title": _s("ins.trails", "{g} trails the other {c} values on {m}", cap=False,
+                                    g=val_label(cat, low_name), c=col_label(cat), m=col_label(m)),
+                        "detail": _d("lowShare", "{pct}% of {m}, against an even share of {u}%.",
+                                     pct=f"{low_frac * 100:.0f}", m=m, u=f"{uniform * 100:.0f}"),
                         "columns": [cat, m],
                         "figures": {"share_pct": round(low_frac * 100, 2),
                                     "member": str(low_name)},
@@ -493,6 +699,11 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
             for i, a in enumerate(measures):
                 for b in measures[i + 1:]:
                     r = corr.loc[a, b]
+                    if pd.notna(r) and r >= SAME_QUANTITY_R and _same_scale(nums[a], nums[b]):
+                        # Two readings of one quantity (a day's opening and
+                        # closing price): moving together is what they are, not
+                        # news (persona test 2026-10-12: eight such findings).
+                        continue
                     if pd.notna(r) and abs(r) >= 0.7:
                         word = "moves with" if r > 0 else "moves against"
                         # An r of 0.7 on 12 rows is not the same claim as an r of
@@ -503,18 +714,16 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                         # useful than silence.
                         p = _pearson_p(nums[a], nums[b])
                         weak = p is not None and p >= SIGNIFICANCE_ALPHA
-                        detail = ("Strong enough that either could stand in for the "
-                                  "other in a first look.")
-                        if p is not None:
-                            detail += f" p = {p:.3g}."
-                        if weak:
-                            detail += (" Not statistically significant, so treat it "
-                                       "as a pattern in these rows rather than a "
-                                       "reliable relationship.")
+                        detail = _then(
+                            _d("standIn", "Strong enough that either could stand in for the other in a first look."),
+                            _p(p),
+                            weak and _d("notSig", "Not statistically significant, so treat it as a pattern in these rows"
+                                        " rather than a reliable relationship."))
                         findings.append({
                             "kind": "correlation",
                             "score": (abs(float(r)) - 0.3) * (0.4 if weak else 1.0),
-                            "title": f"{col_label(a)} {word} {col_label(b)} (r = {r:.2f})",
+                            "title": _s("ins.with" if r > 0 else "ins.against", "{a} " + word + " {b} (r = {r})", cap=False,
+                                        a=col_label(a), b=col_label(b), r=f"{r:.2f}"),
                             "detail": detail,
                             "columns": [a, b],
                             "figures": {"r": round(float(r), 4)},
@@ -538,7 +747,10 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                 continue
             mask = (v < q1 - 1.5 * iqr) | (v > q3 + 1.5 * iqr)
             count = int(mask.sum())
-            if m in intensive:
+            # A total of gains and losses cancels itself: "85 rows carry -36%
+            # of profit" (demo sales). Such a column is read through its average.
+            mixed_sign = bool(len(v)) and float(v.min()) < 0 < float(v.max())
+            if m in intensive or mixed_sign:
                 # "Outliers carry 9% of salary" is a share of a meaningless total.
                 # What they do to an average is the question a reader has.
                 if count == 0 or count / len(v) <= 0.005:
@@ -550,9 +762,10 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                 if abs(shift) > 0.02:
                     findings.append({
                         "kind": "outlier_impact", "score": min(abs(shift) * 4, 0.9),
-                        "title": f"{count} outlying rows move the average {col_label(m)} by {abs(shift) * 100:.0f}%",
-                        "detail": (f"Average {_fmt(mean_all)} with them, {_fmt(mean_in)} without; "
-                                   f"{count} of {len(v):,} rows sit beyond the 1.5×IQR fences."),
+                        "title": _s("ins.outMove", "{n} outlying rows move the average {m} by {pct}%", cap=False,
+                                    n=count, m=col_label(m), pct=f"{abs(shift) * 100:.0f}"),
+                        "detail": _d("outMove", "Average {a} with them, {b} without; {n} of {t} rows sit beyond the 1.5×IQR fences.",
+                                     a=_fmt(mean_all), b=_fmt(mean_in), n=count, t=f"{len(v):,}"),
                         "columns": [m],
                         "figures": {"shift_pct": round(shift * 100, 2), "count": int(count)},
                     })
@@ -564,8 +777,9 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
             if count / len(v) > 0.005 and abs(share) > 0.05:
                 findings.append({
                     "kind": "outlier_impact", "score": min(abs(share) * 2, 0.95),
-                    "title": f"{count} outlying rows carry {share * 100:.0f}% of {col_label(m)}",
-                    "detail": f"{count} of {len(v):,} rows sit beyond the 1.5×IQR fences.",
+                    "title": _s("ins.outCarry", "{n} outlying rows carry {pct}% of {m}", cap=False,
+                                n=count, pct=f"{share * 100:.0f}", m=col_label(m)),
+                    "detail": _d("fences", "{n} of {t} rows sit beyond the 1.5×IQR fences.", n=count, t=f"{len(v):,}"),
                     "columns": [m],
                     "figures": {"share_pct": round(float(share) * 100, 2),
                                 "count": int(count)},
@@ -578,8 +792,8 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
             if miss > 0.2:
                 findings.append({
                     "kind": "data_quality", "score": min(miss, 0.85),
-                    "title": f"{col_label(c)} is {miss * 100:.0f}% missing",
-                    "detail": "Aggregations over this column silently ignore the gaps.",
+                    "title": _s("ins.missing", "{c} is {pct}% missing", cap=False, c=col_label(c), pct=f"{miss * 100:.0f}"),
+                    "detail": _d("gapsIgnored", "Aggregations over this column silently ignore the gaps."),
                     "columns": [c],
                     "figures": {"missing_pct": round(float(miss) * 100, 2)},
                 })
@@ -591,12 +805,234 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                     findings.append({
                         "kind": "data_quality", "score": 0.4,
                         "figures": {"gap_count": int(gaps)},
-                        "title": f"{col_label(dcol)} has {gaps} gap{'s' if gaps != 1 else ''} of more than two weeks",
-                        "detail": "Trend lines bridge these gaps as if the time in between never happened.",
+                        "title": (_s("ins.gaps", "{c} has {n} gaps of more than two weeks", cap=False, c=col_label(dcol), n=gaps)
+                                  if gaps != 1 else
+                                  _s("ins.gap", "{c} has 1 gap of more than two weeks", cap=False, c=col_label(dcol))),
+                        "detail": _d("bridged", "Trend lines bridge these gaps as if the time in between never happened."),
                         "columns": [dcol],
                     })
 
-    _detectors = (_trends, _standouts, _correlations, _outliers, _quality)
+    def _rates(findings: list) -> None:
+        # The share of rows with an OUTCOME (late, returned, resolved) per group,
+        # against the share overall. This is the question a count cannot
+        # answer -- "which branch has a problem" -- because it is read against
+        # each group's own size. Groups too small to carry a rate are left out.
+        for oc in outcomes:
+            col = df[oc]
+            known = col.notna()
+            if int(known.sum()) < MIN_ROWS:
+                continue
+            values = col[known]
+            if set(values.unique().tolist()[:3]) <= {True, False}:
+                targets = [True]
+            else:
+                # A status of several values: its minority outcomes, the common one
+                # being "nothing happened".
+                counts = values.astype(str).value_counts(normalize=True)
+                targets = [k for k, share in counts.items() if 0.01 <= share <= 0.5][:2]
+            for target in targets:
+                hit = (values == target) if target is True else (values.astype(str) == target)
+                overall = float(hit.mean())
+                if not 0 < overall < 1:
+                    continue
+                what = col_label(oc) if target is True else f"{col_label(oc)}: {val_label(oc, target)}"
+                for cat in categories:
+                    if cat == oc:
+                        continue
+                    levels = df.loc[known, cat].astype(str)
+                    if not (2 <= levels.nunique() <= MAX_LEVELS):
+                        continue
+                    if _filled_only_for(levels, hit):
+                        continue        # e.g. a reason given only when the thing happened: true by definition
+                    stats = hit.groupby(levels).agg(["mean", "count", "sum"])
+                    stats = stats[stats["count"] >= RATE_MIN_BASE]
+                    if len(stats) < 2:
+                        continue
+                    hi_name, hi = stats["mean"].idxmax(), float(stats["mean"].max())
+                    lo = float(stats["mean"].min())
+                    if hi - overall < RATE_MIN_GAP or hi / overall < 1.15:
+                        continue
+                    p = None
+                    try:
+                        from scipy import stats as st
+                        table = [[float(r["sum"]), float(r["count"] - r["sum"])] for _, r in stats.iterrows()]
+                        p = float(st.chi2_contingency(table)[1])
+                    except Exception:                       # noqa: BLE001
+                        p = None
+                    weak = p is not None and p >= SIGNIFICANCE_ALPHA
+                    findings.append({
+                        "kind": "rate",
+                        "score": min((hi / overall - 1) * 1.2, 1.0) * (0.4 if weak else 1.0),
+                        "title": _s("ins.rate", "{g} has the highest share of {what}: {hi}% against {all}% overall", cap=False,
+                                    g=group_label(cat, hi_name), what=what, hi=f"{hi * 100:.1f}", all=f"{overall * 100:.1f}"),
+                        "detail": _then(_d("rate", "{a} of {b} rows; the lowest {c} is at {lo}%. Groups under {k} rows are left out.",
+                                           a=f"{int(stats.loc[hi_name, 'sum']):,}", b=f"{int(stats.loc[hi_name, 'count']):,}",
+                                           c=col_label(cat), lo=f"{lo * 100:.1f}", k=RATE_MIN_BASE), _p(p)),
+                        "columns": [cat, oc],
+                        "figures": {"rate_pct": round(hi * 100, 2), "overall_pct": round(overall * 100, 2),
+                                    "lowest_pct": round(lo * 100, 2), "member": str(hi_name),
+                                    "outcome": None if target is True else str(target),
+                                    "rows": int(stats.loc[hi_name, "count"])},
+                        "p_value": None if p is None else round(p, 6),
+                        "significant": None if p is None else (not weak),
+                        "evidence": None if p is None else {
+                            "test": "Chi-square across groups", "n": int(known.sum()),
+                            "effect": f"{hi * 100:.1f}% vs {overall * 100:.1f}% overall"},
+                    })
+
+    def _gradients(findings: list) -> None:
+        # A measure that rises or falls steadily across an ORDERED category
+        # (Low -> Medium -> High; age bands): visible only when the order is
+        # known, which is why it is stored with the column.
+        for cat in categories:
+            order = value_order(cat, column_meta)
+            if not order or len(order) < 3:
+                continue
+            rank = {v: i for i, v in enumerate(order)}
+            levels = df[cat].astype(str)
+            for m in measures[:3]:
+                v = pd.to_numeric(df[m], errors="coerce")
+                stats = v.groupby(levels).agg(["mean", "count"])
+                stats = stats[(stats["count"] >= MEAN_STANDOUT_MIN_ROWS) & stats.index.isin(list(rank))]
+                if len(stats) < 3:
+                    continue
+                stats = stats.loc[sorted(stats.index, key=lambda k: rank[k])]
+                means = stats["mean"].tolist()
+                steps = [b - a for a, b in zip(means, means[1:])]
+                if not (all(s_ > 0 for s_ in steps) or all(s_ < 0 for s_ in steps)):
+                    continue
+                first, last = means[0], means[-1]
+                if first == 0 or abs(last - first) / abs(first) < 0.1:
+                    continue
+                word = "rises" if last > first else "falls"
+                findings.append({
+                    "kind": "gradient",
+                    "score": min(abs(last - first) / abs(first), 1.0) * 0.9,
+                    "title": _s(f"ins.gradient.{word}", "Average {m} " + word + " with every step of {c}: {a} at {ga}, {b} at {gb}",
+                                cap=False, m=col_label(m), c=col_label(cat), a=_fmt(first), ga=val_label(cat, stats.index[0]),
+                                b=_fmt(last), gb=val_label(cat, stats.index[-1])),
+                    "detail": " → ".join(f"{val_label(cat, k)} {_fmt(x)}" for k, x in zip(stats.index, means)) + ".",
+                    "columns": [cat, m],
+                    "figures": {"first": round(float(first), 4), "last": round(float(last), 4),
+                                "direction": "up" if last > first else "down", "steps": len(means),
+                                "order": [str(k) for k in stats.index]},
+                })
+
+    def _timeline(findings: list) -> None:
+        # A MONTH OUTSIDE ITS USUAL RANGE, and the place a LEVEL CHANGED --
+        # read from each measure's own months (services/analysis/timeline.py).
+        # The trend detector above compares the last month with the average
+        # of the rest; these look at every month against the months before it.
+        from .analysis import timeline
+        for dcol in dates[:1]:
+            dt = pd.to_datetime(df[dcol], errors="coerce")
+            if dt.notna().sum() < MIN_ROWS:
+                continue
+            for m in measures[:3]:
+                v = pd.to_numeric(df[m], errors="coerce")
+                if _outlier_share(v) > OUTLIER_TOTAL:
+                    continue
+                grouped = v.groupby(dt.dt.to_period("M"))
+                counts = grouped.count()
+                monthly = (grouped.mean() if m in intensive else grouped.sum()).dropna()
+                # Months with too few rows behind them are not months to judge,
+                # and the month the data stops inside is not finished.
+                floor = max(3, int(counts.median() * THIN_MONTH)) if len(counts) else 3
+                monthly = monthly[counts.reindex(monthly.index).fillna(0) >= floor]
+                if len(monthly) and _month_is_partial(dt, monthly.index[-1]):
+                    monthly = monthly.iloc[:-1]
+                if len(monthly) < TIMELINE_MIN_PERIODS:
+                    continue
+                values = [float(x) for x in monthly.values]
+                what = m_words(m)
+                band = timeline.expected_band(values, timeline.season_of("month", len(values)))
+                out = timeline.anomalies(values, band)
+                # The same month a year before was as far out: that is the
+                # season, not a one-off (persona test 2026-10-12: the November
+                # peak a shop owner asked about was "far above its usual range").
+                seasonal = [a for a in out if timeline.repeats_a_year_before(monthly, a["index"])]
+                out = [a for a in out if a not in seasonal]
+                if seasonal:
+                    a = max(seasonal, key=lambda x: x["deviations"])
+                    now, before = monthly.index[a["index"]], monthly.index[a["index"]] - 12
+                    findings.append({
+                        "kind": "season", "score": min(0.45 + a["deviations"] / 25, 0.9),
+                        "title": _s(f"ins.season.{'peak' if a['side'] == 'above' else 'low'}",
+                                    "{m} " + ("peaks" if a["side"] == "above" else "dips") + " every {month}",
+                                    cap=False, m=m_said(m, True), month=now.strftime("%B")),
+                        "detail": _d("season", "{a}: {x}; {b}: {y}. The same month stands out each year, so it is the season, not a one-off.",
+                                     a=str(before), x=_fmt(float(monthly[before])), b=str(now), y=_fmt(a["value"])),
+                        "columns": [m, dcol],
+                        "figures": {"period": str(now), "value": round(a["value"], 4),
+                                    "year_before": round(float(monthly[before]), 4), "side": a["side"]},
+                    })
+                if out:
+                    a = max(out, key=lambda x: x["deviations"])
+                    findings.append({
+                        "kind": "anomaly", "score": min(0.4 + a["deviations"] / 20, 0.95),
+                        "title": _s(f"ins.anomaly.{a['side']}", "{m} in {when} was far " + str(a["side"]) + " its usual range",
+                                    cap=False, m=m_said(m, True), when=str(monthly.index[a["index"]])),
+                        "detail": _then(_d("expected", "{v} against an expected {lo} to {hi}, judged from the months before it.",
+                                           v=_fmt(a["value"]), lo=_fmt(a["lo"]), hi=_fmt(a["hi"])),
+                                        _d("alsoOut.one", "1 other month also fell outside.") if len(out) == 2 else
+                                        _d("alsoOut.many", "{n} other months also fell outside.", n=len(out) - 1) if len(out) > 2 else None),
+                        "columns": [m, dcol],
+                        "figures": {"period": str(monthly.index[a["index"]]), "value": round(a["value"], 4),
+                                    "lo": round(a["lo"], 4), "hi": round(a["hi"], 4), "side": a["side"],
+                                    "outside": len(out)},
+                    })
+                cp = timeline.change_point(values)
+                if cp:
+                    findings.append({
+                        "kind": "change_point", "score": min(0.4 + abs(cp["shift_pct"]) / 100, 0.9),
+                        "title": _s("ins.shift.higher" if cp["shift"] > 0 else "ins.shift.lower",
+                                    "{m} has run {pct}% " + ("higher" if cp["shift"] > 0 else "lower") + " since {when}",
+                                    cap=False, m=m_said(m, True), pct=f"{abs(cp['shift_pct']):.0f}",
+                                    when=str(monthly.index[cp["index"]])),
+                        "detail": _d("level", "About {a} a month before, {b} from then on. The change is in the level, not in one month.",
+                                     a=_fmt(cp["before"]), b=_fmt(cp["after"])),
+                        "columns": [m, dcol], "p_value": cp["p_value"], "significant": True,
+                        "figures": {"period": str(monthly.index[cp["index"]]), "before": round(cp["before"], 4),
+                                    "after": round(cp["after"], 4), "shift_pct": round(cp["shift_pct"], 2)},
+                    })
+
+    def _pareto(findings: list) -> None:
+        # A FEW GROUPS CARRY MOST OF A TOTAL: "3 of 14 carry 80%". Only for a
+        # number that adds up, a category with enough groups for "few" to
+        # mean something, and a total of one sign (a share of gains and
+        # losses is not a share).
+        for cat in categories:
+            levels = df[cat].astype(str)
+            n_levels = levels.nunique()
+            if not (PARETO_MIN_GROUPS <= n_levels <= MAX_LEVELS):
+                continue
+            for m in measures[:2]:
+                if m in intensive:
+                    continue
+                totals = pd.to_numeric(df[m], errors="coerce").groupby(levels).sum().sort_values(ascending=False)
+                whole = float(totals.sum())
+                if whole <= 0 or (totals < 0).any():
+                    continue
+                running = totals.cumsum() / whole
+                few = int((running >= PARETO_TARGET).values.argmax()) + 1
+                # ONE group carrying it all is the standout finding, already
+                # said ("X carries 93%"); "few" starts at two.
+                if few < 2 or few / n_levels > PARETO_FEW:
+                    continue
+                names = [val_label(cat, v) for v in totals.index[:3]]
+                findings.append({
+                    "kind": "pareto",
+                    "score": min(0.35 + (PARETO_FEW - few / n_levels) / PARETO_FEW * 0.55, 0.9),
+                    "title": _s("ins.pareto", "{k} of {n} {c} values carry {pct}% of {m}", cap=False, k=few, n=n_levels,
+                                c=col_label(cat), pct=f"{running.iloc[few - 1] * 100:.0f}", m=col_label(m)),
+                    "detail": _d("largest", "Largest first: {names}. The other {n} share the rest.",
+                                 names=", ".join(str(x) for x in names) + ("..." if few > 3 else ""), n=n_levels - few),
+                    "columns": [cat, m],
+                    "figures": {"groups": few, "of": int(n_levels),
+                                "share_pct": round(float(running.iloc[few - 1]) * 100, 2)},
+                })
+
+    _detectors = (_trends, _standouts, _correlations, _outliers, _quality, _rates, _gradients, _pareto, _timeline)
     _outs: list[list] = [[] for _ in _detectors]
     if len(df) >= PARALLEL_SCAN_MIN_ROWS:
         from concurrent.futures import ThreadPoolExecutor
@@ -618,20 +1054,68 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
     # scanned list rather than in a single deliberate test.
     _apply_multiple_comparison_correction(findings)
 
+    # Which way is good: "the highest average rating" is good news and "the
+    # highest average delay" is not. Carried as data (`tone`), so no reader
+    # has to guess it from the words -- and only where the column's
+    # classification says which way it points.
+    for f in findings:
+        way = next((direction_of(c, column_meta) for c in f.get("columns") or []
+                    if direction_of(c, column_meta) != "neither"), None)
+        if not way:
+            continue
+        high = f.get("kind") == "standout" or (f.get("kind") in ("trend", "gradient")
+                                               and (f.get("figures") or {}).get("direction") == "up")
+        low = f.get("kind") == "laggard" or (f.get("kind") in ("trend", "gradient")
+                                             and (f.get("figures") or {}).get("direction") == "down")
+        if high or low:
+            f["tone"] = "good" if (high and way == "higher_better") or (low and way == "higher_worse") else "bad"
+
+    # A title written with a key travels twice: as English, and as key + pieces
+    # for a reader in another language (readback._s; the browser's `rb.ins.*`).
+    for f in findings:
+        if isinstance(f.get("title"), Said):
+            f["title_i18n"] = as_i18n(f["title"])
+            f["title"] = str(f["title"])
+        if isinstance(f.get("detail"), Said):
+            f["detail_i18n"] = as_i18n(f["detail"])
+            f["detail"] = str(f["detail"])
     findings.sort(key=lambda f: f["score"], reverse=True)
-    findings = findings[:12]
+    # A ranked list that is five "outlying rows" lines says one thing five
+    # times: each kind keeps its strongest few, and the places go to the rest.
+    kept, per_kind, per_measure = [], {}, {}
+    for f in findings:
+        k = f.get("kind")
+        if per_kind.get(k, 0) >= PER_KIND.get(k, PER_KIND_DEFAULT):
+            continue
+        if k in ("standout", "laggard") and len(f.get("columns") or []) > 1:
+            key = (k, f["columns"][-1])
+            if per_measure.get(key, 0) >= PER_MEASURE:
+                continue
+            per_measure[key] = per_measure.get(key, 0) + 1
+        per_kind[k] = per_kind.get(k, 0) + 1
+        kept.append(f)
+    findings = kept[:12]
 
     # narrative: the top findings as one paragraph of template prose
     if findings:
         parts = [f["title"] for f in findings[:4]]
         narrative = (f"Across {len(df):,} rows: " + ". ".join(parts) + "."
                      ).replace("..", ".")
+        # The same paragraph for another language: the lead, then each title by
+        # its own key. Only when every title has one -- half a paragraph in each
+        # language reads worse than the English one.
+        said = [f.get("title_i18n") for f in findings[:4]]
+        narrative_i18n = ({"key": f"ins.n.{len(said)}",
+                           "vars": {"n": f"{len(df):,}", **dict(zip("abcd", said))}}
+                          if all(said) else None)
     else:
         narrative = f"Across {len(df):,} rows, nothing stands out strongly — shares are even, correlations weak, and the data is clean."
+        narrative_i18n = {"key": "ins.n.0", "vars": {"n": f"{len(df):,}"}}
     # row_count rides along so narrate_findings can hand the model the dataset
     # size as EVIDENCE -- without it the digit guard would correctly discard
     # any prose that mentions the row total.
-    return {"findings": findings, "narrative": narrative, "row_count": int(len(df))}
+    return {"findings": findings, "narrative": narrative, "narrative_i18n": narrative_i18n,
+            "row_count": int(len(df))}
 
 # ── LLM narrative: phrasing, never evidence ──────────────────────────────────
 
@@ -849,6 +1333,16 @@ _FINDING_CHART = {
     # A box plot needs a category the finding does not carry; a histogram
     # shows the outlying tail from the measure alone.
     "outlier_impact": "histogram",
+    # The share of an outcome per group: each group's bar split into "with"
+    # and "without", every bar the same height -- the rate is what the eye reads.
+    "rate":           "bar",
+    # An ordered category, in its order.
+    "gradient":       "bar",
+    # a line that is READ: its usual range and what fell outside; where its level changed
+    "anomaly":        "line",
+    "change_point":   "line",
+    # the groups from the largest down, with the running share of the whole
+    "pareto":         "dual_axis_bar_line",
 }
 
 
@@ -872,32 +1366,99 @@ def _column_matches(column: str, tokens: set[str]) -> bool:
 #: "too few rows" answer is the honest one.
 BASELINE_MIN_ROWS = 20
 
-_PERSON_ID = ("emp", "employee", "staff", "worker", "person", "member", "agent")
-_START_DATE = ("hire", "join", "start", "created", "signup", "sign_up", "purchase", "order",
-               "open", "enrol", "enroll", "registered", "date")
+#: Words for WHEN A RECORD BEGAN and for dates that are something else, in
+#: the neutral vocabulary of any record (see services/semantic_guard.py): no
+#: industry's events (a hire, a purchase, a delivery). Where the rows are in
+#: hand the VALUES decide (order_event_dates): the date that is filled in for
+#: every row and comes first is when the record began.
+_START_DATE = ("start", "created", "opened", "open", "begin", "date")
 #: Dates that are not when a record began. "order_estimated_delivery_date"
 #: carries "order" and was the Olist panel's time axis -- a promise date,
 #: running into the future (2026-10-02).
-_NOT_START_DATE = ("to_date", "end", "leave", "left", "birth", "dob", "close",
-                   "expire", "termination", "exit", "until", "updated", "estimated",
-                   "expected", "due", "deadline", "limit", "deliver", "shipped", "approved")
+_NOT_START_DATE = ("to_date", "end", "birth", "dob", "close", "expire", "until", "updated", "modified",
+                   "estimated", "expected", "due", "deadline", "limit")
 
 
-def order_event_dates(dates: list[str]) -> list[str]:
+def order_event_dates(dates: list[str], df: pd.DataFrame | None = None) -> list[str]:
     """Date columns with the ones a record starts on first, promise and end
-    dates (estimated, due, delivered, left) last. Nothing is dropped."""
+    dates (estimated, due, closed) last. Nothing is dropped.
+
+    With the rows (`df`) the VALUES order the columns no name marks: a date
+    every row has, and that falls before the others, is when the record began;
+    one that is often empty or falls later is something that happened to it
+    afterwards. That holds for an order, an admission, a ticket or a contract
+    without knowing which of them the table is."""
+    seen: dict[str, tuple] = {}
+    if df is not None:
+        for c in dates:
+            try:
+                dt = pd.to_datetime(df[c], errors="coerce")
+                filled = float(dt.notna().mean())
+                mid = dt.dropna().astype("int64").median() if filled else float("inf")
+                # To the nearest percent: a finish date empty for 1% of rows
+                # (the ones still open) is not the date every row has, and its
+                # median -- over finished rows only -- runs early.
+                seen[c] = (round(1 - filled, 2), mid)
+            except Exception:                                   # noqa: BLE001
+                continue
+
     def rank(c: str) -> tuple:
-        low = str(c).lower()
-        if any(k in low for k in _NOT_START_DATE):
-            return 2, 0
-        # Among the rest, a column NAMED a date before a time of day (a call
-        # log's FULL_DATE before its CALL_TIME).
-        return (0 if any(k in low for k in _START_DATE[:-1]) else 1), (0 if "date" in low else 1)
+        named = _rank_by_name(c)
+        return (named[0], *seen.get(c, (0, 0)), named[1]) if seen else named
     return sorted(dates, key=rank)
+
+
+def _rank_by_name(c: str) -> tuple:
+    low = str(c).lower()
+    if any(k in low for k in _NOT_START_DATE):
+        return 2, 0
+    # Among the rest, a column NAMED a date before a time of day (FULL_DATE
+    # before CALL_TIME).
+    return (0 if any(k in low for k in _START_DATE[:-1]) else 1), (0 if "date" in low else 1)
 
 
 def _h(col: str) -> str:
     return " ".join(str(col).replace("_", " ").split())
+
+
+def _outlier_share(v: pd.Series) -> float:
+    """The share of a column's total carried by a FEW rows beyond the
+    1.5 x IQR fences; 0 when there is no spread, no total, or the rows beyond
+    the fences are many (a long tail is how sales look, and its total still
+    has a trend)."""
+    # As plain numbers: a yes/no column that reaches here has no quantiles
+    # to subtract (found by the discovery tests, 2026-10-11).
+    v = pd.to_numeric(v, errors="coerce").dropna().astype(float)
+    if len(v) < 8:
+        return 0.0
+    q1, q3 = v.quantile(0.25), v.quantile(0.75)
+    iqr, total = q3 - q1, float(v.abs().sum())
+    if iqr == 0 or total == 0:
+        return 0.0
+    mask = (v < q1 - 1.5 * iqr) | (v > q3 + 1.5 * iqr)
+    if not mask.any() or mask.mean() > OUTLIER_FEW:
+        return 0.0
+    return float(v[mask].abs().sum()) / total
+
+
+_ID_TAIL = re.compile(r"[\s_]*(?:id|key|uuid|no|number|code)$", re.I)
+#: The same word where Arabic puts it: in front ("رقم الشحنة").
+_ID_HEAD = re.compile(r"^(?:رقم|كود|معرف|مسلسل)[\s_]+")
+
+
+def counted_as(id_col: str) -> str:
+    """What to call a count of an identifier column. "Number of shipment id"
+    counts shipments: the identifier's own word is dropped and the thing it
+    numbers is named ("Shipment count"). A column that is ONLY an identifier
+    word (`id`, `uuid`) or has no such tail keeps the plain form."""
+    name = _h(id_col)
+    stem = _ID_TAIL.sub("", name).strip()
+    if stem and stem != name:
+        return f"{stem[:1].upper()}{stem[1:]} count"
+    stem = _ID_HEAD.sub("", name).strip()
+    if stem and stem != name:
+        return f"عدد {stem}"
+    return f"Number of {name}"
 
 
 def baseline_suggestions(df: pd.DataFrame | None, roles: dict[str, str],
@@ -932,23 +1493,24 @@ def baseline_suggestions(df: pd.DataFrame | None, roles: dict[str, str],
         except Exception:                                   # noqa: BLE001
             return 0
 
-    ids = [c for c in cols if (is_identifier(c, column_meta) or _is_id_like_column(c))
+    ids = [c for c in cols if (is_identifier(c, column_meta) or _is_id_like_column(c, column_meta))
            and nunique(c) >= 0.5 * len(df)]
     id_col = ids[0] if ids else None
-    cats = [c for c in cols if roles.get(c) == "categorical" and c not in ids]
+    # A column that says what became of a row (late, returned) is measured as a
+    # share per group -- the rate findings draw that; "total weight by is_late"
+    # is not a first chart anyone asks for.
+    cats = [c for c in cols if roles.get(c) == "categorical" and c not in ids
+            and not is_outcome(c, column_meta)]
     card = {c: nunique(c) for c in cats}
     main_cats = sorted([c for c in cats if 3 <= card[c] <= 30], key=lambda c: -card[c])
     small_cats = sorted([c for c in cats if 2 <= card[c] <= 6], key=lambda c: card[c])
     nums = [c for c in cols if roles.get(c) == "numeric" and c not in ids
-            and not _is_id_like_column(c) and not is_identifier(c, column_meta)]
-    dates = [c for c in cols if roles.get(c) == "datetime"
-             and not any(k in str(c).lower() for k in _NOT_START_DATE)]
-    dates.sort(key=lambda c: 0 if any(k in str(c).lower() for k in _START_DATE[:-1]) else 1)
+            and not _is_id_like_column(c, column_meta) and not is_identifier(c, column_meta)]
+    dates = order_event_dates([c for c in cols if roles.get(c) == "datetime"
+                               and not any(k in str(c).lower() for k in _NOT_START_DATE)], df)
 
-    if id_col and any(k in str(id_col).lower() for k in _PERSON_ID):
-        count_word = "Headcount"
-    elif id_col:
-        count_word = f"Number of {_h(id_col)}"
+    if id_col:
+        count_word = counted_as(id_col)
     else:
         count_word = "Rows"
 
@@ -972,22 +1534,19 @@ def baseline_suggestions(df: pd.DataFrame | None, roles: dict[str, str],
     if dates:
         d = dates[0]
         meas, agg = count_measure(d)
-        low = str(d).lower()
         try:
             dt = pd.to_datetime(df[d], errors="coerce")
             span_days = (dt.max() - dt.min()).days
         except Exception:                                   # noqa: BLE001
             span_days = 0
         if span_days >= 2 * 365:
-            title = ("Hires per year" if "hire" in low
-                     else f"{count_word} per year of {_h(d)}")
+            title = f"{count_word} per year of {_h(d)}"
             config = {"dimension": d, "measure": meas, "aggregation": agg,
                       "dimension_granularity": "year"}
         else:
             # A short span is bucketed by whoever knows it (polish_widget):
             # a year bucket over four months is one bar.
-            title = ("Hires over time" if "hire" in low
-                     else f"{count_word} over {_h(d)}")
+            title = f"{count_word} over {_h(d)}"
             config = {"dimension": d, "measure": meas, "aggregation": agg}
         add("line", title, f"How many rows fall in each period of {_h(d)}.", config, 9.5)
     if nums:
@@ -1011,7 +1570,7 @@ def suggest_widgets_from_findings(findings: list[dict], roles: dict[str, str],
                                   ineligible: set[str] | None = None,
                                   column_meta: dict | None = None,
                                   frame: pd.DataFrame | None = None,
-                                  per_type: int = 2) -> list[dict]:
+                                  per_type: int = 2, catalogue: int = 0) -> list[dict]:
     """Rank the engine's findings into one-click widget suggestions.
 
     Score = the finding's own interest score, plus a boost per column the
@@ -1052,9 +1611,9 @@ def suggest_widgets_from_findings(findings: list[dict], roles: dict[str, str],
         # encounters"), so the aggregation is corrected rather than the chart
         # dropped. On a hospital dataset this was three of eight suggestions.
         from .widget_data import _is_id_like_column
-        real_nums = [c for c in nums if not _is_id_like_column(c)]
+        real_nums = [c for c in nums if not _is_id_like_column(c, column_meta)]
         # A salary or a price is averaged, never summed (default_summary).
-        if nums and (_is_id_like_column(nums[0]) or is_identifier(nums[0], column_meta)):
+        if nums and (_is_id_like_column(nums[0], column_meta) or is_identifier(nums[0], column_meta)):
             additive = "count"
         elif nums:
             summ = default_summary(nums[0], column_meta)
@@ -1063,9 +1622,26 @@ def suggest_widgets_from_findings(findings: list[dict], roles: dict[str, str],
             additive = "sum"
 
         config: dict | None = None
-        if wt == "line" and dates and nums:
+        if f.get("kind") == "rate" and len(cols) >= 2:
+            # columns = [group, outcome]; counted, never summed.
+            config = {"dimension": cols[0], "dimension2": cols[1], "measure": cols[0],
+                      "aggregation": "count", "bar_mode": "stacked100"}
+        elif f.get("kind") == "pareto" and cats and nums:
+            # `measure2` names the same column: this chart type takes two
+            # measures, and a Pareto's second series is the first one's
+            # running share (widget_data.shape_dual_series).
+            config = {"dimension": cats[0], "measure": nums[0], "measure2": nums[0], "aggregation": "sum",
+                      "pareto": True, "y2_axis_label": "Cumulative share (%)"}
+        elif f.get("kind") == "gradient" and cats and nums:
+            config = {"dimension": cats[0], "measure": nums[0], "aggregation": "avg", "sort_by": "order",
+                      "category_order": list((f.get("figures") or {}).get("order") or [])}
+        elif wt == "line" and dates and nums:
             config = {"dimension": dates[0], "measure": nums[0],
                       "aggregation": additive, "dimension_granularity": "month"}
+            if f.get("kind") == "anomaly":
+                config["anomaly_band"] = True
+            elif f.get("kind") == "change_point":
+                config["change_point"] = True
         elif wt == "bar" and cats and nums:
             config = {"dimension": cats[0], "measure": nums[0],
                       "aggregation": additive}
@@ -1151,17 +1727,61 @@ def suggest_widgets_from_findings(findings: list[dict], roles: dict[str, str],
                   if not mixes_units(x, mixed)
                   and (x.get("kind") == "rules" or draws(x["widget_type"], x["config"], probe))]
         chosen = diversify(ranked, limit, per_type=per_type)
+        if catalogue > 0:
+            # After the ideas the data argues for: up to `catalogue` further
+            # widget types it has the shape for, one of each, none already in
+            # the list (suggest_variety.catalogue_suggestions). They pass the
+            # same checks as everything above and below.
+            from .suggest_variety import _type_key, catalogue_suggestions
+            shown, more = {_type_key(x) for x in chosen}, []
+            for idea in catalogue_suggestions(prof):
+                kind = _type_key(idea) + ("|" + str(idea["config"].get("gauge_shape")) if idea["widget_type"] == "gauge" else "")
+                idea = one_unit(idea, mixed)
+                if kind in shown or _type_key(idea) in {_type_key(x) for x in chosen} or mixes_units(idea, mixed) \
+                        or not draws(idea["widget_type"], idea["config"], probe):
+                    continue
+                shown.add(kind)
+                more.append(idea)
+                if len(more) >= catalogue:
+                    break
+            chosen = chosen + more
         # What each one SHOWS, read from its result on every row (the probe
         # sample only had to prove it draws). The rules widget's reason
         # already states its mined numbers.
         from .readback import as_i18n, takeaway
         from .widget_data import get_widget_data_from_df
+        # The common gate (services/suggest_gate.py): drawn is not enough. A
+        # suggestion whose chart says nothing -- one bar, the same value in
+        # every group, a headline of zero -- is not offered, the same rule the
+        # dashboard designers and the guided setup apply.
+        from .suggest_gate import says_nothing
+        _dates = {c for c, t in roles.items() if t == "datetime"}
+        kept = []
         for x in chosen:
             if x.get("kind") == "rules":
+                kept.append(x)
                 continue
             try:
-                said = takeaway(x["widget_type"], x["config"],
-                                get_widget_data_from_df(frame, dict(x["config"]), x["widget_type"]))
+                drawn = get_widget_data_from_df(frame, dict(x["config"]), x["widget_type"])
+            except Exception:                                # noqa: BLE001
+                drawn = None
+            nothing = says_nothing(x, drawn, _dates) if drawn is not None else None
+            # The basics ("how many per department") are the first thing a
+            # reader asks even when the split is even: they are dropped only
+            # when there is nothing, or one group, to show.
+            counted = str((x.get("config") or {}).get("aggregation") or "").startswith("count")
+            if nothing and (not (x.get("kind") == "baseline" and counted) or nothing in (
+                    "it has nothing to show", "it has only one group to show")):
+                continue
+            kept.append(x)
+            if x.get("kind") == "correlation":
+                # The title carries r measured on EVERY row. The chart draws a
+                # sample of points, and a sentence read off it restated the
+                # same pair with another r ("r = 0.70" over "r = 0.27, 500
+                # rows", Nile Express 2026-10-10): one number per claim.
+                continue
+            try:
+                said = takeaway(x["widget_type"], x["config"], drawn) if drawn is not None else None
             except Exception:                                # noqa: BLE001 -- a sentence is optional
                 said = None
             if said:
@@ -1169,5 +1789,5 @@ def suggest_widgets_from_findings(findings: list[dict], roles: dict[str, str],
                 # The same sentence as a key and its pieces: the browser says
                 # it in the reader's language (readback.Said).
                 x["takeaway_i18n"] = as_i18n(said)
-        return chosen
+        return kept
     return out[:limit]

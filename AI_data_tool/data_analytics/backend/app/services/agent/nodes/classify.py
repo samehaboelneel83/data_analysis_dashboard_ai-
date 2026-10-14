@@ -65,48 +65,48 @@ CLASSIFY_SCHEMA = {
 }
 
 _EXAMPLES = """Examples:
-Q: what is customer 8842's email -> {"intent": "lookup", "ambiguous": false, "ambiguity_reason": null}
-Q: total revenue by region -> {"intent": "aggregate", "ambiguous": false, "ambiguity_reason": null}
-Q: how did signups change month over month -> {"intent": "trend", "ambiguous": false, "ambiguity_reason": null}
-Q: cairo vs giza sales -> {"intent": "compare", "ambiguous": false, "ambiguity_reason": null}
-Q: why did returns spike -> {"intent": "explain", "ambiguous": false, "ambiguity_reason": null}
-Q: compare activity and rated amount over time -> {"intent": "trend", "ambiguous": false, "ambiguity_reason": null}
+Q: what is the contact email of record 8842 -> {"intent": "lookup", "ambiguous": false, "ambiguity_reason": null}
+Q: total amount by region -> {"intent": "aggregate", "ambiguous": false, "ambiguity_reason": null}
+Q: how did the number of new records change month over month -> {"intent": "trend", "ambiguous": false, "ambiguity_reason": null}
+Q: north vs south totals -> {"intent": "compare", "ambiguous": false, "ambiguity_reason": null}
+Q: why did the count jump last week -> {"intent": "explain", "ambiguous": false, "ambiguity_reason": null}
+Q: compare the count and the amount over time -> {"intent": "trend", "ambiguous": false, "ambiguity_reason": null}
 -- two measures ALONG the time axis: a trend of both, per period. "Compare" here
 -- is not a test between groups; answered as one, it came back as a p-value for
--- two call types, a different question (live QA 2026-09-28).
-Q: which services have high activity but relatively low rated amount -> {"intent": "aggregate", "ambiguous": false, "ambiguity_reason": null}
--- two figures per group read side by side (count and amount per service), not a
--- significance test: routed as `compare` it came back as a p-value for call types.
+-- two groups, a different question (live QA 2026-09-28).
+Q: which groups have a high count but a relatively low amount -> {"intent": "aggregate", "ambiguous": false, "ambiguity_reason": null}
+-- two figures per group read side by side (count and amount per group), not a
+-- significance test: routed as `compare` it came back as a p-value between groups.
 Q: find unusual activity -> {"intent": "aggregate", "ambiguous": false, "ambiguity_reason": null}
-Q: are there any spikes in orders -> {"intent": "aggregate", "ambiguous": false, "ambiguity_reason": null}
+Q: are there any spikes in the daily count -> {"intent": "aggregate", "ambiguous": false, "ambiguity_reason": null}
 -- a request to FIND what stands out: the days whose activity is furthest from
 -- the usual day. It has a sensible default, so it is not ambiguous -- asking
 -- back "which metric and which method?" answered nothing.
 Q: show me the numbers -> {"intent": "lookup", "ambiguous": true, "ambiguity_reason": "which numbers — no metric or table named"}
-Q: how many student solutions are there -> {"intent": "aggregate", "ambiguous": false, "ambiguity_reason": null}
--- schema has both `student_solutions` (base table) and
--- `v_student_solutions_norm` (a normalized view derived from it); the plain,
+Q: how many entries are there -> {"intent": "aggregate", "ambiguous": false, "ambiguity_reason": null}
+-- schema has both `entries` (base table) and
+-- `v_entries_norm` (a normalized view derived from it); the plain,
 -- undecorated phrasing names the base table, and "normalized" was never
 -- said — the near-duplicate name is not ambiguity.
-Q: total sales in the customers table -> {"intent": "aggregate", "ambiguous": false, "ambiguity_reason": null}
--- schema has both `customers` and `customers_archive`; the question names
+Q: total amount in the accounts table -> {"intent": "aggregate", "ambiguous": false, "ambiguity_reason": null}
+-- schema has both `accounts` and `accounts_archive`; the question names
 -- the specific table, so the archive variant is irrelevant, not a tie.
-Q: revenue by product -> {"intent": "aggregate", "ambiguous": false, "ambiguity_reason": null}
--- schema has `products` and `product_variants`; "product" (unqualified,
--- singular) most specifically matches `products` — the more granular
--- `product_variants` table is a plausible refinement, not a second reading
+Q: amount by item -> {"intent": "aggregate", "ambiguous": false, "ambiguity_reason": null}
+-- schema has `items` and `item_variants`; "item" (unqualified,
+-- singular) most specifically matches `items` — the more granular
+-- `item_variants` table is a plausible refinement, not a second reading
 -- that changes the answer's shape, so this is not ambiguous.
 Q: suggest a dashboard for me -> {"intent": "suggest_dashboard", "ambiguous": false, "ambiguity_reason": null}
-Q: build me a dashboard for my courses -> {"intent": "suggest_dashboard", "ambiguous": false, "ambiguity_reason": null}
+Q: build me a dashboard for my work -> {"intent": "suggest_dashboard", "ambiguous": false, "ambiguity_reason": null}
 -- a request to DESIGN something, not to answer something. It never becomes SQL
 -- over the data, and it is never ambiguous: choosing what to show IS the request,
 -- so asking back "which dashboard?" returns the question to the person who asked
 -- precisely because they did not want to decide.
-Q: كم عدد الموظفين في قسم المبيعات -> {"intent": "aggregate", "ambiguous": false, "ambiguity_reason": null}
--- "المبيعات" is Arabic for Sales: a department named in the question's own
--- language is the same department. Not seeing the word in the schema is
--- not a tie between two readings (HR re-test 2026-10-01: this asked back
--- whether Sales "exists" and offered an Operations department there is none of).
+Q: كم عدد السجلات في المنطقة الشمالية -> {"intent": "aggregate", "ambiguous": false, "ambiguity_reason": null}
+-- "الشمالية" is Arabic for North: a value named in the question's own
+-- language is the same value. Not seeing the word in the schema is
+-- not a tie between two readings (re-test 2026-10-01: this asked back
+-- whether the value "exists" and offered another one there is none of).
 Q: hi -> {"intent": "chat", "ambiguous": false, "ambiguity_reason": null}
 Q: مرحبا -> {"intent": "chat", "ambiguous": false, "ambiguity_reason": null}
 Q: thanks, that helps -> {"intent": "chat", "ambiguous": false, "ambiguity_reason": null}
@@ -117,13 +117,13 @@ Q: what can you do -> {"intent": "chat", "ambiguous": false, "ambiguity_reason":
 -- hello?" is the wrong answer, and so is a table nobody asked for.
 Q: create a new dataset -> {"intent": "chat", "ambiguous": false, "ambiguity_reason": null}
 Q: save this as a report -> {"intent": "chat", "ambiguous": false, "ambiguity_reason": null}
-Q: delete the orders table -> {"intent": "chat", "ambiguous": false, "ambiguity_reason": null}
+Q: delete the events table -> {"intent": "chat", "ambiguous": false, "ambiguity_reason": null}
 -- a request to CREATE, SAVE, DELETE or CHANGE something. This chat answers
 -- questions; it does not act. Sent through as a query it dumped a whole
 -- table and called that "the dataset" -- an action the person asked for,
 -- reported as done when nothing was done. `chat` lets the reply say plainly
 -- where that action lives instead.
-Q: hi, how many orders are there -> {"intent": "aggregate", "ambiguous": false, "ambiguity_reason": null}
+Q: hi, how many rows are there -> {"intent": "aggregate", "ambiguous": false, "ambiguity_reason": null}
 -- a greeting WRAPPED AROUND a real question is the question. `chat` is for a
 -- message that asks nothing about the data at all; any request for data in
 -- it, however politely buried, wins.
@@ -187,8 +187,8 @@ async def classify(question: str, context: SchemaContext, client,
             "ambiguous. A message that asks for data is never `chat`, even "
             "when it opens with a greeting: the question inside it wins. "
             "A value named in another language is read by its meaning: "
-            "an Arabic question about \"قسم المبيعات\" asks about the "
-            "department whose value is 'Sales', \"التسويق\" is 'Marketing'. "
+            "an Arabic question about \"المنطقة الشمالية\" asks about the "
+            "group whose value is 'North', \"الجنوبية\" is 'South'. "
             "Translate the value and match it to the column it belongs to; a "
             "value that translates to one that exists, or that you cannot "
             "see listed, is never ambiguity -- the query filters on it. Keep "
@@ -236,6 +236,11 @@ _OVER_TIME = re.compile(r"\b(over time|over the (?:period|year|months?|weeks?|da
                         r"by (?:day|week|month|quarter|year)|daily|weekly|monthly)\b", re.I)
 _HIGH_BUT_LOW = re.compile(r"\b(high|many|most|large)\b.*\bbut\b.*\b(low|few|little|small|less)\b|"
                            r"\b(low|few|little|small)\b.*\bbut\b.*\b(high|many|large|more)\b", re.I)
+#: "By how much did A exceed B", "the difference between A and B": one figure
+#: taken from another -- an amount, not a test of whether groups differ.
+_BY_HOW_MUCH = re.compile(r"\bby how much\b|\bhow much (?:more|less|higher|lower|bigger|smaller)\b|"
+                          r"\b(?:what is|what's|what was) the (?:difference|gap) between\b|"
+                          r"بكم|كم يزيد|كم تزيد|كم ينقص|كم تنقص|ما الفرق بين|ما مقدار الفرق", re.I)
 _UNUSUAL = re.compile(r"\b(unusual|anomal\w*|spikes?|outliers?|abnormal|strange|odd)\b", re.I)
 
 
@@ -249,7 +254,9 @@ def settle_intent(question: str, verdict: dict | None) -> dict | None:
     * "high X but low Y" reads two figures side by side -- an aggregate --
       and was sent to the same group test;
     * "find unusual activity" has a sensible default and is never ambiguous
-      (it was answered only with a question back).
+      (it was answered only with a question back);
+    * "by how much did A exceed B" is one figure taken from another -- an
+      aggregate -- and was sent to the group test as well.
     Anything else is returned exactly as the model gave it."""
     if not verdict:
         return verdict
@@ -259,6 +266,11 @@ def settle_intent(question: str, verdict: dict | None) -> dict | None:
     if intent == "compare" and _OVER_TIME.search(q):
         settled = "trend"
     elif intent in ("compare", "explain") and _HIGH_BUT_LOW.search(q):
+        settled = "aggregate"
+    elif intent == "compare" and _BY_HOW_MUCH.search(q):
+        # Asked in English it came back as a p-value across every group and
+        # the widest gap of AVERAGES, never the difference asked for
+        # (benchmark `na-minus-europe.en`, three runs, 2026-10-11).
         settled = "aggregate"
     elif _UNUSUAL.search(q) and not re.search(r"\bwhy\b", q, re.I) and intent not in ("chat", "describe_data"):
         settled = "aggregate"

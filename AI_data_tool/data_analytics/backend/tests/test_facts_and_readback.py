@@ -89,7 +89,7 @@ def test_series_kpi_and_time_sentences_carry_the_drawn_numbers():
     s = _say(df, "bar", {"dimension": "dept_name", "measure": "emp_no", "aggregation": "countd"})
     top = df.dept_name.value_counts()
     assert f"{top.index[0]} leads with {top.iloc[0]:,}" in s
-    assert _say(df, "kpi", {"measure": "emp_no", "aggregation": "countd"}) == f"Headcount: {len(df):,}."
+    assert _say(df, "kpi", {"measure": "emp_no", "aggregation": "countd"}) == f"Number of emps: {len(df):,}."
     s = _say(df, "line", {"dimension": "hire_date", "dimension_granularity": "year",
                           "measure": "salary", "aggregation": "avg"})
     assert s.startswith("Average salary falls from")

@@ -13,7 +13,7 @@ import DataPicker, { useItemMeta, type PickerItem } from './ask/DataPicker'
 import HistoryPanel from './ask/HistoryPanel'
 import { signalRobot } from './ask/robotMood'
 import { useConfirm } from '../components/ui/ConfirmDialog'
-import { connectionSuggestionCards, datasetSuggestionCards } from './ask/suggestions'
+import { connectionSuggestionCards, datasetSuggestionCards, type ColumnClasses } from './ask/suggestions'
 import './ask/ask.css'
 import './ask/askLayout.css'
 import './ask/askCards.css'
@@ -93,6 +93,7 @@ export default function AskAI() {
     ]
   }, [clean.visible, sourceItems, usableDatasets, linkedId])
   const [columnsById, setColumnsById] = useState<Record<number, DatasetColumn[]>>({})
+  const [classesById, setClassesById] = useState<Record<number, ColumnClasses>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -150,7 +151,11 @@ export default function AskAI() {
     if (datasetId == null || columnsById[datasetId] || typeof datasetsApi.get !== 'function') return
     let alive = true
     datasetsApi.get(datasetId)
-      .then(d => { if (alive && d?.columns) setColumnsById(m => ({ ...m, [datasetId]: d.columns })) })
+      .then(d => {
+        if (!alive || !d?.columns) return
+        setColumnsById(m => ({ ...m, [datasetId]: d.columns }))
+        if (d.column_meta) setClassesById(m => ({ ...m, [datasetId]: d.column_meta as ColumnClasses }))
+      })
       .catch(() => { /* suggestions fall back to generic ones */ })
     return () => { alive = false }
   }, [datasetId, columnsById])
@@ -243,8 +248,9 @@ export default function AskAI() {
   useEffect(() => { if (paneOpen && pendingQ) setPendingQ('') }, [paneOpen, pendingQ])
   const columns = datasetId != null ? columnsById[datasetId] : undefined
   const cards = useMemo(
-    () => (sourceId != null ? connectionSuggestionCards(t) : datasetSuggestionCards(columns, t)),
-    [sourceId, columns, t],
+    () => (sourceId != null ? connectionSuggestionCards(t)
+      : datasetSuggestionCards(columns, t, datasetId != null ? classesById[datasetId] : undefined)),
+    [sourceId, columns, t, datasetId, classesById],
   )
   const suggestions = useMemo(() => cards.map(c => c.text), [cards])
   const itemMeta = useItemMeta()

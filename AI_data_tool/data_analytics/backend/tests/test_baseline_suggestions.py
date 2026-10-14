@@ -24,12 +24,12 @@ ROLES = {"emp_no": "numeric", "gender": "categorical", "dept_name": "categorical
 
 
 def test_hr_basics_are_offered_and_counted_not_summed():
-    got = {b["title"]: b["config"] for b in baseline_suggestions(_hr(), ROLES)}
-    assert got["Headcount by dept name"] == {
+    got = {b["title"]: b["config"] for b in baseline_suggestions(_hr(), ROLES, {"salary": {"number": "level"}})}
+    assert got["Emp count by dept name"] == {
         "dimension": "dept_name", "measure": "emp_no", "aggregation": "countd",
         "sort": "desc", "sort_by": "value"}
-    assert got["Hires per year"]["dimension"] == "hire_date"
-    assert got["Hires per year"]["dimension_granularity"] == "year"
+    assert got["Emp count per year of hire date"]["dimension"] == "hire_date"
+    assert got["Emp count per year of hire date"]["dimension_granularity"] == "year"
     assert got["Average salary by gender"]["aggregation"] == "avg"
     assert got["Distribution of salary"] == {"measure": "salary", "bins": 20}
     # never a sum of the identifier
@@ -47,8 +47,12 @@ def test_end_dates_are_not_the_per_year_axis():
 def test_basics_lead_and_findings_fill_the_rest():
     finding = {"kind": "standout", "title": "Sales has the highest average salary",
                "columns": ["dept_name", "salary"], "score": 50}
-    out = suggest_widgets_from_findings([finding], ROLES, frame=_hr())
-    assert out[0]["title"] == "Headcount by dept name"
+    # The finding has to be TRUE of the rows: a chart whose bars are all the
+    # same height is no longer offered (services/suggest_gate.py).
+    df = _hr()
+    df.loc[df["dept_name"] == "Sales", "salary"] += 30000
+    out = suggest_widgets_from_findings([finding], ROLES, frame=df)
+    assert out[0]["title"] == "Emp count by dept name"
     assert any(o["title"] == "Sales has the highest average salary" for o in out)
 
 
@@ -65,11 +69,14 @@ def test_ineligible_columns_are_respected():
 def test_a_model_proposal_never_sums_a_salary_or_an_id():
     """HR re-test: the automation's model proposal had a SUM-of-salary KPI."""
     from app.services.suggest_dataset_dashboard import polish_widget
+    # What a salary IS comes from the dataset's stored classification (the
+    # model's or the author's), carried in the profile -- not from its name.
+    classed = {"columns": [{"name": "salary", "number": "level"}, {"name": "emp_no", "number": "code"}]}
     w = polish_widget({"widget_type": "kpi", "title": "Total Salary",
-                       "config": {"measure": "salary", "aggregation": "sum"}}, {})
+                       "config": {"measure": "salary", "aggregation": "sum"}}, classed)
     assert w["config"]["aggregation"] == "avg" and w["title"] == "Average Salary"
     w = polish_widget({"widget_type": "kpi", "title": "Employees",
-                       "config": {"measure": "emp_no", "aggregation": "sum"}}, {})
+                       "config": {"measure": "emp_no", "aggregation": "sum"}}, classed)
     assert w["config"]["aggregation"] == "countd"
     w = polish_widget({"widget_type": "kpi", "title": "Revenue",
                        "config": {"measure": "revenue", "aggregation": "sum"}}, {})

@@ -33,7 +33,8 @@ def test_answer_numbers_are_rounded_like_a_person_writes_them():
 
 def test_the_classifier_reads_an_arabic_value_by_its_meaning():
     from app.services.agent.nodes import classify as c
-    assert "قسم المبيعات" in c._EXAMPLES
+    # The example is neutral since phase 0 (no trade's vocabulary): a region, read by its meaning.
+    assert "المنطقة الشمالية" in c._EXAMPLES
     from app.services.agent.nodes import clarify as cl
     import inspect
     assert "never invent" in inspect.getsource(cl.clarify)

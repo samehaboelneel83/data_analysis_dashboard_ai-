@@ -100,3 +100,17 @@ async def test_a_missing_database_file_is_said_plainly(client, auth_headers, db_
     s = await client.get(f"/api/v1/data-sources/{src.id}/schema", headers=auth_headers["a"])
     assert s.status_code == 400 and "Database file not found" in s.json()["detail"]
     assert not (tmp_path / "nope.db").exists(), "testing must not create an empty database file"
+
+
+@pytest.mark.asyncio
+async def test_the_last_test_is_kept_with_the_connection(client, auth_headers, db_session, two_orgs, tmp_path):
+    """Persona test 2026-10-12 (plan 3.1): broken connections looked like
+    working ones in the list. The last test is kept and returned."""
+    src = DataSource(name="Gone", type="sqlite", config={"filepath": str(tmp_path / "nope.db")},
+                     org_id=two_orgs["a"]["org"].id)
+    db_session.add(src)
+    await db_session.commit()
+    await client.post(f"/api/v1/data-sources/{src.id}/test", headers=auth_headers["a"])
+    listed = (await client.get("/api/v1/data-sources", headers=auth_headers["a"])).json()
+    health = next(d for d in listed if d["id"] == src.id)["config"]["__health__"]
+    assert health["ok"] is False and health["error"].startswith("Database file not found") and health["at"]

@@ -35,7 +35,7 @@ export function useColumnProfile(ds: Dataset, name: string, analysis: Analysis):
   const cat = analysis.categorical?.columns?.[name]
   const dt = analysis.datetime?.columns?.[name]
   // A year or an id is a label, not a quantity: "2024", never "2,024".
-  const plain = !fmt && (nonAdditiveKind(name) === 'year' || nonAdditiveKind(name) === 'identifier')
+  const plain = !fmt && (nonAdditiveKind(name, ds.column_meta) === 'year' || nonAdditiveKind(name, ds.column_meta) === 'identifier')
   // Each value isolated (LRI…PDI): inside an Arabic sentence a range like
   // "$ -12,012 – $ 16,069" otherwise reorders around its signs and symbols.
   const iso = (x: string) => `\u2066${x}\u2069`

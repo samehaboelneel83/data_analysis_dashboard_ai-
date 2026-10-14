@@ -327,3 +327,29 @@ describe('the Ask AI button stays over the canvas (QA3 B1)', () => {
     } finally { col.remove() }
   })
 })
+
+describe('CopilotChat with no model', () => {
+  it('offers each ready chart as a button that adds it to the page', async () => {
+    vi.spyOn(reportsApi, 'copilot').mockResolvedValue({
+      reply: 'The whole answer\n- Amount by group: which is largest', lead: 'The words without the list',
+      applied: [], notes: [], results: [], without_ai: true,
+      suggestions: [{ title: 'Amount by group', sentence: 'which is largest', widget_type: 'bar',
+                      config: { dimension: 'group', measure: 'amount', aggregation: 'sum' } }],
+    })
+    const add = vi.spyOn(reportsApi, 'addWidget').mockResolvedValue({} as never)
+    const onApplied = mount()
+    openPanel()
+    type('amount by group')
+    await waitFor(() => expect(screen.getByText('The words without the list')).toBeInTheDocument())
+    // The list is the buttons, not a second copy in the text.
+    expect(screen.queryByText(/The whole answer/)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Add to page: Amount by group' }))
+    await waitFor(() => expect(add).toHaveBeenCalledTimes(1))
+    expect(add.mock.calls[0].slice(0, 2)).toEqual([9, 4])
+    expect(add.mock.calls[0][2]).toMatchObject({
+      widget_type: 'bar', title: 'Amount by group',
+      config: { dimension: 'group', measure: 'amount', aggregation: 'sum' } })
+    await waitFor(() => expect(onApplied).toHaveBeenCalledTimes(1))
+    expect(screen.getByRole('button', { name: 'Add to page: Amount by group' })).toBeDisabled()
+  })
+})

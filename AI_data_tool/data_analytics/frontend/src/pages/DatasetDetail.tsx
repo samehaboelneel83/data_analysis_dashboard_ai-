@@ -1,3 +1,4 @@
+import { sayText } from '../lib/readbackText'
 import { useEffect, useLayoutEffect, useState, useCallback, useRef, useContext } from 'react'
 import KeyInfluencersResultView from '../components/analysis/KeyInfluencersResult'
 import { pickInfluencerOutcome } from './datasetDetail/influencerOutcome'
@@ -10,6 +11,9 @@ import ChecksPanel, { ChecksBlockedDialog } from '../components/dataset/ChecksPa
 import IncrementalSettingsForm from '../components/dataset/IncrementalSettings'
 import StatisticsPanel from '../components/StatisticsPanel'
 import DatasetSensitivity from '../components/DatasetSensitivity'
+import DatasetAllowAi from '../components/DatasetAllowAi'
+import HealthChecks from '../components/HealthChecks'
+import DecisionProblemPanel from '../components/dataset/DecisionProblemPanel'
 import NotebookSnippet from '../components/NotebookSnippet'
 import LoadError from '../components/ui/LoadError'
 import LoadingState from '../components/ui/LoadingState'
@@ -790,6 +794,7 @@ export default function DatasetDetail() {
                   title={tr('dsf.certifiedBy', { who: certificationOf(ds)?.by_email ?? '' })}>✓ {tr('dsf.badge')}</span>
               : <span className="dl-dsd__pill">{tr('ov3.notCertified')}</span>}
             <DatasetSensitivity datasetId={ds.id} />
+            <DatasetAllowAi datasetId={ds.id} />
             {ds.shared && (
               <span className="dl-dsd__pill" title={tr('dataset.sharedTitle')}>
                 <IconLabel icon={Link2}>{tr('dataset.sharedWithYou')}</IconLabel>
@@ -1285,7 +1290,7 @@ export default function DatasetDetail() {
                       <>
                         <p data-testid="insights-narrative" dir="auto" style={{ fontSize: 13, background: 'var(--surface)', border: '1px solid var(--border)',
                           borderRadius: 'var(--radius)', padding: '10px 14px', marginBottom: 10 }}>
-                          {isolateNumbers(insights.narrative)}
+                          {isolateNumbers(sayText(tr, insights.narrative, (insights as { narrative_i18n?: unknown }).narrative_i18n as never))}
                         </p>
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 10 }}>
                           {insights.findings.map((f, i) => (
@@ -1315,8 +1320,8 @@ export default function DatasetDetail() {
                                 <span style={{ fontSize: 10.5, color: 'var(--muted)', marginInlineStart: 'auto' }}>{Math.round(f.score * 100)}</span>
                               </div>
                               {/* QA3 D5: own direction; numbers and ranges keep their order */}
-                              <div dir="auto" style={{ fontSize: 13, fontWeight: 600, marginBottom: 3 }}>{isolateNumbers(f.title)}</div>
-                              <div dir="auto" style={{ fontSize: 11, color: 'var(--muted)' }}>{isolateNumbers(f.detail)}</div>
+                              <div dir="auto" style={{ fontSize: 13, fontWeight: 600, marginBottom: 3 }}>{isolateNumbers(sayText(tr, f.title, (f as { title_i18n?: { key: string; vars?: Record<string, unknown> } | null }).title_i18n as never))}</div>
+                              <div dir="auto" style={{ fontSize: 11, color: 'var(--muted)' }}>{isolateNumbers(sayText(tr, f.detail, (f as { detail_i18n?: unknown }).detail_i18n as never))}</div>
                               <FindingChart datasetId={ds.id} finding={f}
                                 columnTypes={Object.fromEntries(ds.columns.map(c => [c.name, c.dtype ?? '']))} />
                             </div>
@@ -1361,6 +1366,7 @@ export default function DatasetDetail() {
                 )}
                 </>
               )}
+              {analysisPick === 'decide' && <DecisionProblemPanel datasetId={ds.id} />}
               {analysesFor(analysisPick) && (
                 <StatisticsPanel mode={ds.mode} datasetId={ds.id} columns={ds.columns ?? []} only={analysesFor(analysisPick)} />
               )}
@@ -1433,6 +1439,7 @@ export default function DatasetDetail() {
           insights={insights} insightsBusy={insightsBusy} onGenerateInsights={generateInsights}
           firstRun={firstRun} onBuild={() => void buildDashboard()} />
       )}
+      {tab === 'overview' && ds && (ds.filename || ds.mode === 'directquery') && <HealthChecks datasetId={ds.id} />}
 
       {/* ── Data tab ── */}
       {/* ── Data tab ── (redesign 3c: v1's left panel became a toolbar; each

@@ -73,6 +73,27 @@ def post_webhook(url: str, title: str, text: str) -> str | None:
         return f"webhook failed: {e}"
 
 
+def _content(payload: bytes) -> bytes:
+    """What a workbook SAYS, for "only if changed": every sheet's name and
+    cells. Its bytes cannot be compared -- a workbook stamps the second it was
+    built into itself, so two deliveries of the same data never had the same
+    bytes and "nothing sent, no change" could only happen when both were built
+    within the same second (found 2026-10-11, when a test that relied on that
+    failed). Anything that is not a workbook is compared as it is."""
+    import io
+    try:
+        from openpyxl import load_workbook
+        book = load_workbook(io.BytesIO(payload), read_only=True, data_only=True)
+    except Exception:                                       # noqa: BLE001 -- not a workbook
+        return payload
+    parts: list[str] = []
+    for sheet in book.worksheets:
+        parts.append(f"## {sheet.title}")
+        for row in sheet.iter_rows(values_only=True):
+            parts.append("\x1f".join("" if v is None else str(v) for v in row))
+    return "\n".join(parts).encode("utf-8")
+
+
 async def build_digest(db, report: Report, creator: User,
                        context_label: str | None = None, release=None,
                        skip_dataset_ids: set[int] | None = None,
@@ -274,6 +295,30 @@ async def run_schedule(db, schedule) -> None:
         _log("error", schedule.last_status)
         return
 
+    # A delivery is a download nobody is at the keyboard for: it is decided
+    # again at every run, as its creator stands NOW. An archived dashboard
+    # sends nothing; so does one its creator can no longer open, or may no
+    # longer take the data from (a share that was revoked, expired, or had
+    # its downloads switched off since the schedule was made).
+    from ..core.capability import effective_capability, export_refusal
+    refusal = None
+    if report.archived_at is not None:
+        refusal = "the dashboard is archived"
+    elif await effective_capability(db, creator, report.id) == "none":
+        refusal = "the person who set this up can no longer open the dashboard"
+    else:
+        try:
+            why = await export_refusal(db, creator, report)
+        except Exception:                                   # noqa: BLE001 -- unreadable: do not send
+            why = "access could not be checked"
+        if why:
+            refusal = "the person who set this up may no longer download from the dashboard"
+    if refusal:
+        schedule.last_status = f"not sent: {refusal}"[:200]
+        await db.commit()
+        _log("error", schedule.last_status)
+        return
+
     recipients = valid_recipients(schedule.recipients)
     about["recipients"] = ", ".join(str(r) for r in recipients)[:2000] or None
     if report is not None and not about["subject"]:
@@ -372,7 +417,7 @@ async def run_schedule(db, schedule) -> None:
         import hashlib
         h = hashlib.sha256()
         for _to, a, _n in (built or [([], attach, count_note)]):
-            h.update(a[1])
+            h.update(_content(a[1]))
         digest = h.hexdigest()
         if fmt == "pdf":
             # A PDF embeds its build time; compare the DATA instead.

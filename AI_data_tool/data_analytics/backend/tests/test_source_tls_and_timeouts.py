@@ -124,3 +124,68 @@ class TestConnectTimeout:
     def test_it_is_on_the_settings_page(self):
         from app.services.app_settings import BY_KEY
         assert BY_KEY["source_connect_timeout_s"].editable
+
+
+class TestSqlServerAndOracleCeiling:
+    """The two families that had no ceiling at all (docs/discovery/PLAN.md §AX).
+    Checked on the arguments and on a stand-in connection: no SQL Server or
+    Oracle server runs in this suite."""
+
+    class Conn:
+        timeout = 0
+        call_timeout = 0
+
+    def _specs(self):
+        return {k: v for k, v in C._REGISTRY.items()}
+
+    def _first(self, backend, driver):
+        for key in self._specs():
+            cfg = {"type": key, "host": "h", "database": "d"}
+            try:
+                if C._backend_of(cfg) == backend and C._driver_of(cfg) == driver:
+                    return cfg
+            except Exception:                       # noqa: BLE001
+                continue
+        return None
+
+    def test_pymssql_gets_a_query_timeout(self, limit):
+        cfg = self._first("mssql", "pymssql")
+        if cfg is None:
+            pytest.skip("no pymssql connector registered")
+        args = C.connect_args(cfg)
+        assert args["timeout"] == 120 and args["login_timeout"] == 8
+        assert C.statement_limit_hook(cfg) is None          # bounded by the argument
+
+    def test_pyodbc_gets_it_on_the_connection(self, limit, monkeypatch):
+        monkeypatch.setattr(C, "_backend_of", lambda cfg: "mssql")
+        monkeypatch.setattr(C, "_driver_of", lambda cfg: "pyodbc")
+        conn = self.Conn()
+        C.statement_limit_hook({"type": "x"})(conn)
+        assert conn.timeout == 120
+
+    def test_oracle_gets_a_call_timeout_in_milliseconds(self, limit, monkeypatch):
+        monkeypatch.setattr(C, "_backend_of", lambda cfg: "oracle")
+        monkeypatch.setattr(C, "_driver_of", lambda cfg: "oracledb")
+        conn = self.Conn()
+        C.statement_limit_hook({"type": "x"})(conn)
+        assert conn.call_timeout == 120_000
+
+    def test_zero_turns_it_off_and_other_families_have_no_hook(self, monkeypatch):
+        monkeypatch.setattr(settings, "source_statement_timeout_s", 0)
+        monkeypatch.setattr(C, "_backend_of", lambda cfg: "oracle")
+        monkeypatch.setattr(C, "_driver_of", lambda cfg: "oracledb")
+        assert C.statement_limit_hook({"type": "x"}) is None
+        monkeypatch.setattr(settings, "source_statement_timeout_s", 120)
+        monkeypatch.setattr(C, "_backend_of", lambda cfg: "postgresql")
+        assert C.statement_limit_hook(PG) is None
+
+    def test_the_engine_sets_it_on_every_new_connection(self, limit, monkeypatch, tmp_path):
+        from sqlalchemy import text
+        from app.services import engines
+        seen = []
+        monkeypatch.setattr(C, "statement_limit_hook", lambda cfg: seen.append)
+        cfg = {"type": "sqlite", "filepath": str(tmp_path / "x.db")}
+        engine = engines.get_engine(cfg)
+        with engine.connect() as conn:
+            conn.execute(text("select 1"))
+        assert len(seen) == 1

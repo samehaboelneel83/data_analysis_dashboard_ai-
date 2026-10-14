@@ -1,0 +1,2217 @@
+{
+ "s1": {
+  "flow": 57,
+  "demand": "Express shipments: how many are late, by destination governorate",
+  "questions": [
+   [
+    "q1",
+    "How many Express shipments are late in each governorate?"
+   ],
+   [
+    "q2",
+    "Which governorates have the highest number of late Express shipments?"
+   ],
+   [
+    "q3",
+    "What is the total number of late Express shipments across all governorates?"
+   ],
+   [
+    "q4",
+    "What is the average delivery time for late Express shipments by governorate?"
+   ],
+   [
+    "q5",
+    "How does the late rate vary by destination region?"
+   ]
+  ],
+  "failed": null,
+  "pages": [
+   {
+    "title": "Late Express Overview",
+    "answer": "There are 2,971 late Express shipments in total. By destination governorate, Cairo has the highest count with 727, while Port Said has the lowest with 89.",
+    "note": "This data holds only Express shipments.",
+    "unanswered": [
+     "This data could not answer: Which governorates have the highest number of late Express shipments?"
+    ],
+    "dataset": "Express shipments with late status by governorate -retry-4",
+    "widgets": [
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Late Rate by Region",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Delivery Time & Records",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "slicer",
+      "title": "Filter by destination governorate",
+      "finding": null,
+      "cfg": {
+       "dimension": "destination_governorate"
+      }
+     },
+     {
+      "q": "q3",
+      "type": "kpi",
+      "title": "Total late Express shipments",
+      "finding": "2,971",
+      "cfg": {
+       "measure": "shipment_id",
+       "aggregation": "count",
+       "filters": [
+        {
+         "column": "is_late",
+         "op": "eq",
+         "value": true
+        }
+       ]
+      }
+     },
+     {
+      "q": "q1",
+      "type": "bar",
+      "title": "Late Express shipments by destination governorate",
+      "finding": "Highest: Cairo (727); lowest: Port Said (89) (follows the size of each group)",
+      "cfg": {
+       "dimension": "destination_governorate",
+       "measure": "shipment_id",
+       "aggregation": "count",
+       "filters": [
+        {
+         "column": "is_late",
+         "op": "eq",
+         "value": true
+        }
+       ],
+       "limit": 12
+      }
+     }
+    ]
+   },
+   {
+    "title": "Late Rate by Region",
+    "answer": "Upper Egypt leads by share with a 26.9% late rate, while the Canal region has the lowest at 15.0%. The count of late shipments follows each group's size, with Assiut having the highest governorate rate at 28.1% and Suez the lowest at 15.1%.",
+    "note": "This data holds only Express shipments.",
+    "unanswered": [],
+    "dataset": "Express shipments with late status by governorate -retry-4",
+    "widgets": [
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Late Express Overview",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Delivery Time & Records",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "slicer",
+      "title": "Filter by destination region",
+      "finding": null,
+      "cfg": {
+       "dimension": "destination_region"
+      }
+     },
+     {
+      "q": null,
+      "type": "slicer",
+      "title": "Filter by destination governorate",
+      "finding": null,
+      "cfg": {
+       "dimension": "destination_governorate"
+      }
+     },
+     {
+      "q": "q5",
+      "type": "bar",
+      "title": "Late rate by destination region",
+      "finding": "Highest: Upper Egypt (26.9%); lowest: Canal (15.0%)",
+      "cfg": {
+       "dimension": "destination_region",
+       "measure": "is_late_pct",
+       "aggregation": "avg",
+       "filters": [
+        {
+         "column": "is_late",
+         "op": "in",
+         "value": [
+          true,
+          false
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "q": "q1",
+      "type": "bar",
+      "title": "Late rate by destination governorate",
+      "finding": "Highest: Assiut (28.1%); lowest: Suez (15.1%)",
+      "cfg": {
+       "dimension": "destination_governorate",
+       "measure": "is_late_pct",
+       "aggregation": "avg",
+       "filters": [
+        {
+         "column": "is_late",
+         "op": "in",
+         "value": [
+          true,
+          false
+         ]
+        }
+       ],
+       "limit": 12
+      }
+     },
+     {
+      "q": "q5",
+      "type": "donut",
+      "title": "Late vs on-time Express shipments",
+      "finding": "Highest: Not late (14,125); lowest: Late (2,971)",
+      "cfg": {
+       "dimension": "is_late_label",
+       "measure": "shipment_id",
+       "aggregation": "count",
+       "filters": [
+        {
+         "column": "is_late",
+         "op": "in",
+         "value": [
+          true,
+          false
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   {
+    "title": "Delivery Time & Records",
+    "answer": "Aswan has the highest typical delivery time for late Express shipments at 6.95, while Sharqia has the lowest at 4.90. There are 2,971 late Express shipment records available for lookup.",
+    "note": "This data holds only Express shipments.",
+    "unanswered": [],
+    "dataset": "Express shipments with late status by governorate -retry-4",
+    "widgets": [
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Late Express Overview",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Late Rate by Region",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "slicer",
+      "title": "Filter by destination governorate",
+      "finding": null,
+      "cfg": {
+       "dimension": "destination_governorate"
+      }
+     },
+     {
+      "q": "q4",
+      "type": "bar",
+      "title": "Typical delivery time for late Express shipments by governorate",
+      "finding": "Highest: Aswan (6.95); lowest: Sharqia (4.90)",
+      "cfg": {
+       "dimension": "destination_governorate",
+       "measure": "delivery_days",
+       "aggregation": "median",
+       "filters": [
+        {
+         "column": "is_late",
+         "op": "eq",
+         "value": true
+        }
+       ],
+       "limit": 12
+      }
+     },
+     {
+      "q": "q1",
+      "type": "table",
+      "title": "Late Express shipments to look up",
+      "finding": "2,971 records",
+      "cfg": {
+       "dimension": "shipment_id",
+       "limit": 25,
+       "filters": [
+        {
+         "column": "is_late",
+         "op": "eq",
+         "value": true
+        }
+       ]
+      }
+     }
+    ]
+   },
+   {
+    "title": "One destination governorate",
+    "answer": "",
+    "note": null,
+    "unanswered": [],
+    "dataset": "Express shipments with late status by governorate -retry-4",
+    "widgets": [
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Late Express Overview",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": "q3",
+      "type": "kpi",
+      "title": "Total late Express shipments",
+      "finding": "2,971",
+      "cfg": {
+       "measure": "shipment_id",
+       "aggregation": "count",
+       "filters": [
+        {
+         "column": "is_late",
+         "op": "eq",
+         "value": true
+        }
+       ]
+      }
+     },
+     {
+      "q": "q1",
+      "type": "table",
+      "title": "Late Express shipments to look up",
+      "finding": "2,971 records",
+      "cfg": {
+       "dimension": "shipment_id",
+       "limit": 25,
+       "filters": [
+        {
+         "column": "is_late",
+         "op": "eq",
+         "value": true
+        }
+       ]
+      }
+     }
+    ]
+   }
+  ]
+ },
+ "s2": {
+  "flow": 58,
+  "demand": "المرتجعات: أسبابها وعدد مرات حدوثها، حسب المحافظة وطريقة الدفع",
+  "questions": [
+   [
+    "q1",
+    "ما هي الأسباب الأكثر شيوعاً لرفض أو إرجاع الشحنات؟"
+   ],
+   [
+    "q2",
+    "ما هي المحافظات التي تسجل أعلى عدد من المرتجعات؟"
+   ],
+   [
+    "q3",
+    "أي طرق الدفع ترتبط بأعلى نسبة مرتجعات؟"
+   ],
+   [
+    "q4",
+    "ما هي نسبة المرتجعات مقارنة بإجمالي الشحنات؟"
+   ],
+   [
+    "q5",
+    "كيف تتغير أسباب المرتجعات بين المحافظات المختلفة؟"
+   ]
+  ],
+  "failed": null,
+  "pages": [
+   {
+    "title": "نظرة عامة على المرتجعات",
+    "answer": "نسبة المرتجعات من إجمالي الشحنات هي 11.3%. السبب الأكثر شيوعاً هو Changed mind بعدد 1,495، بينما الأقل شيوعاً هو Wrong address بعدد 1,380.",
+    "note": "نِسَب «status» تستثني الصفوف التي ما زالت عند “In transit”: ما ستؤول إليه غير معروف بعد.",
+    "unanswered": [],
+    "dataset": "كل الشحنات مع حالة المرتجع -retry-4",
+    "widgets": [
+     {
+      "q": null,
+      "type": "button",
+      "title": "انتقل إلى: المحافظات وطرق الدفع",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "button",
+      "title": "انتقل إلى: تفاصيل الحالات المرتجعة",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "slicer",
+      "title": "تصفية حسب return reason",
+      "finding": null,
+      "cfg": {
+       "dimension": "return_reason"
+      }
+     },
+     {
+      "q": "q4",
+      "type": "kpi",
+      "title": "نسبة المرتجعات من إجمالي الشحنات",
+      "finding": "11.3%",
+      "cfg": {
+       "measure": "status_returned_pct",
+       "aggregation": "avg",
+       "filters": [
+        {
+         "column": "status",
+         "op": "neq",
+         "value": "In transit"
+        }
+       ]
+      }
+     },
+     {
+      "q": "q1",
+      "type": "bar",
+      "title": "أسباب المرتجعات الأكثر شيوعاً",
+      "finding": "الأعلى: Changed mind (1,495)؛ الأدنى: Wrong address (1,380)",
+      "cfg": {
+       "dimension": "return_reason",
+       "measure": "shipment_id",
+       "aggregation": "count",
+       "filters": [
+        {
+         "column": "status",
+         "op": "eq",
+         "value": "Returned"
+        }
+       ]
+      }
+     }
+    ]
+   },
+   {
+    "title": "المحافظات وطرق الدفع",
+    "answer": "تتصدر محافظة Suez المرتجعات من حيث النسبة بـ 13.2%، بينما تتصدر القاهرة من حيث العدد بـ 1,890 مرتجعاً. بالنسبة لطرق الدفع، أعلى نسبة مرتجعات هي للنقد عند الاستلام بـ 15.3%.",
+    "note": "نِسَب «status» تستثني الصفوف التي ما زالت عند “In transit”: ما ستؤول إليه غير معروف بعد.",
+    "unanswered": [],
+    "dataset": "كل الشحنات مع حالة المرتجع -retry-4",
+    "widgets": [
+     {
+      "q": null,
+      "type": "button",
+      "title": "انتقل إلى: نظرة عامة على المرتجعات",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "button",
+      "title": "انتقل إلى: تفاصيل الحالات المرتجعة",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "slicer",
+      "title": "تصفية حسب destination governorate",
+      "finding": null,
+      "cfg": {
+       "dimension": "destination_governorate"
+      }
+     },
+     {
+      "q": null,
+      "type": "slicer",
+      "title": "تصفية حسب payment method",
+      "finding": null,
+      "cfg": {
+       "dimension": "payment_method"
+      }
+     },
+     {
+      "q": "q2",
+      "type": "bar",
+      "title": "أعلى المحافظات في عدد المرتجعات — النسبة داخل كل مجموعة (٪)",
+      "finding": "الأعلى: Suez (13.2%)؛ الأدنى: Qalyubia (11.0%)",
+      "cfg": {
+       "dimension": "destination_governorate",
+       "measure": "status_returned_pct",
+       "aggregation": "avg",
+       "filters": [
+        {
+         "column": "status",
+         "op": "neq",
+         "value": "In transit"
+        }
+       ],
+       "limit": 12
+      }
+     },
+     {
+      "q": "q2",
+      "type": "dual_axis_bar_line",
+      "title": "أعلى المحافظات في عدد المرتجعات",
+      "finding": "الأعلى: Cairo (1,890)؛ الأدنى: Fayoum (199) (يتبع حجم كل مجموعة)",
+      "cfg": {
+       "dimension": "destination_governorate",
+       "measure": "shipment_id",
+       "aggregation": "count",
+       "filters": [
+        {
+         "column": "status",
+         "op": "eq",
+         "value": "Returned"
+        }
+       ]
+      }
+     },
+     {
+      "q": "q3",
+      "type": "bar",
+      "title": "نسبة المرتجعات حسب طريقة الدفع",
+      "finding": "الأعلى: Cash on delivery (15.3%)؛ الأدنى: Prepaid wallet (4.3%)",
+      "cfg": {
+       "dimension": "payment_method",
+       "measure": "status_returned_pct",
+       "aggregation": "avg",
+       "filters": [
+        {
+         "column": "status",
+         "op": "neq",
+         "value": "In transit"
+        }
+       ]
+      }
+     },
+     {
+      "q": "q5",
+      "type": "heatmap",
+      "title": "أسباب المرتجعات حسب المحافظة",
+      "finding": "7,150 سجل",
+      "cfg": {
+       "dimension": "destination_governorate",
+       "dimension2": "return_reason",
+       "measure": "shipment_id",
+       "aggregation": "count",
+       "filters": [
+        {
+         "column": "status",
+         "op": "eq",
+         "value": "Returned"
+        }
+       ]
+      }
+     }
+    ]
+   },
+   {
+    "title": "تفاصيل الحالات المرتجعة",
+    "answer": "يبلغ إجمالي عدد سجلات الشحنات المرتجعة 7,150.",
+    "note": "نِسَب «status» تستثني الصفوف التي ما زالت عند “In transit”: ما ستؤول إليه غير معروف بعد.",
+    "unanswered": [],
+    "dataset": "كل الشحنات مع حالة المرتجع -retry-4",
+    "widgets": [
+     {
+      "q": null,
+      "type": "button",
+      "title": "انتقل إلى: نظرة عامة على المرتجعات",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "button",
+      "title": "انتقل إلى: المحافظات وطرق الدفع",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": "q1",
+      "type": "table",
+      "title": "قائمة الشحنات المرتجعة",
+      "finding": "7,150 سجل",
+      "cfg": {
+       "dimension": "shipment_id",
+       "filters": [
+        {
+         "column": "status",
+         "op": "eq",
+         "value": "Returned"
+        }
+       ],
+       "limit": 25
+      }
+     }
+    ]
+   },
+   {
+    "title": "تفاصيل destination governorate واحد",
+    "answer": "",
+    "note": null,
+    "unanswered": [],
+    "dataset": "كل الشحنات مع حالة المرتجع -retry-4",
+    "widgets": [
+     {
+      "q": null,
+      "type": "button",
+      "title": "انتقل إلى: نظرة عامة على المرتجعات",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": "q4",
+      "type": "kpi",
+      "title": "نسبة المرتجعات من إجمالي الشحنات",
+      "finding": "11.3%",
+      "cfg": {
+       "measure": "status_returned_pct",
+       "aggregation": "avg",
+       "filters": [
+        {
+         "column": "status",
+         "op": "neq",
+         "value": "In transit"
+        }
+       ]
+      }
+     },
+     {
+      "q": "q1",
+      "type": "table",
+      "title": "قائمة الشحنات المرتجعة",
+      "finding": "7,150 سجل",
+      "cfg": {
+       "dimension": "shipment_id",
+       "filters": [
+        {
+         "column": "status",
+         "op": "eq",
+         "value": "Returned"
+        }
+       ],
+       "limit": 25
+      }
+     }
+    ]
+   }
+  ]
+ },
+ "s3": {
+  "flow": 59,
+  "demand": "Delivery fees and COD amounts, by service type and by month",
+  "questions": [
+   [
+    "q1",
+    "What are the total delivery fees and COD amounts per month?"
+   ],
+   [
+    "q2",
+    "Which customers generated the highest total revenue?"
+   ],
+   [
+    "q3",
+    "Which service type makes the most money?"
+   ],
+   [
+    "q4",
+    "How does revenue vary by customer segment?"
+   ],
+   [
+    "q5",
+    "What is the total revenue by destination region?"
+   ]
+  ],
+  "failed": null,
+  "pages": [
+   {
+    "title": "Revenue Overview",
+    "answer": "In 2025, total delivery fees were 4,371,304 EGP and COD amounts were 12,871,334 EGP. By service type, International had the highest revenue at 1,924,323 EGP, while Standard collected the most COD at 6,748,179 EGP. Monthly delivery fees and COD ranged from 297,851 EGP in January to 453,380 EGP in December.",
+    "note": "This data holds only 2025 only.",
+    "unanswered": [],
+    "dataset": "2025 Shipments with Customer Details -retry-4",
+    "widgets": [
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Customer & Segment",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Region & Records",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "slicer",
+      "title": "Filter by service type",
+      "finding": null,
+      "cfg": {
+       "dimension": "service_type"
+      }
+     },
+     {
+      "q": "q1",
+      "type": "card",
+      "title": "2025 Delivery Fees & COD Collected",
+      "finding": "delivery fee egp: 4,371,304; cod amount egp: 12,871,334",
+      "cfg": {
+       "aggregation": "sum"
+      }
+     },
+     {
+      "q": "q1",
+      "type": "area",
+      "title": "Monthly Delivery Fees & COD",
+      "finding": "2025-01: 297,851 → 2025-12: 453,380 (+52%)",
+      "cfg": {
+       "dimension": "created_at",
+       "measure": "delivery_fee_egp",
+       "measure2": "cod_amount_egp",
+       "aggregation": "sum",
+       "dimension_granularity": "month"
+      }
+     },
+     {
+      "q": "q3",
+      "type": "bar",
+      "title": "Revenue by Service Type",
+      "finding": "Highest: International (1,924,323); lowest: Same Day (590,628)",
+      "cfg": {
+       "dimension": "service_type",
+       "measure": "delivery_fee_egp",
+       "aggregation": "sum"
+      }
+     },
+     {
+      "q": "q3",
+      "type": "bar",
+      "title": "COD Collected by Service Type",
+      "finding": "Highest: Standard (6,748,179); lowest: International (1,062,039)",
+      "cfg": {
+       "dimension": "service_type",
+       "measure": "cod_amount_egp",
+       "aggregation": "sum"
+      }
+     }
+    ]
+   },
+   {
+    "title": "Customer & Segment",
+    "answer": "The data for this page does not list delivery fees or COD amounts by service type or by month. It shows that E-commerce sellers had the highest delivery fees (3,458,292 EGP) and COD collected (11,619,908 EGP) among customer segments.",
+    "note": "This data holds only 2025 only.",
+    "unanswered": [],
+    "dataset": "2025 Shipments with Customer Details -retry-4",
+    "widgets": [
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Revenue Overview",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Region & Records",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "slicer",
+      "title": "Filter by segment",
+      "finding": null,
+      "cfg": {
+       "dimension": "segment"
+      }
+     },
+     {
+      "q": "q2",
+      "type": "dual_axis_bar_line",
+      "title": "Top 10 Customers by Revenue",
+      "finding": "Highest: Gamal Store (745,900); lowest: Saleh Pharma (66,241)",
+      "cfg": {
+       "dimension": "customer_name",
+       "measure": "delivery_fee_egp",
+       "measure2": "cod_amount_egp",
+       "aggregation": "sum"
+      }
+     },
+     {
+      "q": "q4",
+      "type": "bar",
+      "title": "Delivery Fees by Customer Segment",
+      "finding": "Highest: E-commerce seller (3,458,292); lowest: Individual (71,442)",
+      "cfg": {
+       "dimension": "segment",
+       "measure": "delivery_fee_egp",
+       "aggregation": "sum"
+      }
+     },
+     {
+      "q": "q4",
+      "type": "bar",
+      "title": "COD Collected by Customer Segment",
+      "finding": "Highest: E-commerce seller (11,619,908); lowest: Individual (130,736)",
+      "cfg": {
+       "dimension": "segment",
+       "measure": "cod_amount_egp",
+       "aggregation": "sum"
+      }
+     }
+    ]
+   },
+   {
+    "title": "Region & Records",
+    "answer": "This page does not provide delivery fees or COD amounts by service type or by month. It indicates that Greater Cairo had the highest delivery fees (2,382,434 EGP) and COD collected (7,021,916 EGP) by destination region.",
+    "note": "This data holds only 2025 only.",
+    "unanswered": [],
+    "dataset": "2025 Shipments with Customer Details -retry-4",
+    "widgets": [
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Revenue Overview",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Customer & Segment",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "slicer",
+      "title": "Filter by destination region",
+      "finding": null,
+      "cfg": {
+       "dimension": "destination_region"
+      }
+     },
+     {
+      "q": "q5",
+      "type": "bar",
+      "title": "Delivery Fees by Destination Region",
+      "finding": "Highest: Greater Cairo (2,382,434); lowest: Canal (331,797)",
+      "cfg": {
+       "dimension": "destination_region",
+       "measure": "delivery_fee_egp",
+       "aggregation": "sum"
+      }
+     },
+     {
+      "q": "q5",
+      "type": "bar",
+      "title": "COD Collected by Destination Region",
+      "finding": "Highest: Greater Cairo (7,021,916); lowest: Canal (1,043,682)",
+      "cfg": {
+       "dimension": "destination_region",
+       "measure": "cod_amount_egp",
+       "aggregation": "sum"
+      }
+     },
+     {
+      "q": "q1",
+      "type": "table",
+      "title": "Shipments with High COD",
+      "finding": "24,809 records",
+      "cfg": {
+       "limit": 25
+      }
+     }
+    ]
+   },
+   {
+    "title": "One destination region",
+    "answer": "",
+    "note": null,
+    "unanswered": [],
+    "dataset": "2025 Shipments with Customer Details -retry-4",
+    "widgets": [
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Revenue Overview",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": "q1",
+      "type": "card",
+      "title": "2025 Delivery Fees & COD Collected",
+      "finding": "delivery fee egp: 4,371,304; cod amount egp: 12,871,334",
+      "cfg": {
+       "aggregation": "sum"
+      }
+     },
+     {
+      "q": "q1",
+      "type": "area",
+      "title": "Monthly Delivery Fees & COD",
+      "finding": "2025-01: 297,851 → 2025-12: 453,380 (+52%)",
+      "cfg": {
+       "dimension": "created_at",
+       "measure": "delivery_fee_egp",
+       "measure2": "cod_amount_egp",
+       "aggregation": "sum",
+       "dimension_granularity": "month"
+      }
+     },
+     {
+      "q": "q1",
+      "type": "table",
+      "title": "Shipments with High COD",
+      "finding": "24,809 records",
+      "cfg": {
+       "limit": 25
+      }
+     }
+    ]
+   }
+  ]
+ },
+ "s4": {
+  "flow": 60,
+  "demand": "شكاوى الطرود التالفة: عدد الشكاوى ومجموع التعويضات وساعات الحل، حسب الفرع وحسب الفترة الزمنية",
+  "questions": [
+   [
+    "q1",
+    "أي الفروع لديها أعلى عدد من شكاوى الطرود التالفة؟"
+   ],
+   [
+    "q2",
+    "ما هو إجمالي مبلغ التعويضات المدفوعة للعملاء؟"
+   ],
+   [
+    "q3",
+    "كم ساعة يستغرق حل الشكوى في المتوسط؟"
+   ],
+   [
+    "q4",
+    "ما هي نسبة الشكاوى المفتوحة مقارنة بالمحلولة؟"
+   ],
+   [
+    "q5",
+    "أي نوع خدمة (عادي، سريع، إلخ) يرتبط بأعلى عدد من الشكاوى؟"
+   ]
+  ],
+  "failed": null,
+  "pages": [
+   {
+    "title": "نظرة عامة على الشكاوى",
+    "answer": "إجمالي شكاوى الطرود التالفة هو 252 شكوى، ومجموع التعويضات المدفوعة 109,858. متوسط ساعات حل الشكوى يبلغ 29.42 ساعة.",
+    "note": null,
+    "unanswered": [],
+    "dataset": "الشحنات مع شكاوى الطرود التالفة -retry-4",
+    "widgets": [
+     {
+      "q": null,
+      "type": "button",
+      "title": "انتقل إلى: مقارنة الفروع والخدمات",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "button",
+      "title": "انتقل إلى: التغير عبر الزمن",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": "q1",
+      "type": "kpi",
+      "title": "إجمالي شكاوى الطرود التالفة",
+      "finding": "252",
+      "cfg": {
+       "measure": "complaint_id",
+       "aggregation": "count",
+       "filters": [
+        {
+         "column": "complaint_id",
+         "op": "neq",
+         "value": null
+        }
+       ]
+      }
+     },
+     {
+      "q": "q2",
+      "type": "kpi",
+      "title": "إجمالي التعويضات المدفوعة",
+      "finding": "109,858",
+      "cfg": {
+       "measure": "compensation_egp",
+       "aggregation": "sum"
+      }
+     },
+     {
+      "q": "q3",
+      "type": "kpi",
+      "title": "متوسط ساعات حل الشكوى",
+      "finding": "29.42",
+      "cfg": {
+       "measure": "resolution_hours",
+       "aggregation": "avg"
+      }
+     },
+     {
+      "q": "q4",
+      "type": "kpi",
+      "title": "نسبة الشكاوى المفتوحة",
+      "finding": "0.0%",
+      "cfg": {
+       "measure": "complaint_status_open_pct",
+       "aggregation": "avg",
+       "filters": []
+      }
+     },
+     {
+      "q": "q4",
+      "type": "kpi",
+      "title": "نسبة الشكاوى المحلولة",
+      "finding": "0.4%",
+      "cfg": {
+       "measure": "complaint_status_resolved_pct",
+       "aggregation": "avg",
+       "filters": []
+      }
+     }
+    ]
+   },
+   {
+    "title": "مقارنة الفروع والخدمات",
+    "answer": "فرع Cairo Central Hub يتصدر في عدد الشكاوى (63) ومجموع التعويضات (30,808). أما فرع Assiut Central Hub فيسجل أعلى نسبة شكاوى تالفة (1.2%)، بينما فرع Alexandria Central Hub يسجل أدنى نسبة (0.3%).",
+    "note": null,
+    "unanswered": [],
+    "dataset": "الشحنات مع شكاوى الطرود التالفة -retry-4",
+    "widgets": [
+     {
+      "q": null,
+      "type": "button",
+      "title": "انتقل إلى: نظرة عامة على الشكاوى",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "button",
+      "title": "انتقل إلى: التغير عبر الزمن",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "slicer",
+      "title": "تصفية حسب branch name",
+      "finding": null,
+      "cfg": {
+       "dimension": "branch_name"
+      }
+     },
+     {
+      "q": null,
+      "type": "slicer",
+      "title": "تصفية حسب service type",
+      "finding": null,
+      "cfg": {
+       "dimension": "service_type"
+      }
+     },
+     {
+      "q": "q1",
+      "type": "dual_axis_bar_line",
+      "title": "عدد شكاوى الطرود التالفة حسب الفرع",
+      "finding": "الأعلى: Cairo Central Hub (63)؛ الأدنى: Dakahlia Central Hub (3)",
+      "cfg": {
+       "dimension": "branch_name",
+       "measure": "complaint_id",
+       "aggregation": "count"
+      }
+     },
+     {
+      "q": "q5",
+      "type": "bar",
+      "title": "عدد الشكاوى حسب نوع الخدمة",
+      "finding": "الأعلى: Standard (124)؛ الأدنى: International (18)",
+      "cfg": {
+       "dimension": "service_type",
+       "measure": "complaint_id",
+       "aggregation": "count"
+      }
+     },
+     {
+      "q": "q1",
+      "type": "bar",
+      "title": "نسبة الشكاوى التالفة حسب الفرع",
+      "finding": "الأعلى: Assiut Central Hub (1.2%)؛ الأدنى: Alexandria Central Hub (0.3%)",
+      "cfg": {
+       "dimension": "branch_name",
+       "measure": "has_damaged_complaint_pct",
+       "aggregation": "avg",
+       "limit": 10,
+       "filters": [
+        {
+         "column": "has_damaged_complaint",
+         "op": "in",
+         "value": [
+          true,
+          false
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "q": "q2",
+      "type": "dual_axis_bar_line",
+      "title": "مجموع التعويضات حسب الفرع",
+      "finding": "الأعلى: Cairo Central Hub (30,808)؛ الأدنى: Sharqia Central Hub (925.01)",
+      "cfg": {
+       "dimension": "branch_name",
+       "measure": "compensation_egp",
+       "aggregation": "sum"
+      }
+     }
+    ]
+   },
+   {
+    "title": "التغير عبر الزمن",
+    "answer": "تغير عدد الشكاوى الشهرية من 2 في يناير 2024 إلى 8 في سبتمبر 2026. تغير مجموع التعويضات من 501.94 إلى 3,318، بينما انخفض متوسط ساعات الحل من 44.90 إلى 27.04.",
+    "note": null,
+    "unanswered": [],
+    "dataset": "الشحنات مع شكاوى الطرود التالفة -retry-4",
+    "widgets": [
+     {
+      "q": null,
+      "type": "button",
+      "title": "انتقل إلى: نظرة عامة على الشكاوى",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "button",
+      "title": "انتقل إلى: مقارنة الفروع والخدمات",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": "q1",
+      "type": "area",
+      "title": "عدد الشكاوى الشهرية",
+      "finding": "2024-01: 2 ← 2026-09: 8 (+300%)",
+      "cfg": {
+       "dimension": "created_at",
+       "measure": "complaint_id",
+       "aggregation": "count",
+       "dimension_granularity": "month"
+      }
+     },
+     {
+      "q": "q2",
+      "type": "line",
+      "title": "مجموع التعويضات الشهرية",
+      "finding": "2024-01: 501.94 ← 2026-09: 3,318 (+561%)",
+      "cfg": {
+       "dimension": "created_at",
+       "measure": "compensation_egp",
+       "aggregation": "sum",
+       "dimension_granularity": "month"
+      }
+     },
+     {
+      "q": "q3",
+      "type": "line",
+      "title": "متوسط ساعات الحل الشهرية",
+      "finding": "2024-01: 44.90 ← 2026-09: 27.04 (-40%)",
+      "cfg": {
+       "dimension": "created_at",
+       "measure": "resolution_hours",
+       "aggregation": "avg",
+       "dimension_granularity": "month"
+      }
+     }
+    ]
+   },
+   {
+    "title": "تفاصيل branch name واحد",
+    "answer": "",
+    "note": null,
+    "unanswered": [],
+    "dataset": "الشحنات مع شكاوى الطرود التالفة -retry-4",
+    "widgets": [
+     {
+      "q": null,
+      "type": "button",
+      "title": "انتقل إلى: نظرة عامة على الشكاوى",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": "q1",
+      "type": "kpi",
+      "title": "إجمالي شكاوى الطرود التالفة",
+      "finding": "252",
+      "cfg": {
+       "measure": "complaint_id",
+       "aggregation": "count",
+       "filters": [
+        {
+         "column": "complaint_id",
+         "op": "neq",
+         "value": null
+        }
+       ]
+      }
+     },
+     {
+      "q": "q2",
+      "type": "kpi",
+      "title": "إجمالي التعويضات المدفوعة",
+      "finding": "109,858",
+      "cfg": {
+       "measure": "compensation_egp",
+       "aggregation": "sum"
+      }
+     },
+     {
+      "q": "q3",
+      "type": "kpi",
+      "title": "متوسط ساعات حل الشكوى",
+      "finding": "29.42",
+      "cfg": {
+       "measure": "resolution_hours",
+       "aggregation": "avg"
+      }
+     },
+     {
+      "q": "q4",
+      "type": "kpi",
+      "title": "نسبة الشكاوى المفتوحة",
+      "finding": "0.0%",
+      "cfg": {
+       "measure": "complaint_status_open_pct",
+       "aggregation": "avg",
+       "filters": []
+      }
+     },
+     {
+      "q": "q1",
+      "type": "area",
+      "title": "عدد الشكاوى الشهرية",
+      "finding": "2024-01: 2 ← 2026-09: 8 (+300%)",
+      "cfg": {
+       "dimension": "created_at",
+       "measure": "complaint_id",
+       "aggregation": "count",
+       "dimension_granularity": "month"
+      }
+     }
+    ]
+   }
+  ]
+ },
+ "s5": {
+  "flow": 64,
+  "demand": "Same-day deliveries to Giza: on-time performance and customer ratings, by parcel category and by month",
+  "questions": [
+   [
+    "q1",
+    "What percentage of deliveries were on time?"
+   ],
+   [
+    "q2",
+    "What is the average customer rating?"
+   ],
+   [
+    "q3",
+    "Which parcel categories have the most complaints?"
+   ],
+   [
+    "q4",
+    "How long does it take to resolve complaints on average?"
+   ],
+   [
+    "q5",
+    "What is the total compensation paid for complaints?"
+   ]
+  ],
+  "failed": null,
+  "pages": [
+   {
+    "title": "Performance Overview",
+    "answer": "The overall on-time delivery rate for same-day deliveries to Giza is 67.6%, with an average customer rating of 3.83. These figures cover a total of 2,641 deliveries.",
+    "note": "This data holds only service type: Same Day; destination governorate: Giza.",
+    "unanswered": [],
+    "dataset": "Same-day deliveries to Giza with complaint details -retry-4",
+    "widgets": [
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Category Breakdown",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Monthly Trends",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": "q1",
+      "type": "kpi",
+      "title": "On-time delivery rate",
+      "finding": "67.6%",
+      "cfg": {
+       "measure": "is_late_not_pct",
+       "aggregation": "avg",
+       "filters": [
+        {
+         "column": "is_late",
+         "op": "in",
+         "value": [
+          true,
+          false
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "q": "q2",
+      "type": "kpi",
+      "title": "Average customer rating",
+      "finding": "3.83",
+      "cfg": {
+       "measure": "customer_rating",
+       "aggregation": "avg"
+      }
+     },
+     {
+      "q": "q5",
+      "type": "kpi",
+      "title": "Total compensation paid",
+      "finding": "12,194",
+      "cfg": {
+       "measure": "compensation_egp",
+       "aggregation": "sum"
+      }
+     },
+     {
+      "q": "q1",
+      "type": "kpi",
+      "title": "Total deliveries",
+      "finding": "2,641",
+      "cfg": {
+       "measure": "shipment_id",
+       "aggregation": "count"
+      }
+     }
+    ]
+   },
+   {
+    "title": "Category Breakdown",
+    "answer": "Spare parts lead in both on-time performance at 71.1% and customer ratings at 4.06, while Food & sweets has the lowest on-time rate at 65.4% and Home goods the lowest rating at 3.69. Clothing has the highest complaint count at 22, whereas Spare parts has the lowest at 11.",
+    "note": "This data holds only service type: Same Day; destination governorate: Giza.",
+    "unanswered": [],
+    "dataset": "Same-day deliveries to Giza with complaint details -retry-4",
+    "widgets": [
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Performance Overview",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Monthly Trends",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "slicer",
+      "title": "Filter by parcel category",
+      "finding": null,
+      "cfg": {
+       "dimension": "parcel_category"
+      }
+     },
+     {
+      "q": "q1",
+      "type": "bar",
+      "title": "On-time rate by parcel category",
+      "finding": "Highest: Spare parts (71.1%); lowest: Food & sweets (65.4%)",
+      "cfg": {
+       "dimension": "parcel_category",
+       "measure": "is_late_not_pct",
+       "aggregation": "avg",
+       "filters": [
+        {
+         "column": "is_late",
+         "op": "in",
+         "value": [
+          true,
+          false
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "q": "q2",
+      "type": "bar",
+      "title": "Average rating by parcel category",
+      "finding": "Highest: Spare parts (4.06); lowest: Home goods (3.69)",
+      "cfg": {
+       "dimension": "parcel_category",
+       "measure": "customer_rating",
+       "aggregation": "avg"
+      }
+     },
+     {
+      "q": "q3",
+      "type": "treemap",
+      "title": "Complaint rate by parcel category",
+      "finding": "Highest: Clothing (22); lowest: Spare parts (11)",
+      "cfg": {
+       "dimension": "parcel_category",
+       "measure": "complaint_type",
+       "aggregation": "count",
+       "filters": [
+        {
+         "column": "complaint_type",
+         "op": "neq",
+         "value": null
+        }
+       ]
+      }
+     }
+    ]
+   },
+   {
+    "title": "Monthly Trends",
+    "answer": "The on-time rate ranged from a low of 63.16% in March 2024 to a high of 71.67% in August 2024. Customer ratings peaked at 4.11 in February 2024 and bottomed out at 3.55 in June 2024.",
+    "note": "This data holds only service type: Same Day; destination governorate: Giza.",
+    "unanswered": [],
+    "dataset": "Same-day deliveries to Giza with complaint details -retry-4",
+    "widgets": [
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Performance Overview",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Category Breakdown",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": "q1",
+      "type": "line",
+      "title": "On-time rate by month",
+      "finding": "2024-01: 65.2% → 2026-09: 65.3% (+0%)",
+      "cfg": {
+       "dimension": "promised_date",
+       "measure": "is_late_not_pct",
+       "aggregation": "avg",
+       "filters": [
+        {
+         "column": "is_late",
+         "op": "in",
+         "value": [
+          true,
+          false
+         ]
+        },
+        {
+         "column": "promised_date",
+         "op": "gte",
+         "value": "2024-01-01"
+        },
+        {
+         "column": "promised_date",
+         "op": "lt",
+         "value": "2026-10-01"
+        }
+       ],
+       "dimension_granularity": "month"
+      }
+     },
+     {
+      "q": "q2",
+      "type": "line",
+      "title": "Average rating by month",
+      "finding": "2024-01: 3.81 → 2026-09: 3.93 (+3%)",
+      "cfg": {
+       "dimension": "promised_date",
+       "measure": "customer_rating",
+       "aggregation": "avg",
+       "dimension_granularity": "month",
+       "filters": [
+        {
+         "column": "promised_date",
+         "op": "gte",
+         "value": "2024-01-01"
+        },
+        {
+         "column": "promised_date",
+         "op": "lt",
+         "value": "2026-10-01"
+        }
+       ]
+      }
+     },
+     {
+      "q": "q4",
+      "type": "line",
+      "title": "Average resolution time by month",
+      "finding": "2024-01: 11.30 → 2026-09: 48.60 (+330%)",
+      "cfg": {
+       "dimension": "promised_date",
+       "measure": "resolution_hours",
+       "aggregation": "avg",
+       "dimension_granularity": "month",
+       "filters": [
+        {
+         "column": "promised_date",
+         "op": "gte",
+         "value": "2024-01-01"
+        },
+        {
+         "column": "promised_date",
+         "op": "lt",
+         "value": "2026-10-01"
+        }
+       ]
+      }
+     }
+    ]
+   },
+   {
+    "title": "One parcel category",
+    "answer": "",
+    "note": null,
+    "unanswered": [],
+    "dataset": "Same-day deliveries to Giza with complaint details -retry-4",
+    "widgets": [
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Performance Overview",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": "q1",
+      "type": "kpi",
+      "title": "On-time delivery rate",
+      "finding": "67.6%",
+      "cfg": {
+       "measure": "is_late_not_pct",
+       "aggregation": "avg",
+       "filters": [
+        {
+         "column": "is_late",
+         "op": "in",
+         "value": [
+          true,
+          false
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "q": "q2",
+      "type": "kpi",
+      "title": "Average customer rating",
+      "finding": "3.83",
+      "cfg": {
+       "measure": "customer_rating",
+       "aggregation": "avg"
+      }
+     },
+     {
+      "q": "q5",
+      "type": "kpi",
+      "title": "Total compensation paid",
+      "finding": "12,194",
+      "cfg": {
+       "measure": "compensation_egp",
+       "aggregation": "sum"
+      }
+     },
+     {
+      "q": "q1",
+      "type": "kpi",
+      "title": "Total deliveries",
+      "finding": "2,641",
+      "cfg": {
+       "measure": "shipment_id",
+       "aggregation": "count"
+      }
+     },
+     {
+      "q": "q1",
+      "type": "line",
+      "title": "On-time rate by month",
+      "finding": "2024-01: 65.2% → 2026-09: 65.3% (+0%)",
+      "cfg": {
+       "dimension": "promised_date",
+       "measure": "is_late_not_pct",
+       "aggregation": "avg",
+       "filters": [
+        {
+         "column": "is_late",
+         "op": "in",
+         "value": [
+          true,
+          false
+         ]
+        },
+        {
+         "column": "promised_date",
+         "op": "gte",
+         "value": "2024-01-01"
+        },
+        {
+         "column": "promised_date",
+         "op": "lt",
+         "value": "2026-10-01"
+        }
+       ],
+       "dimension_granularity": "month"
+      }
+     }
+    ]
+   }
+  ]
+ },
+ "s6": {
+  "flow": 62,
+  "demand": "Drone deliveries: how many there are and where they go, by destination governorate and by region",
+  "questions": [
+   [
+    "q1",
+    "How many drone deliveries are there in total?"
+   ],
+   [
+    "q2",
+    "Which governorates receive the most drone deliveries?"
+   ],
+   [
+    "q3",
+    "How are drone deliveries distributed across the four regions?"
+   ],
+   [
+    "q4",
+    "What is the average delivery fee for drone deliveries?"
+   ],
+   [
+    "q5",
+    "What percentage of drone deliveries are marked as late?"
+   ]
+  ],
+  "failed": null,
+  "pages": [
+   {
+    "title": "Delivery Overview",
+    "answer": "There are 62,662 total shipments. The typical delivery fee is 102.82 and the late delivery rate is 17.7%.",
+    "note": "This data has nothing called “drone deliveries”, so this page shows everything it holds.",
+    "unanswered": [],
+    "dataset": "All shipments by destination -retry-4",
+    "widgets": [
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Destination Breakdown",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Delivery Performance",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": "q1",
+      "type": "kpi",
+      "title": "Total Shipments",
+      "finding": "62,662",
+      "cfg": {
+       "measure": "shipment_id",
+       "aggregation": "count"
+      }
+     },
+     {
+      "q": "q4",
+      "type": "kpi",
+      "title": "Typical Delivery Fee",
+      "finding": "102.82",
+      "cfg": {
+       "measure": "delivery_fee_egp",
+       "aggregation": "median"
+      }
+     },
+     {
+      "q": "q5",
+      "type": "kpi",
+      "title": "Late Delivery Rate",
+      "finding": "17.7%",
+      "cfg": {
+       "measure": "is_late_pct",
+       "aggregation": "avg",
+       "filters": [
+        {
+         "column": "is_late",
+         "op": "in",
+         "value": [
+          true,
+          false
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   {
+    "title": "Destination Breakdown",
+    "answer": "Cairo leads by count with 16,689 shipments, while Assiut has the lowest count at 1,694. By region, Greater Cairo leads with 34,234 shipments, and the Canal region has the lowest count at 4,944.",
+    "note": "This data has nothing called “drone deliveries”, so this page shows everything it holds.",
+    "unanswered": [],
+    "dataset": "All shipments by destination -retry-4",
+    "widgets": [
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Delivery Overview",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Delivery Performance",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "slicer",
+      "title": "Filter by destination region",
+      "finding": null,
+      "cfg": {
+       "dimension": "destination_region"
+      }
+     },
+     {
+      "q": null,
+      "type": "slicer",
+      "title": "Filter by destination governorate",
+      "finding": null,
+      "cfg": {
+       "dimension": "destination_governorate"
+      }
+     },
+     {
+      "q": "q2",
+      "type": "dual_axis_bar_line",
+      "title": "Shipments by Governorate",
+      "finding": "Highest: Cairo (16,689); lowest: Assiut (1,694)",
+      "cfg": {
+       "dimension": "destination_governorate",
+       "measure": "shipment_id",
+       "aggregation": "count"
+      }
+     },
+     {
+      "q": "q3",
+      "type": "donut",
+      "title": "Shipments by Region",
+      "finding": "Highest: Greater Cairo (34,234); lowest: Canal (4,944)",
+      "cfg": {
+       "dimension": "destination_region",
+       "measure": "shipment_id",
+       "aggregation": "count"
+      }
+     }
+    ]
+   },
+   {
+    "title": "Delivery Performance",
+    "answer": "Upper Egypt has the highest late rate at 24.2%, while the Canal region has the lowest at 13.8%. Aswan has the highest typical delivery time at 4.40, and Gharbia has the lowest at 3.20.",
+    "note": "This data has nothing called “drone deliveries”, so this page shows everything it holds.",
+    "unanswered": [],
+    "dataset": "All shipments by destination -retry-4",
+    "widgets": [
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Delivery Overview",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Destination Breakdown",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "slicer",
+      "title": "Filter by destination region",
+      "finding": null,
+      "cfg": {
+       "dimension": "destination_region"
+      }
+     },
+     {
+      "q": null,
+      "type": "slicer",
+      "title": "Filter by destination governorate",
+      "finding": null,
+      "cfg": {
+       "dimension": "destination_governorate"
+      }
+     },
+     {
+      "q": "q5",
+      "type": "bar",
+      "title": "Late Rate by Region",
+      "finding": "Highest: Upper Egypt (24.2%); lowest: Canal (13.8%)",
+      "cfg": {
+       "dimension": "destination_region",
+       "measure": "is_late_pct",
+       "aggregation": "avg",
+       "filters": [
+        {
+         "column": "is_late",
+         "op": "in",
+         "value": [
+          true,
+          false
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "q": "q2",
+      "type": "bar",
+      "title": "Typical Delivery Time by Governorate",
+      "finding": "Highest: Aswan (4.40); lowest: Gharbia (3.20)",
+      "cfg": {
+       "dimension": "destination_governorate",
+       "measure": "delivery_days",
+       "aggregation": "median",
+       "limit": 10
+      }
+     }
+    ]
+   },
+   {
+    "title": "One destination governorate",
+    "answer": "",
+    "note": null,
+    "unanswered": [],
+    "dataset": "All shipments by destination -retry-4",
+    "widgets": [
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Delivery Overview",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": "q1",
+      "type": "kpi",
+      "title": "Total Shipments",
+      "finding": "62,662",
+      "cfg": {
+       "measure": "shipment_id",
+       "aggregation": "count"
+      }
+     },
+     {
+      "q": "q4",
+      "type": "kpi",
+      "title": "Typical Delivery Fee",
+      "finding": "102.82",
+      "cfg": {
+       "measure": "delivery_fee_egp",
+       "aggregation": "median"
+      }
+     },
+     {
+      "q": "q5",
+      "type": "kpi",
+      "title": "Late Delivery Rate",
+      "finding": "17.7%",
+      "cfg": {
+       "measure": "is_late_pct",
+       "aggregation": "avg",
+       "filters": [
+        {
+         "column": "is_late",
+         "op": "in",
+         "value": [
+          true,
+          false
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   }
+  ]
+ },
+ "s7": {
+  "flow": 63,
+  "demand": "Shipments: delivery performance, fees, and outcomes, by service type and by month",
+  "questions": [
+   [
+    "q1",
+    "How many shipments were delivered, returned, or lost?"
+   ],
+   [
+    "q2",
+    "What is the average delivery time for each service type?"
+   ],
+   [
+    "q3",
+    "Which service types have the highest late delivery rates?"
+   ],
+   [
+    "q4",
+    "What is the total delivery fee revenue by month?"
+   ],
+   [
+    "q5",
+    "How do cash-on-delivery amounts vary by parcel category?"
+   ],
+   [
+    "q6",
+    "What are the most common reasons for returned shipments?"
+   ]
+  ],
+  "failed": null,
+  "pages": [
+   {
+    "title": "Delivery Outcomes",
+    "answer": "Out of 62,662 total shipments, 54,885 were Delivered and 277 were Lost. Same Day service has the highest late delivery rate at 31.53%, while Standard service has the lowest at 13.63%.",
+    "note": "Shares of “status” leave out the rows still at “In transit”: what becomes of them is not known yet.",
+    "unanswered": [],
+    "dataset": "All shipments with delivery details -retry-4",
+    "widgets": [
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Service & Fees",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Returns & Records",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "slicer",
+      "title": "Filter by service type",
+      "finding": null,
+      "cfg": {
+       "dimension": "service_type"
+      }
+     },
+     {
+      "q": null,
+      "type": "slicer",
+      "title": "Filter by status",
+      "finding": null,
+      "cfg": {
+       "dimension": "status"
+      }
+     },
+     {
+      "q": "q1",
+      "type": "kpi",
+      "title": "Total Shipments",
+      "finding": "62,662",
+      "cfg": {
+       "measure": "shipment_id",
+       "aggregation": "count"
+      }
+     },
+     {
+      "q": "q1",
+      "type": "donut",
+      "title": "Shipment Status Breakdown",
+      "finding": "Highest: Delivered (54,885); lowest: Lost (277)",
+      "cfg": {
+       "dimension": "status",
+       "measure": "shipment_id",
+       "aggregation": "count"
+      }
+     },
+     {
+      "q": "q3",
+      "type": "bar",
+      "title": "Late Delivery Rate by Service Type",
+      "finding": "Highest: Same Day (31.5%); lowest: Standard (13.6%)",
+      "cfg": {
+       "dimension": "service_type",
+       "measure": "is_late_pct",
+       "aggregation": "avg",
+       "filters": [
+        {
+         "column": "is_late",
+         "op": "in",
+         "value": [
+          true,
+          false
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   {
+    "title": "Service & Fees",
+    "answer": "International service has the highest average delivery time at 7.97, whereas Same Day is the lowest at 1.54. Monthly delivery fee revenue increased from 195,187 in 2024-01 to 422,348 in 2026-09, a rise of 116%.",
+    "note": "Shares of “status” leave out the rows still at “In transit”: what becomes of them is not known yet.",
+    "unanswered": [],
+    "dataset": "All shipments with delivery details -retry-4",
+    "widgets": [
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Delivery Outcomes",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Returns & Records",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "slicer",
+      "title": "Filter by service type",
+      "finding": null,
+      "cfg": {
+       "dimension": "service_type"
+      }
+     },
+     {
+      "q": null,
+      "type": "slicer",
+      "title": "Filter by parcel category",
+      "finding": null,
+      "cfg": {
+       "dimension": "parcel_category"
+      }
+     },
+     {
+      "q": "q2",
+      "type": "bar",
+      "title": "Average Delivery Time by Service Type",
+      "finding": "Highest: International (7.97); lowest: Same Day (1.54)",
+      "cfg": {
+       "dimension": "service_type",
+       "measure": "delivery_days",
+       "aggregation": "avg"
+      }
+     },
+     {
+      "q": "q4",
+      "type": "area",
+      "title": "Monthly Delivery Fee Revenue",
+      "finding": "2024-01: 195,187 → 2026-09: 422,348 (+116%)",
+      "cfg": {
+       "dimension": "created_at",
+       "measure": "delivery_fee_egp",
+       "aggregation": "sum",
+       "dimension_granularity": "month"
+      }
+     },
+     {
+      "q": "q5",
+      "type": "bar",
+      "title": "COD Amounts by Parcel Category",
+      "finding": "Highest: Cosmetics (4,187,262); lowest: Food & sweets (3,967,745)",
+      "cfg": {
+       "dimension": "parcel_category",
+       "measure": "cod_amount_egp",
+       "aggregation": "sum"
+      }
+     }
+    ]
+   },
+   {
+    "title": "Returns & Records",
+    "answer": "The most common return reason is Changed mind with 1,467 instances, while Wrong address is the lowest with 1,351. The dataset contains 62,662 shipment records.",
+    "note": "Shares of “status” leave out the rows still at “In transit”: what becomes of them is not known yet.",
+    "unanswered": [],
+    "dataset": "All shipments with delivery details -retry-4",
+    "widgets": [
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Delivery Outcomes",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Service & Fees",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": null,
+      "type": "slicer",
+      "title": "Filter by return reason",
+      "finding": null,
+      "cfg": {
+       "dimension": "return_reason"
+      }
+     },
+     {
+      "q": "q6",
+      "type": "bar",
+      "title": "Common Return Reasons",
+      "finding": "Highest: Changed mind (1,467); lowest: Wrong address (1,351)",
+      "cfg": {
+       "dimension": "return_reason",
+       "measure": "shipment_id",
+       "aggregation": "count",
+       "filters": [
+        {
+         "column": "status",
+         "op": "eq",
+         "value": "Returned"
+        }
+       ]
+      }
+     },
+     {
+      "q": "q1",
+      "type": "table",
+      "title": "Shipment Records",
+      "finding": "62,662 records",
+      "cfg": {
+       "dimension": "shipment_id",
+       "limit": 25
+      }
+     }
+    ]
+   },
+   {
+    "title": "One service type",
+    "answer": "",
+    "note": null,
+    "unanswered": [],
+    "dataset": "All shipments with delivery details -retry-4",
+    "widgets": [
+     {
+      "q": null,
+      "type": "button",
+      "title": "Go to: Delivery Outcomes",
+      "finding": null,
+      "cfg": {}
+     },
+     {
+      "q": "q1",
+      "type": "kpi",
+      "title": "Total Shipments",
+      "finding": "62,662",
+      "cfg": {
+       "measure": "shipment_id",
+       "aggregation": "count"
+      }
+     },
+     {
+      "q": "q4",
+      "type": "area",
+      "title": "Monthly Delivery Fee Revenue",
+      "finding": "2024-01: 195,187 → 2026-09: 422,348 (+116%)",
+      "cfg": {
+       "dimension": "created_at",
+       "measure": "delivery_fee_egp",
+       "aggregation": "sum",
+       "dimension_granularity": "month"
+      }
+     },
+     {
+      "q": "q1",
+      "type": "table",
+      "title": "Shipment Records",
+      "finding": "62,662 records",
+      "cfg": {
+       "dimension": "shipment_id",
+       "limit": 25
+      }
+     }
+    ]
+   }
+  ]
+ }
+}

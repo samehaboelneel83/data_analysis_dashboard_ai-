@@ -39,6 +39,8 @@ of them were blank on screen.
 """
 from __future__ import annotations
 
+from .llm import data_block as _data_block
+
 import asyncio
 import json
 import re
@@ -114,8 +116,8 @@ WIDGET_GUIDE: dict[str, str] = {
     "waterfall": "how a total is built up or eroded, step by step.",
     "funnel": "attrition through ordered stages.",
     "table": "the rows themselves, for looking a record up: `columns` (a list of the columns "
-             "to show) with optional `filters`, `sort_col`, `sort` and `limit` -- e.g. the late "
-             "orders, the students needing follow-up. With a `dimension` and a measure it is a "
+             "to show) with optional `filters`, `sort_col`, `sort` and `limit` -- e.g. the rows "
+             "that are overdue, the ones needing follow-up. With a `dimension` and a measure it is a "
              "grouped table instead; by an identifier that only works as a top list (`limit` <= 25).",
     "crosstab": "a measure across two categories, as a grid of numbers.",
     "matrix": "a measure across two categories, as a grid of numbers.",
@@ -148,8 +150,8 @@ WIDGET_GUIDE: dict[str, str] = {
     "org": "a reporting line. Takes `id_col`, `parent_col` and `label_col`.",
     "schedule": "intervals over time. Takes `start` and `end` date columns.",
     "bubble": "three numbers per category: x (`measure`), y (`measure2`) and `size`. A date "
-              "column is read as years since it (tenure); `size` may be the identifier with "
-              "`size_aggregation: countd` to size by headcount.",
+              "column is read as years since it; `size` may be the identifier with "
+              "`size_aggregation: countd` to size by how many distinct ones there are.",
     "numeric_series": "the relationship between two measures: `measure` (x) against `measure2` "
                       "(y), row by row. Use when the question is whether one moves with the other.",
     "map_points": "locations on a map. Needs latitude and longitude.",
@@ -173,19 +175,19 @@ WIDGET_GUIDE: dict[str, str] = {
                      "(a date is read as years).",
     "model_rules": "which values go together (association rules). Optional `predictors` "
                    "(columns to mine) and `response` (the column the rules conclude).",
+    "model_influencers": "which values of the other columns go with an outcome, against its "
+                         "overall rate. `response` is the outcome, optional `event_value` the "
+                         "value of interest, optional `predictors` the columns to look in.",
 }
 
-#: Widget types that need something the profile can tell us about in advance.
-#: The value is the profile key that must be non-empty.
-_NEEDS_STRUCTURE = {
-    "map_points": "coordinate_pairs", "map_bubbles": "coordinate_pairs",
-    "map_clusters": "coordinate_pairs", "map_density": "coordinate_pairs",
-    "map_lines": "coordinate_pairs", "map_network": "coordinate_pairs",
-    "map_layers": "coordinate_pairs",
-    "org": "parent_child",
-    "tree": "hierarchies", "sunburst": "hierarchies",
-    "icicle": "hierarchies", "dendrogram": "hierarchies",
-}
+#: What a widget type needs of the table before it is worth offering lives in
+#: ONE place now -- services/discovery/capabilities.py -- beside what every
+#: analysis needs. These names stay as this module's view of it.
+from .discovery.capabilities import (NEEDS_COUNTRY as _NEEDS_COUNTRY, NEEDS_DATE as _NEEDS_DATE,  # noqa: E402
+                                     NEEDS_STRUCTURE as _NEEDS_STRUCTURE,
+                                     NEEDS_TWO_CATEGORIES as _NEEDS_TWO_CATEGORIES,
+                                     NEEDS_TWO_MEASURES as _NEEDS_TWO_MEASURES,
+                                     NOT_PROPOSABLE as _NOT_PROPOSABLE)
 
 #: Config keys that are SETTINGS rather than field roles: their values are
 #: numbers, booleans or enumerations, and are never column names.
@@ -194,7 +196,16 @@ _SETTING_KEYS = ("aggregation", "aggregation2", "limit", "sort", "sort_by",
                  "inner_widget_type", "why", "bins", "baseline", "bar_mode",
                  "show_totals", "show_subtotals", "x_axis_angle", "filters",
                  "event_value", "max_depth", "size_aggregation", "x_axis_label",
-                 "y_axis_label", "target_value", "sort_order")
+                 "y_axis_label", "target_value", "target_period", "sort_order",
+                 # A line that is read, a Pareto, a headline's history (discovery, phase 2-3).
+                 "dimension2_granularity", "bridge_from", "difference_of", "timeline_notes", "anomaly_band", "change_point", "pareto", "trend_good", "sparkline_granularity",
+                 "y2_axis_label",
+                 # How a gauge or a filter control is drawn (bullet, progress; buttons, dropdown).
+                 "gauge_shape", "slicer_mode",
+                 "influencer_style", "influencer_direction", "influencer_limit", "influencer_details",
+                 "influencer_format", "influencer_decimals", "rules_view", "rules_items", "model_tab", "points",
+                 # An ordinal axis's real order, and a reader's line under a number.
+                 "category_order", "caption")
 
 #: What `_apply_filters` actually implements. An operator outside this list is
 #: swallowed there without complaint, which would leave a chart showing
@@ -212,38 +223,22 @@ _CATEGORY_AXIS = ("bar", "pie", "donut", "treemap", "dot_plot", "needle",
 READABLE_CATEGORIES = 12
 
 
-#: The two map types that place rows by COUNTRY NAME rather than by coordinates.
-#: Detected by column name, which is how such a column is actually named, and
-#: gated because a choropleth of Egyptian governorates matched nothing and drew a
-#: blank world map on a real dashboard in this repository.
-_NEEDS_COUNTRY = ("map_choropleth", "map_pie")
 _COUNTRY_WORDS = ("country", "nation", "country_name", "country_code", "iso_country")
 
 
 def _has_country_column(profile: dict) -> bool:
     from .dataset_profile import _looks_like
-    return any(_looks_like(c["name"], _COUNTRY_WORDS)
+    # The stored classification first (a column the author -- or the
+    # classifier -- marked as holding countries, whatever it is called), then
+    # the name.
+    return any(c.get("geo_level") == "country" or (c.get("geo_level") is None
+                                                   and _looks_like(c["name"], _COUNTRY_WORDS))
                for c in profile.get("columns", [])
                if c["role"] == "categorical")
 
 
-#: Types that need a date column to mean anything.
-_NEEDS_DATE = ("line", "area", "step", "forecast", "ribbon", "schedule",
-               "dual_axis_time_series", "comparative_time_series", "bubble_change")
 
-#: Types that need at least two numeric columns.
-_NEEDS_TWO_MEASURES = ("scatter", "bubble", "numeric_series", "correlation_matrix",
-                       "parallel_coordinates", "dual_axis_bar", "dual_axis_line",
-                       "dual_axis_bar_line", "butterfly", "vector_plot")
 
-#: Types deliberately withheld from the model. They carry no data (a text box, a
-#: shape) or need a target the model cannot know (a button's action), so
-#: proposing them is noise on a first draft.
-#: `script` is withheld for a stronger reason than the rest: its content is
-#: Python the server executes, only an admin may author one, and a proposed
-#: tile with no code is a tile that shows an error.
-_NOT_PROPOSABLE = ("text", "image", "shape", "button", "web_content", "container",
-                   "custom_visual", "slicer", "script")
 
 PROPOSALS_SCHEMA = {
     "type": "object",
@@ -316,8 +311,7 @@ def usable_widgets(profile: dict) -> list[str]:
         if wt in _NEEDS_TWO_MEASURES and len(numeric) < 2 \
                 and not (wt == "bubble" and numeric and has_date):
             continue
-        if wt in ("heatmap", "crosstab", "matrix", "sankey", "network", "map_pie") \
-                and len(categorical) < 2:
+        if wt in _NEEDS_TWO_CATEGORIES and len(categorical) < 2:
             continue
         # A table of numbers by DAY has no category but every trend: without
         # this the daily-ops data offered no line chart at all, and the model
@@ -426,7 +420,7 @@ Propose {count} different dashboards. Make them genuinely different from each \
 other -- different questions, not the same page reordered. Each needs a title, a \
 one-sentence rationale naming who it is for and what it answers, and 4 to 8 \
 widgets. Give every widget a `why`: the question it answers, in one short \
-sentence.""".format(person=person, questions=questions, data=describe_for_prompt(profile, knowledge),
+sentence.""".format(person=person, questions=questions, data=_data_block(describe_for_prompt(profile, knowledge)),
                     menu=_menu_text(profile), count=count,
                     facts=("\nMEASURED FACTS (exact, computed on the rows this person may see)\n"
                            + facts + "\n\nBuild on these facts. Prefer charts that show a "
@@ -957,6 +951,19 @@ def _is_bounded_measure(name: str, column: dict) -> bool:
         return False
 
 
+#: Words for a part of the calendar, as a title says it (English and Arabic).
+_TIME_PARTS = (
+    ("hour_of_day", re.compile(r"\b(hour of (the )?day|by hour|per hour|hourly|time of day)\b|ساعة|الساعات", re.I)),
+    ("weekday", re.compile(r"\b(day of (the )?week|weekdays?|by day of week)\b|أيام الأسبوع|يوم الأسبوع", re.I)),
+    ("month_of_year", re.compile(r"\b(month of (the )?year|by calendar month|seasonality)\b|أشهر السنة|شهر السنة", re.I)),
+)
+
+
+def time_part_named(title: str) -> str | None:
+    """The calendar part a title asks to group by, or None."""
+    return next((grain for grain, words in _TIME_PARTS if words.search(title or "")), None)
+
+
 def polish_widget(widget: dict, profile: dict) -> dict:
     """Fill in the settings an author would set and a model routinely forgets.
 
@@ -990,6 +997,13 @@ def polish_widget(widget: dict, profile: dict) -> dict:
     if isinstance(axis, str) and axis in known and known[axis].get("role") != "datetime" \
             and config.get("dimension_granularity"):
         config.pop("dimension_granularity")
+
+    # A part of the day, week or year named in the title is what the axis
+    # groups by: "Average earnings by hour of day" grouped by DATE drew one
+    # point per day from 2002 to 2024 (persona test 2026-10-12).
+    part = time_part_named(str(widget.get("title") or ""))
+    if part and isinstance(axis, str) and known.get(axis, {}).get("role") == "datetime":
+        config["dimension_granularity"] = part
 
     # A row limit on a grouped TIME axis keeps the earliest N periods: "EGX30
     # index trend" stopped at 2004-Q4 on data running to 2026 (guided-setup
@@ -1034,21 +1048,37 @@ def polish_widget(widget: dict, profile: dict) -> dict:
     whole = widget.get("widget_type") in ("pie", "donut", "treemap", "sunburst", "circle_pack",
                                           "icicle", "waterfall", "funnel")
     if isinstance(meas, str) and str(config.get("aggregation") or "").lower() == "sum" and not whole:
-        from .semantic_guard import default_summary, is_identifier
-        if is_identifier(meas, None):
+        from .semantic_guard import default_summary, is_identifier, meta_of
+        # What the column IS comes from its stored classification, carried in
+        # the profile -- not from a list of one industry's column names.
+        _classes = meta_of(profile)
+        if is_identifier(meas, _classes):
             config["aggregation"] = "countd"
         else:
-            summ = default_summary(meas, None)
+            summ = default_summary(meas, _classes)
             if summ in ("avg", "median"):
                 config["aggregation"] = summ
                 if isinstance(title, str):
                     word = "Average" if summ == "avg" else "Median"
                     title = re.sub(r"^(total|sum of)\s+", f"{word} ", title, flags=re.I)
 
+    # An average, a rate or an extreme per group is ranked only over groups with
+    # enough rows behind it (admin setting `min_group_rows`); a total keeps all.
+    if isinstance(dim, str) and not is_time_axis and not config.get("min_group_rows") \
+            and str(config.get("aggregation") or "").lower() in _RANKED_PER_ROW:
+        from ..core.config import settings
+        floor = int(getattr(settings, "min_group_rows", 30) or 0)
+        if floor > 1:
+            config["min_group_rows"] = floor
+
     out = {**widget, "config": config}
     if title is not None:
         out["title"] = title
     return out
+
+
+#: Aggregations that describe a group's typical row, not its total.
+_RANKED_PER_ROW = frozenset({"avg", "mean", "median", "min", "max", "std", "stddev"})
 
 
 #: Distinguishes "caller said nothing" from "caller said there is no model".
@@ -1109,11 +1139,34 @@ async def suggest_for_dataset(profile: dict, goal: str | None, count: int = 3,
 
             sem = asyncio.Semaphore(PROBE_CONCURRENCY)
 
+            drawn_results: dict = {}
+
             async def _guarded(w):
                 async with sem:
-                    return await _probe(w, probe)
+                    return await _probe(w, probe, drawn_results)
 
             results = await asyncio.gather(*(_guarded(w) for w in candidates)) if candidates else []
+            # The common gate (services/suggest_gate.py): a chart that draws and
+            # says nothing -- one bar, the same value everywhere, a headline of
+            # zero -- is refused here as it is in the guided setup, and goes
+            # back to the model with its reason like any other refusal.
+            from .suggest_gate import REASONS, date_columns, says_nothing
+            _dates = date_columns(profile)
+            judged = []
+            for widget, (drew, rows, why) in zip(candidates, results):
+                if drew and id(widget) in drawn_results:
+                    nothing = says_nothing(widget, drawn_results[id(widget)], _dates)
+                    # "The same in every group" is an ANSWER when somebody asked
+                    # the question: with a stated goal ("I run HR") the model's
+                    # "average salary by gender" stays even though the two
+                    # averages are level -- that is the finding. With no goal it
+                    # is a chart nobody asked for that shows nothing.
+                    if nothing == REASONS["flat"] and (goal or "").strip():
+                        nothing = None
+                    if nothing:
+                        drew, why = False, nothing
+                judged.append((drew, rows, why))
+            results = judged
             # Zipped back onto `candidates`, so the order the model chose
             # survives being probed out of sequence -- the tiles are laid out in
             # exactly this order.
@@ -1198,7 +1251,7 @@ _RESULT_METADATA = frozenset({"truncation", "relative_dates", "partial_period", 
                               "evidence", "notes", "warnings", "disclosure"})
 
 
-async def _probe(widget: dict, probe) -> tuple[bool, int, str]:
+async def _probe(widget: dict, probe, keep: dict | None = None) -> tuple[bool, int, str]:
     """Did this widget actually draw, how much, and if not -- why not?
 
     The shaper's own verdict is the authority. Counting rows under a key of my
@@ -1218,6 +1271,9 @@ async def _probe(widget: dict, probe) -> tuple[bool, int, str]:
         result = await probe(widget["widget_type"], widget["config"])
     except Exception as exc:                                 # noqa: BLE001
         return False, 0, "could not be drawn ({})".format(type(exc).__name__)
+    if keep is not None:
+        # What it drew, for the common gate: judged once, never drawn twice.
+        keep[id(widget)] = result
     # A probe may hand back its own refusal rather than an empty shape.
     if isinstance(result, dict) and result.get("unsupported"):
         return False, 0, str(result["unsupported"])

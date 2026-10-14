@@ -57,14 +57,14 @@ describe('SuggestFromSourceDialog', () => {
     const ask = vi.spyOn(dataSourcesApi, 'suggestDashboard')
       .mockResolvedValue({ ok: true, reason: '', suggestion: SUGGESTION })
     open()
-    fireEvent.change(screen.getByPlaceholderText(/ward sister/),
-                     { target: { value: 'a ward sister' } })
-    fireEvent.change(screen.getByPlaceholderText(/queue builds up/),
-                     { target: { value: 'night shifts' } })
+    fireEvent.change(screen.getByPlaceholderText(/team lead/),
+                     { target: { value: 'a team lead' } })
+    fireEvent.change(screen.getByPlaceholderText(/slow down/),
+                     { target: { value: 'slow steps' } })
     fireEvent.click(screen.getByRole('button', { name: 'Suggest' }))
 
     await waitFor(() => expect(ask).toHaveBeenCalledWith(
-      3, { for_role: 'a ward sister', goal: 'night shifts' }))
+      3, { for_role: 'a team lead', goal: 'slow steps' }))
     expect(await screen.findByText('Emergency department flow')).toBeInTheDocument()
     expect(screen.getByText(/limited to the ten busiest/)).toBeInTheDocument()
   })
@@ -76,7 +76,7 @@ describe('SuggestFromSourceDialog', () => {
       .mockResolvedValue({ ok: false, reason: 'the model endpoint is not configured',
                            suggestion: null })
     open()
-    fireEvent.change(screen.getByPlaceholderText(/ward sister/), { target: { value: 'me' } })
+    fireEvent.change(screen.getByPlaceholderText(/team lead/), { target: { value: 'me' } })
     fireEvent.click(screen.getByRole('button', { name: 'Suggest' }))
     expect(await screen.findByText(/model endpoint is not configured/)).toBeInTheDocument()
   })
@@ -98,7 +98,7 @@ describe('SuggestFromSourceDialog', () => {
                   by_name: false }],
     })
     open()
-    fireEvent.change(screen.getByPlaceholderText(/ward sister/), { target: { value: 'me' } })
+    fireEvent.change(screen.getByPlaceholderText(/team lead/), { target: { value: 'me' } })
     fireEvent.click(screen.getByRole('button', { name: 'Suggest' }))
 
     expect(await screen.findByText('You may already have this')).toBeInTheDocument()
@@ -118,7 +118,7 @@ describe('SuggestFromSourceDialog', () => {
     const addWidget = vi.spyOn(reportsApi, 'addWidget').mockResolvedValue({} as never)
 
     open()
-    fireEvent.change(screen.getByPlaceholderText(/ward sister/), { target: { value: 'me' } })
+    fireEvent.change(screen.getByPlaceholderText(/team lead/), { target: { value: 'me' } })
     fireEvent.click(screen.getByRole('button', { name: 'Suggest' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Create it' }))
 
@@ -141,7 +141,7 @@ describe('SuggestFromSourceDialog', () => {
     vi.spyOn(dataSourcesApi, 'import')
       .mockRejectedValue({ response: { data: { detail: 'the query timed out' } } })
     open()
-    fireEvent.change(screen.getByPlaceholderText(/ward sister/), { target: { value: 'me' } })
+    fireEvent.change(screen.getByPlaceholderText(/team lead/), { target: { value: 'me' } })
     fireEvent.click(screen.getByRole('button', { name: 'Suggest' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Create it' }))
     /* The query already ran against the database when it was proposed, so a

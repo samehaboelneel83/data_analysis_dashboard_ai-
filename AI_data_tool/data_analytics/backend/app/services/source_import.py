@@ -267,8 +267,34 @@ async def import_from_source(db: AsyncSession, current_user: User, ds: DataSourc
         await db.refresh(dataset)
         return {'id': dataset.id, 'name': dataset.name, 'row_count': 0, 'col_count': dataset.col_count, 'mode': 'directquery'}
 
+    # A large import is written to disk as it arrives (connections.Streamed):
+    # it gets a folder of its own to be written in, removed whatever happens.
+    import shutil
+    import tempfile
+
+    from .connections import Streamed
+    from .upload_store import allocate_path as _allocate
+    stream_dir = tempfile.mkdtemp(prefix="import_", dir=str(Path(_allocate(current_user.org_id, "import.parquet")).parent))
+
+    def _prepare(chunk):
+        # What `_write_aside` does to a whole frame, done to each chunk as it
+        # passes: instants to the reference zone, then the conversions type
+        # detection makes in place (an epoch number or a text date becomes a date).
+        dupes = duplicate_columns(chunk.columns)
+        if dupes:
+            raise ValueError(
+                "The query returns more than one column named %s. Give each one a "
+                "different name with AS, for example `l.unit AS lab_unit`."
+                % ", ".join("'%s'" % d for d in dupes))
+        from .timezones import normalize_instants
+        normalize_instants(chunk)
+        detect_types(chunk)
+        return chunk
+
     def _fetch():
-        df = import_to_dataframe(cfg, req.table, req.query)
+        df = import_to_dataframe(cfg, req.table, req.query, stream_dir=stream_dir, prepare=_prepare)
+        if isinstance(df, Streamed):
+            return df
         # Two columns with the same name make `df[name]` a DataFrame rather than a
         # Series, and every later truth test on it raises a pandas message that
         # names nothing the person wrote. Refuse here, naming the column instead.
@@ -281,6 +307,15 @@ async def import_from_source(db: AsyncSession, current_user: User, ds: DataSourc
         return df
 
     def _write_aside(df, file_path_hint: str | None):
+        if isinstance(df, Streamed):
+            # Already on disk, as parquet: that file IS the dataset (no CSV
+            # beside it -- at this size a second copy is the larger cost). A
+            # re-import of a dataset that was a CSV gets a new file; the old
+            # one is removed once the new one is in place.
+            keep = file_path_hint if file_path_hint and str(file_path_hint).lower().endswith(".parquet") else None
+            file_path = Path(keep) if keep else Path(_allocate(current_user.org_id, "import.parquet"))
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            return file_path, Path(df.path), detect_types(df.sample)
         if file_path_hint:
             file_path = Path(file_path_hint)
             file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -311,6 +346,8 @@ async def import_from_source(db: AsyncSession, current_user: User, ds: DataSourc
 
     def _swap_in(file_path: Path, tmp: Path) -> None:
         os.replace(tmp, file_path)
+        if str(file_path).lower().endswith(".parquet"):
+            return                             # a streamed import: the parquet file is the dataset
         write_parquet_sidecar(str(file_path))  # already on a worker thread
 
     # Three stages with a checkpoint between each, so a queued import can be
@@ -319,35 +356,52 @@ async def import_from_source(db: AsyncSession, current_user: User, ds: DataSourc
     try:
         df = await asyncio.to_thread(_fetch)
     except Exception as e:
+        shutil.rmtree(stream_dir, ignore_errors=True)
         raise ImportRefused(str(e))
-    await _checkpoint(checkpoint, "writing", rows=len(df))
+    streamed = isinstance(df, Streamed)
+    n_rows = df.rows if streamed else len(df)
+    n_cols = len(df.columns)
+    await _checkpoint(checkpoint, "writing", rows=n_rows)
     try:
         target, tmp, type_map = await asyncio.to_thread(
             _write_aside, df, existing.filename if existing is not None else None)
     except Exception as e:
+        shutil.rmtree(stream_dir, ignore_errors=True)
         raise ImportRefused(str(e))
     try:
-        await _checkpoint(checkpoint, "saving", rows=len(df))
+        await _checkpoint(checkpoint, "saving", rows=n_rows)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
+        shutil.rmtree(stream_dir, ignore_errors=True)
         raise
     try:
         await asyncio.to_thread(_swap_in, target, tmp)
     except Exception as e:
         Path(tmp).unlink(missing_ok=True)
+        shutil.rmtree(stream_dir, ignore_errors=True)
         raise ImportRefused(str(e))
     file_path = str(target)
+    shutil.rmtree(stream_dir, ignore_errors=True)
+    old = existing.filename if existing is not None else None
+    if streamed and old and str(old) != file_path:
+        # The dataset was a CSV and is now this parquet file: the old file and its copy go.
+        from .frame_cache import remove_parquet_sidecar
+        Path(old).unlink(missing_ok=True)
+        remove_parquet_sidecar(str(old))
 
+    # How empty each column is: counted on every row either way (a streamed
+    # import counted it on disk; its sample is only for the types).
     new_cols = [DatasetColumn(name=col_name, dtype=dtype,
-                               missing_pct=missing_pct(df[col_name]), stats={})
+                               missing_pct=(df.missing.get(col_name, 0.0) if streamed else missing_pct(df[col_name])),
+                               stats={})
                 for col_name, dtype in type_map.items()]
 
     if existing is not None:
         existing.name = req.dataset_name
         existing.description = f"Imported from {ds.name} ({ds.type})"
         existing.filename = file_path
-        existing.row_count = len(df)
-        existing.col_count = len(df.columns)
+        existing.row_count = n_rows
+        existing.col_count = n_cols
         existing.file_size = Path(file_path).stat().st_size
         existing.data_source_id = ds.id
         existing.source_table = req.table
@@ -388,8 +442,8 @@ async def import_from_source(db: AsyncSession, current_user: User, ds: DataSourc
         name=req.dataset_name,
         description=f"Imported from {ds.name} ({ds.type})",
         filename=file_path,
-        row_count=len(df),
-        col_count=len(df.columns),
+        row_count=n_rows,
+        col_count=n_cols,
         file_size=Path(file_path).stat().st_size,
         data_source_id=ds.id,
         source_table=req.table,

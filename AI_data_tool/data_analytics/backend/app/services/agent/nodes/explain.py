@@ -2,6 +2,8 @@
 correctly computed result must not be discarded when prose generation fails."""
 from __future__ import annotations
 
+from ...llm import data_block as _data_block
+
 import math
 from decimal import Decimal
 
@@ -303,7 +305,7 @@ async def describe(question: str, results: dict[str, StepResult],
             "figures are a sample of a larger result means you describe the "
             "sample AS a sample.")},
          {"role": "user", "content": (
-             f"Their message: {question}\n\nFigures:\n{_facts(results, sink_ids, names)}\n\n"
+             f"Their message: {question}\n\nFigures:\n{_data_block(_facts(results, sink_ids, names), "query results")}\n\n"
              f"Notes: {'; '.join(concerns) or 'none'}")}],
         max_tokens=300, temperature=0.2)
     return got.strip() if got else None
@@ -346,7 +348,7 @@ async def explain(question: str, results: dict[str, StepResult],
             "to determine', which misrepresent a real, computed empty "
             "result as a failure.")},
          {"role": "user", "content": (
-             f"Question: {question}\n\nFigures:\n{_facts(results, sink_ids, names)}\n\n"
+             f"Question: {question}\n\nFigures:\n{_data_block(_facts(results, sink_ids, names), "query results")}\n\n"
              f"Notes: {'; '.join(concerns) or 'none'}")}],
         max_tokens=250, temperature=0.2)
     return got.strip() if got else None

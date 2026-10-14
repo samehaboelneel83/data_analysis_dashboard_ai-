@@ -126,13 +126,14 @@ async def distributed_fields(db: AsyncSession, report: Report) -> dict:
     release = await latest_release(db, report.id)
     if release is not None:
         rep = release.snapshot.get("report") or {}
-        return {"theme": rep.get("theme") or report.theme, "dataset_id": rep.get("dataset_id"),
+        return {"theme": rep.get("theme") or report.theme, "style": rep.get("style") or {},
+                "dataset_id": rep.get("dataset_id"),
                 "common_filters": list(release.snapshot.get("common_filters") or [])}
     rows = (await db.execute(
         select(CommonFilter).where(CommonFilter.report_id == report.id)
         .order_by(CommonFilter.position, CommonFilter.id)
     )).scalars().all()
-    return {"theme": report.theme, "dataset_id": report.dataset_id,
+    return {"theme": report.theme, "style": report.style or {}, "dataset_id": report.dataset_id,
             "common_filters": [{"id": f.id, "column": f.column, "op": f.op, "value": f.value} for f in rows]}
 
 
@@ -199,7 +200,9 @@ async def _resolve_link(db: AsyncSession, token: str) -> tuple[ShareLink, Report
     link = (await db.execute(
         select(ShareLink).where(ShareLink.token_hash == hash_token(token))
     )).scalar_one_or_none()
-    if link is None or link.revoked_at is not None or _expired(link.expires_at):
+    from ..core.config import settings as _platform
+    if (link is None or link.revoked_at is not None or _expired(link.expires_at)
+            or not _platform.guest_links_enabled):          # the policy off closes every link
         raise HTTPException(404, "This link does not exist or has expired")
     report = await db.get(Report, link.report_id)
     # Role rides along eagerly: resolve_rls_expr reads creator.role.is_org_admin
@@ -208,6 +211,14 @@ async def _resolve_link(db: AsyncSession, token: str) -> tuple[ShareLink, Report
         select(User).options(selectinload(User.role)).where(User.id == link.creator_user_id)
     )).scalar_one_or_none()
     if report is None or creator is None or report.org_id != link.org_id:
+        raise HTTPException(404, "This link does not exist or has expired")
+    # A link shows the dashboard AS ITS CREATOR. It therefore stops with the
+    # creator's own access: someone whose share was revoked or expired, or
+    # whose account was switched off, must not keep a working door into it --
+    # and an archived dashboard has no links at all.
+    from ..core.capability import effective_capability
+    if (not getattr(creator, "is_active", True) or report.archived_at is not None
+            or await effective_capability(db, creator, report.id) == "none"):
         raise HTTPException(404, "This link does not exist or has expired")
     return link, report, creator
 
@@ -288,6 +299,11 @@ async def download_gate(db, user, *, report=None, dataset_id: int | None = None)
     it hands out (Confidential and above)."""
     from ..core.capability import effective_capability, max_dataset_capability, rank as cap_rank
     from ..services.sensitivity import dataset_effective, rank, report_effective
+    if report is not None:
+        # Seeing is not taking: the dashboard's own switch and the grant that
+        # let this person in decide first (core.capability.export_refusal).
+        from ..core.capability import require_export
+        await require_export(db, user, report)
     label, reasons = (await report_effective(db, report)) if report is not None else (None, [])
     if dataset_id is not None:
         ds_label, ds_reasons = await dataset_effective(db, dataset_id)
@@ -371,7 +387,7 @@ async def shared_report(token: str, request: Request, db: AsyncSession = Depends
     if link.snapshot is None:
         fields = await distributed_fields(db, report)
     else:
-        fields = {"theme": report.theme, "dataset_id": report.dataset_id, "common_filters": [
+        fields = {"theme": report.theme, "style": report.style or {}, "dataset_id": report.dataset_id, "common_filters": [
             {"id": f.id, "column": f.column, "op": f.op, "value": f.value}
             for f in (await db.execute(
                 select(CommonFilter).where(CommonFilter.report_id == report.id)
@@ -383,6 +399,7 @@ async def shared_report(token: str, request: Request, db: AsyncSession = Depends
     return {
         "name": report.name,
         "theme": fields["theme"],
+        "style": fields.get("style") or {},
         "theme_colors": await theme_colors(db, report, fields["theme"]),
         "classification": classif.label if classif else None,
         "common_filters": fields["common_filters"],

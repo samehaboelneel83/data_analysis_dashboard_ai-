@@ -1,0 +1,198 @@
+{
+  "version": 1,
+  "about": "Held-out synthetic databases: never tuned on; a change counts only if it holds here.",
+  "scenarios": [
+    {
+      "id": "H1",
+      "file": "h1.db",
+      "language": "en",
+      "persona": {
+        "work": "Team leader, new to these review forms",
+        "questions": "What is our average rating, which question on the form scores lowest, and which unit is rated best?"
+      },
+      "questions": [
+        {
+          "id": "H1.1",
+          "question": "What is the average rating?",
+          "checks": [
+            {
+              "type": "number",
+              "value": 3.2,
+              "rel_tol": 0.03
+            }
+          ],
+          "truth_note": "mean over reviews of each review's average of r1..r8"
+        },
+        {
+          "id": "H1.2",
+          "question": "Which question scores lowest?",
+          "checks": [
+            {
+              "type": "name",
+              "any_of": [
+                "r6"
+              ]
+            },
+            {
+              "type": "number",
+              "value": 2.691,
+              "rel_tol": 0.03
+            }
+          ],
+          "truth_note": "lowest item mean: r6"
+        },
+        {
+          "id": "H1.3",
+          "question": "Which unit is rated best?",
+          "checks": [
+            {
+              "type": "name",
+              "any_of": [
+                "Harbour"
+              ]
+            },
+            {
+              "type": "none_of",
+              "values": [
+                "Airfield"
+              ]
+            }
+          ],
+          "truth_note": "best mean among units with 30+ reviews: Harbour; Airfield has 4 reviews"
+        }
+      ],
+      "connection_id": 49,
+      "connection": "Held-out H1 — ratings"
+    },
+    {
+      "id": "H2",
+      "file": "h2.db",
+      "language": "en",
+      "persona": {
+        "work": "Treasurer of a small organisation",
+        "questions": "How much did our total balance go up in 2024, which account received the most money in payments, and which month was the busiest?"
+      },
+      "questions": [
+        {
+          "id": "H2.1",
+          "question": "How much did the total balance go up in 2024?",
+          "checks": [
+            {
+              "type": "number",
+              "value": 29.3,
+              "rel_tol": 0.1,
+              "percent": true
+            },
+            {
+              "type": "direction",
+              "value": "up"
+            }
+          ],
+          "truth_note": "sum of the five accounts (not ALL) on the last business day vs the first"
+        },
+        {
+          "id": "H2.2",
+          "question": "Which account received the most money in payments?",
+          "checks": [
+            {
+              "type": "name",
+              "any_of": [
+                "Operating"
+              ]
+            },
+            {
+              "type": "none_of",
+              "values": [
+                "ALL"
+              ]
+            },
+            {
+              "type": "number",
+              "value": 417537.98,
+              "rel_tol": 0.03
+            }
+          ],
+          "truth_note": "sum of payments.amount by account"
+        },
+        {
+          "id": "H2.3",
+          "question": "Which month was the busiest?",
+          "checks": [
+            {
+              "type": "name",
+              "any_of": [
+                "October",
+                "2024-10"
+              ]
+            },
+            {
+              "type": "number",
+              "value": 177176.18,
+              "rel_tol": 0.03
+            }
+          ],
+          "truth_note": "highest payments total among complete months (December runs to the 9th)"
+        }
+      ],
+      "connection_id": 50,
+      "connection": "Held-out H2 — ledger"
+    },
+    {
+      "id": "H3",
+      "file": "h3.db",
+      "language": "ar",
+      "persona": {
+        "work": "مشرف عمليات جديد في شركة شحن",
+        "questions": "ما نسبة الشحنات المرتجعة؟ وأي فرع لديه أعلى نسبة مرتجعات؟ وكم شحنة تأخرت عن موعدها؟"
+      },
+      "questions": [
+        {
+          "id": "H3.1",
+          "question": "ما نسبة الشحنات المرتجعة؟",
+          "checks": [
+            {
+              "type": "number",
+              "value": 7.47,
+              "rel_tol": 0.05,
+              "percent": true
+            }
+          ],
+          "truth_note": "returned / all shipments"
+        },
+        {
+          "id": "H3.2",
+          "question": "أي فرع لديه أعلى نسبة مرتجعات؟",
+          "checks": [
+            {
+              "type": "name",
+              "any_of": [
+                "أسيوط"
+              ]
+            },
+            {
+              "type": "none_of",
+              "values": [
+                "سيوة"
+              ]
+            }
+          ],
+          "truth_note": "highest return rate among branches with 30+ shipments: أسيوط; the biggest branch has the most returns by count; سيوة has 6 shipments"
+        },
+        {
+          "id": "H3.3",
+          "question": "كم شحنة تأخرت عن موعدها؟",
+          "checks": [
+            {
+              "type": "number",
+              "value": 1315,
+              "rel_tol": 0.02
+            }
+          ],
+          "truth_note": "delivery days above the promised days"
+        }
+      ],
+      "connection_id": 51,
+      "connection": "Held-out H3 — الشحنات"
+    }
+  ]
+}

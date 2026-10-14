@@ -11,6 +11,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { MessageSquare, RefreshCw, Sparkles, Table2, Wrench } from 'lucide-react'
+import WaitTime from './WaitTime'
 import { useT } from '../../i18n'
 import { useDirection } from '../../contexts/DirectionContext'
 import { localDigits } from '../../lib/arabicFormats'
@@ -24,10 +25,13 @@ const num = (n: number | null | undefined) => localDigits((n ?? 0).toLocaleStrin
 
 type Creating = { name: string; state: 'running' | 'done' | 'failed'; error?: string | null; datasetId?: number | null }
 
-export default function ChooseDataStep({ sourceId, onDone }: {
+export default function ChooseDataStep({ sourceId, flow, onDone }: {
   sourceId: number
-  /** Called with every dataset id the setup now uses, once they exist. */
-  onDone: (datasetIds: number[]) => Promise<void>
+  /** The analysis this step belongs to (a connection can have several). */
+  flow?: number
+  /** Called with every dataset id the setup now uses, once they exist, and
+   *  which of them this step made (the rest were adopted). */
+  onDone: (datasetIds: number[], createdIds: number[]) => Promise<void>
 }) {
   const t = useT()
   const { language } = useDirection()
@@ -36,8 +40,10 @@ export default function ChooseDataStep({ sourceId, onDone }: {
   const [answers, setAnswers] = useState(0)
   const [editingBrief, setEditingBrief] = useState(false)
   const [picked, setPicked] = useState<Set<string>>(new Set())
+  const draft = useRef<SetupBrief | null>(null)
   const [names, setNames] = useState<Record<string, string>>({})
   const [adopted, setAdopted] = useState<Set<number>>(new Set())
+  const [allExisting, setAllExisting] = useState(false)
   const [mode, setMode] = useState<'import' | 'directquery'>('import')
   const [creating, setCreating] = useState<Creating[] | null>(null)
   const [gaveUp, setGaveUp] = useState(false)
@@ -46,11 +52,11 @@ export default function ChooseDataStep({ sourceId, onDone }: {
   const load = useCallback(async () => {
     try {
       setError(null)
-      const d = await setupApi.datasets(sourceId, language)
+      const d = await setupApi.datasets(sourceId, language, flow)
       setData(d)
       setAnswers(n => n + 1)
     } catch (e) { setError(e) }
-  }, [sourceId, language])
+  }, [sourceId, language, flow])
   useEffect(() => { polls.current = 0; load() }, [load])
 
   // The datasets already chosen in an earlier visit stay ticked.
@@ -68,11 +74,11 @@ export default function ChooseDataStep({ sourceId, onDone }: {
 
   async function suggest(brief?: SetupBrief) {
     try {
-      if (brief) await setupApi.update(sourceId, { brief })
+      if (brief) await setupApi.update(sourceId, { brief }, flow)
       setEditingBrief(false)
       polls.current = 0
       setGaveUp(false)
-      await setupApi.suggestDatasets(sourceId, language)
+      await setupApi.suggestDatasets(sourceId, language, flow)
       await load()
     } catch { toast.error(t('setup.d.suggestFailed')) }
   }
@@ -81,19 +87,26 @@ export default function ChooseDataStep({ sourceId, onDone }: {
     try {
       polls.current = 0
       setGaveUp(false)
-      await setupApi.refineDataset(sourceId, p.id, message, language)
+      await setupApi.refineDataset(sourceId, p.id, message, language, flow)
       await load()
     } catch { toast.error(t('setup.d.refineFailed')) }
   }
 
   async function create() {
     if (!data) return
+    // What was typed in About you and not yet sent goes with the choice: it
+    // was lost when existing datasets were ticked without "Suggest datasets"
+    // (persona test 2026-10-12).
+    const typed = draft.current
+    if (typed && JSON.stringify(typed) !== JSON.stringify(data.brief ?? {})) {
+      try { await setupApi.update(sourceId, { brief: typed }, flow) } catch { /* the choice still goes ahead */ }
+    }
     const chosen = data.proposals.items.filter(p => picked.has(p.id))
     const kept = [...adopted]
-    if (!chosen.length) { await onDone(kept); return }
+    if (!chosen.length) { await onDone(kept, []); return }
     setCreating(chosen.map(p => ({ name: names[p.id] ?? p.name, state: 'running' })))
     try {
-      const res = await setupApi.createDatasets(sourceId, chosen.map(p => ({ id: p.id, name: names[p.id] ?? p.name })), mode)
+      const res = await setupApi.createDatasets(sourceId, chosen.map(p => ({ id: p.id, name: names[p.id] ?? p.name })), mode, flow)
       const results = await Promise.all(res.items.map(async (item, i): Promise<Creating> => {
         if (item.error) return { name: item.name, state: 'failed', error: item.error }
         if (item.dataset_id) return { name: item.name, state: 'done', datasetId: item.dataset_id }
@@ -102,12 +115,12 @@ export default function ChooseDataStep({ sourceId, onDone }: {
       }))
       setCreating(results)
       const made = results.filter(r => r.state === 'done' && r.datasetId).map(r => r.datasetId!)
-      if (made.length === results.length) await onDone([...kept, ...made])
+      if (made.length === results.length) await onDone([...kept, ...made], made)
       else if (made.length) toast(t('setup.d.someFailed'))
       else toast.error(t('setup.d.allFailed'))
       if (made.length && made.length < results.length) {
         // Keep what worked; the failed ones stay on screen with their reason.
-        await setupApi.update(sourceId, { dataset_ids: [...kept, ...made] })
+        await setupApi.update(sourceId, { dataset_ids: [...kept, ...made], created_ids: made }, flow)
       }
     } catch (e) {
       setCreating(null)
@@ -118,6 +131,11 @@ export default function ChooseDataStep({ sourceId, onDone }: {
 
   if (error) return <LoadError what={t('setup.d.what')} error={error} onRetry={load} />
   if (!data) return <LoadingState />
+  // Unused datasets someone else made (leftover trials, say) are folded away
+  // until asked for; decided by use, never by the name.
+  const leftover = (d: SetupDatasetsStep['existing'][number]) => d.used === 0 && d.mine === false && !adopted.has(d.id)
+  const shownExisting = allExisting ? data.existing : data.existing.filter(d => !leftover(d))
+  const foldedExisting = data.existing.length - shownExisting.length
 
   const asked = data.proposals.asked
   const showBrief = !asked || editingBrief
@@ -127,6 +145,7 @@ export default function ChooseDataStep({ sourceId, onDone }: {
     <div className="setup-understand">
       {showBrief ? (
         <AboutYou initial={data.brief} first={!asked}
+          onChange={b => { draft.current = b }}
           onSubmit={brief => suggest(brief)}
           onSkip={() => asked ? setEditingBrief(false) : suggest({})} />
       ) : (
@@ -154,7 +173,7 @@ export default function ChooseDataStep({ sourceId, onDone }: {
           <p className="setup-section__sub">{t('setup.d.proposalsSub')}</p>
           <div aria-live="polite">
             {data.proposals.pending && !gaveUp && (
-              <p className="setup-ai setup-ai--pending"><Sparkles size={13} aria-hidden="true" /> {t('setup.d.thinking')}</p>
+              <p className="setup-ai setup-ai--pending"><Sparkles size={13} aria-hidden="true" /> {t('setup.d.thinking')}<WaitTime since={data.proposals.since} usual={data.usual?.proposals} /></p>
             )}
             {data.proposals.pending && gaveUp && (
               <p className="setup-ai">{t('setup.u.aiSlow')}{' '}
@@ -190,17 +209,23 @@ export default function ChooseDataStep({ sourceId, onDone }: {
           <h2 id="setup-existing" className="setup-section__title">{t('setup.d.existing')}</h2>
           <p className="setup-section__sub">{t('setup.d.existingSub')}</p>
           <ul className="setup-checklist">
-            {data.existing.map(d => (
+            {shownExisting.map(d => (
               <li key={d.id}>
                 <label>
                   <input type="checkbox" checked={adopted.has(d.id)}
                     onChange={() => setAdopted(s => { const n = new Set(s); if (n.has(d.id)) n.delete(d.id); else n.add(d.id); return n })} />
                   <span>{d.name}</span>
                   {d.rows != null && <span className="setup-section__sub">{t('setup.u.rowsN', { n: num(d.rows) })}</span>}
+                  {d.used != null && <span className="setup-section__sub">{d.used > 0 ? t('setup.d.usedBy', { n: d.used }) : t('setup.d.unused')}</span>}
                 </label>
               </li>
             ))}
           </ul>
+          {foldedExisting > 0 && (
+            <button type="button" className="btn btn-sm btn-ghost" onClick={() => setAllExisting(true)}>
+              {t('setup.d.showUnused', { n: foldedExisting })}
+            </button>
+          )}
         </section>
       )}
 
@@ -280,11 +305,14 @@ const BRIEF_FIELDS: { key: keyof SetupBrief; label: 'setup.d.q.work' | 'setup.d.
   { key: 'exclude', label: 'setup.d.q.exclude', ph: 'setup.d.ph.exclude' },
 ]
 
-function AboutYou({ initial, first, onSubmit, onSkip }: {
+function AboutYou({ initial, first, onSubmit, onSkip, onChange }: {
   initial: SetupBrief; first: boolean; onSubmit: (b: SetupBrief) => void; onSkip: () => void
+  /** Each change, so a choice made without pressing Suggest still keeps it. */
+  onChange?: (b: SetupBrief) => void
 }) {
   const t = useT()
-  const [brief, setBrief] = useState<SetupBrief>(initial)
+  const [brief, setBriefState] = useState<SetupBrief>(initial)
+  const setBrief = (next: (b: SetupBrief) => SetupBrief) => setBriefState(b => { const n = next(b); onChange?.(n); return n })
   const [busy, setBusy] = useState(false)
   return (
     <form className="card setup-card" aria-labelledby="setup-about"
@@ -347,6 +375,25 @@ function ProposalCard({ p, checked, canCreate, allowAi, name, onName, onToggle, 
         </div>
       </div>
       {p.purpose && <p className="setup-table__what">{p.purpose}</p>}
+      {(p.counts_only ?? []).map(c => (
+        <p key={c.events} className="setup-counts-only">
+          <span className="setup-badge">{t('setup.d.countsOnly')}</span>{' '}
+          {t('setup.d.countsOnlyWhy', { events: c.events.replace(/_/g, ' '), base: c.base.replace(/_/g, ' ') })}
+        </p>
+      ))}
+      {p.joins?.repeats && (
+        <p className="setup-counts-only" data-testid="join-repeats">
+          <span className="setup-badge">{t('setup.d.repeats')}</span>{' '}
+          {t('setup.d.repeatsWhy', { table: p.joins.repeats.table.replace(/_/g, ' '),
+            rows: p.joins.repeats.rows.toLocaleString(), distinct: p.joins.repeats.distinct.toLocaleString() })}
+        </p>
+      )}
+      {(p.joins?.unmatched ?? []).map(u => (
+        <p key={u.table} className="setup-counts-only" data-testid="join-unmatched">
+          <span className="setup-badge">{t('setup.d.unmatched')}</span>{' '}
+          {t('setup.d.unmatchedWhy', { table: u.table.replace(/_/g, ' '), pct: Math.round(u.share * 100) })}
+        </p>
+      ))}
       <div className="setup-split">
         <div>
           <h4 className="setup-split__title setup-split__title--in">{t('setup.d.includes')}</h4>

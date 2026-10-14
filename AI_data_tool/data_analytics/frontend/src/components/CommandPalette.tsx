@@ -19,6 +19,8 @@ const STATIC_PAGES: Entry[] = [
   fixed('page', 'nav.askAi', 'palette.page', '/ask'),
   fixed('page', 'nav.upload', 'palette.page', '/upload'),
   fixed('page', 'nav.dashboards', 'palette.page', '/reports'),
+  fixed('page', 'pub.nav', 'palette.page', '/portal'),
+  fixed('page', 'tpl.nav', 'palette.page', '/templates'),
   fixed('page', 'nav.insights', 'palette.page', '/insights'),
   fixed('page', 'nav.connections', 'palette.page', '/connections'),
   fixed('page', 'nav.lineage', 'palette.page', '/lineage'),

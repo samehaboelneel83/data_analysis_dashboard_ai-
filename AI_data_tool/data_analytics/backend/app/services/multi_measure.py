@@ -74,3 +74,32 @@ def merge_measure_series(parts: list[dict], measures: list[str]) -> dict:
         **({"truncation": first["truncation"]} if "truncation" in first else {}),
         **({"missing_category": first["missing_category"]} if "missing_category" in first else {}),
     }
+
+
+def measures_as_bars(widget_type: str, config: dict | None) -> list[str] | None:
+    """The measures of a bar that has NO category: one bar per measure (the
+    items of a score group compared), else None. MIRRORS `measuresAsBars` in
+    frontend/src/components/report/WidgetPlaceholder.tsx."""
+    cfg = config or {}
+    if widget_type != "bar" or cfg.get("dimension") or cfg.get("dimension2"):
+        return None
+    names = list(dict.fromkeys(m for m in cfg.get("measures") or [] if isinstance(m, str) and m))
+    return names if len(names) >= 2 else None
+
+
+def bars_of_measures(values: list[tuple[str, object]], config: dict | None = None) -> dict:
+    """One row per measure, from each measure's own headline number. Kept in
+    the order given unless the chart asks for a sort."""
+    rows = [{"name": m, "value": v} for m, v in values if v is not None]
+    sort = str((config or {}).get("sort") or "").lower()
+    if sort in ("asc", "desc"):
+        rows.sort(key=lambda r: float(r["value"]), reverse=sort == "desc")
+    return {"type": "bar", "rows": rows, "total": len(rows), "measures_as_bars": True}
+
+
+def headline_value(result: dict | None):
+    """The number of a single-measure headline result (a kpi's first row)."""
+    rows = (result or {}).get("rows") or []
+    if rows and isinstance(rows[0], dict):
+        return rows[0].get("value")
+    return (result or {}).get("value")

@@ -32,6 +32,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from ..readback import _s
 
 RANDOM_STATE = 42
 
@@ -256,7 +257,7 @@ def decision_tree(df: pd.DataFrame, target: str,
     from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 
     if target not in df.columns:
-        raise DecisionTreeError(f"Column '{target}' not found")
+        raise DecisionTreeError(_s("no.automated_prediction.1", "Column '{a}' not found", cap=False, a=target))
 
     depth = min(int(max_depth or DEFAULT_MAX_DEPTH), HARD_MAX_DEPTH)
     depth = max(1, depth)
@@ -264,9 +265,7 @@ def decision_tree(df: pd.DataFrame, target: str,
     used, skipped = _usable_predictors(df, target, predictors)
     if not used:
         raise DecisionTreeError(
-            "No column can be used as a predictor here. Numeric columns and "
-            "categorical ones with a manageable number of values can be split "
-            "on; identifiers and dates cannot.")
+            _s("no.decision_tree.1", "No column can be used as a predictor here. Numeric columns and categorical ones with a manageable number of values can be split on; identifiers and dates cannot.", cap=False))
 
     frame = df[[target, *used]].dropna(subset=[target])
     sampled = len(frame) > FRAME_SAMPLE_THRESHOLD
@@ -274,8 +273,7 @@ def decision_tree(df: pd.DataFrame, target: str,
         frame = frame.sample(FRAME_SAMPLE_THRESHOLD, random_state=RANDOM_STATE)
     if len(frame) < MIN_ROWS:
         raise DecisionTreeError(
-            f"Only {len(frame)} usable rows; at least {MIN_ROWS} are needed to "
-            f"hold any back for testing.")
+            _s("no.decision_tree.2", "Only {a} usable rows; at least {b} are needed to hold any back for testing.", cap=False, a=len(frame), b=MIN_ROWS))
 
     y = frame[target]
     numeric_target = pd.api.types.is_numeric_dtype(y) and y.nunique() > MAX_TARGET_CLASSES
@@ -284,12 +282,10 @@ def decision_tree(df: pd.DataFrame, target: str,
         classes = sorted(y.unique())
         if len(classes) < 2:
             raise DecisionTreeError(
-                f"'{target}' has only one value, so there is nothing to separate.")
+                _s("no.decision_tree.3", "'{a}' has only one value, so there is nothing to separate.", cap=False, a=target))
         if len(classes) > MAX_TARGET_CLASSES:
             raise DecisionTreeError(
-                f"'{target}' has {len(classes):,} distinct values. A tree over "
-                f"that many outcomes is not readable -- group them first, or "
-                f"pick a numeric measure to predict.")
+                _s("no.decision_tree.4", "'{a}' has {b} distinct values. A tree over that many outcomes is not readable -- group them first, or pick a numeric measure to predict.", cap=False, a=target, b=f'{len(classes):,}'))
     else:
         classes = None
 

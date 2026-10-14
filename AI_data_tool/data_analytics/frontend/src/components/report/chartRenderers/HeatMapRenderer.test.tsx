@@ -41,3 +41,17 @@ describe('a heatmap of the day', () => {
     expect(screen.getByText('Configure widget to see data')).toBeInTheDocument()
   })
 })
+
+describe('a grid of differences', () => {
+  // server: widget_data.shape_heatmap with `difference_of`
+  it('colours by sign around zero and shows the sign of a surplus', () => {
+    const { container } = draw({ type: 'heatmap', diverging: true, rows_axis: ['a', 'b'], cols_axis: ['2024-01', '2024-02'],
+      cells: [[12, -13], [0, null]], min: -13, max: 12, total: 4 }, 300)
+    const cells = [...container.querySelectorAll('tbody td div')] as HTMLElement[]
+    expect(cells[0].style.background).toContain('--ok')
+    expect(cells[1].style.background).toContain('--danger')
+    expect(cells[0].textContent).toBe('+12')
+    expect(cells[1].textContent).toContain('13')
+    expect(cells[3].textContent).toBe('—')
+  })
+})

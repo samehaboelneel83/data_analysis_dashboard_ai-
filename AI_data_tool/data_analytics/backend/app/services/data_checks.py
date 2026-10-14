@@ -129,12 +129,23 @@ def validate_check(kind: str, column: str | None, params: dict | None, severity:
     return params
 
 
+#: Checks answered on every row of a reload that was written to disk, not on
+#: its sample: counted by DuckDB on the finished file, or carried on the frame.
+WHOLE_FILE_KINDS = frozenset({"not_null", "unique", "accepted_values", "row_count", "row_drop"})
+
+
 def _one(df: pd.DataFrame, check: dict, previous_rows: int | None,
          known: dict[str, str] | None = None) -> dict:
     kind, col, params = check["kind"], check.get("column"), check.get("params") or {}
     res: dict[str, Any] = {"id": check.get("id"), "kind": kind, "column": col,
                            "severity": check.get("severity", "warn"), "passed": True,
                            "failing": 0, "detail": None}
+    # A reload larger than memory is checked on a random sample of its rows;
+    # the row count, and how empty a column is, are the whole file's.
+    total = int(df.attrs.get("rows", len(df)))
+    whole = df.attrs.get("file") or df.attrs.get("staged")   # the file itself, when the frame is a sample of one
+    if "rows" in df.attrs and not (whole and kind in WHOLE_FILE_KINDS):
+        res["sampled"] = int(len(df))
     if kind in COLUMN_KINDS and col not in df.columns:
         res.update(passed=False, detail=f"the data has no column '{col}'")
         return res
@@ -142,8 +153,23 @@ def _one(df: pd.DataFrame, check: dict, previous_rows: int | None,
         s = df[col]
         blank = s.isna() | (s.astype(str).str.strip() == "")
         n = int(blank.sum())
+        counted = df.attrs.get("missing")
+        if isinstance(counted, dict) and col in counted:
+            n = max(n, int(round(float(counted[col]) * total / 100.0)))
         if n:
-            res.update(passed=False, failing=n, detail=f"{n:,} of {len(df):,} rows have no {col}")
+            res.update(passed=False, failing=n, detail=f"{n:,} of {total:,} rows have no {col}")
+    elif kind == "unique" and whole:
+        from .refresh_on_disk import unique_faults
+        n, distinct = unique_faults(whole, col)
+        if n:
+            res.update(passed=False, failing=n,
+                       detail=f"{n:,} repeated {col} values ({distinct:,} distinct values repeat)")
+    elif kind == "accepted_values" and whole:
+        from .refresh_on_disk import outside_list
+        n, distinct = outside_list(whole, col, list(params.get("values") or []))
+        if n:
+            res.update(passed=False, failing=n,
+                       detail=f"{n:,} rows have values outside the list ({distinct:,} different values)")
     elif kind == "unique":
         s = df[col].dropna()
         dup = s[s.duplicated(keep=False)]
@@ -160,7 +186,7 @@ def _one(df: pd.DataFrame, check: dict, previous_rows: int | None,
                        detail=f"{len(bad):,} rows have values outside the list "
                               f"({bad.nunique():,} different values)")
     elif kind == "row_count":
-        n, lo, hi = len(df), params.get("min"), params.get("max")
+        n, lo, hi = total, params.get("min"), params.get("max")
         if lo is not None and n < lo:
             res.update(passed=False, detail=f"{n:,} rows, fewer than the minimum {int(lo):,}")
         elif hi is not None and n > hi:
@@ -168,10 +194,10 @@ def _one(df: pd.DataFrame, check: dict, previous_rows: int | None,
     elif kind == "row_drop":
         pct = float(params.get("max_drop_pct") or 0)
         if previous_rows and previous_rows > 0:
-            fell = (previous_rows - len(df)) * 100.0 / previous_rows
+            fell = (previous_rows - total) * 100.0 / previous_rows
             if fell > pct:
                 res.update(passed=False,
-                           detail=f"rows fell {fell:.0f}% ({previous_rows:,} to {len(df):,}); "
+                           detail=f"rows fell {fell:.0f}% ({previous_rows:,} to {total:,}); "
                                   f"the limit is {pct:g}%")
     elif kind == "references":
         # Every value must exist in the other dataset's column (an order's

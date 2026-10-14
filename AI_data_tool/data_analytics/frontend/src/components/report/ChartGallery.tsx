@@ -83,7 +83,7 @@ const ICON_OF: Record<string, LucideIcon> = {
   map_network: Compass, map_bubbles: Circle,
   container: Frame,
   model_linear: TrendingUp, model_logistic: Spline, model_tree: GitBranch, model_cluster: Shapes,
-  model_compare: Scale, model_score: Target, model_rules: Link2,
+  model_compare: Scale, model_score: Target, model_rules: Link2, model_influencers: TrendingUp, analysis_result: Scale,
 }
 
 /** The gallery's glyph for a widget type, for anywhere else that names one. */

@@ -35,6 +35,13 @@ async def _report_decision(db, user, report_id: int, action: str) -> dict:
     if action == "share_link":
         if cap_rank(level) < cap_rank("edit"):
             return {"allowed": False, "level": level, "reason": why + " Sharing by link needs edit access."}
+        from ..core.config import settings
+        if not settings.guest_links_enabled:
+            return {"allowed": False, "level": level,
+                    "reason": "Links that open without signing in are switched off for this platform. "
+                              "Share it with named people, a role or a team instead."}
+        if report is not None and report.archived_at is not None:
+            return {"allowed": False, "level": level, "reason": "This dashboard is archived; restore it first."}
         if s_rank(label) >= s_rank("Restricted"):
             return {"allowed": False, "level": level, "sensitivity": label,
                     "reason": f"The report is Restricted{because}; share it with named people instead."}
@@ -47,6 +54,11 @@ async def _report_decision(db, user, report_id: int, action: str) -> dict:
         if s_rank(label) >= s_rank("Restricted") and cap_rank(level) < cap_rank("data"):
             return {"allowed": False, "level": level, "sensitivity": label,
                     "reason": f"The report is Restricted{because}; only data-level access may download it."}
+        # The same answer the download itself gets (core.capability.export_refusal).
+        from ..core.capability import export_refusal
+        refusal = await export_refusal(db, user, report) if report else None
+        if refusal:
+            return {"allowed": False, "level": level, "reason": refusal}
         note = " Personal-data columns are redacted from the file." if s_rank(label) >= s_rank("Confidential") else ""
         return {"allowed": True, "level": level, "sensitivity": label, "reason": why + note}
     if action == "data_rules":

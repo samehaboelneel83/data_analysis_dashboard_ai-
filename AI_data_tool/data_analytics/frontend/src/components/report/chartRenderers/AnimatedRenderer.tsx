@@ -1,3 +1,4 @@
+import { useT } from '../../../i18n'
 import { Suspense, useEffect, useState, type ComponentType } from 'react'
 import type { ChartRendererProps } from './types'
 import { MeasuredChart } from '../MeasuredChart'
@@ -23,6 +24,7 @@ export default function AnimatedRenderer({ Inner, props, onFrame }: {
   props: ChartRendererProps
   onFrame?: (label: string | null) => void
 }) {
+  const t9 = useT()
   const data = props.data
   const frames: Frame[] = data.frames ?? []
   const [idx, setIdx] = useState(Math.max(0, frames.length - 1))
@@ -45,7 +47,7 @@ export default function AnimatedRenderer({ Inner, props, onFrame }: {
   const domain: [number, number] | null = data.domain ?? null
   const cfg = { ...own, ...(domain && own.y_min === undefined && own.y_max === undefined
     ? { y_min: domain[0], y_max: domain[1] } : {}) }
-  if (!frame) return <div style={{ color: 'var(--muted)', fontSize: 12, padding: 8 }}>No data.</div>
+  if (!frame) return <div style={{ color: 'var(--muted)', fontSize: 12, padding: 8 }}>{t9('cr.noData')}</div>
   const res = frame.result ?? {}
   // A map plays on ONE frame: each period drawn over the extent (or the
   // regions) of every period, with its zoom kept -- so it stays mounted even
@@ -55,13 +57,13 @@ export default function AnimatedRenderer({ Inner, props, onFrame }: {
   return (
     <div data-testid="animated" style={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 4px 4px' }}>
-        <button className="btn" data-testid="anim-play" aria-label={playing ? 'Pause' : 'Play'}
+        <button className="btn" data-testid="anim-play" aria-label={playing ? t9('cr.pause') : t9('cr.play')}
           style={{ padding: '1px 8px', fontSize: 11 }}
           onClick={() => {
             if (!playing && idx >= frames.length - 1) setIdx(0)   // replay from the start
             setPlaying(p => !p)
           }}>{playing ? '⏸' : '▶'}</button>
-        <input type="range" aria-label={`${data.animate_by} frame`} min={0} max={frames.length - 1} value={idx}
+        <input type="range" aria-label={t9('cr.frameOf', { by: String(data.animate_by) })} min={0} max={frames.length - 1} value={idx}
           onChange={e => { setPlaying(false); setIdx(Number(e.target.value)) }} style={{ flex: 1 }} />
         <span data-testid="anim-label" aria-live="polite" dir="auto"
           style={{ fontSize: 12, fontWeight: 600, minWidth: 70, textAlign: 'end' }}>{frame.label}</span>
@@ -69,7 +71,7 @@ export default function AnimatedRenderer({ Inner, props, onFrame }: {
       <div style={{ flex: 1, minHeight: 0 }}>
         {!isMap && (res.type === 'empty' || !(res.rows?.length))
           ? <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 11, color: 'var(--muted)' }}>No rows in {frame.label}</div>
+              fontSize: 11, color: 'var(--muted)' }}>{t9('cr.noRowsIn', { label: String(frame.label) })}</div>
           : <Suspense fallback={<MapLoading />}>
               <MeasuredChart>{(w, h) => (
                 <Inner {...props} data={shown} rows={res.rows ?? []} cfg={cfg} plotW={w} plotH={h} />
@@ -77,7 +79,7 @@ export default function AnimatedRenderer({ Inner, props, onFrame }: {
             </Suspense>}
       </div>
       <div style={{ fontSize: 10, color: 'var(--muted)', padding: '2px 4px' }}>
-        {frames.length} frames by {data.animate_by}{data.granularity ? ` (${data.granularity})` : ''} · {isMap ? 'one map and one scale for every frame' : 'one axis for every frame'}
+        {t9('cr.framesBy', { n: frames.length, by: `${data.animate_by}${data.granularity ? ` (${data.granularity})` : ''}` })} · {isMap ? t9('cr.oneMap') : t9('cr.oneAxis')}
         {data.animation_truncation?.text ? ` · ${data.animation_truncation.text}` : ''}
       </div>
     </div>

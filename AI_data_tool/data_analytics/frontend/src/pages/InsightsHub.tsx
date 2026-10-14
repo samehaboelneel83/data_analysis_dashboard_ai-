@@ -1,3 +1,4 @@
+import { sayText } from '../lib/readbackText'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { datasetsApi, insightsApi } from '../services/api'
@@ -133,7 +134,7 @@ export default function InsightsHub() {
               <option value="" disabled>{t('insights.choose')}</option>
               {(noMatches ? clean.visible : filtered).map(d => (
                 <option key={d.id} value={d.id}>
-                  {isCertified(d) ? '✓ ' : ''}{d.name}{d.mode === 'directquery' ? ' · live' : ''}
+                  {isCertified(d) ? '✓ ' : ''}{d.name}{d.mode === 'directquery' ? ` · ${t('common.live')}` : ''}
                 </option>
               ))}
             </select>
@@ -167,7 +168,7 @@ export default function InsightsHub() {
           )}
 
           {!isDirectQuery && scanLoading && (
-            <div style={{ marginBottom: 16 }}><LoadingState label="Scanning for insights…" /></div>
+            <div style={{ marginBottom: 16 }}><LoadingState label={t('insights.scanning')} /></div>
           )}
 
           {!isDirectQuery && scanError != null && (
@@ -199,15 +200,15 @@ export default function InsightsHub() {
                   thing saying how they relate. */}
               {scan.narrative && strong.length !== 1 && (
                 // QA3 D5: the server's sentence takes its own direction; numbers and ranges keep their order.
-                <p dir="auto" style={{ fontSize: 13, marginBottom: strong.length ? 8 : 0 }}>{isolateNumbers(scan.narrative)}</p>
+                <p dir="auto" style={{ fontSize: 13, marginBottom: strong.length ? 8 : 0 }}>{isolateNumbers(sayText(t, scan.narrative, (scan as { narrative_i18n?: unknown }).narrative_i18n as never))}</p>
               )}
               {strong.length > 0 && (
                 <ul style={{ margin: 0, paddingInlineStart: 18, display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {/* Top 3 -- the backend already returns findings sorted by score. */}
                   {strong.slice(0, 3).map((f, i) => (
                     <li key={i} dir="auto" style={{ fontSize: 12 }}>
-                      <strong>{isolateNumbers(f.title)}</strong>
-                      {f.detail && <span style={{ color: 'var(--muted)' }}> — {isolateNumbers(f.detail)}</span>}
+                      <strong>{isolateNumbers(sayText(t, f.title, (f as { title_i18n?: { key: string; vars?: Record<string, unknown> } | null }).title_i18n as never))}</strong>
+                      {f.detail && <span style={{ color: 'var(--muted)' }}> — {isolateNumbers(sayText(t, f.detail, (f as { detail_i18n?: unknown }).detail_i18n as never))}</span>}
                       {current && (
                         <FindingChart datasetId={current.id} finding={f}
                           columnTypes={Object.fromEntries(current.columns.map(c => [c.name, c.dtype ?? '']))} />

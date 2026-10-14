@@ -1142,13 +1142,13 @@ relationships, a profile, and no unmasked personal data.
 
 ### Relational store
 
-PostgreSQL 16 Alpine. **92 tables** defined in `models/models.py` via async
+PostgreSQL 16 Alpine. **100 tables** defined in `models/models.py` via async
 SQLAlchemy, grouped by concern:
 
 | Group | Representative tables |
 |-------|----------------------|
 | Datasets | `datasets`, `dataset_columns`, `dataset_shares`, `analysis_results` |
-| Reports | `reports`, `report_pages`, `report_widgets`, `report_parameters`, `bookmarks`, `report_user_grants`, `recent_views` |
+| Reports | `reports`, `report_pages`, `report_widgets`, `report_parameters`, `bookmarks`, `report_user_grants` (every direct share: a person, a role or a team, with its level, end date and what it allows), `report_favorites`, `recent_views` |
 | Security | `row_security_rules`, `report_capability`, `org_units`, `user_org_units` |
 | Modelling | `relationships`, `hierarchy_nodes`, `data_views`, `common_filters` |
 | Sources | `data_sources`, `source_objects`, `source_columns`, `source_relationships` |
@@ -1166,7 +1166,7 @@ SQLAlchemy, grouped by concern:
 | Platform | `saml_authn_requests`, `org_mcp_access`, `eval_runs` |
 | Ops | `sync_runs`, `schema_versions`, `column_stats`, `materializations`, `quotas`, `query_runs`, `ai_usage`, `migration_items` |
 
-Schema changes go through **Alembic** (`backend/alembic/`, 60 revisions).
+Schema changes go through **Alembic** (`backend/alembic/`, 68 revisions).
 Every timestamp column is `TIMESTAMPTZ` and the app writes naive UTC; `core/database.py` marks each bound naive datetime as UTC (asyncpg would read it as the process's local time) and pins the session time zone to UTC, so stored times are right on a server whose clock is not UTC.
 `postgres/init.sql` provides the initial schema and indexes.
 
@@ -1316,9 +1316,11 @@ render holds its own frame.
 truncated frame would produce totals over an arbitrary subset with no way to say so in
 the result, and a confident wrong number is worse than an error. Over the cap the
 request returns **413** naming both the dataset size and the limit. It defaults to
-**2,000,000 rows** — roughly where the measured 1.8 GB-per-render cost stops being
-survivable on a shared box. An operator with the memory to spare can still set `0` to
-disable it.
+**200,000,000 rows** (2,000,000 until 2026-10-11) and is an administrator's setting
+(Admin → Settings, or `IMPORT_ROW_CAP`); `0` disables it. At the default the host's
+memory is the real limit — about 2.1 GB per million rows at import on the benchmark
+table — so a small or shared host should set it to what `scripts/bench_import.py`
+reports there.
 
 Both hand their result to the **same shaper**, `get_widget_data_from_df`, which is why
 `direct_query.py` rejects aggregations that are not grain-safe: the shaper re-runs its
@@ -1508,8 +1510,8 @@ breaks an org's tokens down by day, feature and person.
 
 ### Routers
 
-**36 router modules**, mounted with 37 `include_router` calls in `main.py` --
-`analysis` and `metadata` each expose a second router. All under `/api/v1`
+**38 router modules**, mounted with 41 `include_router` calls in `main.py` --
+`analysis`, `metadata` and `publishing` each expose a second router. All under `/api/v1`
 except the agent:
 
 | Router | Surface |
@@ -1531,6 +1533,7 @@ except the agent:
 | `authz` | Batched "may I, and why not" decisions for the UI |
 | `review` | Report review, publish gate, performance evaluation |
 | `report_copilot` | Copilot edits to a report (versioned, undoable) |
+| `publishing` (+ `portal`) | A dashboard's state, details, approval, release rollback, archive, owner; what a person may do with it; the reader's catalogue, favourites and deliveries (`docs/publishing/PLAN.md`) |
 | `semantic` | Governed semantic-layer API (datasets, measures, RLS) |
 | `prediction_models` | Train, save and score models |
 | `boundary_sets`, `map_settings` | Region boundaries, starter packs, basemap tiles |
@@ -2101,7 +2104,7 @@ React 18 · TypeScript · Vite · Recharts.
 
 ### Pages
 
-**22 pages** in `frontend/src/pages/`:
+**25 pages** in `frontend/src/pages/`:
 
 | Page | Purpose |
 |------|---------|
@@ -2118,6 +2121,7 @@ React 18 · TypeScript · Vite · Recharts.
 | `SharedReport.tsx`, `EmbeddedReport.tsx` | Public and embedded views |
 | `ReportPrint.tsx` | Print/PDF layout |
 | `Home.tsx` | Landing page — recents, dashboards, datasets as card sections |
+| `Portal.tsx` | The reader's portal (route `/portal`): only what the person may open, in sections (made by me, shared with me, my team, favourites, recently opened, reports sent), searched and filtered on the server, a page at a time (`docs/publishing/PLAN.md`) |
 | `Dashboard.tsx` | The dataset list (route `/datasets`): each row says what the data is (uploaded, copied from a connection, live, built from other datasets, a summary) and how current, from `services/catalog.py` |
 | `AskAI.tsx` | The agent's own page — scope picker over `ChatPane` |
 | `InsightsHub.tsx` | One front door to the analysis capabilities (links into `DatasetDetail` anchors) |
@@ -2128,7 +2132,7 @@ React 18 · TypeScript · Vite · Recharts.
 
 ### Widget system
 
-**75 widget types** declared in `types/report.ts` as `WidgetType` and catalogued
+**77 widget types** declared in `types/report.ts` as `WidgetType` and catalogued
 in `WIDGET_CATALOG` (the source of truth — do not maintain a parallel list):
 
 | Category | Types |
@@ -2357,8 +2361,8 @@ Agent pane (7)
 
 | Suite | Scope | Count |
 |-------|-------|-------|
-| Backend | `backend/tests/` | ~6,670 tests across 477 modules |
-| Frontend | colocated `*.test.ts(x)` | ~3,410 tests across 343 files |
+| Backend | `backend/tests/` | ~6,670 tests across 538 modules |
+| Frontend | colocated `*.test.ts(x)` | ~3,410 tests across 389 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |
 | Doc audit | `tests/test_architecture_doc.py` | Enforces the *counts* in this document |

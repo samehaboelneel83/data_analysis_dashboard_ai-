@@ -978,6 +978,10 @@ def _models_specs(datasets: dict[str, Dataset]) -> list[tuple[str, str, int, int
          {"measures": ["revenue", "units", "cost"]}),
         ("model_rules", "What goes with each sales channel (association rules)", 8, 6,
          {"predictors": ["region", "units"], "response": "channel"}),
+        ("analysis_result", "What is behind the latest change in revenue", 6, 6,
+         {"analysis": "explain_change", "params": {"date_column": "date", "measure": "revenue"}}),
+        ("model_influencers", "What goes with an online sale (key influencers)", 6, 6,
+         {"response": "channel", "event_value": "Online", "predictors": ["region", "units", "revenue"]}),
     ]
 
 

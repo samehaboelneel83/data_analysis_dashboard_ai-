@@ -101,7 +101,7 @@ export default function NotificationsBell() {
                     {formatTimeAgo(n.created_at, t) ?? formatDate(n.created_at)}
                   </span>
                 </span>
-                {!n.read && <span className="dl-bell__dot" aria-label="new" />}
+                {!n.read && <span className="dl-bell__dot" aria-label={t('bell.dotNew')} />}
               </button>
             ))}
           </div>

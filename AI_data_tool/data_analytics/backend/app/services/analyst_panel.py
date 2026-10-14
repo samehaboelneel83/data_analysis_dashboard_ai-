@@ -20,6 +20,8 @@ data returned.
 """
 from __future__ import annotations
 
+from .llm import data_block as _data_block
+
 import asyncio
 from collections import Counter
 import json
@@ -53,9 +55,9 @@ LENSES: dict[str, dict] = {
     "relationships": {
         "title": "Patterns & models",
         "brief": "how things relate: categories that travel together, two or three measures "
-                 "at once per group (a bubble of pay, tenure and size per department), models "
+                 "at once per group (a bubble of two measures and the group's size), models "
                  "that explain a number (regression) or predict a category (logistic for a "
-                 "yes/no such as 'is senior', a tree for several values), segments",
+                 "yes/no column, a tree for several values), segments",
         "needs": "relations",
     },
     # Added after the HR benchmark (2026-10-02): the hand-picked set gave pay
@@ -64,10 +66,10 @@ LENSES: dict[str, dict] = {
     # none of it. For a group people ask about, a flat result IS the finding.
     "equity": {
         "title": "Fairness & like-for-like",
-        "brief": "whether a group people ask about (a two-to-four value category such as "
-                 "gender) is treated alike: the main measure compared between its values "
-                 "WITHIN like-for-like groups (the same department, the same title, the same "
-                 "hiring year), its share in each group, and its spread. Here a result that "
+        "brief": "whether the values of a small category (two to four values) come out alike "
+                 "once like is compared with like: the main measure compared between its values "
+                 "WITHIN groups that are otherwise the same (the same value of every other "
+                 "category that matters, the same start period), its share in each group, and its spread. Here a result that "
                  "shows no difference is the finding -- say so in `why`. Prefer ONE chart that "
                  "compares the group inside every like-for-like group at once (that group as "
                  "`dimension`, the compared group as `dimension2`) over one filtered chart each",
@@ -153,26 +155,26 @@ balance) -- then its `why` says it is flat. Vary the widget types when a differe
 type answers better, never for decoration.
 
 A widget splits by at most the fields its line in the menu lists (a box plot \
-has one category; a bar or a line has two). For a three-way comparison -- pay by \
-title, by gender -- use a heatmap or crosstab, or a filter to one group, never an \
+has one category; a bar or a line has two). For a three-way comparison -- a \
+measure by two categories at once -- use a heatmap or crosstab, or a filter to one group, never an \
 extra field the widget does not take.
 
 Say only what the columns hold. A value is its CURRENT value unless a column \
-says otherwise: grouped by the year a record started (a hire or sign-up date), \
+says otherwise: grouped by the year a record started (the date it began), \
 a measure is today's value for the records that started that year -- not its \
-value at the start ("starting pay"); nothing is a history unless a date column \
+value at the start; nothing is a history unless a date column \
 dates the value itself.
 
 When the facts say a measure is on different scales by some column, show it \
 for one value of that column at a time, with a filter -- never totalled, \
 averaged or side by side across it (small multiples share one scale too).
 
-An identifier (a seller, product or customer code) may be a bar or table \
+An identifier (a code that names one thing among many) may be a bar or table \
 dimension only as a ranked top list with `limit` 10-25.
 
 A date is a point in time, never a quantity: count rows by it, or put it on \
-the time axis; never sum or average it as a measure (an average delivery DATE \
-is not a delivery time). A year column is a date too. Two columns the facts \
+the time axis; never sum or average it as a measure (an average of DATES \
+is not a length of time). A year column is a date too. Two columns the facts \
 say always go together are one breakdown: use one of them. A column that is \
 already an average, a rate or a per-row distinct count (unique_*, active_*) \
 is averaged, never totalled. Share-of-a-whole charts (pie, donut, treemap) \
@@ -220,15 +222,16 @@ def repair_and_check(w: dict, profile: dict, column_meta: dict | None = None,
         # "average" and slipped past the rule that knows "avg" (Olist, 2026-10-02).
         if isinstance(w.get("config"), dict):
             w = {**w, "config": normalise_aggregations(w["config"])}
+        w = _respect_classes(w, column_meta)
         w = _honest_title(_mix_from_filter(_aggregation_from_title(
             resolve_time_words(w, profile), column_meta, dates)), profile)
         w = _grain_from_title(_measure_from_title(_count_word_measure(w, profile), profile, column_meta), dates)
-        w = one_unit(_whole_needs_a_total(_no_sum_of_rates(_rows_not_groups(w, profile))), mixed)
+        w = one_unit(_whole_needs_a_total(_no_sum_of_rates(_rows_not_groups(w, profile), column_meta)), mixed)
         w = _drop_twins(_drop_dependent_predictors(w, dependents or {}), identical or {})
         w = trim_edges(w, edges or {})
         ok, why = validate_widget(w, profile, column_meta)
         if ok:
-            why = (broken_promise(w, profile) or mixes_units(w, mixed)
+            why = (broken_promise(w, profile, dependents or {}) or mixes_units(w, mixed)
                    or date_as_number(w, dates) or dependent_split(w, dependents or {})
                    or same_number_twice(w, identical or {}))
             ok = why is None
@@ -296,7 +299,7 @@ to 8 questions whose answers would change a decision this person takes, and \
 that THIS dataset can answer with its columns. For each: the question, the \
 decision it informs, and the exact columns it needs. Prefer questions that \
 reveal what the person does not already know: what changed most, where most \
-people or money are, what is out of line, what moves together. Ask about the \
+of it is, what is out of line, what moves together. Ask about the \
 world the data describes, never about the data itself (row counts, codes, \
 quality). Read the facts: a column with one value, mostly empty, or in mixed \
 units is not compared across rows. Also list what this person would want \
@@ -313,7 +316,7 @@ async def person_questions(client, profile: dict, facts_text: str, goal: str,
     from .dataset_profile import describe_for_prompt
     messages = [{"role": "system", "content": QUESTIONS_SYSTEM},
                 {"role": "user", "content": f'The person: "{goal.strip()}"\n\n'
-                                            f"THE DATA\n{describe_for_prompt(profile, knowledge)}\n\n"
+                                            f"THE DATA\n{_data_block(describe_for_prompt(profile, knowledge))}\n\n"
                                             f"MEASURED FACTS (exact)\n{facts_text}"}]
     key = lens_cache_key(client, messages)
     hit = None if fresh else _cache_get(key)
@@ -349,7 +352,7 @@ def lens_messages(lens: str, profile: dict, facts_text: str, goal: str | None,
     spec = DECISIONS if lens == "decisions" else LENSES[lens]
     who = (f'The person this is for describes themselves: "{goal.strip()}".\n'
            if goal and goal.strip() else "")
-    user = (f"{who}{questions_text(questions)}THE DATA\n{describe_for_prompt(profile, knowledge)}\n\n"
+    user = (f"{who}{questions_text(questions)}THE DATA\n{_data_block(describe_for_prompt(profile, knowledge))}\n\n"
             f"MEASURED FACTS (exact)\n{facts_text}\n\n"
             f"WIDGETS YOU MAY USE\n{_menu_text(profile)}\n\n"
             f"Return {n} widgets for the {spec['title']} lens.")
@@ -394,8 +397,13 @@ def rule_candidates(df, roles: dict, column_meta: dict | None, ineligible: set[s
     import pandas as pd
     dates = {c for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])}
     out = []
+    # ...and one idea for each further widget type the data has the shape for
+    # (suggest_variety.catalogue_suggestions), so a suggested dashboard is not
+    # limited to the handful of types the findings map to.
+    from ..core.config import settings
+    more = int(getattr(settings, "suggest_more_types", 0) or 0)
     for s in suggest_widgets_from_findings(findings, roles, None, limit=40, ineligible=ineligible,
-                                           column_meta=column_meta, frame=df, per_type=6):
+                                           column_meta=column_meta, frame=df, per_type=6, catalogue=more):
         value = _VALUE.get(s.get("kind"), 3 + (1 if float(s.get("score") or 0) > 0.6 else 0))
         out.append({"question": s["title"], "widget_type": s["widget_type"], "title": s["title"],
                     "why": s.get("reason", ""), "config": s["config"], "value": value,
@@ -630,8 +638,11 @@ def _mix_from_filter(w: dict) -> dict:
     is only a one-value filter on a bar, the filter becomes the bar's split,
     shown as shares of 100%."""
     cfg = w.get("config")
-    if w.get("widget_type") not in ("bar", "column") or not isinstance(cfg, dict) or cfg.get("dimension2") \
-            or not _MIX_WORDS.search(str(w.get("title") or "")):
+    # A chart that DECLARES what its number is (`shows`) is held to that by the
+    # guided setup's own checks; the title's words decide only for one that
+    # declares nothing (any other designer's widgets).
+    if w.get("shows") or w.get("widget_type") not in ("bar", "column") or not isinstance(cfg, dict) \
+            or cfg.get("dimension2") or not _MIX_WORDS.search(str(w.get("title") or "")):
         return w
     filters = [f for f in cfg.get("filters") or [] if isinstance(f, dict)]
     title = " " + re.sub(r"[^\w]+", " ", str(w.get("title") or "").lower()) + " "
@@ -650,7 +661,7 @@ def _mix_from_filter(w: dict) -> dict:
 
 
 _TITLE_AGG = (("median", "median"), ("average", "avg"), ("avg", "avg"), ("mean", "avg"),
-              ("total", "sum"), ("sum", "sum"), ("headcount", "countd"), ("count", "count"))
+              ("total", "sum"), ("sum", "sum"), ("distinct", "countd"), ("unique", "countd"), ("count", "count"))
 _NO_AGG = ("box_plot", "histogram", "scatter", "numeric_series", "table", "correlation_matrix",
            "parallel_coordinates")
 
@@ -660,12 +671,45 @@ _ALREADY_A_RATE = re.compile(r"^(avg|mean|average|median)_|_(avg|mean|rate|ratio
                              r"(rate|ratio|pct|percent)$", re.I)
 
 
-def _not_additive(m) -> bool:
-    from .semantic_guard import _DISTINCT_SNAPSHOT
-    return isinstance(m, str) and bool(_ALREADY_A_RATE.search(m) or _DISTINCT_SNAPSHOT.search(m))
+def _respect_classes(w: dict, column_meta: dict | None) -> dict:
+    """The widget, read against each column's STORED classification
+    (services/column_classes.py) -- shared by the panel, the designer and the
+    guided setup, so the rule holds wherever a chart is proposed:
+
+    * a level, duration, score or share is never TOTALLED: its sum becomes
+      its average (a sum of ratings is nobody's number);
+    * a code is never calculated: it is counted;
+    * an ORDINAL category is drawn in its own order, not alphabetically or by
+      value, unless the proposal asked for a ranking (a `limit`)."""
+    from . import semantic_guard as guard
+    config = w.get("config")
+    if not isinstance(config, dict) or not column_meta:
+        return w
+    out = dict(config)
+    for mkey, akey in (("measure", "aggregation"), ("measure2", "aggregation2")):
+        kind = guard.recorded_number(out.get(mkey), column_meta)
+        agg = str(out.get(akey) or out.get("aggregation") or "").lower()
+        if kind in guard.INTENSIVE_KINDS and agg == "sum":
+            out[akey] = "avg"
+        elif kind == "code" and agg in ("sum", "avg", "mean", "average", "median"):
+            out[akey] = "countd"
+    order = guard.value_order(out.get("dimension"), column_meta)
+    if order and not out.get("limit") and not out.get("sort_by") and not out.get("sort_col"):
+        out["sort_by"], out["category_order"] = "order", order
+    return w if out == config else {**w, "config": out}
 
 
-def _no_sum_of_rates(w: dict) -> dict:
+def _not_additive(m, column_meta: dict | None = None) -> bool:
+    from .semantic_guard import INTENSIVE_KINDS, _DISTINCT_SNAPSHOT, recorded_number
+    if not isinstance(m, str):
+        return False
+    kind = recorded_number(m, column_meta)
+    if kind is not None:                     # classified: that settles it
+        return kind in INTENSIVE_KINDS
+    return bool(_ALREADY_A_RATE.search(m) or _DISTINCT_SNAPSHOT.search(m))
+
+
+def _no_sum_of_rates(w: dict, column_meta: dict | None = None) -> dict:
     """A total of a column that is already an average, a rate or a per-row
     distinct count becomes its average: "Total avg freight cost" summed daily
     averages, and "Active sellers" summed daily seller counts (daily-ops).
@@ -678,16 +722,16 @@ def _no_sum_of_rates(w: dict) -> dict:
         return w
     wt = str(w.get("widget_type"))
     if wt == "card" and isinstance(cfg.get("measures"), list):
-        keep = [m for m in cfg["measures"] if not _not_additive(m)]
+        keep = [m for m in cfg["measures"] if not _not_additive(m, column_meta)]
         if keep and len(keep) < len(cfg["measures"]):
             return {**w, "config": {**cfg, "measures": keep}}
     m2 = cfg.get("measure2")
-    if _not_additive(m2) and str(cfg.get("aggregation2") or cfg.get("aggregation") or "").lower() in ("sum", "") \
+    if _not_additive(m2, column_meta) and str(cfg.get("aggregation2") or cfg.get("aggregation") or "").lower() in ("sum", "") \
             and wt not in _NO_AGG:
         cfg = {**cfg, "aggregation2": "avg"}
         w = {**w, "config": cfg}
     ms = [cfg.get("measure")] + list(cfg.get("measures") or [])
-    if not any(_not_additive(m) for m in ms):
+    if not any(_not_additive(m, column_meta) for m in ms):
         return w
     if not cfg.get("aggregation") and wt in _NO_AGG:
         return w
@@ -1015,7 +1059,7 @@ def _aggregation_from_title(w: dict, column_meta: dict | None = None,
     return {**w, "config": {**cfg, "aggregation": agg}} if agg else w
 
 
-def broken_promise(w: dict, profile: dict) -> str | None:
+def broken_promise(w: dict, profile: dict, pairs: dict | None = None) -> str | None:
     """Why a proposed widget's title promises something its config does not
     draw, or None.
 
@@ -1075,6 +1119,10 @@ def broken_promise(w: dict, profile: dict) -> str | None:
     for c in profile.get("columns", []):
         name = c["name"]
         if name in used or name in filtered or c.get("is_identifier") or same_period(name):
+            continue
+        # One fact written twice (fact_sheet.one_to_one: "Late" always with
+        # is_late 1): a chart using one keeps a title naming the other.
+        if set((pairs or {}).get(name) or []) & (used | filtered):
             continue
         if f" {name.lower().replace('_', ' ')} " in title:
             return f"{w.get('title')}: the title names {name}, which the chart does not use"
@@ -1413,8 +1461,20 @@ def _filterable(profile: dict, ineligible: set[str] | frozenset = frozenset()) -
             and 2 <= (c.get("distinct") or 0) <= SLICER_MAX_VALUES}
 
 
+#: Up to this many values are buttons (all in view, one click); up to the
+#: next, a list to tick; beyond it a dropdown, which takes no room until opened.
+CONTROL_BUTTONS = 5
+CONTROL_LIST = 12
+
+
+def control_for(distinct: int) -> str:
+    """The filter control for a column with this many values (a `slicer_mode`)."""
+    return "buttons" if distinct <= CONTROL_BUTTONS else "list" if distinct <= CONTROL_LIST else "dropdown"
+
+
 def slicers_for(widgets: list[dict], profile: dict, ineligible: set[str] | frozenset = frozenset(),
-                fallback: list[str] | None = None, limit: int = MAX_SLICERS) -> list[dict]:
+                fallback: list[str] | None = None, limit: int = MAX_SLICERS, with_date: bool = False,
+                date: str | None = None) -> list[dict]:
     """Filter controls for one page: the categories its charts split by most.
 
     Every reference dashboard the five-dataset review drew (2026-10-02) put
@@ -1438,13 +1498,41 @@ def slicers_for(widgets: list[dict], profile: dict, ineligible: set[str] | froze
     if not ok:
         # Nothing in the data to filter by but its date.
         return date_slicers(profile, limit)
-    return [{"widget_type": "slicer", "title": f"Filter by {str(c).replace('_', ' ')}",
-             "config": {"dimension": c}, "source": "panel",
-             "why": f"Narrows every chart on this page to the {str(c).replace('_', ' ')} values you pick."}
-            for c in ranked[:limit]]
+    found = [{"widget_type": "slicer", "title": f"Filter by {str(c).replace('_', ' ')}",
+              # The control that suits how many values there are to choose from.
+              "config": {"dimension": c, "slicer_mode": control_for(ok[c].get("distinct") or 0)}, "source": "panel",
+              "why": f"Narrows every chart on this page to the {str(c).replace('_', ' ')} values you pick."}
+             for c in ranked[:limit]]
+    # A period beside them, when the data has a date: "which month" is asked
+    # of almost every page, and a category filter cannot answer it.
+    return found + (date_range_control(profile, date) if with_date else [])
 
 
-def date_slicers(profile: dict, limit: int = MAX_SLICERS) -> list[dict]:
+def date_range_control(profile: dict, date: str | None = None) -> list[dict]:
+    """One from-to control on the page's date: two dates picked, every chart
+    narrowed to the days between them. `date` is the column the rows are
+    dated by (when they happened); without one, the date the data's history
+    is measured on. Not offered for a date covering less than 60 days."""
+    span = ((profile.get("structure") or {}).get("date_range")) or {}
+    known = {c["name"]: c for c in profile.get("columns", []) if c.get("role") == "datetime"}
+    col = date if date in known else span.get("column")
+    if not col or col not in known:
+        return []
+    days = span.get("days") or 0
+    if col != span.get("column"):
+        try:
+            import pandas as pd
+            days = int((pd.Timestamp(known[col].get("max")) - pd.Timestamp(known[col].get("min"))).days)
+        except Exception:  # noqa: BLE001 -- no span known: judged by the widest date's
+            pass
+    if days < 60:
+        return []
+    return [{"widget_type": "slicer", "title": f"Filter by {str(col).replace('_', ' ')}",
+             "config": {"dimension": col, "slicer_mode": "range"}, "source": "panel",
+             "why": "Narrows every chart on this page to the dates you pick, from one day to another."}]
+
+
+def date_slicers(profile: dict, limit: int = MAX_SLICERS, finest: bool = False) -> list[dict]:
     """Period controls for data with nothing else to filter by.
 
     Daily ops (one row per day, numbers only) got no filter at all: a slicer
@@ -1456,9 +1544,14 @@ def date_slicers(profile: dict, limit: int = MAX_SLICERS) -> list[dict]:
     if not col or days < 60:
         return []
     grains = (["year"] if days >= 365 else []) + (["month"] if days <= 3 * 366 else ["quarter"])
+    if finest:
+        grains = grains[-1:]              # one control: the months, or the quarters of a long history
     words = {"year": "year", "quarter": "quarter", "month": "month"}
+    # Periods are many and in order: a dropdown, never a wall of buttons.
     return [{"widget_type": "slicer", "title": f"Filter by {words[g]}",
-             "config": {"dimension": col, "dimension_granularity": g}, "source": "panel",
+             "config": {"dimension": col, "dimension_granularity": g,
+                        "slicer_mode": "dropdown" if g != "year" else control_for(max(1, round(days / 365)))},
+             "source": "panel",
              "why": f"Narrows every chart on this page to the {words[g]}s you pick."}
             for g in grains][:limit]
 
@@ -1482,18 +1575,30 @@ def series_backbone(profile: dict, ineligible: set[str] | frozenset = frozenset(
     nums: list[dict] = []
     for c in profile.get("columns", []):
         if c.get("role") != "numeric" or c.get("is_identifier") or c["name"] in ineligible \
-                or c.get("is_personal") or non_additive_kind(c["name"]) == "coordinate":
+                or c.get("is_personal") or (not c.get("number") and non_additive_kind(c["name"]) == "coordinate"):
             continue
         # One of two columns that always hold the same number is shown once.
         if any(c["name"] in (twins.get(k["name"]) or ()) for k in nums):
             continue
         nums.append(c)
-    additive = [c["name"] for c in nums if not _not_additive(c["name"])]
+    # The recorded kind decides what may be totalled; the name only for a
+    # column nobody classified.
+    def _averaged(c: dict) -> bool:
+        kind = c.get("number")
+        from .semantic_guard import INTENSIVE_KINDS
+        return kind in INTENSIVE_KINDS if kind else _not_additive(c["name"])
+    additive = [c["name"] for c in nums if not _averaged(c)]
     # True rates and averages first (avg_freight_cost, cancellation_rate_pct),
     # then per-day distinct counts (active_sellers): the headline and trend
     # places go to what the analysts read as the day's rates.
-    rates = sorted((c["name"] for c in nums if _not_additive(c["name"])),
-                   key=lambda m: 0 if _ALREADY_A_RATE.search(m) else 1)
+    by_name = {c["name"]: c for c in nums}
+
+    def _is_rate(m: str) -> bool:
+        # A stored kind says it (a share, a level, a score, a duration);
+        # the name only for a column nobody classified.
+        kind = by_name.get(m, {}).get("number")
+        return kind in ("share", "level", "score", "duration") if kind else bool(_ALREADY_A_RATE.search(m))
+    rates = sorted((c["name"] for c in nums if _averaged(c)), key=lambda m: 0 if _is_rate(m) else 1)
     if len(nums) < 3:
         return []
     # "total_freight_cost" reads "freight cost": the titles say "Total" themselves.
@@ -1514,7 +1619,7 @@ def series_backbone(profile: dict, ineligible: set[str] | frozenset = frozenset(
     # The typical day for each rate, beside the totals: the daily-ops
     # analysts opened with average item value, average freight per item and
     # the worst cancellation rate (live re-score, 2026-10-02).
-    for m in [r for r in rates if _ALREADY_A_RATE.search(r)][:3]:
+    for m in [r for r in rates if _is_rate(r)][:3]:
         add("kpi", f"Average {re.sub(r'^(avg|mean|average) ', '', label(m))} per day",
             {"measure": m, "aggregation": "avg"}, "summary", 4, f"The daily {label(m)}, averaged over the period.")
     for m in additive[:3]:
@@ -1572,8 +1677,12 @@ def series_backbone(profile: dict, ineligible: set[str] | frozenset = frozenset(
     return out
 
 
-_MONEY = re.compile(r"amount|revenue|price|fee|cost|salary|salaries|pay|income|sales|spend|gmv|"
-                    r"charge|freight|payroll|budget|value", re.I)
+#: Money, in the words any organisation's accounts use -- not one trade's
+#: (see the note on neutral vocabulary in services/semantic_guard.py). A
+#: column the stored classification gives a currency unit is money whatever
+#: it is called.
+_MONEY = re.compile(r"amount|revenue|price|fee|cost|payment|paid|income|expense|spend|charge|budget|value|"
+                    r"مبلغ|قيمة|سعر|تكلفة|رسوم|إيراد|ايراد|مصروف", re.I)
 
 
 def money_totals(profile: dict, ineligible: set[str] | frozenset = frozenset(),
@@ -1592,8 +1701,14 @@ def money_totals(profile: dict, ineligible: set[str] | frozenset = frozenset(),
     money: list[str] = []
     for c in cols:
         m = c["name"]
-        if c.get("role") != "numeric" or c.get("is_identifier") or not _MONEY.search(m) \
-                or _not_additive(m) or non_additive_kind(m) is not None or m in (mixed or {}):
+        kind = c.get("number")
+        # Classified: money is an AMOUNT that carries a currency or a money
+        # name. Unclassified: the name alone, as before.
+        if kind:
+            is_money = kind == "amount" and bool(_MONEY.search(m) or c.get("unit"))
+        else:
+            is_money = bool(_MONEY.search(m)) and not _not_additive(m) and non_additive_kind(m) is None
+        if c.get("role") != "numeric" or c.get("is_identifier") or not is_money or m in (mixed or {}):
             continue
         # A copy is the same money twice: "price (copy)" became "Total price
         # (copy) by order status" on live Olist (2026-10-03).
@@ -1621,7 +1736,10 @@ def money_totals(profile: dict, ineligible: set[str] | frozenset = frozenset(),
     return out
 
 
-_DONE_DATE = re.compile(r"deliver|shipped|complet|closed|resolved|finished|fulfil", re.I)
+#: Percentage points of rows a finish date must be empty for beyond the start
+#: date: the records still open.
+OPEN_SHARE = 0.5
+_DONE_DATE = re.compile(r"complet|closed|resolved|finished|ended|done", re.I)
 _PROMISE_DATE = re.compile(r"estimat|expect|due|deadline|limit|promis|target|planned", re.I)
 
 
@@ -1644,9 +1762,26 @@ def completion_trends(profile: dict, ineligible: set[str] | frozenset = frozense
     rows = profile.get("row_count") or 0
     ids = [c["name"] for c in cols if c.get("is_identifier") and not c.get("is_personal")
            and (not rows or (c.get("distinct") or 0) >= 0.2 * rows)]
+    # WHICH DATE IS A FINISH is read from the values, not from one trade's
+    # verbs: the record's start is the date every row has and that comes
+    # first; a finish comes later and is EMPTY for the rows still open. A
+    # date named in neutral words (closed, completed) counts too.
+    by = {c["name"]: c for c in cols}
+
+    def _missing(d: str) -> float:
+        return float(by[d].get("missing_pct") or 0.0)
+
+    def _mid(d: str) -> str:
+        return str(by[d].get("date_median") or "")
+    measured = all(by[d].get("date_median") for d in dates)
+    plain = [d for d in dates if not _PROMISE_DATE.search(d)]
+    start = min(plain, key=lambda d: (round(_missing(d), 1), _mid(d))) if measured and plain else None
     out = []
     for d in dates:
-        if not _DONE_DATE.search(d) or _PROMISE_DATE.search(d):
+        if _PROMISE_DATE.search(d) or d == start:
+            continue
+        later_and_open = bool(start) and _mid(d) >= _mid(start) and _missing(d) >= _missing(start) + OPEN_SHARE
+        if not (_DONE_DATE.search(d) or later_and_open):
             continue
         # Count the record the date belongs to: order_delivered_customer_date
         # counts order_id, not item rows.
@@ -1663,15 +1798,10 @@ def completion_trends(profile: dict, ineligible: set[str] | frozenset = frozense
         cfg = {"dimension": d, "dimension_granularity": "month",
                "measure": idc or d, "aggregation": "countd" if idc else "count"}
         what = (idc or "record").replace("_id", "").replace("_", " ")
-        done = _DONE_DATE.search(d).group(0).lower()
-        out.append({"widget_type": "line", "title": f"{what.capitalize()}s {done.rstrip('e')}ed per month"
-                    if not done.endswith(("ed", "d")) else f"{what.capitalize()}s {done} per month",
+        out.append({"widget_type": "line", "title": f"{what.capitalize()}s per month, by {_h_date(d)}",
                     "question": f"How many {what}s finish each month?", "config": cfg, "section": "time",
                     "value": 4, "source": "backbone", "audience": "manager",
                     "why": f"Throughput by the day each {what} finished ({d}), not the day it began."})
-    if len(out) > 1:
-        for w in out:
-            w["title"] += f" (by {_h_date(w['config']['dimension'])})"
     return out[:2]
 
 
@@ -1697,7 +1827,7 @@ def detail_table(profile: dict, ineligible: set[str] | frozenset = frozenset(),
     date_cols = [d for d in (dates or []) if d in {c["name"] for c in cols}][:1]
     from .semantic_guard import non_additive_kind
     nums = [c["name"] for c in cols if c.get("role") == "numeric" and not c.get("is_identifier")
-            and non_additive_kind(c["name"]) != "coordinate"
+            and (c.get("number") or non_additive_kind(c["name"]) != "coordinate")
             and not re.search(r"\bcopy\b", c["name"], re.I)][:3]      # "price (copy)" is price again
     columns = ([ids[0]["name"]] if ids else []) + cats + date_cols + nums
     if len(columns) < 2:
@@ -1807,16 +1937,83 @@ def drill_page(proposals: list[dict], categories: list[str]) -> dict | None:
             "widgets": [{**w, "layout": slot} for w, slot in layout_section(widgets, "drill")]}
 
 
+#: Charts the model may choose for one request, and the answer's shape.
+PICK_MAX = 12
+PICK_SCHEMA = {
+    "type": "object", "additionalProperties": False, "required": ["picks"],
+    "properties": {"picks": {"type": "array", "maxItems": 24, "items": {
+        "type": "object", "additionalProperties": False, "required": ["id"],
+        "properties": {"id": {"type": "integer"}, "why": {"type": "string"}}}}},
+}
+
+
+def pick_messages(goal: str, cards: list[dict], questions: dict | None, limit: int) -> list[dict]:
+    """The model as a chooser: every chart below exists, has been drawn on the
+    person's data, and carries the sentence of what it shows. It answers with
+    ids from the list -- there is nothing else it can return."""
+    listing = "\n".join(
+        f"{i} | {w.get('widget_type')} | {str(w.get('title') or '')[:90]} | "
+        f"{str(w.get('takeaway') or w.get('why') or '')[:160]}" for i, w in enumerate(cards))
+    system = ("You help a person choose charts for a dashboard. Every chart in the list has already been built and "
+              "drawn on their data; the last column says what it shows, in its own numbers. Choose the charts that "
+              "best answer what the person asked, most useful first. Choose ONLY from the list, by id. Do not "
+              "describe, rename or invent charts. If nothing in the list bears on the question, return no picks.")
+    user = (f"WHAT THE PERSON ASKED\n{_data_block(goal)}\n\n{questions_text(questions)}"
+            f"THE CHARTS (id | kind | title | what it shows)\n{_data_block(listing)}\n\n"
+            f"Return up to {limit} ids, each with a few words on why it answers the question.")
+    return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
+async def pick_cards(client, cards: list[dict], goal: str, questions: dict | None = None,
+                     limit: int = PICK_MAX, fresh: bool = False) -> list[tuple[int, str]]:
+    """[(index into `cards`, why)] in the model's order. Anything that is not
+    an id of the list is dropped; a failure is no picks, never an error."""
+    if client is None or not cards or not (goal or "").strip():
+        return []
+    messages = pick_messages(goal, cards, questions, limit)
+    key = lens_cache_key(client, messages)
+    got = None if fresh else _cache_get(key)
+    if got is None:
+        try:
+            got = await client.complete_json(messages, PICK_SCHEMA, max_tokens=1500, enforce=True,
+                                             temperature=FRESH_TEMPERATURE if fresh else 0.0,
+                                             seed=_fresh_seed() if fresh else LENS_SEED)
+        except Exception as exc:                             # noqa: BLE001
+            log.warning("choosing among the validated charts failed: %s", exc)
+            return []
+        if isinstance(got, dict) and got.get("picks"):
+            _cache_set(key, got)
+    out, seen = [], set()
+    for p in (got or {}).get("picks") or []:
+        i = p.get("id") if isinstance(p, dict) else None
+        if isinstance(i, bool) or not isinstance(i, int) or not (0 <= i < len(cards)) or i in seen:
+            continue
+        seen.add(i)
+        out.append((i, str(p.get("why") or "")[:200]))
+    return out[:limit]
+
+
+def selection_mode(selection: str | None = None) -> str:
+    """cards | free | both, as set now (settings.suggest_ai_selection)."""
+    if selection in ("cards", "free", "both"):
+        return selection
+    from ..core.config import settings
+    mode = str(getattr(settings, "suggest_ai_selection", "cards") or "cards")
+    return mode if mode in ("cards", "free", "both") else "cards"
+
+
 async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
                     ineligible: set[str], findings: list[dict], facts: dict,
                     goal: str | None, size: int, probe: Probe, client=None,
                     knowledge=None, progress=None, extra: list[dict] | None = None,
-                    fresh: bool = False) -> dict:
+                    fresh: bool = False, selection: str | None = None) -> dict:
     from .readback import as_i18n, takeaway
     from .suggest_dataset_dashboard import (PROBE_CONCURRENCY, _probe, polish_widget,
                                             resolve_time_words, validate_widget)
     size = min(max(int(size or 24), 6), 60)
     lenses = choose_lenses(profile, facts.get("facts") or [])
+    # Where an AI-designed dashboard's charts come from (settings.suggest_ai_selection).
+    mode = selection_mode(selection)
 
     # 1. proposals: one call per lens, concurrently; plus the engine's own ideas
     proposed: list[dict] = []
@@ -1843,7 +2040,7 @@ async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
             log.warning("person questions failed: %s", exc)
         if questions:
             lenses = ["decisions"] + lenses
-    if client is not None and lenses:
+    if client is not None and lenses and mode != "cards":
         await tell("proposing", lenses=len(lenses))
 
         async def ask(lens: str):
@@ -1978,9 +2175,32 @@ async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
             continue
         result = drawn.get(i)
         said = takeaway(w["widget_type"], w["config"], result)
+        if w.get("source") == "discovery" and w.get("why"):
+            # A chart the discovery engine offered for something it MEASURED
+            # (a season, a weekly rhythm) says that -- the generic reading of
+            # a year-by-month grid has nothing to say about a season.
+            alive.append({**w, "row_count": rows, "takeaway": w["why"], "takeaway_i18n": w.get("takeaway_i18n"),
+                          "evidence": round(evidence(w["widget_type"], w["config"], result), 3)})
+            continue
         alive.append({**w, "row_count": rows,
                       "takeaway": str(said) if said else None, "takeaway_i18n": as_i18n(said),
                       "evidence": round(evidence(w["widget_type"], w["config"], result), 3)})
+
+    # 2b. the model CHOOSES among what was built, validated and drawn. In
+    # "cards" mode this is all it does: it cannot put a chart on the page
+    # that the platform did not make.
+    picked: list[tuple[int, str]] = []
+    if client is not None and goal and goal.strip() and mode in ("cards", "both"):
+        await tell("choosing", drawn=len(alive))
+        picked = await pick_cards(client, alive, goal, questions, limit=max(PICK_MAX, size // 2), fresh=fresh)
+        for order, (i, why) in enumerate(picked):
+            w = alive[i]
+            # Chosen for the person's question: valued above anything not chosen,
+            # in the model's order, and on the page of their questions.
+            alive[i] = {**w, "value": 5 + (len(picked) - order) / (len(picked) + 1), "picked": order + 1,
+                        "why": why or w.get("why"),
+                        "section": "decisions" if questions and w.get("section") != "summary" else w.get("section")}
+        lens_notes["chosen"] = f"{len(picked)} chosen of {len(alive)} drawn"
 
     # 3. select
     await tell("selecting", drawn=len(alive))
@@ -1989,7 +2209,7 @@ async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
     # not the four a categorical dataset's summary page holds.
     chosen, stats = select(alive, size, sections,
                            summary_cap=9 if series else 4,
-                           quota={"decisions": len((questions or {}).get("questions") or []) + 2}
+                           quota={"decisions": max(len((questions or {}).get("questions") or []) + 2, len(picked))}
                            if questions else None)
 
     # 4. the detail page: the rows themselves, drawn like everything else
@@ -2035,7 +2255,11 @@ async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
         # A page that splits by nothing filterable (a trend, a model) still
         # takes the dataset's own: "pay over time, for Sales" is a question.
         # The quality page is about the rows as they are: no filters.
-        controls = [] if sec == "quality" else slicers_for(widgets, profile, ineligible, fallback=overall)
+        # The period is asked of the date the rows HAPPENED on (the first of
+        # the event dates), not whichever date column spans the longest.
+        event = next(iter(order_event_dates(sorted(dates), df)), None)
+        controls = [] if sec == "quality" else slicers_for(widgets, profile, ineligible, fallback=overall,
+                                                           with_date=True, date=event)
         keys = ("widget_type", "title", "why", "config", "row_count", "takeaway", "takeaway_i18n",
                 "question", "value", "audience", "evidence", "source")
         proposals.append({
@@ -2055,7 +2279,7 @@ async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
         proposals.append(drill)
     return {
         "proposals": proposals,
-        "panel": {"lenses": lenses, "lens_notes": lens_notes,
+        "panel": {"lenses": lenses, "lens_notes": lens_notes, "selection": mode, "chosen": len(picked),
                   "candidates": len(candidates), "from_model": len(proposed),
                   "from_statistics": len(rules), "from_derived": len(extra),
                   "from_backbone": len(backbone), "drawn": len(alive),

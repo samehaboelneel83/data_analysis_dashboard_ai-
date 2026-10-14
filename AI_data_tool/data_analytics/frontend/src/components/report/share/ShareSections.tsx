@@ -177,7 +177,7 @@ payload = {
     "cfg": ${minted.id},
     "exp": int(time.time()) + 3600,  # max 24h ahead
     "filters": [{"column": "region", "op": "eq", "value": "US"}],  # optional, scopes every widget
-    "viewer_email": "viewer@customer.example.com",  # optional, expands USEREMAIL()
+    "viewer_email": "viewer@example.com",  # optional, expands USEREMAIL()
 }
 token = jwt.encode(payload, "${minted.secret}", algorithm="HS256")
 # Hand the token to the browser as ${window.location.origin}/embed?token=<token>` : ''
@@ -186,7 +186,7 @@ token = jwt.encode(payload, "${minted.secret}", algorithm="HS256")
 const token = jwt.sign({
   cfg: ${minted.id},
   filters: [{ column: 'region', op: 'eq', value: 'US' }], // optional, scopes every widget
-  viewer_email: 'viewer@customer.example.com', // optional, expands USEREMAIL()
+  viewer_email: 'viewer@example.com', // optional, expands USEREMAIL()
 }, '${minted.secret}', { algorithm: 'HS256', expiresIn: '1h' }) // max 24h
 // Hand \`token\` to the browser as ${window.location.origin}/embed?token=<token>` : ''
 
@@ -208,11 +208,11 @@ const token = jwt.sign({
       <div className="shx-row" style={{ alignItems: 'flex-end' }}>
         <div style={{ flex: 1, minWidth: 160 }}>
           <label className="shx-lbl" htmlFor="embed-name">{t('shx.em.name')}</label>
-          <input id="embed-name" className="shx-in" value={name} onChange={e => setName(e.target.value)} placeholder="customer-portal" dir="ltr" />
+          <input id="embed-name" className="shx-in" value={name} onChange={e => setName(e.target.value)} placeholder="my-portal" dir="ltr" /> {/* i18n-ok */}
         </div>
         <div style={{ flex: 1.4, minWidth: 200 }}>
           <label className="shx-lbl" htmlFor="embed-origins">{t('shx.em.origins')}</label>
-          <input id="embed-origins" className="shx-in" value={origins} onChange={e => setOrigins(e.target.value)} placeholder="https://app.customer.com" dir="ltr" />
+          <input id="embed-origins" className="shx-in" value={origins} onChange={e => setOrigins(e.target.value)} placeholder="https://app.example.com" dir="ltr" /> {/* i18n-ok */}
         </div>
         <button type="button" className="btn btn-primary" style={{ height: 40 }} onClick={() => void create()}>{t('shx.em.create')}</button>
       </div>

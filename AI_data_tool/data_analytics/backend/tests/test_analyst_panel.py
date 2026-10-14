@@ -1,5 +1,6 @@
 """Step 2 of the analyst-panel pipeline (2026-10-02): several lenses propose,
 everything is drawn, and the data decides what is kept."""
+import pytest
 import asyncio
 
 import numpy as np
@@ -11,6 +12,15 @@ from app.services.dataset_profile import build_profile
 from app.services.fact_sheet import build_facts
 from app.services.insights import effective_roles, generate_insights
 from app.services.widget_data import get_widget_data_from_df
+
+
+@pytest.fixture(autouse=True)
+def _the_model_proposes_its_own_charts(monkeypatch):
+    """These tests are of the "free" way of designing (the model proposes,
+    lens by lens); the default is now "cards" (tests/test_suggest_cards.py)."""
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "suggest_ai_selection", "free")
+
 
 
 def _hr(n=4000, seed=0):
@@ -87,16 +97,20 @@ class FakeClient:
 def _run(size=12, client="fake"):
     df = _hr()
     tm = detect_types(df)
-    roles = effective_roles(tm, {})
-    profile = build_profile(df, tm, {})
+    # The dataset as the platform holds it: each number classified once
+    # (services/column_classes.py). What a salary is comes from there, not
+    # from a built-in list of one field's column names.
+    meta = {"salary": {"number": "level", "class_source": "ai"}}
+    roles = effective_roles(tm, meta)
+    profile = build_profile(df, tm, meta)
     facts = build_facts(df, roles)
-    findings = generate_insights(df, tm, {})["findings"]
+    findings = generate_insights(df, tm, meta)["findings"]
     c = FakeClient() if client == "fake" else None
 
     async def probe(wt, cfg):
         return get_widget_data_from_df(df, cfg, wt)
 
-    out = asyncio.run(run_panel(df=df, profile=profile, roles=roles, column_meta={}, ineligible=set(),
+    out = asyncio.run(run_panel(df=df, profile=profile, roles=roles, column_meta=meta, ineligible=set(),
                                 findings=findings, facts=facts, goal="I run HR", size=size,
                                 probe=probe, client=c))
     return out, c
@@ -117,7 +131,10 @@ def test_a_panel_run_proposes_draws_merges_and_selects():
     assert p["from_model"] == 12 and p["from_statistics"] > 0
     assert p["rejected"] >= 1 and "region" in out["reason"]    # invented column dropped, named
     assert p["duplicates_merged"] >= 1                         # the second pay-by-dept
-    assert p["selected"] <= 12
+    # The size bounds what is SELECTED from the pool; the detail table (the rows
+    # themselves) is added after it. With the wider chart types in the pool the
+    # selection now fills the size, so the table shows as one more.
+    assert p["selected"] <= 12 + 1
     widgets = [w for prop in out["proposals"] for w in prop["widgets"]]
     # Controls and the rows themselves have nothing to read back.
     assert all(w["takeaway"] for w in widgets if not w["widget_type"].startswith("model_rules")
@@ -290,7 +307,7 @@ def test_a_missing_aggregation_is_read_from_the_title():
     assert w["config"]["aggregation"] == "avg"
     # no word in the title: how the column itself rolls up, never a blind sum
     plain = {"widget_type": "bar", "title": "Salary by gender", "config": {"dimension": "gender", "measure": "salary"}}
-    assert _aggregation_from_title(plain)["config"]["aggregation"] == "avg"
+    assert _aggregation_from_title(plain, {"salary": {"number": "level"}})["config"]["aggregation"] == "avg"
     rev = {"widget_type": "bar", "title": "Revenue by region", "config": {"dimension": "region", "measure": "revenue"}}
     assert _aggregation_from_title(rev)["config"]["aggregation"] == "sum"
     told_meta = _aggregation_from_title(rev, {"revenue": {"aggregation": "avg"}})

@@ -683,7 +683,9 @@ async def rescan_insights(session, ds) -> bool:
         df = apply_prep_steps(df, steps, {})
         if ds.calculated_columns:
             df = apply_calculated_columns(df, ds.calculated_columns, ds.custom_functions)
-        return generate_insights(df, detect_types(df), ds.column_meta or {})
+        from . import column_classes
+        meta, _ = column_classes.classified(df, ds.column_meta or {})
+        return generate_insights(df, detect_types(df), meta)
 
     try:
         result = await asyncio.to_thread(_scan)
@@ -722,7 +724,7 @@ async def refresh_one(session, ds: Dataset) -> bool:
     ago, and every staleness label agreed. Backoff now does that job, and the
     stamp means what it says: the last time the data actually changed.
     """
-    from .dataset_refresh import rewrite_dataset_file, write_materialization
+    from .dataset_refresh import rewrite_dataset_file, rows_of, write_materialization
     from .refresh_runs import finish_run, start_run
 
     # E12: a queued manual refresh of this dataset owns it until it ends; the
@@ -846,7 +848,7 @@ async def refresh_one(session, ds: Dataset) -> bool:
                     wm.last_full_at = datetime.utcnow()
             if filename:
                 await write_materialization(
-                    session, ds_id, filename, load_kind, len(df), list(df.columns),
+                    session, ds_id, filename, load_kind, rows_of(df), list(df.columns),
                     result["cursor_value"] if result else None)
         except SchemaBreak as e:
             log.warning("Scheduled refresh refused for dataset %s: %s", ds_id, e)
@@ -870,10 +872,10 @@ async def refresh_one(session, ds: Dataset) -> bool:
         ds = await session.get(Dataset, ds_id)
         ds.last_refreshed_at = datetime.utcnow()
         # The scheduled path used to leave these as they were at upload.
-        ds.row_count, ds.col_count = int(len(df)), int(len(df.columns))
+        ds.row_count, ds.col_count = rows_of(df), int(len(df.columns))
         await session.commit()
         await clear_failure(session, "dataset", ds_id)
-        await finish_run(session, run_id, "ok", rows=int(len(df)), checks=outcome.get("checks"))
+        await finish_run(session, run_id, "ok", rows=rows_of(df), checks=outcome.get("checks"))
         # The data just changed; the stored insight baseline describes the OLD
         # data. Still under this dataset's advisory lock, so a user-triggered
         # scan cannot interleave.

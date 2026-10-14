@@ -35,6 +35,69 @@ def rank(level: str | None) -> int:
     return _RANK.get(level or "data", 2)
 
 
+class Grant:
+    """What sharing a dashboard directly gives one person: the level, and the
+    two things a level cannot say. `via` is how it reached them."""
+    __slots__ = ("level", "can_export", "can_share", "via", "expires_at")
+
+    def __init__(self, level: str, can_export: bool, can_share: bool, via: str, expires_at=None):
+        self.level, self.can_export, self.can_share, self.via, self.expires_at = level, can_export, can_share, via, expires_at
+
+
+def grant_expired(expires_at) -> bool:
+    if expires_at is None:
+        return False
+    from datetime import datetime, timezone
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return expires_at <= datetime.now(timezone.utc)
+
+
+async def report_grants(db: AsyncSession, user: User, report_ids: list[int]) -> dict[int, "Grant"]:
+    """The direct share that applies to this person on each report, if any.
+
+    A grant names a person, a role or a team (ReportUserGrant). One that has
+    EXPIRED gives nothing. A grant naming the person decides alone -- the
+    specific instrument stays authoritative, the rule the per-user rung
+    always had -- so naming someone 'view, no downloads' holds even when
+    their team was given more. Otherwise the grants of their role and of
+    their teams (and every team above) combine upward: the highest level, and
+    a right any of them gives. Two queries at most (the second only when a
+    team is named), whatever the number of reports."""
+    if not report_ids:
+        return {}
+    rows = (await db.execute(select(ReportUserGrant).where(
+        ReportUserGrant.report_id.in_(report_ids),
+        or_(ReportUserGrant.user_id == user.id,
+            ReportUserGrant.role_id == user.role_id,
+            ReportUserGrant.org_unit_id.isnot(None))))).scalars().all()
+    rows = [r for r in rows if not grant_expired(r.expires_at)]
+    units: set[int] = set()
+    if any(r.org_unit_id is not None for r in rows):
+        units = await _my_unit_ids(db, user.org_id, user.id)
+    out: dict[int, Grant] = {}
+    named: set[int] = set()
+    for r in rows:
+        if r.user_id == user.id:
+            out[r.report_id] = Grant(r.level, bool(r.can_export), bool(r.can_share), "user", r.expires_at)
+            named.add(r.report_id)
+    for r in rows:
+        if r.report_id in named or r.user_id is not None:
+            continue
+        if not (r.role_id == user.role_id or (r.org_unit_id is not None and r.org_unit_id in units)):
+            continue
+        via = "role" if r.role_id is not None else "team"
+        had = out.get(r.report_id)
+        if had is None:
+            out[r.report_id] = Grant(r.level, bool(r.can_export), bool(r.can_share), via, r.expires_at)
+        else:
+            if rank(r.level) > rank(had.level):
+                had.level, had.via = r.level, via
+            had.can_export = had.can_export or bool(r.can_export)
+            had.can_share = had.can_share or bool(r.can_share)
+    return out
+
+
 async def _published_via_folder(db: AsyncSession, org_id: int) -> set[int]:
     """Report ids filed anywhere under a published folder.
 
@@ -179,6 +242,10 @@ def _resolve(report: Report, *, is_admin: bool, author_ok: int | None,
         return "data"
     if report.created_by is not None and report.created_by == author_ok:
         return "data"
+    if getattr(report, "archived_at", None) is not None:
+        # Archived: kept and restorable, but closed to everyone except its
+        # owner and administrators -- no grant, folder or publication opens it.
+        return "none"
     if grant:
         return grant
     published_level = ((role_row or "view")
@@ -210,11 +277,8 @@ async def effective_capability(db: AsyncSession, user: User, report_id: int) -> 
             ReportCapability.report_id == report_id,
             ReportCapability.role_id == user.role_id)
     )).scalar_one_or_none()
-    grant = (await db.execute(
-        select(ReportUserGrant.level).where(
-            ReportUserGrant.report_id == report_id,
-            ReportUserGrant.user_id == user.id)
-    )).scalar_one_or_none()
+    held = (await report_grants(db, user, [report_id])).get(report_id)
+    grant = held.level if held else None
     folder_pub = (not report.published and report.created_by is not None
                   and report_id in await _published_via_folder(db, user.org_id))
     is_admin = bool(user.role and user.role.is_org_admin)
@@ -254,11 +318,7 @@ async def effective_capabilities(
             ReportCapability.report_id.in_(report_ids),
             ReportCapability.role_id == user.role_id)
     )).all())
-    grants = dict((await db.execute(
-        select(ReportUserGrant.report_id, ReportUserGrant.level).where(
-            ReportUserGrant.report_id.in_(report_ids),
-            ReportUserGrant.user_id == user.id)
-    )).all())
+    grants = {rid: g.level for rid, g in (await report_grants(db, user, report_ids)).items()}
     folder_pub = await _published_via_folder(db, user.org_id)
     # One batch resolution for the whole list; admins skip it the same way
     # the single resolver's gate does.
@@ -285,6 +345,44 @@ async def require_capability(db: AsyncSession, user: User, report_id: int, min_l
         raise HTTPException(
             403, f"Your access to this report is {level}-level; "
                  f"this action needs {min_level}")
+
+
+async def export_refusal(db: AsyncSession, user: User, report: Report) -> str | None:
+    """Why this person may NOT take this dashboard's data away, or None.
+
+    Seeing is not taking: a viewer may be allowed to look and filter without
+    being allowed a PDF, a workbook, a CSV or a scheduled copy. Anyone who can
+    EDIT the dashboard may export it (they could rebuild it to show anything
+    it reads). For a viewer it is the dashboard's own switch, then the grant
+    that let them in. This only ever narrows: the dataset's export policy and
+    the sensitivity label are checked separately and still apply."""
+    level = await effective_capability(db, user, report.id)
+    if level == "none":
+        raise HTTPException(404, "Report not found")
+    if rank(level) >= rank("edit"):
+        return None
+    if not getattr(report, "viewers_may_export", True):
+        return "The owner of this dashboard has switched downloads off for viewers."
+    held = (await report_grants(db, user, [report.id])).get(report.id)
+    if held is not None and not held.can_export:
+        return "Your access to this dashboard does not include downloads."
+    return None
+
+
+async def require_export(db: AsyncSession, user: User, report: Report) -> None:
+    """403 with the reason when `export_refusal` gives one; the refusal is
+    written to the audit log on a transaction of its own, so it survives the
+    request that is about to fail."""
+    why = await export_refusal(db, user, report)
+    if why is None:
+        return
+    try:
+        from ..services.audit import record
+        await record(db, user, "report.export_denied", "report", report.id, why)
+        await db.commit()
+    except Exception:                                       # noqa: BLE001 -- the refusal stands either way
+        await db.rollback()
+    raise HTTPException(403, why)
 
 
 async def max_dataset_capability(db: AsyncSession, user: User, dataset_id: int) -> str:
@@ -658,10 +756,13 @@ async def explain_capability(db: AsyncSession, user: User, report_id: int) -> tu
         return level, "You are an organisation admin."
     if report.created_by is not None and report.created_by == user.id:
         return level, "You created this report."
-    grant = (await db.execute(select(ReportUserGrant.level).where(
-        ReportUserGrant.report_id == report_id, ReportUserGrant.user_id == user.id))).scalar_one_or_none()
-    if grant:
-        return level, f"The report was shared with you directly at {grant} level."
+    if report.archived_at is not None:
+        return level, "This report is archived: only its owner and administrators can open it."
+    held = (await report_grants(db, user, [report_id])).get(report_id)
+    grant = held.level if held else None
+    if held:
+        how = {"user": "with you directly", "role": "with your role", "team": "with your team"}[held.via]
+        return level, f"The report was shared {how} at {grant} level."
     folder_grant = (await folder_granted_reports(db, user)).get(report_id)
     role_row = (await db.execute(select(ReportCapability.level).where(
         ReportCapability.report_id == report_id,

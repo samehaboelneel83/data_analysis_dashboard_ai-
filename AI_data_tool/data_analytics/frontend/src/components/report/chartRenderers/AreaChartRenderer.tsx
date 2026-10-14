@@ -1,13 +1,15 @@
+import { useId } from 'react'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Brush, LabelList } from 'recharts'
 import { TT, fmtStr, COLORS } from '../chartUtils'
 import type { ChartRendererProps } from './types'
-import { xAxisProps, yAxisProps, gridProps, labelListProps, legendProps, chartMargin } from './axisOptions'
+import { xAxisProps, yAxisProps, gridProps, labelListProps, legendProps, chartMargin, valueTick } from './axisOptions'
 import { useChartViewport } from './useChartViewport'
 import { seriesName } from './axisOptions'
 import { toBarSeries } from './barSeries'
 
 export default function AreaChartRenderer({ rows, data, cfg, rtl, broadcasts, onClickPoint, measureFmt, plotW, plotH, onBrushChange }: ChartRendererProps) {
   const grid = gridProps(cfg)
+  const gradientId = `area${useId().replace(/:/g, '')}`
   // Several measures on the value axis arrive as a crosstab, one column per
   // measure (backend services/multi_measure.py): one area each, with a legend.
   const { rows: seriesRows, series } = toBarSeries(data, 'clustered')
@@ -29,15 +31,25 @@ export default function AreaChartRenderer({ rows, data, cfg, rtl, broadcasts, on
       >
         {grid && <CartesianGrid {...grid} />}
         <XAxis dataKey="name" {...xAxisProps(cfg, rtl, view.visible.map((r: any) => String(r.name)), plotW)} />
-        <YAxis {...yAxisProps(cfg, rtl, measureFmt, values, undefined, { height: plotH })} tickFormatter={v => fmtStr(v, measureFmt)} />
+        <YAxis {...yAxisProps(cfg, rtl, measureFmt, values, undefined, { height: plotH })} tickFormatter={valueTick(cfg, measureFmt)} />
         <Tooltip contentStyle={TT} formatter={(v: unknown, name: unknown) =>
           [fmtStr(v, measureFmt), multi ? String(name ?? '') : seriesName(cfg)]} />
         {legend && <Legend {...legend} wrapperStyle={{ fontSize: 10 }} />}
+        {/* The fill fades towards the axis: the line carries the reading, the
+            area only says "this much", and one area no longer hides another. */}
+        <defs>
+          {(multi ? series : ['value']).map((_, i) => (
+            <linearGradient key={i} id={`${gradientId}-${i}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={COLORS[i % COLORS.length]} stopOpacity={multi ? 0.4 : 0.5} />
+              <stop offset="100%" stopColor={COLORS[i % COLORS.length]} stopOpacity={0.03} />
+            </linearGradient>
+          ))}
+        </defs>
         {multi ? series.map((s, i) => (
           <Area key={s} type="monotone" dataKey={s} name={s} stroke={COLORS[i % COLORS.length]}
-            fill={COLORS[i % COLORS.length]} fillOpacity={0.22} strokeWidth={2} connectNulls />
+            fill={`url(#${gradientId}-${i})`} fillOpacity={1} strokeWidth={2} connectNulls />
         )) : (
-          <Area type="monotone" dataKey="value" stroke={COLORS[0]} fill={COLORS[0]} fillOpacity={0.35} strokeWidth={2}>
+          <Area type="monotone" dataKey="value" stroke={COLORS[0]} fill={`url(#${gradientId}-0)`} fillOpacity={1} strokeWidth={2}>
             {labels && <LabelList {...labels} />}
           </Area>
         )}

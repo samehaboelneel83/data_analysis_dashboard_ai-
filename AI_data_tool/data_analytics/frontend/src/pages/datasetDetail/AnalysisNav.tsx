@@ -13,7 +13,7 @@ import { analysisCatalogueApi } from '../../services/api'
 
 export type AnalysisPick =
   | 'drives' | 'inputs' | 'groups' | 'related' | 'alike' | 'together'
-  | 'insights' | 'unusual' | 'predict' | 'goal' | 'text' | 'all'
+  | 'insights' | 'unusual' | 'returns' | 'predict' | 'goal' | 'sure' | 'decide' | 'text' | 'all'
 
 type Question = { pick: AnalysisPick; analyses?: string[]; importOnly?: boolean; needsNumeric?: boolean }
 
@@ -28,10 +28,15 @@ export const QUESTION_GROUPS: { key: string; items: Question[] }[] = [
     // v1's automatic insights and anomaly inspection: not on the board's
     // list, kept so nothing v1 offered disappears.
     { pick: 'insights' }, { pick: 'unusual', importOnly: true, needsNumeric: true },
+    // Phase 5: who is seen again, period after period.
+    { pick: 'returns', analyses: ['cohort_retention'] },
   ] },
   { key: 'predict', items: [
     { pick: 'predict', analyses: ['regression', 'glm_logistic', 'decision_tree', 'automated_prediction', 'mixed_model', 'survival'] },
     { pick: 'goal', analyses: ['forecast_goal', 'goal_seek', 'forecast_scenario'] },
+    // Phase 5: a what-if as a range of outcomes; and a decision the table has the shape of.
+    { pick: 'sure', analyses: ['simulate_scenarios'] },
+    { pick: 'decide', importOnly: true },
   ] },
   { key: 'text', items: [{ pick: 'text', analyses: ['text_topics', 'text_sentiment'] }] },
 ]
@@ -43,6 +48,8 @@ export const analysesFor = (pick: AnalysisPick): string[] | undefined =>
 /** Deep-link anchors (from the Insights hub) and the question they open. */
 export const HASH_PICK: Record<string, AnalysisPick> = {
   influencers: 'drives', segment: 'alike', associations: 'together', insights: 'insights', anomalies: 'unusual',
+  // The builder's suggestions link here: a decision is set up on the dataset, not on a page.
+  decide: 'decide',
 }
 
 export default function AnalysisNav({ pick, onPick, live, hasNumeric }: {

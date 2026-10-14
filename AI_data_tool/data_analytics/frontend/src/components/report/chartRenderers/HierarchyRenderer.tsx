@@ -69,6 +69,7 @@ function TreeRows({ node, rtl, fmt, path, tree, ticked, onTick, selectable }: {
   onTick: (tree: TreeNode, path: string[]) => void
   selectable: boolean
 }) {
+  const t9 = useT()
   // Collapsed by default below the second level: an org chart that opens fully
   // expanded is a wall, and the reader has not asked for the leaves yet.
   const t = useT()
@@ -232,6 +233,7 @@ function Sunburst({ node, fmt, onZoomInto, onZoomOut }: {
   node: Node; fmt?: CalcColumnFormat | null
   onZoomInto?: (path: string[]) => void; onZoomOut?: () => void
 }) {
+  const t9 = useT()
   const t = useT()
   const size = 260, cx = size / 2, cy = size / 2
   const maxDepth = useMemo(() => {

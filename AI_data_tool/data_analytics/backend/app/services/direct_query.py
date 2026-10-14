@@ -985,6 +985,23 @@ def fetch_analysis_frame(
                         row_cap=row_cap)
 
 def run_direct_query(*args, **kwargs) -> dict:
+    """`_run_direct_query_guarded`, once for everyone asking the same thing at
+    the same moment (services/single_flight.py): ten readers opening one
+    dashboard send the customer's database one query, not ten."""
+    from . import single_flight
+    names = ("source_cfg", "dataset", "config", "widget_type", "rls_filter_expr", "row_cap", "cache_ttl_seconds",
+             "cache_epoch", "org_id", "drop_columns", "measures")
+    given = {**dict(zip(names, args)), **kwargs}
+    dataset = given.get("dataset")
+    key = single_flight.key_of(
+        "dq", given.get("source_cfg"), getattr(dataset, "id", None), getattr(dataset, "source_table", None),
+        getattr(dataset, "source_query", None), given.get("config"), given.get("widget_type"),
+        given.get("rls_filter_expr"), given.get("row_cap"), given.get("cache_epoch"), given.get("org_id"),
+        sorted(given.get("drop_columns") or []), given.get("measures")) if len(args) <= len(names) else None
+    return single_flight.run(key, lambda: _run_direct_query_guarded(*args, **kwargs))
+
+
+def _run_direct_query_guarded(*args, **kwargs) -> dict:
     """Execute a pushdown query, translating a dead source into a domain error.
 
     Every caller went through the generic 500 handler when the customer's
@@ -1184,7 +1201,7 @@ def _fetch_and_compute(
 #: Config keys whose meaning needs every group, or the raw rows, after
 #: aggregation -- see `_needs_rows`.
 _ROW_LEVEL_KEYS = ("having", "suppress_below", "quick_calc", "sort_custom",
-                   "dimension_levels", "dimension_granularity", "running",
+                   "dimension_levels", "dimension_granularity", "dimension2_granularity", "running",
                    # Number ranges (services/auto_bin.py) when no bucket SQL
                    # exists for the dialect: the shaper bins the fetched rows.
                    "dimension_bin",
@@ -1942,6 +1959,9 @@ def _run_aggregate_plan(source_cfg: dict, dataset, config: dict, shaped_config: 
     ran = [f for f in (plan.filters or [])]
     shaped_config = {**shaped_config,
                      "filters": [f for f in (shaped_config.get("filters") or []) if f not in ran]}
+    # `df` has one row per group: a group-size floor counted here would empty
+    # the chart. Not applied on a live table yet (docs/persona-test, plan 1.6).
+    shaped_config.pop("min_group_rows", None)
     # check_fields off: `df` is the pushed-down GROUP BY (dimension + measure
     # only), and _validate_columns above already refused an unknown field.
     result = get_widget_data_from_df(df, shaped_config, widget_type, flag_partial=False,

@@ -302,3 +302,29 @@ def trace_claims(answer: str | None, question: str | None,
             claims.append({**base, "status": "untraced"})
     return {"claims": claims,
             "untraced": sum(1 for c in claims if c["status"] == "untraced")}
+
+
+#: A sentence ends at . ! ? or the Arabic question mark, or a line break.
+_SENTENCE_END = re.compile(r"(?<=[.!?؟])\s+|\n+")
+
+
+def set_aside_untraced(answer: str, evidence: dict) -> tuple[str, list[str]]:
+    """(the answer without the sentences whose numbers are in no result row,
+    those sentences). Persona test 2026-10-12: "Total sales for 2010 were
+    9,352,485 and for 2011 were 10,635,747" -- both made up, marked, and the
+    conclusion drawn from them (2011 > 2010) was the opposite of the data.
+    The answer is not asked for again (ask once): the checked sentences lead,
+    the others are kept aside to be shown under the details."""
+    bad = [(c["start"], c["end"]) for c in evidence.get("claims") or [] if c.get("status") == "untraced"]
+    if not bad or not answer:
+        return answer, []
+    kept, aside, at = [], [], 0
+    for m in list(_SENTENCE_END.finditer(answer)) + [None]:
+        end = m.start() if m else len(answer)
+        piece = answer[at:end]
+        if piece.strip():
+            (aside if any(at <= s < end for s, _e in bad) else kept).append(piece.strip())
+        at = m.end() if m else len(answer)
+    if not kept:
+        return answer, []
+    return " ".join(kept), aside

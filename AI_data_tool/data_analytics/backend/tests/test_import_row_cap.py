@@ -10,7 +10,7 @@ The behaviour these tests pin, in order of importance:
   1. Over the cap FAILS. It does not truncate. A truncated frame would produce
      totals over an arbitrary subset with no way to say so in the result -- a
      confident wrong number, which is worse than an error.
-  2. The cap is ON by default (2,000,000 since 2026-08-29). 0 disables it,
+  2. The cap is ON by default (2,000,000 since 2026-08-29, 200,000,000 since 2026-10-11). 0 disables it,
      which is what an operator with the memory to spare sets deliberately.
   3. The error names the cap AND the actual size, so an operator can raise
      it deliberately rather than guess.
@@ -67,8 +67,12 @@ class TestTheShippedDefault:
         2M rows is roughly where the measured ~1.8 GB-per-render cost stops
         being survivable on a shared box. An operator with the memory can still
         set 0 and get the old behaviour exactly.
+
+        Raised from 2,000,000 to 200,000,000 on 2026-10-11 at the owner's
+        request: still on, still an administrator's setting, but at this size
+        it is the host's memory that decides, not this number.
         """
-        assert settings.import_row_cap == 2_000_000
+        assert settings.import_row_cap == 200_000_000
 
     def test_disabled_cap_loads_any_size(self, csv_500, monkeypatch):
         monkeypatch.setattr(settings, "import_row_cap", 0)

@@ -74,7 +74,7 @@ describe('Dataflows (E12)', () => {
       { id: 1, name: 'dept', dtype: 'categorical' }, { id: 2, name: 'from_date', dtype: 'datetime' },
       { id: 3, name: 'to_date', dtype: 'datetime' }] } as never)
     vi.mocked(dataflowsApi.create).mockResolvedValue(flow({ id: 7, name: 'Headcount', steps: [], outputs: [], last_run_at: null,
-      source_dataset_id: 2, snapshot: { every: 'month', group_by: ['dept'], measure: null, agg: 'count', as: 'headcount',
+      source_dataset_id: 2, snapshot: { every: 'month', group_by: ['dept'], measure: null, agg: 'count', as: 'row_count',
         backfill: { from_column: 'from_date', to_column: 'to_date', start: '2025-01-01' } } }) as never)
     renderAt()
     await screen.findByTestId('flow-5')
@@ -91,7 +91,7 @@ describe('Dataflows (E12)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create' }))
     await waitFor(() => expect(dataflowsApi.create).toHaveBeenCalledWith({
       name: 'Headcount', source_dataset_id: 2, steps: [], refresh_interval_minutes: 1440,
-      snapshot: { every: 'month', group_by: ['dept'], measure: null, agg: 'count', as: 'headcount',
+      snapshot: { every: 'month', group_by: ['dept'], measure: null, agg: 'count', as: 'row_count',
         backfill: { from_column: 'from_date', to_column: 'to_date', start: '2025-01-01' } } }))
     expect(await screen.findByTestId('snapshot-summary')).toHaveTextContent(/split by dept/)
   })

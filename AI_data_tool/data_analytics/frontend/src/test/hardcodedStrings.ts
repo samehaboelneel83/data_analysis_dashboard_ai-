@@ -38,7 +38,7 @@ export function hardcodedStrings(file: string): Hit[] {
   const hits: Hit[] = []
   const add = (node: ts.Node, text: string) => {
     const line = sf.getLineAndCharacterOfPosition(node.getStart()).line
-    if (/\/\/\s*i18n-ok/.test(lines[line] ?? '')) return
+    if (/(\/\/|\/\*)\s*i18n-ok/.test(lines[line] ?? '')) return
     hits.push({ line: line + 1, text: text.trim().slice(0, 80) })
   }
   const literal = (e: ts.Expression | undefined): string | null => {

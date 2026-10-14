@@ -89,6 +89,42 @@ SPECS: list[Spec] = [
        "Of the concurrent calls, how many background work may never take."),
     _S("agent_statement_timeout_s", "ai", "AI query timeout (seconds)", "The longest one AI-generated query may run."),
     _S("agent_row_cap", "ai", "AI result row limit"),
+    _S("ai_tokens_per_user_per_day", "ai", "AI tokens per person per day",
+       "Besides the organisation's budget: one person cannot use everyone's. 0 = no per-person limit."),
+    _S("suggest_ai_selection", "ai", "AI-designed dashboards: where charts come from",
+       "cards: the AI chooses among charts already validated and drawn on the data. "
+       "free: the AI proposes its own charts, each then checked. both: its proposals join the validated ones.",
+       options=("cards", "free", "both")),
+    _S("suggest_more_types", "ai", "Suggestions panel: further chart types offered",
+       "After the ideas the data argues for, how many further chart types the data has the shape for are offered, "
+       "one of each, each with the reason it fits. 0 = none.", minimum=0, maximum=40),
+    _S("source_ai_selection", "ai", "Suggesting from a connection: where charts come from",
+       "free: the AI writes the query and designs the charts, each then checked on the rows. cards: the AI "
+       "writes the query, the platform makes the plain charts of its result, and the AI only chooses among them.",
+       options=("free", "cards")),
+    _S("setup_ai_selection", "ai", "Guided setup: where charts come from",
+       "free: the AI designs a chart for each question, each then drawn and checked. cards: it only chooses among "
+       "charts the platform built (faster; questions about part of the rows may go unanswered). both: it chooses "
+       "first and designs for the questions left.",
+       options=("cards", "free", "both")),
+    _S("setup_dashboard_richness", "ai", "Guided setup: how rich the dashboards are",
+       "basic: the simplest chart for each question, nothing added. balanced: further chart kinds where a question "
+       "calls for one, with display rules, a number's history, filter controls, click-to-filter and buttons "
+       "between pages. rich: the same, with more of the further kinds per page.",
+       options=("basic", "balanced", "rich")),
+    _S("setup_max_analyses", "data", "Analyses per connection",
+       "How many guided-setup analyses one connection may hold before one must be removed.", minimum=1),
+    _S("min_group_rows", "data", "Fewest rows behind a group in a ranking of averages",
+       "A chart that ranks groups by an average, a median or an extreme leaves out groups with fewer rows than "
+       "this, so a group of two rows does not top the list. Totals and counts keep every group. 0 = keep all."),
+    _S("setup_ai_rule_auto_share", "data", "Guided setup: largest share an AI rule removes by itself",
+       "Rows that break a rule the AI proposed are left out automatically only when they are at most this "
+       "share of the dataset (0 to 1). A rule whose rows are one group's own rows is never applied by itself. "
+       "0 = always ask."),
+    _S("classify_columns_with_model", "ai", "Ask the model once what each column is",
+       "Off: columns are classified from their values alone. The answer is kept and never asked twice."),
+    _S("ai_for_uploads_default", "ai", "Allow AI on uploaded files by default",
+       "Applies to a file whose own Allow AI switch has not been set. A dataset set to off always stays off."),
     # -- Embeddings ---------------------------------------------------------
     _S("embedding_base_url", "embeddings", "Embeddings endpoint", "Empty turns semantic search off."),
     _S("embedding_model", "embeddings", "Embeddings model"),
@@ -107,7 +143,19 @@ SPECS: list[Spec] = [
     _S("max_upload_files", "data", "Files per upload", minimum=1),
     _S("max_batch_upload_mb", "data", "Largest multi-file upload (MB)", minimum=1),
     _S("import_row_cap", "data", "Import row limit", "A larger file or query is refused, never cut short. 0 = no limit."),
+    _S("import_stream_rows", "data", "Write large imports straight to disk from (rows)",
+       "An import from a database with more rows than this is written to disk as it arrives, so its size is "
+       "not limited by the server's memory. 0 = always gather it in memory first."),
+    _S("upload_stream_mb", "data", "Write large CSV uploads straight to disk from (MB)",
+       "A CSV upload at least this large is written to disk a part at a time, so its size is not limited by the "
+       "server's memory. It only matters once the largest upload allowed is this big. 0 = always read it into "
+       "memory first."),
+    _S("load_memory_share", "data", "Memory one dataset may take",
+       "The share of the server's free memory (0 to 1) that loading one whole dataset may use. A dataset needing "
+       "more is refused with a message instead of stopping the server. 0 = never refuse."),
     _S("analysis_row_cap", "data", "Analysis row limit"),
+    _S("analysis_background_rows", "data", "Run slow analyses in the background from (rows)",
+       "A model-fitting analysis on a table at least this large is queued instead of held in the request. 0 = never."),
     _S("source_connect_timeout_s", "data", "Database connect timeout (seconds)",
        "How long to wait for a connected database to answer before giving up."),
     _S("source_statement_timeout_s", "data", "Database query timeout (seconds)",
@@ -117,6 +165,8 @@ SPECS: list[Spec] = [
     _S("automation_frame_max_mb", "data", "Automation data limit (MB)"),
     _S("connector_allow_private_hosts", "data", "Allow connections to private network addresses"),
     _S("job_worker_enabled", "data", "Background job worker", "Runs queued imports and refreshes.", restart=True),
+    _S("job_time_limit_s", "data", "Longest background job (seconds)",
+       "A job still running after this ends as failed, so a stuck one cannot hold the worker. 0 = no limit."),
     # -- Maps -----------------------------------------------------------------
     _S("map_tile_hosts", "maps", "Allowed tile servers",
        "Comma-separated host names. Empty: an organization may use any tile server."),
@@ -130,9 +180,17 @@ SPECS: list[Spec] = [
     _S("fk_overlap_high", "metadata", "Relationship confidence: accept", "0 to 1."),
     _S("fk_overlap_review", "metadata", "Relationship confidence: review", "0 to 1."),
     # -- Performance ----------------------------------------------------------
+    _S("discovery_sample_rows", "performance", "Rows measured for suggestions",
+       "A larger table is sampled for its profile and for the look at the rows before a suggestion is offered."),
+    _S("model_fit_threads", "performance", "Threads for model fits",
+       "1 is fastest on most hosts: more threads fight over small problems. 0 = let the library decide."),
     _S("widget_duckdb_pushdown", "performance", "Compute charts in DuckDB"),
     _S("widget_duckdb_threads", "performance", "DuckDB threads per chart"),
     _S("widget_work_max_concurrency", "performance", "Charts computed at once", restart=True),
+    _S("db_pool_size", "performance", "Connections kept to the app's database",
+       "How many this server keeps open to its own database.", restart=True),
+    _S("db_pool_overflow", "performance", "Extra connections under load",
+       "How many more it may open when all are busy.", restart=True),
     _S("widget_data_cache_maxsize", "performance", "Chart result cache (entries)"),
     _S("widget_data_cache_max_entry_bytes", "performance", "Largest cached chart result (bytes)"),
     _S("frame_cache_enabled", "performance", "Keep parsed files in memory"),
@@ -141,6 +199,9 @@ SPECS: list[Spec] = [
     _S("directquery_engine_pool_maxsize", "performance", "Open database connections kept"),
     _S("valkey_cache_ttl_s", "performance", "Shared cache lifetime (seconds)"),
     # -- Security -------------------------------------------------------------
+    _S("guest_links_enabled", "security", "Allow links that open without signing in",
+       "On: someone who can edit a dashboard may make a link that shows it to anyone who holds the link, as the "
+       "maker sees it, until it expires. Off: no such link can be made, and none that exists opens."),
     _S("access_token_expire_hours", "security", "Sign-in lasts (hours)", "Applies to new sign-ins."),
     # -- Rate limits ----------------------------------------------------------
     _S("rate_limit_enabled", "rate_limits", "Rate limiting on"),

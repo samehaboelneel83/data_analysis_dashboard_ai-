@@ -125,6 +125,13 @@ def _run_payload(run: AgentRun, steps: list[AgentStep]) -> dict:
     # conversation reopened later is traced exactly as it was when asked.
     evidence = (trace_claims(run.answer, run.question, results, sql)
                 if run.status == "ok" and run.intent != "chat" else None)
+    if evidence and evidence.get("untraced"):
+        from ..services.agent.evidence import set_aside_untraced
+        checked, aside = set_aside_untraced(run.answer or "", evidence)
+        if aside:
+            # The answer shown is the checked part; its numbers traced afresh.
+            evidence = {**trace_claims(checked, run.question, results, sql),
+                        "text": checked, "set_aside": aside}
     return {"results": results,
             "sql": sql,
             "presentation": run.presentation,
@@ -314,6 +321,7 @@ async def ask(cid: int, body: AskIn, db: AsyncSession = Depends(get_db),
     db.add(AgentMessage(conversation_id=conv.id, role="user",
                         content=body.question))
 
+    from ..services import ai_policy
     async with quotas.concurrent_ask_slot(db, user.org_id):
         if conv.dataset_ids:
             datasets = []
@@ -322,12 +330,16 @@ async def ask(cid: int, body: AskIn, db: AsyncSession = Depends(get_db),
                 check_org(ds, user, "Conversation not found")
                 _reject_directquery(ds)
                 datasets.append(ds)
+            # "Allow AI" for this data (services/ai_policy.py): when it is off
+            # the run answers without a model (agent/without_model.py).
+            await ai_policy.enter(db, datasets=datasets)
             run = await run_agent(db, question=body.question, datasets=datasets,
                                   user=user, client=llm_service.get_client(),
                                   conversation_id=conv.id, history=history)
         else:
             source = await db.get(DataSource, conv.data_source_id)
             check_org(source, user, "Conversation not found")
+            await ai_policy.enter(db, source=source)
             run = await run_agent(db, question=body.question, source=source,
                                   user=user, client=llm_service.get_client(),
                                   conversation_id=conv.id, history=history)

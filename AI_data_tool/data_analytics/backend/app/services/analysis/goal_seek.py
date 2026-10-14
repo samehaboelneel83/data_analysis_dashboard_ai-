@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from ..readback import _s
 
 
 class GoalSeekError(ValueError):
@@ -34,19 +35,19 @@ def goal_seek(df: pd.DataFrame, x_column: str, y_column: str, target_y: float,
     """
     for col in (x_column, y_column):
         if col not in df.columns:
-            raise GoalSeekError(f"Column '{col}' not found")
+            raise GoalSeekError(_s("no.automated_prediction.1", "Column '{a}' not found", cap=False, a=col))
 
     pair = pd.DataFrame({
         "x": pd.to_numeric(df[x_column], errors="coerce"),
         "y": pd.to_numeric(df[y_column], errors="coerce"),
     }).dropna()
     if len(pair) < 3 or pair["x"].nunique() < 2:
-        raise GoalSeekError("Not enough varying numeric data to fit y ~ x")
+        raise GoalSeekError(_s("no.goal_seek.1", "Not enough varying numeric data to fit y ~ x", cap=False))
 
     slope, intercept = np.polyfit(pair["x"], pair["y"], 1)
     if abs(slope) < 1e-12:
         raise GoalSeekError(
-            f"'{y_column}' does not move with '{x_column}' (flat fit)")
+            _s("no.goal_seek.2", "'{a}' does not move with '{b}' (flat fit)", cap=False, a=y_column, b=x_column))
 
     pred = slope * pair["x"] + intercept
     ss_res = float(((pair["y"] - pred) ** 2).sum())
@@ -67,7 +68,7 @@ def goal_seek(df: pd.DataFrame, x_column: str, y_column: str, target_y: float,
         lo = x_min if x_min is not None else float("-inf")
         hi = x_max if x_max is not None else float("inf")
         if lo > hi:
-            raise GoalSeekError("x_min must not exceed x_max")
+            raise GoalSeekError(_s("no.goal_seek.3", "x_min must not exceed x_max", cap=False))
         within = lo <= required <= hi
         out["within_bounds"] = bool(within)
         if not within:

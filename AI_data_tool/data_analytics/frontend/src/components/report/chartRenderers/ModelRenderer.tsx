@@ -8,9 +8,13 @@
  * verdict. The shaper (backend services/model_widgets.py) supplies every
  * number; this file only draws them, and draws the refusals in words.
  */
+import SaidItems, { saidOf } from '../../analysis/SaidItems'
+import { kiSentence } from '../../analysis/KeyInfluencersResult'
+import { sayText } from '../../../lib/readbackText'
 import { useState } from 'react'
 import { seriesColor } from '../chartUtils'
-import { useT, type MessageKey } from '../../../i18n'
+import RuleRoles, { RULE_VIEWS, type RuleView } from './RuleRoles'
+import { useT, type MessageKey, type TranslateFn } from '../../../i18n'
 import { useDirection, navArrows } from '../../../contexts/DirectionContext'
 import type { ChartRendererProps } from './types'
 import { familyLabel, rich } from '../../../i18n/pages/modelsMaps'
@@ -35,7 +39,7 @@ const pfmt = (p: unknown) => (p == null ? '—' : Number(p) < 0.001 ? '< 0.001' 
 // (the interpretation, caveats) still arrive in English from the server.
 const MODEL_NAMES: Record<string, MessageKey> = {
   linear: 'mdl.linear', logistic: 'mdl.logistic', tree: 'mdl.tree',
-  cluster: 'mdl.cluster', compare: 'mdl.compare', score: 'mdl.score', rules: 'mdl.rules',
+  cluster: 'mdl.cluster', compare: 'mdl.compare', score: 'mdl.score', rules: 'mdl.rules', influencers: 'mdl.influencers',
 }
 
 function Population({ pop }: { pop: any }) {
@@ -57,6 +61,110 @@ function Population({ pop }: { pop: any }) {
 }
 
 /** A small scatter drawn in SVG (≤ 400 points), with an optional reference line. */
+/** The groups as a picture: each row placed on the two directions along which
+ *  the rows differ most, coloured by its group (server: analysis/segment.py
+ *  `_projection`). Each axis says how much of the variation it carries and
+ *  which variables weigh most on it. */
+function ClusterMap({ projection, tr }: {
+  projection: { points: [number, number, number][]; centers: [number, number, number][]
+    axes: { share: number; variables: { name: string; weight: number }[] }[]; shown: number; of: number }
+  tr: ReturnType<typeof useT>
+}) {
+  const pts = projection.points
+  if (!pts.length) return <p style={{ fontSize: 12, color: 'var(--muted)' }}>{tr('pg.modelsMaps.mr.nothing')}</p>
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1])
+  const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)]
+  const W = 320, H = 200, P = 8
+  const sx = (v: number) => P + ((v - x0) / ((x1 - x0) || 1)) * (W - 2 * P)
+  const sy = (v: number) => H - P - ((v - y0) / ((y1 - y0) || 1)) * (H - 2 * P)
+  const groups = [...new Set(pts.map(p => p[2]))].sort((a, b) => a - b)
+  const axis = (i: number) => {
+    const a = projection.axes[i]
+    return a ? tr('mdl.map.axis', { pct: Math.round(a.share * 100), cols: a.variables.map(v => v.name).join(', ') }) : ''
+  }
+  return (
+    <div data-testid="cluster-map">
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={tr('mdl.map.aria', { n: pts.length, k: groups.length })}
+        style={{ width: '100%', maxHeight: 260, border: '1px solid var(--border)', borderRadius: 6 }}>
+        {pts.map((p, i) => <circle key={i} cx={sx(p[0])} cy={sy(p[1])} r={1.8} fill={seriesColor(p[2])} fillOpacity={0.55} />)}
+        {projection.centers.map(c => (
+          <circle key={`c${c[2]}`} cx={sx(c[0])} cy={sy(c[1])} r={5} fill={seriesColor(c[2])} stroke="var(--panel, #fff)" strokeWidth={1.5} />
+        ))}
+      </svg>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 11, margin: '4px 0' }}>
+        {groups.map(g => (
+          <span key={g} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <span aria-hidden style={{ width: 9, height: 9, borderRadius: 9, background: seriesColor(g), display: 'inline-block' }} />
+            {tr('pg.modelsMaps.mr.segmentN', { n: g + 1 })}
+          </span>
+        ))}
+      </div>
+      <p style={{ fontSize: 10.5, color: 'var(--muted)', margin: 0 }} dir="auto">
+        {tr('mdl.map.across')} {axis(0)} · {tr('mdl.map.up')} {axis(1)}
+        {projection.shown < projection.of ? ` · ${tr('mdl.map.sample', { n: projection.shown.toLocaleString(), of: projection.of.toLocaleString() })}` : ''}
+      </p>
+    </div>
+  )
+}
+
+/** The rules as a network: each value that takes part in a rule is a node
+ *  (larger when more rules touch it), each rule a line from what it starts
+ *  with to what it concludes, thicker the further above chance it is
+ *  (server: analysis/patterns.py `rules_network`). Values sit on a circle, so
+ *  the picture is the same every time. */
+function RuleNetwork({ network, tr }: {
+  network: { nodes: { id: string; column: string; label: string; rules: number }[]
+    edges: { source: string; target: string; lift: number; confidence: number; support_rows?: number }[] }
+  tr: ReturnType<typeof useT>
+}) {
+  const nodes = [...network.nodes].sort((a, b) => a.column.localeCompare(b.column) || a.label.localeCompare(b.label))
+  const W = 340, H = 260, R = 92, cx = W / 2, cy = H / 2
+  const at = new Map(nodes.map((n, i) => {
+    const a = (2 * Math.PI * i) / Math.max(nodes.length, 1) - Math.PI / 2
+    return [n.id, { x: cx + R * Math.cos(a), y: cy + R * Math.sin(a), a }]
+  }))
+  const columns = [...new Set(nodes.map(n => n.column))]
+  const top = Math.max(...network.edges.map(e => e.lift || 1), 1.0001)
+  const most = Math.max(...nodes.map(n => n.rules), 1)
+  return (
+    <div data-testid="rule-network">
+      <svg viewBox={`0 0 ${W} ${H}`} role="img"
+        aria-label={tr('mdl.net.aria', { n: nodes.length, k: network.edges.length })} style={{ width: '100%', maxHeight: 320 }}>
+        {network.edges.map((e, i) => {
+          const a = at.get(e.source), b = at.get(e.target)
+          if (!a || !b) return null
+          return <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="var(--muted)" strokeOpacity={0.55}
+            strokeWidth={0.8 + 3 * ((e.lift - 1) / (top - 1 || 1))}>
+            <title>{`${e.source} → ${e.target} · ${tr('mdl.net.lift', { x: Number(e.lift).toFixed(2) })}`}</title>
+          </line>
+        })}
+        {nodes.map(n => {
+          const p = at.get(n.id)!
+          const out = Math.cos(p.a) >= 0
+          return (
+            <g key={n.id}>
+              <circle cx={p.x} cy={p.y} r={4 + 6 * (n.rules / most)} fill={seriesColor(columns.indexOf(n.column))} />
+              <text x={p.x + (out ? 10 : -10)} y={p.y + 3} fontSize={9} textAnchor={out ? 'start' : 'end'} fill="currentColor">
+                {n.label.length > 16 ? `${n.label.slice(0, 15)}…` : n.label}
+              </text>
+            </g>
+          )
+        })}
+      </svg>
+      {columns.length > 1 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 11 }}>
+          {columns.map((c, i) => (
+            <span key={c} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <span aria-hidden style={{ width: 9, height: 9, borderRadius: 9, background: seriesColor(i), display: 'inline-block' }} />{c}
+            </span>
+          ))}
+        </div>
+      )}
+      <p style={{ fontSize: 10.5, color: 'var(--muted)', margin: '4px 0 0' }}>{tr('mdl.net.note')}</p>
+    </div>
+  )
+}
+
 function MiniScatter({ points, xLabel, yLabel, refLine }: {
   points: [number | null, number | null][]; xLabel: string; yLabel: string; refLine?: 'zero' | 'identity'
 }) {
@@ -199,6 +307,95 @@ function TreeOutline({ node, depth = 0 }: { node: any; depth?: number }) {
   )
 }
 
+/** Key influencers: each group, what it shows, and how far that is from usual. */
+type Influencer = { factor: string; group: string; value: number; lift: number; rows: number }
+type InflDirection = 'both' | 'higher' | 'lower'
+
+/** Which influencers to show: those that go with a higher value, a lower one, or both; then the first `limit`. */
+export function chosenInfluencers(rows: Influencer[], direction: InflDirection, limit?: number): Influencer[] {
+  const kept = rows.filter(r => direction === 'both' || (direction === 'higher' ? r.lift >= 1 : r.lift < 1))
+  return limit && limit > 0 ? kept.slice(0, limit) : kept
+}
+
+type InflFormat = 'change' | 'times' | 'value'
+
+/** An influencer's figure as the author asked for it: how far from usual
+ *  ("+23.5%"), how many times the usual ("1.24×"), or the group's own value. */
+export function influencerFigure(r: Influencer, percent: boolean, format: InflFormat, decimals?: number): string {
+  if (format === 'times') return `${r.lift.toFixed(decimals ?? 2)}×`
+  if (format === 'value') {
+    return percent ? `${(r.value * 100).toFixed(decimals ?? 1)}%` : fmt(r.value, decimals ?? (Math.abs(r.value) >= 100 ? 0 : 2))
+  }
+  const diff = (r.lift - 1) * 100
+  return `${diff >= 0 ? '+' : '−'}${Math.abs(diff).toFixed(decimals ?? (Math.abs(diff) >= 100 ? 0 : 1))}%`
+}
+
+/** Key influencers as a line to a bubble: the further from usual, the longer
+ *  the line and the larger the bubble, which says how far ("+23.5%"). The
+ *  same figures as the bars; the value itself is in the tooltip. */
+function InfluencerBubbles({ rows, percent, format = 'change', decimals }: { rows: Influencer[]; percent: boolean; format?: InflFormat; decimals?: number }) {
+  const tr = useT()
+  const far = Math.max(...rows.map(r => Math.abs(r.lift - 1)), 0) || 1
+  const show = (v: number) => percent ? `${(v * 100).toFixed(1)}%` : fmt(v, Math.abs(v) >= 100 ? 0 : 2)
+  return (
+    <div data-testid="influencers" data-style="bubbles" style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '4px 2px' }}>
+      {rows.map((r, i) => {
+        const share = Math.abs(r.lift - 1) / far
+        const up = r.lift >= 1
+        const said = influencerFigure(r, percent, format, decimals)
+        // Room for what it says: a long figure gets a wider bubble, never a cut one.
+        const size = Math.max(Math.round(34 + share * 18), said.length * 7 + 14)
+        // The dashboard's palette: its first colour for what goes with a higher value, its second for a lower one.
+        const tone = seriesColor(up ? 0 : 1)
+        return (
+          <div key={i} data-testid="influencer" title={`${r.factor}: ${r.group} — ${show(r.value)} · ${tr('mdl.infl.rows', { n: r.rows.toLocaleString() })}`}
+            style={{ display: 'grid', gridTemplateColumns: 'minmax(96px, 46%) 1fr max-content', gap: 8, alignItems: 'center', fontSize: 12.5 }}>
+            <span style={{ minWidth: 0, lineHeight: 1.25 }}>
+              <span style={{ color: 'var(--muted)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.factor}</span>
+              <bdi style={{ fontWeight: 600, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.group}</bdi>
+            </span>
+            <span aria-hidden style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+              <span style={{ height: 3, borderRadius: 2, background: tone, width: `${Math.max(8, share * 100)}%` }} />
+            </span>
+            <span data-testid="influencer-bubble" dir="ltr" style={{ width: size, height: size, borderRadius: '50%', background: tone, color: '#fff',
+              display: 'grid', placeItems: 'center', fontSize: size >= 44 ? 11.5 : 10.5, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+              {said}
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function Influencers({ rows, percent, format, decimals }: { rows: Influencer[]; percent: boolean; format?: InflFormat; decimals?: number }) {
+  const tr = useT()
+  const far = Math.max(...rows.map(r => Math.abs(r.lift - 1)), 0) || 1
+  return (
+    <div data-testid="influencers" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {rows.map((r, i) => (
+        <div key={i} data-testid="influencer" style={{ display: 'grid', gridTemplateColumns: 'minmax(110px, 40%) 1fr max-content', gap: 6, alignItems: 'center', fontSize: 12 }}>
+          <span title={`${r.factor}: ${r.group}`} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span style={{ color: 'var(--muted)' }}>{r.factor}</span> <bdi><b>{r.group}</b></bdi>
+          </span>
+          <div style={{ background: 'var(--surface2)', borderRadius: 4, height: 14 }}>
+            <div style={{ width: `${(Math.abs(r.lift - 1) / far) * 100}%`, height: '100%', borderRadius: 4,
+              background: 'color-mix(in srgb, var(--muted) 45%, transparent)' }} />
+          </div>
+          <span style={{ textAlign: 'end', fontVariantNumeric: 'tabular-nums' }}
+            title={tr('mdl.infl.rows', { n: r.rows.toLocaleString() })}>
+            {/* By default the value and, beside it, how many times the usual; a chosen format shows that one figure. */}
+            {format ? influencerFigure(r, percent, format, decimals) : <>
+              {influencerFigure(r, percent, 'value', decimals)}
+              <span style={{ color: 'var(--muted)' }}> · {tr(r.lift >= 1 ? 'mdl.infl.above' : 'mdl.infl.below', { x: fmt(r.lift, 2) })}</span>
+            </>}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function Bars({ rows, accentId, baseline, percent }: { rows: { id?: unknown; name: string; value: number | null }[]; accentId?: unknown; baseline?: { label: string; value: number }; percent?: boolean }) {
   const tr = useT()
   // Whole units from 100 up: a predicted salary read "88,851.211" -- and the
@@ -285,8 +482,22 @@ function RuleTable({ rules }: { rules: any[] }) {
   )
 }
 
-export default function ModelRenderer({ data }: ChartRendererProps) {
+/** The headline's name as the shapers write it, in the reader's language. */
+const FIT_NAMES: Record<string, MessageKey> = {
+  'Overall rate': 'mdl.fit.overallRate', 'Overall average': 'mdl.fit.overallAverage',
+  'strongest lift': 'mdl.fit.strongestLift', score: 'mdl.fit.score',
+}
+function fitName(tr: TranslateFn, name: string): string {
+  const key = FIT_NAMES[name]
+  return key ? tr(key) : name
+}
+
+export default function ModelRenderer({ data, cfg }: ChartRendererProps) {
   const [tab, setTab] = useState<string | null>(null)
+  // Key influencers: which way to look, chosen in the settings and changeable by the reader.
+  const opts = (cfg ?? {}) as { influencer_style?: string; influencer_direction?: InflDirection; influencer_limit?: number; influencer_details?: boolean
+    influencer_format?: InflFormat; influencer_decimals?: number; rules_view?: string; rules_items?: number; model_tab?: string }
+  const [direction, setDirection] = useState<InflDirection | null>(null)
   const tr = useT()
   const { rtl } = useDirection()
   if (!data || data.type !== 'model') return null
@@ -310,13 +521,29 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
   const tabs: Tab[] = kind === 'linear' ? [{ key: 'coef', label: tr('mdl.tab.coef') }, { key: 'resid', label: tr('mdl.tab.resid') }, { key: 'ap', label: tr('mdl.tab.ap') }, { key: 'fit', label: tr('mdl.tab.fit') }]
     : kind === 'logistic' ? [{ key: 'coef', label: tr('mdl.tab.odds') }, { key: 'cm', label: tr('mdl.tab.cm') }, { key: 'roc', label: 'ROC' }, { key: 'fit', label: tr('mdl.tab.fit') }] // i18n-ok: ROC
     : kind === 'tree' ? [{ key: 'imp', label: tr('mdl.tab.imp') }, { key: 'rules', label: tr('mdl.tab.rules') }, { key: 'fit', label: tr('mdl.tab.fit') }]
-    : kind === 'cluster' ? [{ key: 'seg', label: tr('mdl.tab.seg') }, { key: 'fit', label: tr('mdl.tab.fit') }]
+    : kind === 'cluster' ? [{ key: 'seg', label: tr('mdl.tab.seg') },
+      // The groups as a picture, when the server could place the rows in two dimensions.
+      ...(data.result?.meta?.projection ? [{ key: 'map', label: tr('mdl.tab.map') }] : []),
+      { key: 'fit', label: tr('mdl.tab.fit') }]
+    : kind === 'influencers' ? [{ key: 'infl', label: tr('mdl.tab.infl') }, { key: 'fit', label: tr('mdl.tab.fit') }]
     : kind === 'score' ? [{ key: 'pred', label: tr('mdl.tab.pred') }, { key: 'fit', label: tr('mdl.tab.check') }]
-    : kind === 'rules' ? [{ key: 'rlist', label: tr('mdl.tab.rules') }, { key: 'lift', label: tr('mdl.tab.lift') }, { key: 'rfit', label: tr('mdl.tab.fit') }]
+    : kind === 'rules' ? [{ key: 'rlist', label: tr('mdl.tab.rules') },
+      // The rules as a network of values, when there is more than one to connect.
+      ...((data.network?.edges ?? []).length > 1 ? [{ key: 'net', label: tr('mdl.tab.net') }] : []),
+      { key: 'lift', label: tr('mdl.tab.lift') }, { key: 'rfit', label: tr('mdl.tab.fit') }]
     : (data.models ?? []).some((m: any) => Array.isArray(m.roc))
       ? [{ key: 'verdict', label: tr('mdl.tab.verdict') }, { key: 'rocs', label: 'ROC' }] // i18n-ok
       : [{ key: 'verdict', label: tr('mdl.tab.verdict') }]
-  const active = tab && tabs.some(t => t.key === tab) ? tab : tabs[0].key
+  // One of the model's views as a tile of its own (`model_tab`): a page can
+  // then lay a confusion matrix beside its ROC curve, or residuals beside
+  // actual-against-predicted, instead of hiding all but one behind tabs.
+  const fixedTab = opts.model_tab && tabs.some(t => t.key === opts.model_tab) ? opts.model_tab : null
+  const active = fixedTab ?? (tab && tabs.some(t => t.key === tab) ? tab : tabs[0].key)
+  // Only the influencers, when the author switched the model's own lines off.
+  // The rules read one way only -- by the role each value plays (RuleRoles): a
+  // tile of a page of such views, with no model line and no tabs.
+  const ruleView = kind === 'rules' && RULE_VIEWS.includes(opts.rules_view as RuleView) ? (opts.rules_view as RuleView) : null
+  const compact = (kind === 'influencers' && opts.influencer_details === false) || ruleView != null || fixedTab != null
   const formula = kind === 'cluster' ? (data.variables ?? []).join(', ')
     : kind === 'rules' ? <>
         {data.focus && <>{tr('mdl.r.about')} <bdi><b>{data.focus}</b></bdi> · </>}
@@ -335,7 +562,7 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
 
   return (
     <div data-testid="model-widget" style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 6, padding: '2px 4px', overflow: 'hidden' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <div data-testid="model-header" style={{ display: compact ? 'none' : 'flex', flexDirection: 'column', gap: 2 }}>
         <div style={{ fontSize: 12 }}>
           <b>{MODEL_NAMES[kind] ? tr(MODEL_NAMES[kind]) : tr('mdl.model')}</b> <span style={{ color: 'var(--muted)' }}>· {formula}</span>
         </div>
@@ -349,10 +576,10 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
         )}
         {fit && kind !== 'compare' && kind !== 'rules' && (
           <div style={{ fontSize: 12 }}>
-            {fit.name}: <b style={{ color: 'var(--accent)' }}>{fmt(fit.value)}</b>{held ? '' : effect}
+            {fitName(tr, fit.name)}: <b style={{ color: 'var(--accent)' }}>{fmt(fit.value)}</b>{held ? '' : effect}
             {/* With a partition the headline is the held-out score; the
                 registry's sentence describes the TRAINING fit, so it says so. */}
-            {r.interpretation && <span style={{ color: 'var(--muted)' }}> — {held ? tr('pg.modelsMaps.mr.onTraining', { text: String(r.interpretation) }) : r.interpretation}</span>}
+            {r.interpretation && <span style={{ color: 'var(--muted)' }}> — {held ? tr('pg.modelsMaps.mr.onTraining', { text: sayText(tr, String(r.interpretation), r.interpretation_i18n) }) : sayText(tr, String(r.interpretation), r.interpretation_i18n)}</span>}
           </div>
         )}
         {kind === 'compare' && (
@@ -368,12 +595,12 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
         {warnings.map((w, i) => (
           <div key={i} role="alert" style={{ fontSize: 11, padding: '4px 8px', borderRadius: 6,
             border: '1px solid var(--warning, #d68910)', background: 'color-mix(in srgb, var(--warning, #d68910) 10%, transparent)' }}>
-            ⚠ {w}
+            ⚠ {sayText(tr, w, saidOf(data, 'warnings')?.[i])}
           </div>
         ))}
       </div>
 
-      {tabs.length > 1 && (
+      {tabs.length > 1 && !compact && (
         <div role="tablist" aria-label={tr('pg.modelsMaps.mr.views')} style={{ display: 'flex', gap: 2, flexWrap: 'wrap', borderBottom: '1px solid var(--border)' }}>
           {tabs.map(t => (
             <button key={t.key} type="button" role="tab" aria-selected={active === t.key}
@@ -389,7 +616,12 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
       )}
 
       {/* Focusable: it scrolls, and a keyboard user must be able to (E10). */}
-      <div role="tabpanel" tabIndex={0} style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+      {ruleView && (
+        <div data-testid="rule-roles" tabIndex={0} style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+          <RuleRoles rules={data.rules ?? []} view={ruleView} limit={opts.rules_items} />
+        </div>
+      )}
+      <div role="tabpanel" tabIndex={0} style={{ flex: 1, minHeight: 0, overflow: 'auto', display: ruleView ? 'none' : undefined }}>
         {active === 'coef' && <Coefficients coefs={r.detail?.coefficients ?? []} odds={kind === 'logistic'} />}
         {active === 'coef' && data.encodings && Object.keys(data.encodings).length > 0 && (
           <p style={{ fontSize: 10, color: 'var(--muted)', margin: '4px 0 0' }}>
@@ -405,6 +637,30 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
           <p style={{ fontSize: 10, color: 'var(--muted)' }}>{tr('pg.modelsMaps.mr.coinToss')}</p>
         </>}
         {active === 'rocs' && <RocOverlay models={(data.models ?? []).filter((m: any) => Array.isArray(m.roc))} winner={data.winner} />}
+        {active === 'infl' && (() => {
+          const way: InflDirection = direction ?? opts.influencer_direction ?? 'both'
+          const shown = chosenInfluencers(data.influencers ?? [], way, opts.influencer_limit)
+          const percent = data.value_format === 'percent'
+          return (
+            <>
+              <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 11.5, color: 'var(--muted)', margin: '2px 0 6px' }}>
+                {tr('mdl.infl.o.show')}
+                <select data-testid="influencer-direction" value={way} onMouseDown={e => e.stopPropagation()}
+                  onChange={e => setDirection(e.target.value as InflDirection)} style={{ fontSize: 11.5, padding: '1px 4px' }}>
+                  <option value="both">{tr('mdl.infl.o.both')}</option>
+                  <option value="higher">{tr('mdl.infl.o.higher')}</option>
+                  <option value="lower">{tr('mdl.infl.o.lower')}</option>
+                </select>
+              </label>
+              {shown.length === 0
+                ? <p style={{ fontSize: 12, color: 'var(--muted)' }}>{tr('mdl.infl.o.none')}</p>
+                : opts.influencer_style === 'bubbles'
+                  ? <InfluencerBubbles rows={shown} percent={percent} format={opts.influencer_format ?? 'change'} decimals={opts.influencer_decimals} />
+                  : <Influencers rows={shown} percent={percent} format={opts.influencer_format} decimals={opts.influencer_decimals} />}
+            </>
+          )
+        })()}
+        {active === 'infl' && caveats[0] && <p role="note" style={{ fontSize: 10.5, color: 'var(--muted)', margin: '6px 0 0' }}>{kiSentence(caveats[0], tr)}</p>}
         {active === 'imp' && <Bars rows={(data.rows ?? []).map((x: any) => ({ name: x.name, value: x.value }))} />}
         {active === 'rules' && <TreeOutline node={r.tree} />}
         {active === 'pred' && <>
@@ -431,6 +687,8 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
             </tbody>
           </table>
         )}
+        {active === 'net' && data.network && <RuleNetwork network={data.network} tr={tr} />}
+        {active === 'map' && r.meta?.projection && <ClusterMap projection={r.meta.projection} tr={tr} />}
         {active === 'verdict' && (
           <Bars rows={(data.models ?? []).map((m: any) => ({ id: m.id, name: m.title, value: m.score }))}
             accentId={data.winner}
@@ -494,11 +752,11 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
         )}
         {active === 'fit' && fit && (
           <div style={{ fontSize: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div>{fit.name}: <b>{fmt(fit.value)}</b>{effect}</div>
+            <div>{fitName(tr, fit.name)}: <b>{fmt(fit.value)}</b>{effect}</div>
             {Object.entries(fit.secondary ?? {}).map(([k, v]) => <div key={k}>{k}: <b>{fmt(v)}</b></div>)}
             {caveats.length > 0 && (
               <ul style={{ margin: '6px 0 0', paddingInlineStart: 18, color: 'var(--muted)', fontSize: 11 }}>
-                {caveats.map((c, i) => <li key={i}>{c}</li>)}
+                <SaidItems texts={caveats} i18n={saidOf(r, r.caveats ? 'caveats' : 'warnings')} />
               </ul>
             )}
           </div>

@@ -1,7 +1,9 @@
+import { useT, type MessageKey } from '../../../i18n'
+import { rich } from '../../../i18n/pages/modelsMaps'
 import { ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 import { TT, fmtStr, seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
-import { gridProps, xAxisProps, yAxisProps, chartMargin } from './axisOptions'
+import { gridProps, xAxisProps, yAxisProps, chartMargin, valueTick } from './axisOptions'
 
 /**
  * History as a solid line, forecast as a dashed one, the 95% interval as a band.
@@ -60,7 +62,7 @@ export default function ForecastChartRenderer({ data, cfg, rtl, measureFmt, plot
       <ComposedChart data={joined} margin={chartMargin(rtl, { top: 4, right: 8, bottom: 20, left: 0 })}>
         {grid && <CartesianGrid {...grid} />}
         <XAxis dataKey="name" {...xAxisProps(cfg, rtl, joined.map((d: any) => String(d.name)), plotW)} />
-        <YAxis {...yAxisProps(cfg, rtl, measureFmt, [...history.map(r => r.value), ...forecast.map(f => f.hi)], undefined, { height: plotH })} tickFormatter={v => fmtStr(v, measureFmt)} />
+        <YAxis {...yAxisProps(cfg, rtl, measureFmt, [...history.map(r => r.value), ...forecast.map(f => f.hi)], undefined, { height: plotH })} tickFormatter={valueTick(cfg, measureFmt)} />
         <Tooltip contentStyle={TT} formatter={(v: unknown, name: string) =>
           [fmtStr(v, measureFmt), name === 'yhat' ? 'forecast' : name === 'band' ? 'interval' : name]} />
         {/* The interval band: an invisible base to `lo`, then the lo->hi delta. */}
@@ -93,18 +95,17 @@ export default function ForecastChartRenderer({ data, cfg, rtl, measureFmt, plot
  * the horizon" on its own reads as broken.
  */
 function GoalCaption({ goal, fmt }: { goal: ForecastGoal; fmt?: unknown }) {
+  const t9 = useT()
   const value = (v: number | null) => v == null ? '—' : fmtStr(v, fmt as never)
-  const verb = goal.direction === 'rise' ? 'reach' : 'fall to'
+  // "reach" or "fall to": two sentences each, so neither language has to bend a verb into a template.
+  const way = goal.direction === 'rise' ? 'rise' : 'fall'
 
   let body: React.ReactNode
   if (goal.expected_period) {
-    body = <>Expected to {verb} <strong>{value(goal.target)}</strong> by{' '}
-      <strong>{goal.expected_period}</strong>
-      {goal.earliest_period && goal.earliest_period !== goal.expected_period && (
-        <> — as early as {goal.earliest_period}</>)}
-      {goal.latest_period && goal.latest_period !== goal.expected_period && (
-        <>, as late as {goal.latest_period}</>)}
-      {!goal.latest_period && <> ; the interval does not rule out later</>}
+    body = <>{rich(t9, `fc.expected.${way}` as MessageKey, { target: <strong>{value(goal.target)}</strong>, period: <strong>{goal.expected_period}</strong> })}
+      {goal.earliest_period && goal.earliest_period !== goal.expected_period && t9('fc.early', { p: goal.earliest_period })}
+      {goal.latest_period && goal.latest_period !== goal.expected_period && t9('fc.late', { p: goal.latest_period })}
+      {!goal.latest_period && t9('fc.noLater')}
     </>
   } else if (goal.reached_in_history) {
     // Both halves, when both are true. Saying only "not expected to return"
@@ -112,23 +113,17 @@ function GoalCaption({ goal, fmt }: { goal: ForecastGoal; fmt?: unknown }) {
     // case is exactly this one: revenue passed the target a year ago, the
     // central estimate has settled below it, and the optimistic edge clears it
     // from the first projected period.
-    body = <>Already reached {value(goal.target)} in{' '}
-      <strong>{goal.reached_in_history.period}</strong>
-      {' '}({value(goal.reached_in_history.value)}) — the projection is not
-      {' '}expected to return there within {goal.horizon} periods
+    body = <>{rich(t9, 'fc.reached', { target: value(goal.target), period: <strong>{goal.reached_in_history.period}</strong>,
+        v: value(goal.reached_in_history.value), n: goal.horizon })}
       {goal.earliest_period
-        ? <>, though it is possible from <strong>{goal.earliest_period}</strong>
-            {' '}at the optimistic edge of the interval.</>
-        : <>.</>}
+        ? rich(t9, 'fc.reachedPossible', { e: <strong>{goal.earliest_period}</strong> })
+        : '.'}
     </>
   } else if (goal.earliest_period) {
-    body = <>Not expected to {verb} {value(goal.target)} — though it is
-      {' '}possible as early as <strong>{goal.earliest_period}</strong> at the
-      {' '}optimistic edge of the interval.</>
+    body = rich(t9, `fc.notButPossible.${way}` as MessageKey, { target: value(goal.target), e: <strong>{goal.earliest_period}</strong> })
   } else {
-    body = <>Not expected to {verb} {value(goal.target)} within{' '}
-      {goal.horizon} periods — the projection ends near{' '}
-      <strong>{value(goal.end_value)}</strong> in {goal.end_period}.</>
+    body = rich(t9, `fc.notWithin.${way}` as MessageKey, { target: value(goal.target), n: goal.horizon,
+      end: <strong>{value(goal.end_value)}</strong>, period: String(goal.end_period ?? '') })
   }
 
   return (

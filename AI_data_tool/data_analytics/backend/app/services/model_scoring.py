@@ -21,6 +21,7 @@ from pathlib import Path
 
 from ..models.models import Dataset, DatasetColumn
 from . import jobs
+from .readback import _s
 
 MODEL_SCORE_KIND = "model.score"
 #: column_meta key on a scored dataset: the dataset and model version it came from.
@@ -46,7 +47,7 @@ async def run_score_job(ctx: jobs.JobContext) -> None:
             raise jobs.JobError("The person who queued this scoring can no longer use it.", code="forbidden")
         ds = await db.get(Dataset, dataset_id)
         if ds is None or ds.org_id != ctx.org_id or not await can_read_dataset(db, user, dataset_id):
-            raise jobs.JobError("The dataset is gone, or no longer readable by you.", code="not_found")
+            raise jobs.JobError(_s("job.datasetGone", "The dataset is gone, or no longer readable by you."), code="not_found")
         try:
             model, pkg = await usable_model(db, user, dataset_id, model_id)
             await ctx.checkpoint("reading")

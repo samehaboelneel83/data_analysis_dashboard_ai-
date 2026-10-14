@@ -33,6 +33,8 @@ number:
 """
 from __future__ import annotations
 
+from ..readback import _s, as_i18n
+
 import pandas as pd
 
 #: Enough periods that a fit over a trend plus factors is not drawing a line
@@ -63,23 +65,20 @@ def forecast_scenario(df: pd.DataFrame, date_column: str, measure: str,
 
     for column in (date_column, measure):
         if column not in df.columns:
-            raise ForecastScenarioError(f"Column '{column}' not found")
+            raise ForecastScenarioError(_s("no.automated_prediction.1", "Column '{a}' not found", cap=False, a=column))
     factors = [f for f in (factors or [])]
     if not factors:
         raise ForecastScenarioError(
-            "A scenario needs at least one factor to move. Without one this is "
-            "an ordinary forecast -- use `forecast_ets`.")
+            _s("no.forecast_scenario.1", "A scenario needs at least one factor to move. Without one this is an ordinary forecast -- use `forecast_ets`.", cap=False))
     if len(factors) > MAX_FACTORS:
         raise ForecastScenarioError(
-            f"At most {MAX_FACTORS} factors; more than that and the fit "
-            f"describes the noise as readily as the signal.")
+            _s("no.forecast_scenario.2", "At most {a} factors; more than that and the fit describes the noise as readily as the signal.", cap=False, a=MAX_FACTORS))
     for f in factors:
         if f not in df.columns:
-            raise ForecastScenarioError(f"Factor '{f}' not found")
+            raise ForecastScenarioError(_s("no.forecast_scenario.3", "Factor '{a}' not found", cap=False, a=f))
         if not pd.api.types.is_numeric_dtype(df[f]):
             raise ForecastScenarioError(
-                f"Factor '{f}' is not numeric. A scenario moves a quantity by a "
-                f"percentage; a category has no percentage to move.")
+                _s("no.forecast_scenario.4", "Factor '{a}' is not numeric. A scenario moves a quantity by a percentage; a category has no percentage to move.", cap=False, a=f))
 
     dates = pd.to_datetime(df[date_column], errors="coerce")
     freq = {"day": "D", "week": "W", "month": "MS",
@@ -94,9 +93,7 @@ def forecast_scenario(df: pd.DataFrame, date_column: str, measure: str,
     needed = MIN_PERIODS + PERIODS_PER_FACTOR * len(factors)
     if len(grouped) < needed:
         raise ForecastScenarioError(
-            f"Only {len(grouped)} periods of history; {needed} are needed to fit "
-            f"a trend plus {len(factors)} factor(s) without simply tracing the "
-            f"data back.")
+            _s("no.forecast_scenario.5", "Only {a} periods of history; {b} are needed to fit a trend plus {c} factor(s) without simply tracing the data back.", cap=False, a=len(grouped), b=needed, c=len(factors)))
 
     horizon = max(1, min(int(periods or DEFAULT_HORIZON), MAX_HORIZON))
     y = grouped[measure].astype(float)
@@ -153,28 +150,28 @@ def forecast_scenario(df: pd.DataFrame, date_column: str, measure: str,
     scenario_total = round(sum(p["value"] for p in scenario), 4)
 
     caveats = [
-        "This is association, not intervention. The model has only seen these "
-        "columns move together -- moving one inside the model is not the same "
-        "as changing it in the world, and a factor that rises with the measure "
-        "may be an effect of it rather than a cause.",
-        f"Factors you did not adjust are held at their average over the last "
-        f"{RECENT_PERIODS} periods.",
-        f"Fitted over {len(grouped)} periods; the fit explains "
-        f"{round(float(fitted.rsquared), 4)} of the variation.",
+        _s("fs.assoc", "This is association, not intervention. The model has only seen these "
+           "columns move together -- moving one inside the model is not the same "
+           "as changing it in the world, and a factor that rises with the measure "
+           "may be an effect of it rather than a cause."),
+        _s("fs.held", "Factors you did not adjust are held at their average over the last "
+           "{n} periods.", n=RECENT_PERIODS),
+        _s("fs.fitted", "Fitted over {n} periods; the fit explains "
+           "{r2} of the variation.", n=len(grouped), r2=round(float(fitted.rsquared), 4)),
     ]
     weak = [f["column"] for f in per_factor if f["p_value"] > 0.05]
     if weak:
         caveats.append(
-            f"There is no strong evidence that {', '.join(weak)} moves this "
-            f"measure at all (p > 0.05) -- a scenario built on it is a guess "
-            f"wearing a number.")
+            _s("fs.weak", "There is no strong evidence that {cols} moves this "
+               "measure at all (p > 0.05) -- a scenario built on it is a guess "
+               "wearing a number.", cols=', '.join(weak)))
     if stretched:
         ranges = "; ".join(
             f"{f['column']} has only ever been between {f['observed_min']:,} and "
             f"{f['observed_max']:,}" for f in per_factor if f["column"] in stretched)
         caveats.append(
-            f"That scenario goes outside anything observed -- {ranges}. The "
-            f"projection is an extrapolation, not evidence.")
+            _s("fs.outside", "That scenario goes outside anything observed -- {ranges}. The "
+               "projection is an extrapolation, not evidence.", ranges=ranges))
 
     return {
         "kind": "forecast_scenario",
@@ -192,5 +189,6 @@ def forecast_scenario(df: pd.DataFrame, date_column: str, measure: str,
         "periods_fitted": int(len(grouped)),
         "horizon": horizon,
         "extrapolating": extrapolating,
-        "caveats": caveats,
+        "caveats": [str(c) for c in caveats],
+        "caveats_i18n": [as_i18n(c) for c in caveats],
     }

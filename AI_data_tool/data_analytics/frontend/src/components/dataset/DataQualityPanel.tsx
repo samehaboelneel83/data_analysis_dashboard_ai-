@@ -5,12 +5,14 @@
  * security, the saved prep pipeline). Run on demand: a full scan is not free,
  * and an Overview that opens instantly matters more than one that is prefilled.
  */
+import { useT } from '../../i18n'
 import { useState } from 'react'
 import { datasetsApi, type QualityReport } from '../../services/api'
 
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12 } as const
 
 export default function DataQualityPanel({ datasetId }: { datasetId: number }) {
+  const t9 = useT()
   const [report, setReport] = useState<QualityReport | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -31,30 +33,30 @@ export default function DataQualityPanel({ datasetId }: { datasetId: number }) {
 
   const flagged = report?.column_report.filter(c => c.issues.length) ?? []
   return (
-    <section aria-label="Data quality" style={{ ...card, marginTop: 14 }}>
+    <section aria-label={t9('dq.title')} style={{ ...card, marginTop: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <h2 style={{ fontSize: 14, margin: 0, flex: 1 }}>Data quality</h2>
+        <h2 style={{ fontSize: 14, margin: 0, flex: 1 }}>{t9('dq.title')}</h2>
         <button type="button" className="btn btn-primary btn-sm" onClick={() => void run()} disabled={busy}>
-          {busy ? 'Checking…' : report ? 'Check again' : 'Check data quality'}
+          {busy ? t9('dq.checking') : report ? t9('dq.again') : t9('dq.check')}
         </button>
       </div>
       <label style={{ display: 'block', fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>
-        Your rules (optional) — one per line, each describing a GOOD row, e.g. <code>amount &gt;= 0</code>
-        <textarea value={rules} onChange={e => setRules(e.target.value)} rows={2} aria-label="Quality rules"
+        {t9('dq.rulesLabel')} <code>amount &gt;= 0</code> {/* i18n-ok */}
+        <textarea value={rules} onChange={e => setRules(e.target.value)} rows={2} aria-label={t9('dq.rulesAria')}
           style={{ display: 'block', width: '100%', marginTop: 4, fontFamily: 'var(--mono)', fontSize: 11 }} />
       </label>
       {error && <p role="alert" style={{ color: 'var(--danger)', fontSize: 12 }}>{error}</p>}
       {report && (
         <div data-testid="quality-report" style={{ marginTop: 10, fontSize: 12 }}>
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-            <span><b>{report.rows.toLocaleString()}</b> rows × <b>{report.columns}</b> columns</span>
-            <span><b>{report.missing_pct}%</b> of cells empty</span>
-            <span><b>{report.duplicate_rows.toLocaleString()}</b> duplicate row{report.duplicate_rows === 1 ? '' : 's'}</span>
-            <span><b>{report.columns_with_issues}</b> column{report.columns_with_issues === 1 ? '' : 's'} with issues</span>
+            <span>{t9('dq.shape', { rows: report.rows.toLocaleString(), cols: report.columns })}</span>
+            <span>{t9('dq.empty', { p: report.missing_pct })}</span>
+            <span>{t9(report.duplicate_rows === 1 ? 'dq.dup1' : 'dq.dups', { n: report.duplicate_rows.toLocaleString() })}</span>
+            <span>{t9(report.columns_with_issues === 1 ? 'dq.issue1' : 'dq.issues', { n: report.columns_with_issues })}</span>
           </div>
           {flagged.length > 0 && (
             <table style={{ width: '100%', marginTop: 8, fontSize: 11, borderCollapse: 'collapse' }}>
-              <thead><tr><th style={{ textAlign: 'start' }}>Column</th><th style={{ textAlign: 'start' }}>Issues</th></tr></thead>
+              <thead><tr><th style={{ textAlign: 'start' }}>{t9('dd.th.column')}</th><th style={{ textAlign: 'start' }}>{t9('dq.thIssues')}</th></tr></thead>
               <tbody>
                 {flagged.map(c => (
                   <tr key={c.column}>
@@ -67,16 +69,15 @@ export default function DataQualityPanel({ datasetId }: { datasetId: number }) {
           )}
           {report.duplicate_rows > 0 && (
             <div style={{ marginTop: 8, color: 'var(--muted)' }}>
-              Duplicate rows, e.g. {report.duplicate_examples.slice(0, 2)
-                .map(r => Object.values(r).slice(0, 4).map(v => String(v ?? '—')).join(', ')).join(' | ')}.
-              A “Remove duplicates” prep step drops them.
+              {t9('dq.dupExamples', { list: report.duplicate_examples.slice(0, 2)
+                .map(r => Object.values(r).slice(0, 4).map(v => String(v ?? '—')).join(', ')).join(' | ') })}
             </div>
           )}
           {report.rules.map(r => (
             <div key={r.rule} style={{ marginTop: 6, color: r.error ? 'var(--danger)' : (r.failing_rows ? 'var(--warning, #d68910)' : 'var(--muted)') }}>
               <code>{r.rule}</code>: {r.error
-                ? `could not check (${r.error})`
-                : r.failing_rows ? `${r.failing_rows.toLocaleString()} row${r.failing_rows === 1 ? '' : 's'} fail` : 'every row passes'}
+                ? t9('dq.couldNot', { why: String(r.error) })
+                : r.failing_rows ? t9(r.failing_rows === 1 ? 'dq.fail1' : 'dq.fails', { n: r.failing_rows.toLocaleString() }) : t9('dq.allPass')}
             </div>
           ))}
         </div>

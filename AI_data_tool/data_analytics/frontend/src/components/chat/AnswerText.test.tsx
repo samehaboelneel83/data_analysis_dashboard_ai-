@@ -81,3 +81,18 @@ describe('AnswerText highlights (QA V9)', () => {
     expect(p.querySelectorAll('.dl-num')).toHaveLength(3)
   })
 })
+
+describe('figures not in the results (persona test, plan 2.7)', () => {
+  it('shows the checked answer and keeps the unchecked sentences under the details', () => {
+    const evidence: AnswerEvidence = {
+      claims: [{ start: 27, end: 36, text: '1,509,496', status: 'traced',
+        source: { result: 0, row: 0, column: 'sales', value: 1509496, kind: 'cell' } }] as never,
+      untraced: 0,
+      text: 'The best month was 2011 at 1,509,496.',
+      set_aside: ['Sales in 2011 were 10,635,747.'],
+    }
+    render(<AnswerText text="The best month was 2011 at 1,509,496. Sales in 2011 were 10,635,747." evidence={evidence} />)
+    expect(screen.getByTestId('answer-text')).not.toHaveTextContent('10,635,747')
+    expect(screen.getByTestId('answer-set-aside')).toHaveTextContent('Sales in 2011 were 10,635,747.')
+  })
+})

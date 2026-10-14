@@ -57,3 +57,25 @@ async def test_only_if_changed_skips_the_second_identical_run(db_session, two_or
     await delivery.run_schedule(db_session, s)
     assert len(sent) == 1
     assert "no change" in s.last_status
+
+
+def test_the_same_data_built_at_another_second_counts_as_no_change():
+    """A workbook stamps its build time into its bytes: comparing bytes made
+    "only if changed" resend every time. What is compared is what it says."""
+    import io
+    import time
+
+    import pandas as pd
+
+    def build(values):
+        b = io.BytesIO()
+        with pd.ExcelWriter(b, engine="openpyxl") as w:
+            pd.DataFrame({"a": values}).to_excel(w, sheet_name="Rows", index=False)
+        return b.getvalue()
+    first = build([1, 2])
+    time.sleep(2.1)                                    # past the two-second grain of a zip entry's time
+    again = build([1, 2])
+    assert first != again                              # the bytes do differ
+    assert delivery._content(first) == delivery._content(again)
+    assert delivery._content(first) != delivery._content(build([1, 3]))
+    assert delivery._content(b"not a workbook") == b"not a workbook"

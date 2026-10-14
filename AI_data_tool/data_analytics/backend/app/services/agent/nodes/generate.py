@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from ..context import SchemaContext
+from ...llm import data_block
 from ...analysis.registry import render_prompt_block as render_analyses_block
 from .followup import render_history
 
@@ -54,10 +55,10 @@ async def generate_sql(question: str, context: SchemaContext,
         "from that same source instead of switching to a different, "
         "merely convenient column.",
         "NEVER stack different groupings into one column with UNION ALL. "
-        "Measured live: asked what a sales table contained, the model wrote "
+        "Measured live: asked what a table contained, the model wrote "
         "`SELECT region, COUNT(*) FROM t GROUP BY region UNION ALL SELECT "
         "country, COUNT(*) FROM t GROUP BY country UNION ALL ...`, and the "
-        "35 rows that came back were regions AND countries AND products in "
+        "35 rows that came back were regions AND countries AND categories in "
         "one column named `region` -- charted, the axis said region and the "
         "bars were three different kinds of thing. One SELECT answers about "
         "ONE grouping; if several are genuinely wanted, put each in its own "
@@ -104,9 +105,9 @@ async def generate_sql(question: str, context: SchemaContext,
         "row of a history table when a current-row rule exists.",
         "Group by what a reader recognises: when the grouping column is a "
         "code (d001, a numeric key) and a listed join reaches a name column "
-        "for it (a departments.dept_name for dept_no), select and group by "
+        "for it (a groups.name for group_no), select and group by "
         "the NAME, not the code.",
-        "Averages of a pay, price, rate, age or score column are AVG over "
+        "Averages of a price, rate, age or score column are AVG over "
         "the rows that the business rules keep -- one row per person or "
         "item at its current value -- never over every historical row.",
         "When the Glossary below maps a question phrase to a column, the "
@@ -122,7 +123,10 @@ async def generate_sql(question: str, context: SchemaContext,
         # Rendered from the SAME registry `GET /analysis/registry` serves
         # (services/analysis/registry.py), so the two can never drift apart.
         f"\n{render_analyses_block()}",
-        f"\n{context.render(question=question)}",
+        # The catalogue (names, descriptions, value labels, glossary) is text
+        # written by whoever built the tables: fenced as data like every
+        # other piece of theirs (llm.DATA_RULE; phase 0 left this one open).
+        "\n" + data_block(context.render(question=question), "the tables, columns, value labels and rules in scope"),
     ]
     if examples:
         shown = "\n".join(f"Q: {e['question']}\nSQL: {e['sql']}"

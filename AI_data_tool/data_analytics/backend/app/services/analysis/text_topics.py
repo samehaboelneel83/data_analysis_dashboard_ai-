@@ -35,6 +35,7 @@ unusually easy to:
 from __future__ import annotations
 
 import pandas as pd
+from ..readback import _s
 
 RANDOM_STATE = 42
 
@@ -70,33 +71,29 @@ def text_topics(df: pd.DataFrame, column: str, topics: int = DEFAULT_TOPICS,
                              score_text, stop_words_for, tokens)
 
     if column not in df.columns:
-        raise TextTopicsError(f"Column '{column}' not found")
+        raise TextTopicsError(_s("no.automated_prediction.1", "Column '{a}' not found", cap=False, a=column))
     series = df[column]
     if pd.api.types.is_numeric_dtype(series) or \
             pd.api.types.is_datetime64_any_dtype(series):
         raise TextTopicsError(
-            f"'{column}' is not text. Topics come from what people wrote, so "
-            f"this needs a column of comments, descriptions or free notes.")
+            _s("no.text_topics.1", "'{a}' is not text. Topics come from what people wrote, so this needs a column of comments, descriptions or free notes.", cap=False, a=column))
 
     raw = series.dropna().astype(str)
     documents = [d.strip() for d in raw if len(d.strip()) >= MIN_DOCUMENT_CHARS]
     skipped = len(series) - len(documents)
     if len(documents) < MIN_DOCUMENTS:
         raise TextTopicsError(
-            f"Only {len(documents)} usable comments; at least {MIN_DOCUMENTS} "
-            f"are needed before clusters mean anything.")
+            _s("no.text_topics.2", "Only {a} usable comments; at least {b} are needed before clusters mean anything.", cap=False, a=len(documents), b=MIN_DOCUMENTS))
 
     wanted = max(2, min(int(topics or DEFAULT_TOPICS), MAX_TOPICS))
     if wanted * DOCUMENTS_PER_TOPIC > len(documents):
         raise TextTopicsError(
-            f"{wanted} topics from {len(documents)} comments would be noise -- "
-            f"allow about {DOCUMENTS_PER_TOPIC} comments per topic, so at most "
-            f"{max(2, len(documents) // DOCUMENTS_PER_TOPIC)} here.")
+            _s("no.text_topics.3", "{a} topics from {b} comments would be noise -- allow about {c} comments per topic, so at most {d} here.", cap=False, a=wanted, b=len(documents), c=DOCUMENTS_PER_TOPIC, d=max(2, len(documents) // DOCUMENTS_PER_TOPIC)))
 
     detected = detect_languages(documents)
     if language and language != "auto":
         if language not in LANGUAGES:
-            raise TextTopicsError(f"Unknown language '{language}' (use auto or one of {', '.join(LANGUAGES)})")
+            raise TextTopicsError(_s("no.text_topics.4", "Unknown language '{a}' (use auto or one of {b})", cap=False, a=language, b=', '.join(LANGUAGES)))
         langs = [language]
     else:
         langs = detected["languages"] or ["en"]
@@ -111,12 +108,11 @@ def text_topics(df: pd.DataFrame, column: str, topics: int = DEFAULT_TOPICS,
         matrix = vectoriser.fit_transform(documents)
     except ValueError as e:
         raise TextTopicsError(
-            f"No vocabulary left after removing common words: {e}")
+            _s("no.text_topics.5", "No vocabulary left after removing common words: {a}", cap=False, a=e))
     terms = vectoriser.get_feature_names_out()
     if len(terms) < wanted:
         raise TextTopicsError(
-            f"Only {len(terms)} distinct words remain after removing common "
-            f"ones -- not enough vocabulary for {wanted} topics.")
+            _s("no.text_topics.6", "Only {a} distinct words remain after removing common ones -- not enough vocabulary for {b} topics.", cap=False, a=len(terms), b=wanted))
 
     model = NMF(n_components=wanted, random_state=RANDOM_STATE,
                 init="nndsvda", max_iter=400)

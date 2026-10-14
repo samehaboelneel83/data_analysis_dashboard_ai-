@@ -1,7 +1,7 @@
 import { ComposedChart, Bar, Cell, ReferenceLine, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList } from 'recharts'
 import { TT, fmtStr, seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
-import { xAxisProps, yAxisProps, gridProps, labelListProps, chartMargin } from './axisOptions'
+import { xAxisProps, yAxisProps, gridProps, labelListProps, chartMargin, valueTick } from './axisOptions'
 import { seriesName } from './axisOptions'
 
 export default function NeedlePlotRenderer({ rows, cfg, rtl, broadcasts, onClickPoint, measureFmt, ruleStyles, plotW, plotH }: ChartRendererProps) {
@@ -18,7 +18,7 @@ export default function NeedlePlotRenderer({ rows, cfg, rtl, broadcasts, onClick
       >
         {grid && <CartesianGrid {...grid} />}
         <XAxis dataKey="name" {...xAxisProps(cfg, rtl, rows.map((r: any) => String(r.name)), plotW)} />
-        <YAxis {...yAxisProps(cfg, rtl, measureFmt, rows.map((r: any) => r.value), observedMin, { height: plotH })} tickFormatter={v => fmtStr(v, measureFmt)} />
+        <YAxis {...yAxisProps(cfg, rtl, measureFmt, rows.map((r: any) => r.value), observedMin, { height: plotH })} tickFormatter={valueTick(cfg, measureFmt)} />
         <Tooltip contentStyle={TT} formatter={(v: unknown) => [fmtStr(v, measureFmt), seriesName(cfg)]} />
         <ReferenceLine y={baseline} stroke="var(--muted)" strokeDasharray="3 3" />
         <Bar dataKey="value" barSize={3}>

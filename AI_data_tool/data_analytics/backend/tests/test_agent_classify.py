@@ -192,7 +192,7 @@ class TestTheChatIntent:
         assert '"intent": "chat"' in prompt
         # ...and the example that stops it over-triggering: a greeting wrapped
         # around a real question is still the question.
-        assert "hi, how many orders are there" in prompt
+        assert "hi, how many rows are there" in prompt
 
     async def test_a_greeting_comes_back_as_chat(self):
         client = FakeClient({"intent": "chat", "ambiguous": False,
@@ -265,6 +265,10 @@ import pytest as _pytest  # noqa: E402
     ("Which services have high activity but relatively low rated amount?", "compare", "aggregate"),
     ("Find unusual activity.", "explain", "aggregate"),
     ("are there any spikes in orders", "lookup", "aggregate"),
+    # Benchmark 2026-10-11: a difference of two totals came back as a group test.
+    ("By how much did the north's total exceed the south's?", "compare", "aggregate"),
+    ("what is the difference between the first group and the second", "compare", "aggregate"),
+    ("بكم تجاوز إجمالي الشمال إجمالي الجنوب؟", "compare", "aggregate"),
     # ...and these are left as the model gave them.
     ("why did returns spike", "explain", "explain"),
     ("cairo vs giza sales", "compare", "compare"),

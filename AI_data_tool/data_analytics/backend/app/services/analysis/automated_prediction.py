@@ -32,12 +32,62 @@ analysis here.
 """
 from __future__ import annotations
 
+from ..readback import _s, as_i18n
+
 from typing import Any
 
 import pandas as pd
 
-from .decision_tree import (MAX_TARGET_CLASSES, RANDOM_STATE, _encode,
+from .decision_tree import (MAX_TARGET_CLASSES, RANDOM_STATE, SEP, _encode,
                             _usable_predictors, group_rare)
+
+#: Times each column is shuffled; the answer is the average, with its spread.
+IMPORTANCE_REPEATS = 5
+#: Held-back rows the shuffling is scored on (it scores the model once per
+#: column per repeat).
+IMPORTANCE_ROWS = 5_000
+#: A fall in score smaller than this is not told apart from shuffling noise.
+IMPORTANCE_FLOOR = 0.002
+
+
+def _importance_note(score_name: str):
+    from ..readback import _s
+    return _s("an.impnote", "How much {score} falls on the held-back rows when a column's values are shuffled. "
+                            "Columns that carry the same information share the credit. "
+                            "It is what the model uses, not what causes the outcome.", score=score_name)
+
+
+def permutation_importance(model, X_test, y_test, columns: list[str]) -> list[dict]:
+    """How much the score on the held-back rows FALLS when one column's values
+    are shuffled -- what the model actually leans on, measured on rows it never
+    saw, for any model (docs/discovery/PLAN.md, phase 3 #16).
+
+    A text column is one-hot encoded into several; they are shuffled together,
+    so the answer is per column of the data, not per encoded piece. Two columns
+    that carry the same information share the credit: shuffling one leaves the
+    other to answer, and both read as less important than they are together."""
+    import numpy as np
+    if len(X_test) > IMPORTANCE_ROWS:
+        X_test = X_test.sample(IMPORTANCE_ROWS, random_state=RANDOM_STATE)
+        y_test = y_test.loc[X_test.index]
+    rng = np.random.default_rng(RANDOM_STATE)
+    base = float(model.score(X_test, y_test))
+    out: list[dict] = []
+    for c in columns:
+        pieces = [k for k in X_test.columns if str(k) == c or str(k).startswith(c + SEP)]
+        if not pieces:
+            continue
+        falls = []
+        for _ in range(IMPORTANCE_REPEATS):
+            shuffled = X_test.copy()
+            shuffled[pieces] = X_test[pieces].to_numpy()[rng.permutation(len(X_test))]
+            falls.append(base - float(model.score(shuffled, y_test)))
+        fall, spread = float(np.mean(falls)), float(np.std(falls))
+        out.append({"column": c, "drop": round(fall, 4), "spread": round(spread, 4),
+                    # Clear of its own shuffling noise, and of the floor.
+                    "matters": bool(fall > max(IMPORTANCE_FLOOR, 2 * spread))})
+    out.sort(key=lambda r: -r["drop"])
+    return out
 
 #: A quarter held back, same as the tree.
 TEST_SIZE = 0.25
@@ -85,21 +135,19 @@ def automated_prediction(df: pd.DataFrame, target: str,
     from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 
     if target not in df.columns:
-        raise AutomatedPredictionError(f"Column '{target}' not found")
+        raise AutomatedPredictionError(_s("no.automated_prediction.1", "Column '{a}' not found", cap=False, a=target))
 
     if partition and partition not in df.columns:
-        raise AutomatedPredictionError(f"Partition column '{partition}' not found")
+        raise AutomatedPredictionError(_s("no.automated_prediction.2", "Partition column '{a}' not found", cap=False, a=partition))
     if partition and partition == target:
-        raise AutomatedPredictionError("The partition column cannot also be the outcome")
+        raise AutomatedPredictionError(_s("no.automated_prediction.3", "The partition column cannot also be the outcome", cap=False))
     used, skipped = _usable_predictors(df, target, [p for p in (predictors or []) if p != partition] or
                                        ([c for c in df.columns if c not in (target, partition)] if partition else None),
                                        allow_grouping=True)
     used = [c for c in used if c != partition]
     if not used:
         raise AutomatedPredictionError(
-            "No column can be used as a predictor here. Numeric columns and "
-            "categorical ones with a manageable number of values can be, "
-            "identifiers and dates cannot.")
+            _s("no.automated_prediction.4", "No column can be used as a predictor here. Numeric columns and categorical ones with a manageable number of values can be, identifiers and dates cannot.", cap=False))
 
     frame = df[[target, *used, *([partition] if partition else [])]].dropna(subset=[target])
     # A car's make (104 brands): its 19 commonest values, the rest as "(other)".
@@ -109,8 +157,7 @@ def automated_prediction(df: pd.DataFrame, target: str,
         frame = frame.sample(FRAME_SAMPLE_THRESHOLD, random_state=RANDOM_STATE)
     if len(frame) < MIN_ROWS:
         raise AutomatedPredictionError(
-            f"Only {len(frame)} usable rows; at least {MIN_ROWS} are needed to "
-            f"compare models on data none of them was fitted to.")
+            _s("no.automated_prediction.5", "Only {a} usable rows; at least {b} are needed to compare models on data none of them was fitted to.", cap=False, a=len(frame), b=MIN_ROWS))
 
     y = frame[target]
     classification = not (pd.api.types.is_numeric_dtype(y)
@@ -120,11 +167,10 @@ def automated_prediction(df: pd.DataFrame, target: str,
         classes = sorted(y.unique())
         if len(classes) < 2:
             raise AutomatedPredictionError(
-                f"'{target}' has only one value, so there is nothing to predict.")
+                _s("no.automated_prediction.6", "'{a}' has only one value, so there is nothing to predict.", cap=False, a=target))
         if len(classes) > MAX_CLASSES:
             raise AutomatedPredictionError(
-                f"'{target}' has {len(classes):,} distinct values -- that is an "
-                f"identifier, not an outcome.")
+                _s("no.automated_prediction.7", "'{a}' has {b} distinct values -- that is an identifier, not an outcome.", cap=False, a=target, b=f'{len(classes):,}'))
 
     X, _labels = _encode(frame, used)
     if partition:
@@ -135,8 +181,7 @@ def automated_prediction(df: pd.DataFrame, target: str,
         is_test = present & ~is_train
         if is_train.sum() < 10 or is_test.sum() < 5:
             raise AutomatedPredictionError(
-                f"Partition '{partition}' leaves {int(is_train.sum())} training and "
-                f"{int(is_test.sum())} validation rows; need at least 10 and 5.")
+                _s("no.automated_prediction.8", "Partition '{a}' leaves {b} training and {c} validation rows; need at least 10 and 5.", cap=False, a=partition, b=int(is_train.sum()), c=int(is_test.sum())))
         X_train, X_test = X[is_train], X[is_test]
         y_train, y_test = y[is_train], y[is_test]
     else:
@@ -172,6 +217,7 @@ def automated_prediction(df: pd.DataFrame, target: str,
         score_name = "r2"
 
     results: list[dict] = []
+    fitted: dict[str, Any] = {}
     for name, model, is_baseline in candidates:
         try:
             model.fit(X_train, y_train)
@@ -188,11 +234,12 @@ def automated_prediction(df: pd.DataFrame, target: str,
         results.append({"model": name, "score": score, "train_score": train,
                         "n_test": int(len(X_test)), "is_baseline": is_baseline,
                         "error": None})
+        fitted[name] = model
 
     scored = [r for r in results if r["score"] is not None]
     if not scored:
         raise AutomatedPredictionError(
-            "No candidate model could be fitted to this data.")
+            _s("no.automated_prediction.9", "No candidate model could be fitted to this data.", cap=False))
 
     champion = max(scored, key=lambda r: r["score"])
     baseline = next((r for r in scored if r["is_baseline"]), None)
@@ -202,32 +249,44 @@ def automated_prediction(df: pd.DataFrame, target: str,
     beats = lift is not None and lift >= MEANINGFUL_LIFT
 
     caveats = [
-        ("Every candidate was fitted on the same rows and scored on the same "
-         f"{len(X_test):,} rows held back from all of them.")
-        + (f" The split is the partition column '{partition}' ({len(X_train):,} training, "
-           f"{len(X_test):,} validation) -- the same one saved models use." if partition else ""),
-        "These models describe what predicts the outcome in THIS data. That is "
-        "association, not causation.",
+        (_s("ap.split.partition", "Every candidate was fitted on the same rows and scored on the same "
+            "{test} rows held back from all of them. The split is the partition column '{col}' ({train} training, "
+            "{test} validation) -- the same one saved models use.",
+            test=f"{len(X_test):,}", train=f"{len(X_train):,}", col=partition) if partition else
+         _s("ap.split", "Every candidate was fitted on the same rows and scored on the same "
+            "{test} rows held back from all of them.", test=f"{len(X_test):,}")),
+        _s("ap.assoc", "These models describe what predicts the outcome in THIS data. That is "
+           "association, not causation."),
         # What this call does and does not leave behind. It used to say no
         # model store existed; one does now, so saying otherwise would send
         # a reader away from the thing they are looking for.
-        "This comparison does not keep the winner -- it refits from scratch "
-        "each time. To score new rows, save a model from this dataset and "
-        "apply that instead.",
+        _s("ap.notkept", "This comparison does not keep the winner -- it refits from scratch "
+           "each time. To score new rows, save a model from this dataset and "
+           "apply that instead."),
     ]
     if not beats:
         caveats.append(
-            f"The best model scores {champion['score']} and simply guessing "
-            f"scores {baseline_score}. Nothing here predicts "
-            f"'{target}' meaningfully better than no model at all.")
+            _s("ap.nobetter", "The best model scores {score} and simply guessing "
+               "scores {base}. Nothing here predicts "
+               "'{target}' meaningfully better than no model at all.",
+               score=champion['score'], base=baseline_score, target=target))
     if champion["train_score"] is not None and \
             champion["train_score"] - champion["score"] > 0.15:
         caveats.append(
-            f"The winner scores {champion['train_score']} on the rows it was "
-            f"fitted to and {champion['score']} on rows it never saw -- it has "
-            f"memorised detail that does not generalise.")
+            _s("ap.overfit", "The winner scores {train} on the rows it was "
+               "fitted to and {score} on rows it never saw -- it has "
+               "memorised detail that does not generalise.", train=champion['train_score'], score=champion['score']))
     if sampled:
-        caveats.append(f"Fitted on a random sample of {FRAME_SAMPLE_THRESHOLD:,} rows.")
+        caveats.append(_s("ap.sample", "Fitted on a random sample of {n} rows.", n=f"{FRAME_SAMPLE_THRESHOLD:,}"))
+
+    # What the winner leans on. Not for a winner that is the guess (it uses no
+    # column), nor one that does not beat it (there is nothing to explain).
+    importance: list[dict] = []
+    if beats and not champion["is_baseline"]:
+        try:
+            importance = permutation_importance(fitted[champion["model"]], X_test, y_test, used)
+        except Exception:                                       # noqa: BLE001 - an extra, never the result
+            importance = []
 
     return {
         "kind": "automated_prediction",
@@ -241,11 +300,16 @@ def automated_prediction(df: pd.DataFrame, target: str,
         "lift_over_baseline": lift,
         "beats_baseline": beats,
         "predictors_used": used,
+        "importance": importance,
+        "importance_of": champion["model"] if importance else None,
+        "importance_note": str(_importance_note(score_name)) if importance else None,
+        "importance_note_i18n": _importance_note(score_name).as_i18n() if importance else None,
         "predictors_grouped": {c: len(v) - 1 for c, v in grouped.items()},
         "predictors_skipped": skipped,
         "n_train": int(len(X_train)),
         "n_test": int(len(X_test)),
         "split": ({"kind": "partition", "column": partition} if partition
                   else {"kind": "random", "test_share": TEST_SIZE}),
-        "caveats": caveats,
+        "caveats": [str(c) for c in caveats],
+        "caveats_i18n": [as_i18n(c) for c in caveats],
     }

@@ -82,3 +82,15 @@ describe('missingWidgetOptions (BUG-038)', () => {
     expect(screen.queryByText('No data.')).toBeNull()
   })
 })
+
+describe('a bar of several measures and no category (score group items)', () => {
+  it('is finished, and one measure alone still needs a category', async () => {
+    const { measuresAsBars, missingRequiredRoles } = await import('./WidgetPlaceholder')
+    const items = { widget_type: 'bar', config: { measures: ['q1', 'q2', 'q3'], aggregation: 'avg' } } as never
+    expect(measuresAsBars(items)).toEqual(['q1', 'q2', 'q3'])
+    expect(missingRequiredRoles(items)).toEqual([])
+    const one = { widget_type: 'bar', config: { measures: ['q1'], aggregation: 'avg' } } as never
+    expect(measuresAsBars(one)).toBeNull()
+    expect(missingRequiredRoles(one).length).toBeGreaterThan(0)
+  })
+})

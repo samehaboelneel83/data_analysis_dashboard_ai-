@@ -23,6 +23,8 @@ a refusal carries its reason in words (constitution rule 1).
 """
 from __future__ import annotations
 
+from .readback import _s, as_i18n
+
 import math
 from typing import Any
 
@@ -382,8 +384,8 @@ def shape_model_tree(df: pd.DataFrame, config: dict) -> dict:
     # always a relabelling of the response (product -> category), not a finding.
     top = max(importance, key=lambda kv: kv[1] or 0, default=None)
     if top and (top[1] or 0) >= 0.98 and (_num(r.get("score")) or 0) >= 0.98:
-        warnings.append(f"'{top[0]}' alone determines {target}. It is probably another name for the "
-                        f"answer rather than a predictor; leave it out to learn something new.")
+        warnings.append(_s("mw.leak", "'{c}' alone determines {target}. It is probably another name for the "
+                           "answer rather than a predictor; leave it out to learn something new.", c=top[0], target=target))
     return {
         "type": "model", "status": "ok", "model": "tree", "target": target,
         "predictors": r.get("predictors_used", []), "result": r,
@@ -392,7 +394,8 @@ def shape_model_tree(df: pd.DataFrame, config: dict) -> dict:
                 "secondary": {"on the rows it trained on": _num(r.get("train_score")),
                               "rows held out for scoring": r.get("n_test"),
                               **_guess_baseline(df, target, r.get("score_name"))}},
-        "warnings": warnings,
+        "warnings": [str(w) for w in warnings],
+        "warnings_i18n": [as_i18n(w) for w in warnings],
         "rows": [{"name": k, "value": v} for k, v in importance],
     }
 
@@ -507,7 +510,30 @@ def shape_model_rules(df: pd.DataFrame, config: dict) -> dict:
     times more often than chance), with the base rate beside every confidence:
     a rule that is "90% confident" about something true of 90% of rows anyway
     says nothing."""
-    from .analysis.patterns import PatternError, association_rules
+    from .analysis.patterns import PatternError, association_rules, basket_rules, rules_network
+
+    # One row per (group, thing) -- an order's lines, a visit's procedures: the
+    # question is what occurs together in the SAME GROUP, not in the same row.
+    basket, item = config.get("basket"), config.get("item")
+    if isinstance(basket, str) and basket and isinstance(item, str) and item:
+        try:
+            out = basket_rules(df, basket, item).to_dict()
+        except PatternError as e:
+            msg = str(e)
+            return _refused(msg[:1].upper() + msg[1:] + ".", _population(df, [], [basket, item], 0))
+        meta, rules = out.get("meta", {}), out.get("rows") or []
+        return {
+            "type": "model", "status": "ok", "model": "rules", "mode": "baskets",
+            "variables": [basket, item], "focus": None, "banded": {}, "result": out, "rules": rules,
+            "network": rules_network(rules),
+            "population": _population(df, [], [basket, item], meta.get("rows_scanned", len(df))),
+            "fit": {"name": "strongest lift", "value": _num(rules[0]["lift"] if rules else None),
+                    "secondary": {"rules found": len(rules), "groups": meta.get("groups"),
+                                  "least rows behind a rule": meta.get("params", {}).get("min_support_rows"),
+                                  "least lift reported": meta.get("params", {}).get("min_lift")}},
+            "warnings": [],
+            "rows": [{"name": f"{r['if_items'][0][1]} + {r['then_items'][0][1]}", "value": r["lift"]} for r in rules],
+        }
 
     focus = config.get("response") or None
     focus = focus if isinstance(focus, str) and focus else None
@@ -521,7 +547,7 @@ def shape_model_rules(df: pd.DataFrame, config: dict) -> dict:
         return _refused(
             f"{', '.join(ids)} {'is an identifier' if len(ids) == 1 else 'are identifiers'}: "
             f"every row has its own value, so nothing can repeat to form a rule. "
-            f"Choose descriptive columns such as department, product, region or status.",
+            f"Choose descriptive columns whose values repeat across rows.",
             _population(df, [], chosen, 0))
     if chosen:
         cols = [*chosen, *([focus] if focus else [])]
@@ -553,6 +579,7 @@ def shape_model_rules(df: pd.DataFrame, config: dict) -> dict:
         "type": "model", "status": "ok", "model": "rules",
         "variables": meta.get("columns_considered", cols), "focus": focus,
         "banded": banded, "result": out, "rules": rules,
+        "network": rules_network(rules),
         "population": pop,
         "fit": {"name": "strongest lift", "value": _num(strongest),
                 "secondary": {"rules found": len(rules),
@@ -567,6 +594,86 @@ def shape_model_rules(df: pd.DataFrame, config: dict) -> dict:
 
 def _is_classification(y: pd.Series) -> bool:
     return not pd.api.types.is_numeric_dtype(y) or y.nunique(dropna=True) <= 2
+
+
+def shape_model_influencers(df: pd.DataFrame, config: dict) -> dict:
+    """Key influencers on the page: which values of the other columns go with
+    the response, against its overall rate (or average). Re-fitted as the
+    page is filtered, like every model beside it."""
+    from .analysis.influencers import InfluencerError, key_influencers
+
+    target = config.get("response")
+    if not target:
+        return _incomplete(["Response"])
+    if target not in df.columns:
+        return _refused(f"Column '{target}' is not in this dataset.")
+    factors = _predictors(config, target) or None
+    event = config.get("event_value", config.get("event"))
+    if event is not None and event != "":
+        # The panel stores what was typed; the column may hold numbers.
+        match = next((v for v in df[target].dropna().unique() if str(v) == str(event)), None)
+        event = match if match is not None else event
+    else:
+        event = None
+    try:
+        r = key_influencers(df, target, event, factors).to_dict()
+    except InfluencerError as e:
+        return _refused(str(e), _population(df, [], [target, *(factors or [])], 0))
+    meta = r["meta"]
+    rate = meta["measure"] == "rate"
+    pop = _population(df, [], [target], meta["n_rows_used"])
+    if meta.get("sampled"):
+        pop.pop("sampled_of", None)
+        pop["sampled_from"] = meta["n_rows_total"]
+    return {
+        "type": "model", "status": "ok", "model": "influencers", "target": target,
+        "event": meta.get("target_value"), "predictors": meta["params"]["factors"],
+        "measure": meta["measure"], "baseline": meta["baseline"],
+        "influencers": [{"factor": x["factor"], "group": x["group"], "value": x[meta["measure"]],
+                         "lift": x["lift"], "rows": x["rows"], "share_of_rows": x["share_of_rows"]}
+                        for x in r["rows"]],
+        "result": {"caveats": [meta["caveat"], *r.get("warnings", [])]},
+        "population": pop,
+        "fit": {"name": "Overall rate" if rate else "Overall average", "value": meta["baseline"],
+                "secondary": {"groups looked at": meta["groups_considered"],
+                              "smallest group counted": meta["params"]["min_group_rows"]}},
+        "value_format": "percent" if rate else None,
+        "rows": [{"name": f"{x['factor']}: {x['group']}", "value": x["lift"]} for x in r["rows"]],
+    }
+
+
+#: Analyses that can sit on a page as a tile: quick, read from the page's own
+#: rows, and each with a result view of its own. Not the whole catalogue -- a
+#: model that takes a minute to fit is not something a filter click re-runs.
+TILE_ANALYSES = ("explain_change", "explain_variance", "compare_two_groups", "stage_board", "compare_scenarios",
+                 "cohort_retention", "simulate_scenarios")
+
+
+def shape_analysis_result(df: pd.DataFrame, config: dict) -> dict:
+    """An analysis result as a tile (`analysis_result`): `config.analysis`
+    names one of TILE_ANALYSES and `config.params` are its parameters. It is
+    run on the rows the page shows (its filters applied first, like every
+    model beside it), and the tile draws the same view the analysis page does.
+
+    What it cannot do is said in words: a missing parameter, an analysis that
+    is not a tile, a refusal by the analysis itself."""
+    from .analysis import registry
+    name = str(config.get("analysis") or "")
+    params = config.get("params") if isinstance(config.get("params"), dict) else {}
+    if not name:
+        return {"type": "analysis", "status": "incomplete", "needs": ["Analysis"], "rows": []}
+    if name not in TILE_ANALYSES:
+        return {"type": "analysis", "status": "refused", "analysis": name, "rows": [],
+                "reason": f"'{name}' cannot sit on a page as a tile. Run it from the dataset's Analysis tab."}
+    spec = registry.get(name)
+    try:
+        result = registry.run_analysis(name, df, params)
+    except (ValueError, TypeError, KeyError) as e:
+        # The analyses refuse in plain words (their own ...Error types are ValueErrors).
+        reason = str(e) or "This analysis could not be run on these rows."
+        return {"type": "analysis", "status": "refused", "analysis": name, "reason": reason, "rows": []}
+    return {"type": "analysis", "status": "ok", "analysis": name, "kind": spec.result_kind if spec else name,
+            "result": result, "params": params, "total": int(len(df)), "rows": []}
 
 
 def shape_model_compare(df: pd.DataFrame, config: dict) -> dict:
@@ -853,4 +960,6 @@ MODEL_SHAPERS: dict[str, Any] = {
     "model_compare": _living(shape_model_compare),
     "model_score": _living(shape_model_score),
     "model_rules": _living(shape_model_rules),
+    "model_influencers": _living(shape_model_influencers),
+    "analysis_result": _living(shape_analysis_result),
 }

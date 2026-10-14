@@ -1,3 +1,4 @@
+import { useT, type MessageKey } from '../i18n'
 import { useEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 
@@ -7,11 +8,11 @@ export interface CanvasJoin { left_table: string; left_column: string; table: st
  *  `cross` needs no ON clause, which is why it is offered here and NOT
  *  reachable by drawing a line between two columns. */
 export const JOIN_TYPES: { how: string; label: string; hint: string }[] = [
-  { how: 'inner', label: 'Inner', hint: 'Only rows that match on both sides' },
-  { how: 'left', label: 'Left', hint: 'Every row from the left table; nulls where none matches' },
-  { how: 'right', label: 'Right', hint: 'Every row from the right table; nulls where none matches' },
-  { how: 'full', label: 'Full outer', hint: 'Every row from both sides' },
-  { how: 'cross', label: 'Cross', hint: 'Every row against every row — no matching column' },
+  { how: 'inner', label: 'Inner', hint: 'Only rows that match on both sides' },  // i18n-ok: shown through qc.join.* keys
+  { how: 'left', label: 'Left', hint: 'Every row from the left table; nulls where none matches' },  // i18n-ok
+  { how: 'right', label: 'Right', hint: 'Every row from the right table; nulls where none matches' },  // i18n-ok
+  { how: 'full', label: 'Full outer', hint: 'Every row from both sides' },  // i18n-ok
+  { how: 'cross', label: 'Cross', hint: 'Every row against every row — no matching column' },  // i18n-ok
 ]
 
 const colKey = (table: string, column: string) => `${table}.${column}`
@@ -51,6 +52,7 @@ export default function QueryCanvas({ tables, kinds, columnsByTable, joins, onAd
   onToggleColumn?: (table: string, column: string) => void
   onCycleAggregation?: (table: string, column: string) => void
 }) {
+  const t9 = useT()
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({})
   const [pending, setPending] = useState<{ table: string; column: string } | null>(null)
   const [picking, setPicking] = useState<number | null>(null)
@@ -128,15 +130,15 @@ export default function QueryCanvas({ tables, kinds, columnsByTable, joins, onAd
           <button data-testid={`join-label-${e.i}`}
             onClick={() => setPicking(picking === e.i ? null : e.i)}
             aria-haspopup="menu" aria-expanded={picking === e.i}
-            title={JOIN_TYPES.find(t => t.how === e.how)?.hint ?? 'Change join type'}
+            title={JOIN_TYPES.some(j => j.how === e.how) ? t9(`qc.joinHint.${e.how}` as MessageKey) : t9('qc.changeJoin')}
             style={{ fontSize: 10.5, fontWeight: 700, padding: '1px 6px', borderRadius: 8, cursor: 'pointer',
               border: '1px solid var(--accent)', background: 'var(--surface)', color: 'var(--accent)' }}>
             {e.how}
           </button>
-          <button aria-label={`Remove join ${e.i + 1}`} onClick={() => onRemoveJoin(e.i)}
+          <button aria-label={t9('qbd.a.removeJoin', { n: e.i + 1 })} onClick={() => onRemoveJoin(e.i)}
             style={{ fontSize: 10.5, border: 'none', background: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 0 }}>✕</button>
           {picking === e.i && (
-            <div role="menu" aria-label="Join type"
+            <div role="menu" aria-label={t9('qc.joinType')}
               style={{ position: 'absolute', top: '120%', insetInlineStart: 0, zIndex: 5, minWidth: 190,
                 background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
                 boxShadow: '0 8px 24px rgba(0,0,0,.2)', padding: 4 }}>
@@ -149,9 +151,9 @@ export default function QueryCanvas({ tables, kinds, columnsByTable, joins, onAd
                     background: t.how === e.how ? 'var(--accent-soft)' : 'transparent',
                     color: t.how === e.how ? 'var(--accent)' : 'var(--text)',
                     fontWeight: t.how === e.how ? 700 : 400 }}>
-                  {t.label}
+                  {t9(`qc.join.${t.how}` as MessageKey)}
                   <span style={{ display: 'block', fontSize: 10.5, color: 'var(--muted)', fontWeight: 400 }}>
-                    {t.hint}
+                    {t9(`qc.joinHint.${t.how}` as MessageKey)}
                   </span>
                 </button>
               ))}
@@ -181,8 +183,8 @@ export default function QueryCanvas({ tables, kinds, columnsByTable, joins, onAd
                 close button: removing it would not tidy the diagram, it would
                 empty the query. */}
             {onCloseTable && t !== tables[0] && (
-              <button data-testid={`close-table-${t}`} aria-label={`Remove ${t} from the query`}
-                title={`Remove ${t} and its joins`}
+              <button data-testid={`close-table-${t}`} aria-label={t9('qc.removeTable', { t })}
+                title={t9('qc.removeTableTip', { t })}
                 onMouseDown={e => e.stopPropagation()}
                 onClick={e => { e.stopPropagation(); onCloseTable(t) }}
                 style={{ display: 'inline-flex', border: 'none', background: 'none', cursor: 'pointer',
@@ -199,18 +201,18 @@ export default function QueryCanvas({ tables, kinds, columnsByTable, joins, onAd
               return (
                 <div key={c} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '1px 4px',
                   background: isPending ? 'color-mix(in srgb, var(--accent) 20%, transparent)' : 'transparent' }}>
-                  <input type="checkbox" aria-label={`Include ${key}`} checked={isSelected}
+                  <input type="checkbox" aria-label={t9('qc.include', { c: key })} checked={isSelected}
                     onChange={() => onToggleColumn?.(t, c)}
                     style={{ margin: 0, cursor: onToggleColumn ? 'pointer' : 'default' }} />
                   <button ref={el => { colRefs.current[key] = el }}
                     onClick={() => clickColumn(t, c)}
-                    title={pending && pending.table !== t ? `Join ${pending.table}.${pending.column} = ${t}.${c}` : 'Click, then a column in another table, to join'}
+                    title={pending && pending.table !== t ? t9('qc.joinPair', { a: `${pending.table}.${pending.column}`, b: `${t}.${c}` }) : t9('qc.clickToJoin')}
                     style={{ display: 'block', flex: 1, textAlign: 'start', fontSize: 11, padding: '2px 4px',
                       border: 'none', cursor: 'pointer', color: 'var(--text)', background: 'transparent' }}>
                     {c}
                   </button>
                   {isSelected && (
-                    <button aria-label={`Aggregation ${key}`} title="Click to cycle aggregation"
+                    <button aria-label={t9('qc.aggOf', { c: key })} title={t9('qc.cycleAgg')}
                       onClick={() => onCycleAggregation?.(t, c)}
                       style={{ fontSize: 8, fontWeight: 700, padding: '1px 5px', borderRadius: 6, cursor: 'pointer',
                         border: '1px solid var(--accent)', background: 'var(--surface2)', color: 'var(--accent)',
@@ -226,7 +228,7 @@ export default function QueryCanvas({ tables, kinds, columnsByTable, joins, onAd
       ))}
       {pending && (
         <div style={{ position: 'absolute', bottom: 6, insetInlineStart: 8, fontSize: 11, color: 'var(--accent)', zIndex: 2 }}>
-          Joining from {pending.table}.{pending.column} — click a column in another table (Esc to cancel)
+          {t9('qc.joiningFrom', { a: `${pending.table}.${pending.column}` })}
         </div>
       )}
     </div>

@@ -39,6 +39,9 @@ REQUIRED_ROLES: dict[str, tuple[str, ...]] = {
     # Association rules: the columns are optional (blank = every usable text
     # column), and so is the column the conclusions must be about.
     "model_rules": (),
+    "model_influencers": ("response",),
+    # An analysis result as a tile: its inputs are the analysis' own parameters.
+    "analysis_result": (),
     "area": ("category",),
     "bar": ("category",),
     "box_plot": ("category", "measure"),
@@ -189,6 +192,9 @@ def missing_roles(widget_type: str, config: dict) -> list[str]:
     required = REQUIRED_ROLES.get(widget_type)
     if not required:
         return []
+    from .multi_measure import measures_as_bars
+    if measures_as_bars(widget_type, config):
+        return []                       # one bar per measure: no category needed
     from .widget_data import resolve_roles
     cfg = config or {}
     have = resolve_roles(cfg)
@@ -310,7 +316,7 @@ VOCABULARIES: dict[str, frozenset] = {
     "gauge_shape": frozenset({"arc", "speedometer", "bullet", "thermometer", "progress"}),
     "container_mode": frozenset({"group", "tabs", "scroll", "prompt", "precision"}),
     "dimension_granularity": frozenset({"year", "quarter", "month", "week", "day",
-                                        "hour", "hour_of_day",
+                                        "hour", "hour_of_day", "weekday", "month_of_year",
                                         "hijri_month", "hijri_year",
                                         "fiscal_year", "fiscal_quarter"}),
 }
@@ -487,7 +493,7 @@ def _check_settings(config: dict, keys) -> None:
             probe = value.lower() if isinstance(value, str) and key in _CASE_FOLDED else value
             if probe not in VOCABULARIES[key]:
                 raise InvalidWidget(f"{key} must be one of {', '.join(sorted(VOCABULARIES[key]))}")
-        elif key in ("limit", "suppress_below"):
+        elif key in ("limit", "suppress_below", "min_group_rows"):
             _check_count(key, value)
 
 

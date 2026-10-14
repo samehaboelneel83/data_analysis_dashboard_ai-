@@ -1854,12 +1854,15 @@ describe('dropping several fields on the canvas', () => {
 
   it('a numeric identifier groups with the dimensions and a coordinate with geography', async () => {
     // Live QA 2026-09-28: IMEI and A_NUMBER sat under Measures with a Sum beside them.
+    // That IMEI is a code is the dataset's stored classification (the server
+    // reads it from the values: a long fixed-width number), not a telecom
+    // word known to the browser.
     vi.mocked(reportsApi.get).mockResolvedValue(baseReport() as any)
     vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Calls', columns: [
       { id: 1, name: 'IMEI', dtype: 'numeric', missing_pct: 0, stats: {} },
       { id: 2, name: 'LATITUDE', dtype: 'numeric', missing_pct: 0, stats: {} },
       { id: 3, name: 'RATED_AMOUNT', dtype: 'numeric', missing_pct: 0, stats: {} },
-    ] } as any)
+    ], column_meta: { IMEI: { number: 'code' } } } as any)
     renderBuilder()
     await screen.findByTestId('view-strip')
     const groupOf = async (name: string) =>
@@ -2598,6 +2601,7 @@ describe('ReportBuilder explains permissions and sensitivity (Phase 7.3)', () =>
     renderBuilder()
     await screen.findByTestId('view-strip')
     expect((await screen.findByTestId('sensitivity-badge')).textContent).toContain('Restricted')
+    expect((await screen.findByTestId('sensitivity-badge')).textContent).toContain('Data:')
     // 7c: Share opens one dialog; the refused guest link is greyed there
     // with the server's reason, and "Your access, and why" is in its footer.
     fireEvent.click(screen.getByRole('button', { name: /^Share$/ }))

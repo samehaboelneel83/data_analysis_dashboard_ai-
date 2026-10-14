@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import AboutMe from '../AboutMe'
 import { useNavigate } from 'react-router-dom'
 import { Sparkles, X } from 'lucide-react'
 import { useModalDialog } from '../ui/useModalDialog'
@@ -247,7 +248,7 @@ export default function SuggestDashboardsDialog(
   const newReport = async (name: string) => {
     const report = await reportsApi.create({
       name,
-      description: goal ? `Suggested for: ${goal}` : 'Suggested from the data',
+      description: goal ? tr('sdd.descFor', { goal }) : tr('sdd.descData'),
       dataset_id: datasetId,
     } as never)
     return { reportId: (report as { id: number }).id,
@@ -347,6 +348,7 @@ export default function SuggestDashboardsDialog(
           <div style={{ ...muted, marginTop: 4 }}>
             {tr('sdd.help1')} <strong>{tr('sdd.helpBlank')}</strong> {tr('sdd.help2')}
           </div>
+          <AboutMe disabled={busy} />
           <fieldset disabled={busy} style={{ border: 0, padding: 0, margin: '10px 0 0' }}>
             <legend style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{tr('sug.mode.label')}</legend>
             {(['quick', 'panel'] as const).map(m => (

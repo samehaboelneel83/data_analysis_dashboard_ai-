@@ -32,8 +32,19 @@ export function emptyPickerReason(hasAnyColumns: boolean, kind: string | undefin
 }
 
 /** Required roles this widget has not been given yet (labels, for display). */
+/** A bar of several measures and no category draws one bar per measure
+ *  (the items of a score group compared). MIRRORS
+ *  `multi_measure.measures_as_bars` on the server. */
+export function measuresAsBars(widget: Pick<Widget, 'widget_type' | 'config'>): string[] | null {
+  const cfg = (widget.config ?? {}) as Record<string, unknown>
+  if (widget.widget_type !== 'bar' || cfg.dimension) return null
+  const ms = Array.isArray(cfg.measures) ? [...new Set(cfg.measures.filter((m): m is string => typeof m === 'string' && !!m))] : []
+  return ms.length >= 2 ? ms : null
+}
+
 export function missingRequiredRoles(widget: Pick<Widget, 'widget_type' | 'config'>): string[] {
   const cfg = (widget.config ?? {}) as Record<string, unknown>
+  if (measuresAsBars(widget)) return []
   return (ROLE_SPECS[widget.widget_type as WidgetType] ?? [])
     .filter(rf => rf.required)
     .filter(rf => {

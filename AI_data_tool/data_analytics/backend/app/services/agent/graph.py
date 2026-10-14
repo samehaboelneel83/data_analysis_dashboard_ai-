@@ -209,6 +209,14 @@ async def run_agent(db, *, question: str, source: DataSource | None = None,
                 continue
             frame = await asyncio.to_thread(analytics.load_file, ds.filename)
             frame = widget_data.apply_rls_filter(frame, expr)
+            # The dataset's Prepare steps, as every chart on it reads them:
+            # Ask AI answered from the raw rows (36.23) beside a dashboard
+            # drawn from the cleaned ones (37.60) -- persona test 2026-10-12.
+            from ..prep import apply_prep_steps, prep_steps_of, resolve_join_frames
+            steps = prep_steps_of(ds)
+            if steps:
+                aux = await resolve_join_frames(db, user, steps)
+                frame = await asyncio.to_thread(apply_prep_steps, frame, steps, aux)
             if denied_here:
                 present = [c for c in frame.columns
                            if c.casefold() in {x.casefold() for x in denied_here}]
@@ -303,8 +311,20 @@ async def run_agent(db, *, question: str, source: DataSource | None = None,
     verdict = await classify(effective_question, await get_context(), client,
                              history=history)
     if verdict is None:
-        return _finish(run, started, status="failed",
-                       error="the model endpoint could not classify the question")
+        # No model -- switched off, not allowed for this data, out of budget
+        # or not answering. Ask AI still answers: with what the platform can
+        # compute by itself for this question (agent/without_model.py),
+        # saying plainly that no AI was used.
+        from . import without_model
+        from ..llm import AI_NOT_ALLOWED, BUDGET_SPENT
+        last = getattr(client, "last_error", None)
+        reason = ("AI is switched off for this data" if last == AI_NOT_ALLOWED
+                  else "the AI budget is used up" if last == BUDGET_SPENT
+                  else "AI is switched off" if not getattr(client, "enabled", True)
+                  else "it did not answer")
+        run.intent = "chat"
+        return _finish(run, started, status="ok",
+                       answer=without_model.answer(effective_question, await get_context(), reason))
     run.intent = verdict["intent"]
 
     # The message that is not a question about the data at all. Checked BEFORE
@@ -480,6 +500,13 @@ async def run_agent(db, *, question: str, source: DataSource | None = None,
                        # step reworded as "total ROUNDED_VOLUME per service" names
                        # the very column the question never asked for.
                        or measure_fit(effective_question, sql, context.family))
+            if failure is not None and failure.rung == "V7" and attempt == MAX_ATTEMPTS - 1:
+                # V7 is a hint about wording, not a safety rule: when every
+                # repair still adds up a column, that query is answered rather
+                # than refused (persona test 2026-10-12: "when is our busiest
+                # season" on a monthly summary, where COUNT(*) counts months).
+                failures.append({"rung": failure.rung, "detail": failure.detail})
+                failure = None
             if failure is not None:
                 failures.append({"rung": failure.rung, "detail": failure.detail})
                 feedback = f"{failure.rung}: {failure.detail}"
@@ -1041,9 +1068,15 @@ async def _suggest_dashboards(db, run: AgentRun, started: float, source, user,
     role_name = (said if isinstance(said, str) and said else None) or role_fallback
     brief = None
     try:
+        # Their request, then what they wrote about themselves and what the
+        # connection is described as (services/ai_context.py).
+        from ..ai_context import compose as _compose
+        asked = _compose(question, llm_on=True, about=getattr(user, "about", None),
+                         connection=getattr(source, "description", None),
+                         connection_name=getattr(source, "name", None)) or question
         proposals, brief, why = await design(
             client=client or _get_llm(), catalog=facts_catalog, persona=role_name,
-            request=question, joins=joins, run_query=run_query, count=3,
+            request=asked, joins=joins, run_query=run_query, count=3,
             quote=_quote, enriched=True)
         if isinstance(brief, dict) and isinstance(brief.get("_timings"), dict):
             brief["_timings"]["facts_s"] = facts_s

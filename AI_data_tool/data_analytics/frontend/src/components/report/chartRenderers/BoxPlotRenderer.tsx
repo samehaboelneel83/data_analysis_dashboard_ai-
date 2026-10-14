@@ -1,3 +1,4 @@
+import { useT } from '../../../i18n'
 import { fmtStr, seriesColor } from '../chartUtils'
 import { valueTick } from './axisOptions'
 import type { ChartRendererProps } from './types'
@@ -16,12 +17,13 @@ const H = 400
 interface BoxRow { name: string; min: number; q1: number; median: number; q3: number; max: number; outliers: number[] }
 
 export default function BoxPlotRenderer({ data, rtl, measureFmt, cfg }: ChartRendererProps) {
+  const t9 = useT()
   // The shared tick formatter, compact by default here: a gutter is narrow.
   const tick = valueTick({ ...(cfg ?? {}), labels_compact: cfg?.labels_compact ?? true }, measureFmt)
   const rows: BoxRow[] = data?.rows ?? []
 
   if (rows.length === 0) {
-    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>Configure widget to see data</div>
+    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>{t9('cr.configure')}</div>
   }
 
   const allVals = rows.flatMap(r => [r.min, r.max, ...(r.outliers ?? [])])
@@ -75,7 +77,7 @@ export default function BoxPlotRenderer({ data, rtl, measureFmt, cfg }: ChartRen
                 <circle key={oi} cx={cx} cy={yToPx(o)} r={2.5} fill="var(--muted)" fillOpacity={0.7} />
               ))}
               <text x={cx} y={H - MARGIN_BOTTOM + 16} textAnchor="middle" fontSize={10} fill="var(--muted)">{r.name}</text>
-              <title>{`${r.name}: min ${fmtStr(r.min, measureFmt)}, Q1 ${fmtStr(r.q1, measureFmt)}, median ${fmtStr(r.median, measureFmt)}, Q3 ${fmtStr(r.q3, measureFmt)}, max ${fmtStr(r.max, measureFmt)}`}</title>
+              <title>{t9('cr.boxTitle', { name: String(r.name), min: fmtStr(r.min, measureFmt), q1: fmtStr(r.q1, measureFmt), median: fmtStr(r.median, measureFmt), q3: fmtStr(r.q3, measureFmt), max: fmtStr(r.max, measureFmt) })}</title>
             </g>
           )
         })}

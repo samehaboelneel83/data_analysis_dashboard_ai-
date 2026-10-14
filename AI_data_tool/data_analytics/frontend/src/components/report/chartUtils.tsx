@@ -313,9 +313,13 @@ export function getFillFactory(
   broadcasts: boolean,
   localSelected: unknown,
   ruleRowStyles?: (RuleStyle | null)[],
+  /** One series (a bar per group of ONE measure): every mark takes the first
+   *  colour, so a rainbow never suggests the groups differ in kind. Parts of a
+   *  whole (donut, pie, funnel) keep a colour each. */
+  oneSeries = false,
 ) {
   return (name: unknown, i: number) => {
-    const color = ruleRowStyles?.[i]?.fill ?? COLORS[i % COLORS.length]
+    const color = ruleRowStyles?.[i]?.fill ?? COLORS[oneSeries ? 0 : i % COLORS.length]
     if (!broadcasts || localSelected === null) return { fill: color, opacity: 1 }
     return localSelected === name
       ? { fill: color, opacity: 1, strokeWidth: 2, stroke: SELECTED_STROKE }

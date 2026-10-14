@@ -8,6 +8,8 @@ import type { ReportPage, PageType, Widget, Bookmark } from '../../types/report'
 import type { DatasetColumn } from '../../services/api'
 import { pageVisibilityApi } from '../../services/api'
 import ExpandableGroup from './ExpandableGroup'
+import DashboardStylePanel from './DashboardStylePanel'
+import type { DashboardStyle } from '../../lib/dashboardStyle'
 
 interface Props {
   reportId?: number
@@ -29,6 +31,9 @@ interface Props {
   palettes?: { key: string; name: string; colors: string[] }[]
   currentPalette?: string
   onPalette?: (key: string) => void
+  /** The dashboard's look (lib/dashboardStyle), when the caller lets this panel change it. */
+  dashboardStyle?: DashboardStyle | null
+  onDashboardStyle?: (next: DashboardStyle) => void
 }
 
 const PAGE_TYPES: { value: PageType; label: MessageKey; desc: MessageKey }[] = [
@@ -44,7 +49,7 @@ const PAGE_TYPES: { value: PageType; label: MessageKey; desc: MessageKey }[] = [
  *  matches the English and the translated title alike. */
 const GROUP = {
   identity: 'Identity', layout: 'Layout', appearance: 'Appearance', behaviour: 'Behaviour',
-  prompt: 'Prompt', actions: 'Actions on this page', visibility: 'Visibility',
+  prompt: 'Prompt', actions: 'Actions on this page', visibility: 'Visibility', style: 'Dashboard style',
 } as const
 
 /** The key each group's displayed heading is translated by. */
@@ -52,6 +57,7 @@ const GROUP_KEY: Record<string, MessageKey> = {
   'Identity': 'group.identity', 'Layout': 'group.layout', 'Appearance': 'group.appearance',
   'Behaviour': 'group.behaviour', 'Prompt': 'group.prompt',
   'Actions on this page': 'group.actions_on_this_page', 'Visibility': 'group.visibility',
+  'Dashboard style': 'tpl.style.group',
 }
 
 // One-line summary of a button's action, e.g. "Button 'Go' → navigate: Page 2".
@@ -82,7 +88,7 @@ function actionSummary(tr: TranslateFn, w: Widget, pages: ReportPage[], bookmark
   }
 }
 
-export default function PagePropertiesPanel({ reportId, page, columns, onUpdate, pages, bookmarks, onSelectWidget, palettes, currentPalette, onPalette }: Props) {
+export default function PagePropertiesPanel({ reportId, page, columns, onUpdate, pages, bookmarks, onSelectWidget, palettes, currentPalette, onPalette, dashboardStyle, onDashboardStyle }: Props) {
   const tr = useT()
   /** Finding a setting by name. The widget panel beside this one has had this
    *  since it grew past a screenful; without it here the search an author just
@@ -295,6 +301,12 @@ export default function PagePropertiesPanel({ reportId, page, columns, onUpdate,
               )
             })}
           </div>
+        </ExpandableGroup>
+      )}
+
+      {onDashboardStyle && (
+        <ExpandableGroup id="dashboard-style" title={GROUP.style} {...groupFilter(GROUP.style)}>
+          <DashboardStylePanel style={dashboardStyle ?? {}} onChange={onDashboardStyle} />
         </ExpandableGroup>
       )}
 

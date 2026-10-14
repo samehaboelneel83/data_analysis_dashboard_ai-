@@ -41,8 +41,8 @@ describe('Guided setup — Choose data', () => {
     renderStep()
     fireEvent.change(await screen.findByLabelText('What is your work?'), { target: { value: 'Lawyer' } })
     fireEvent.click(screen.getByRole('button', { name: 'Suggest datasets' }))
-    await waitFor(() => expect(setupApi.update).toHaveBeenCalledWith(38, { brief: { work: 'Lawyer' } }))
-    expect(setupApi.suggestDatasets).toHaveBeenCalledWith(38, 'en')
+    await waitFor(() => expect(setupApi.update).toHaveBeenCalledWith(38, { brief: { work: 'Lawyer' } }, undefined))
+    expect(setupApi.suggestDatasets).toHaveBeenCalledWith(38, 'en', undefined)
   })
 
   it('can skip About you', async () => {
@@ -66,6 +66,17 @@ describe('Guided setup — Choose data', () => {
     expect(screen.getByText('Empty')).toBeInTheDocument()
   })
 
+  it('says when a join repeats rows or leaves rows without a match (persona test, plan 1.9)', async () => {
+    vi.mocked(setupApi.datasets).mockResolvedValue(step({
+      proposals: { pending: false, failed: null, language: 'en', asked: true, items: [proposal({
+        joins: { repeats: { table: 'orders', rows: 97015, distinct: 96478 }, unmatched: [{ table: 'salaries', share: 0.2 }] },
+      })] },
+    }))
+    renderStep()
+    expect(await screen.findByTestId('join-repeats')).toHaveTextContent('97,015 rows hold 96,478 orders')
+    expect(screen.getByTestId('join-unmatched')).toHaveTextContent('20% of the rows have no matching salaries')
+  })
+
   it('sends a change asked in plain words', async () => {
     vi.mocked(setupApi.datasets).mockResolvedValue(step())
     vi.mocked(setupApi.refineDataset).mockResolvedValue({ proposals: step().proposals })
@@ -73,7 +84,7 @@ describe('Guided setup — Choose data', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Change it' }))
     fireEvent.change(screen.getByRole('textbox', { name: /Ask for a change/ }), { target: { value: 'only 2015 and newer' } })
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
-    await waitFor(() => expect(setupApi.refineDataset).toHaveBeenCalledWith(38, 'p1', 'only 2015 and newer', 'en'))
+    await waitFor(() => expect(setupApi.refineDataset).toHaveBeenCalledWith(38, 'p1', 'only 2015 and newer', 'en', undefined))
   })
 
   it('creates the chosen dataset, waits for the import, then moves on', async () => {
@@ -84,8 +95,8 @@ describe('Guided setup — Choose data', () => {
     const onDone = renderStep()
     fireEvent.click(await screen.findByRole('checkbox', { name: 'Use "Car prices"' }))
     fireEvent.click(screen.getByRole('button', { name: 'Create 1 dataset and continue' }))
-    await waitFor(() => expect(onDone).toHaveBeenCalledWith([501]))
-    expect(setupApi.createDatasets).toHaveBeenCalledWith(38, [{ id: 'p1', name: 'Car prices' }], 'import')
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith([501], [501]))
+    expect(setupApi.createDatasets).toHaveBeenCalledWith(38, [{ id: 'p1', name: 'Car prices' }], 'import', undefined)
   })
 
   it('can use datasets that already exist instead', async () => {
@@ -93,8 +104,33 @@ describe('Guided setup — Choose data', () => {
     const onDone = renderStep()
     fireEvent.click(await screen.findByRole('checkbox', { name: /cars_hatla2ee/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Next: Check & discover' }))
-    await waitFor(() => expect(onDone).toHaveBeenCalledWith([7]))
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith([7], []))
     expect(setupApi.createDatasets).not.toHaveBeenCalled()
+  })
+
+  it('keeps what was typed in About you when existing datasets are chosen without Suggest (persona test)', async () => {
+    vi.mocked(setupApi.datasets).mockResolvedValue(step({
+      proposals: { pending: false, failed: null, items: [], language: null, asked: false }, brief: {},
+      existing: [{ id: 7, name: 'cars_hatla2ee', rows: 14269, mode: 'import' }] }))
+    const onDone = renderStep()
+    fireEvent.change(await screen.findByLabelText('What do you need to know?'), { target: { value: 'Prices in 2023' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: /cars_hatla2ee/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Next: Check & discover' }))
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith([7], []))
+    expect(setupApi.update).toHaveBeenCalledWith(38, { brief: { questions: 'Prices in 2023' } }, undefined)
+  })
+
+  it('folds away unused datasets someone else made, by use not by name (persona test 3.4)', async () => {
+    vi.mocked(setupApi.datasets).mockResolvedValue(step({
+      existing: [{ id: 7, name: 'sales view', rows: 10, mode: 'import', used: 2, mine: false },
+                 { id: 8, name: 'old trial', rows: 5, mode: 'import', used: 0, mine: false },
+                 { id: 9, name: 'my draft', rows: 5, mode: 'import', used: 0, mine: true }] }))
+    renderStep()
+    expect(await screen.findByText('Used by 2 dashboards')).toBeInTheDocument()
+    expect(screen.getByText('my draft')).toBeInTheDocument()
+    expect(screen.queryByText('old trial')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Show 1 more not used anywhere' }))
+    expect(screen.getByText('old trial')).toBeInTheDocument()
   })
 
   it('says plainly when someone may not create datasets', async () => {

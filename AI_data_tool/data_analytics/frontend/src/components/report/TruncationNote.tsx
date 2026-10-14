@@ -1,3 +1,4 @@
+import { useT } from '../../i18n'
 import { useEffect, useState } from 'react'
 /**
  * The visible half of the truncation contract (MASTER_PLAN Phase 0, rule 4).
@@ -76,6 +77,7 @@ export function countToSlider(count: number, max: number, min = 1): number {
 
 export function TruncationNote({ t, dimension, onShowMore }:
   { t: Truncation; dimension?: string; onShowMore?: (limit: number) => void }) {
+  const t9 = useT()
   const max = Math.min(t?.of ?? 0, SLIDER_MAX)
   const [pos, setPos] = useState(() => countToSlider(t?.shown ?? 1, max))
   // A new result (the limit was applied, or the data changed) re-seats the thumb.
@@ -91,7 +93,7 @@ export function TruncationNote({ t, dimension, onShowMore }:
     <div data-testid="truncation-note" role="note"
       style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '2px 8px 4px',
         fontSize: 10.5, color: 'var(--muted)', borderTop: '1px solid var(--border)' }}>
-      <span>{truncationSentence(t, dimension)}{t.reason === 'limit' ? ' (row limit)' : ''}</span>
+      <span>{truncationSentence(t, dimension)}{t.reason === 'limit' ? ` ${t9('cr.rowLimit')}` : ''}</span>
       {onShowMore && max > 1 && (
         // One control for "fewer or more": a log-scale slider, applied on
         // release. Replaces a "Show 500" button that could only go one way and
@@ -99,13 +101,13 @@ export function TruncationNote({ t, dimension, onShowMore }:
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, flex: '1 1 160px', minWidth: 140 }}
           onMouseDown={stop} onPointerDown={stop} onClick={stop}>
           <input type="range" min={0} max={1000} step={1} value={pos}
-            aria-label={`How many ${dimension ? `${dimension} values` : 'groups'} to show`}
+            aria-label={dimension ? t9('cr.howManyValues', { d: dimension }) : t9('cr.howManyGroups')}
             aria-valuetext={count >= max ? `All ${t.of.toLocaleString()}` : count.toLocaleString()}
             onChange={e => setPos(Number(e.target.value))}
             onPointerUp={commit} onKeyUp={commit} onBlur={commit}
             style={{ flex: 1, minWidth: 80, accentColor: 'var(--accent)' }} />
           <span style={{ minWidth: 52, textAlign: 'end', color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>
-            {count >= max && max === t.of ? 'All' : count.toLocaleString()}
+            {count >= max && max === t.of ? t9('cr.all') : count.toLocaleString()}
           </span>
         </label>
       )}

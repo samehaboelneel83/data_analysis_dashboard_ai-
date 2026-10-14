@@ -1,3 +1,4 @@
+import { useT } from '../../../i18n'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Brush, LineChart, ResponsiveContainer, XAxis } from 'recharts'
 import { brushProps } from './axisOptions'
@@ -29,6 +30,7 @@ export default function OverviewStrip({ rows, start, end, onChange, onCommit, re
   /** Bumped to put the window back over the whole series. */
   resetNonce?: number
 }) {
+  const t9 = useT()
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current) }, [])
   // Remount the Brush on reset: it keeps its own drag state otherwise.
@@ -41,7 +43,7 @@ export default function OverviewStrip({ rows, start, end, onChange, onCommit, re
   if (!props || rows.length < 2) return null
   return (
     <div data-testid="overview-strip" style={{ height: 34, flexShrink: 0 }}
-      title="Drag the handles to zoom. The chart shows more detail for the part you pick.">
+      title={t9('cr.overviewTip')}>
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={rows as Record<string, unknown>[]} margin={{ top: 0, right: 8, bottom: 0, left: 8 }}>
           <XAxis dataKey="name" hide />

@@ -64,14 +64,14 @@ async def test_the_gate_blocks_publishing_only_when_on_and_errors_are_open(
     # gate off: publishing works as before
     assert (await client.post(f"/api/v1/reports/{rep.id}/publish", json={"published": True}, headers=h)).status_code == 200
     await client.post(f"/api/v1/reports/{rep.id}/publish", json={"published": False}, headers=h)
-    assert (await client.put("/api/v1/review-settings", json={"publish_gate": True}, headers=h)).json() == {"publish_gate": True}
+    assert (await client.put("/api/v1/review-settings", json={"publish_gate": True}, headers=h)).json() == {"publish_gate": True, "require_approval": False}   # the approval switch is its own, untouched
     r = await client.post(f"/api/v1/reports/{rep.id}/publish", json={"published": True}, headers=h)
     assert r.status_code == 409
     assert "review error" in r.json()["detail"]["message"] and r.json()["detail"]["findings"]
     # unpublishing is never blocked
     assert (await client.post(f"/api/v1/reports/{rep.id}/publish", json={"published": False}, headers=h)).status_code == 200
     # another org's admin cannot flip this org's gate, and non-admins cannot at all
-    assert (await client.get("/api/v1/review-settings", headers=auth_headers["b"])).json() == {"publish_gate": False}
+    assert (await client.get("/api/v1/review-settings", headers=auth_headers["b"])).json() == {"publish_gate": False, "require_approval": False}
 
 
 @pytest.mark.asyncio

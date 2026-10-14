@@ -241,9 +241,27 @@ async def ai_budget(db: AsyncSession, org_id: int) -> tuple[int | None, str | No
     return best
 
 
+async def ai_user_budget(db: AsyncSession, org_id: int, user_id: int | None) -> tuple[int | None, str | None, int]:
+    """What ONE person has left today (settings.ai_tokens_per_user_per_day);
+    (None, None, 0) when there is no per-person limit or nobody is asking
+    (scheduled work spends the organisation's budget only)."""
+    from ..core.config import settings
+    cap = int(getattr(settings, "ai_tokens_per_user_per_day", 0) or 0)
+    if not cap or user_id is None:
+        return None, None, 0
+    used = int((await db.execute(
+        select(func.coalesce(func.sum(AiUsage.tokens_in + AiUsage.tokens_out), 0))
+        .where(AiUsage.org_id == org_id, AiUsage.user_id == user_id, AiUsage.created_at >= _midnight_utc())
+    )).scalar_one())
+    return cap - used, "ai_tokens_per_user_per_day", _seconds_until_next_midnight_utc()
+
+
 async def open_ai_meter(db: AsyncSession, org_id: int, user_id: int | None,
                         feature: str) -> UsageMeter:
     remaining, kind, resets_in = await ai_budget(db, org_id)
+    own = await ai_user_budget(db, org_id, user_id)
+    if own[0] is not None and (remaining is None or own[0] < remaining):
+        remaining, kind, resets_in = own
     return UsageMeter(org_id=org_id, user_id=user_id, feature=feature,
                       remaining=remaining, limit_kind=kind, resets_in=resets_in)
 
@@ -257,6 +275,9 @@ def enforce_ai_budget(meter: UsageMeter) -> None:
         return
     kind = meter.limit_kind or "ai_tokens"
     period = "this month" if kind == "ai_tokens_per_month" else "today"
+    if kind == "ai_tokens_per_user_per_day":
+        raise QuotaExceeded("Your own AI budget for today is used up",
+                            headers={"Retry-After": str(meter.resets_in or 60)}, kind=kind)
     raise QuotaExceeded(f"This organization's AI budget for {period} is used up",
                         headers={"Retry-After": str(meter.resets_in or 60)},
                         kind=kind)

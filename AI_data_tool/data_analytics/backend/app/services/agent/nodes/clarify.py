@@ -11,7 +11,7 @@ async def clarify(question: str, reason: str, client) -> str | None:
             "question offering the concrete interpretations. No preamble. "
             "Offer ONLY the interpretations the reason below names: you "
             "cannot see the data, so never invent a table, column or value "
-            "(a department, a product) that the reason does not mention. "
+            "(a group, a category) that the reason does not mention. "
             "Write it in the SAME language as the user's question (an Arabic "
             "question gets an Arabic clarifying question); keep table and "
             "column names exactly as they are.")},

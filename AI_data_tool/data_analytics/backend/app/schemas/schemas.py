@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Literal, Any, Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
 class DatasetColumnOut(BaseModel):
@@ -14,6 +14,14 @@ class DatasetColumnOut(BaseModel):
     # so codeless authoring surfaces (S0b's RLS builder) can pre-suggest user/owner
     # columns without a separate round trip through the review endpoints.
     semantic_type: Optional[str] = None
+
+    @computed_field
+    @property
+    def personal(self) -> Optional[str]:
+        """The personal-data type (email, person_name, national_id ...), from the
+        detected type or the name -- the "personal data" mark (persona test 3.7)."""
+        from ..services.pii import personal_type
+        return personal_type(self.name, self.semantic_type)
 
 
 class CalcColumnFormat(BaseModel):
@@ -48,6 +56,10 @@ class SuggestDashboardsRequest(BaseModel):
     #: "quick" is one designer call; "panel" asks several analyst lenses, draws
     #: every idea, and keeps the `size` best by what the data actually shows.
     mode: Literal["quick", "panel"] = "quick"
+    #: With the box left empty, let the person's profile description stand in
+    #: for it (services/ai_context.py). Off for callers that must not wait on
+    #: a model.
+    use_profile: bool = True
     size: int = Field(default=24, ge=6, le=60)
     #: Panel only: queue it as a job and answer with its id at once. The
     #: dialog polls the job and can be closed and reopened meanwhile.
@@ -169,11 +181,40 @@ class ColumnMeta(BaseModel):
     #: heuristic cannot know that `readmitted_30d` is the question this hospital
     #: actually cares about.
     target_candidate_priority: Optional[int] = None
+    # ── The stored classification (docs/suggestions/PLAN.md, phase 1) ────────
+    # What the column IS, decided once -- measured on the rows, named by the
+    # model, corrected by the author -- and read by every engine through
+    # services/semantic_guard.py instead of each one guessing from the name.
+    #: What a NUMBER is: amount | count (add up) · level | duration | score |
+    #: share (average, never total) · code (never calculate).
+    number: Optional[str] = None
+    #: Its unit, when known: "EGP", "kg", "days".
+    unit: Optional[str] = None
+    #: higher_better | higher_worse | neither -- which way "best" points.
+    direction: Optional[str] = None
+    #: Measurement level: nominal | ordinal | interval | ratio.
+    level: Optional[str] = None
+    #: The values of an ORDINAL column in their real order (Low, Medium, High).
+    order: Optional[list[str]] = None
+    #: country | region | city | postcode | latitude | longitude.
+    geo_level: Optional[str] = None
+    #: True for a column that says what became of a row (late, returned): its
+    #: share is measured, and groups are compared by that share.
+    outcome: Optional[bool] = None
+    #: Who decided the classification: measured | ai | confirmed. A confirmed
+    #: entry is the author's and is never overwritten.
+    class_source: Optional[str] = None
+    #: The number the author says this column should reach -- never guessed,
+    #: never set by a model. `target_period` says what it is a target FOR:
+    #: each month | quarter | year, or (absent) the whole of what is shown.
+    target: Optional[float] = None
+    target_period: Optional[str] = None
 
 
 class DataViewDefault(BaseModel):
     """Whether this view is the one applied to newly uploaded datasets."""
     default: bool
+
 
 
 class ColumnMetaUpdate(BaseModel):
@@ -474,6 +515,9 @@ class ReportUpdate(BaseModel):
     additional_dataset_ids: Optional[list[int]] = None
     theme: Optional[str] = None
     display_rules: Optional[list[dict]] = None
+    #: The dashboard's look (fonts, borders, corners...); unknown keys and
+    #: values out of range are dropped on the way in.
+    style: Optional[dict] = None
 
 
 class ReportOut(BaseModel):
@@ -485,6 +529,7 @@ class ReportOut(BaseModel):
     additional_dataset_ids: list[int] = []
     theme: str = "default"
     display_rules: list[dict] = []
+    style: Optional[dict] = None
     # Bumped by every mutation to this report or anything nested under it, so a
     # client can tell that another session changed the report underneath it.
     revision: int = 0
@@ -512,6 +557,14 @@ class ReportOut(BaseModel):
     # authoritative answer for "can others see it" is my_capability on their
     # side. Unowned legacy rows carry False and ignore the regime entirely.
     published: bool = False
+    # Publication details (routers/publishing): how a reader finds it, when it
+    # went out, whether it is archived, and whether viewers may download.
+    category: Optional[str] = None
+    tags: Optional[list] = None
+    published_at: Optional[datetime] = None
+    archived_at: Optional[datetime] = None
+    viewers_may_export: bool = True
+    review_state: str = "none"
     # Sensitivity label (Public/Internal/Confidential/Restricted) or None. Lives in
     # its own table; the read endpoint sets it as a transient attribute, like above.
     classification: Optional[str] = None
@@ -723,6 +776,8 @@ class UserOut(BaseModel):
     id: int
     email: str
     is_active: bool
+    #: What the person wrote about themselves (services/ai_context.py).
+    about: Optional[str] = None
     organization: OrganizationOut
     role: RoleOut
     # Platform super-admin (config allowlist), set transiently by the read endpoint so

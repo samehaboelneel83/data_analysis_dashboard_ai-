@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ChevronDown, Pencil, Search } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { columnMetaApi, datasetsApi, type ColumnMeta, type Dataset } from '../../services/api'
+import { columnMetaApi, datasetsApi, discoveryApi, type ColumnMeta, type ColumnProfileCard, type Dataset } from '../../services/api'
 import { defaultSummary, nonAdditiveKind } from '../../lib/semanticGuard'
 import { localDigits } from '../../lib/arabicFormats'
 import { typeTag, useColumnProfile, type Analysis } from '../../pages/datasetDetail/columnProfile'
@@ -24,6 +24,14 @@ const ROLES: NonNullable<ColumnMeta['role']>[] = ['measure', 'category', 'tempor
 /** How a measure rolls up when a chart, an insight or an alert does not say.
  *  "Average" for a salary is what keeps "M has 60% of salary" off the page. */
 const SUMMARIES = ['sum', 'avg', 'median', 'min', 'max', 'countd']
+/** What a number is, for every engine that reads it. Mirrors NUMBER_KINDS in
+ *  services/semantic_guard.py. */
+const NUMBER_KIND_OPTIONS: NonNullable<ColumnMeta['number']>[] = ['amount', 'count', 'level', 'duration', 'score', 'share', 'code']
+/** Mirrors GEO_LEVELS in services/semantic_guard.py. */
+const GEO_LEVEL_OPTIONS: { value: NonNullable<ColumnMeta['geo_level']>; numeric: boolean }[] = [
+  { value: 'country', numeric: false }, { value: 'region', numeric: false }, { value: 'city', numeric: false },
+  { value: 'postcode', numeric: false }, { value: 'latitude', numeric: true }, { value: 'longitude', numeric: true },
+]
 const isSummary = (v: string) => SUMMARIES.includes(v)
 /** The summary as a lower-case word ("average"), for a sentence. */
 const summaryWord = (v: string, t: ReturnType<typeof useT>) => (isSummary(v) ? t(`cols3.agg.${v}` as MessageKey) : v)
@@ -74,13 +82,16 @@ const kindOf = (dtype: string): Exclude<Kind, 'all'> =>
 /** What the column is used as, in the words of the board's pill. */
 function useAs(name: string, dtype: string, meta: ColumnMeta | undefined, t: ReturnType<typeof useT>): { label: string; measure: boolean } {
   const role = meta?.role
-  if (role === 'measure' || (!role && dtype === 'numeric' && nonAdditiveKind(name) === null)) {
-    const agg = meta?.aggregation ?? defaultSummary(name)
+  // What the column IS is its stored classification first (the server's
+  // reading of its values, the AI's, or the author's); the name only after.
+  const classed = meta ? { [name]: meta } : undefined
+  if (role === 'measure' || (!role && dtype === 'numeric' && nonAdditiveKind(name, classed) === null)) {
+    const agg = meta?.aggregation ?? defaultSummary(name, classed)
     const aggWord = summaryWord(agg, t)
     return { label: t('cols3.use.measure', { agg: aggWord }), measure: true }
   }
   if (role === 'temporal' || (!role && dtype === 'datetime')) return { label: t('cols3.use.time'), measure: false }
-  if (role === 'identifier' || (!role && nonAdditiveKind(name) === 'identifier')) return { label: t('cols3.use.id'), measure: false }
+  if (role === 'identifier' || (!role && nonAdditiveKind(name, classed) === 'identifier')) return { label: t('cols3.use.id'), measure: false }
   if (role === 'freetext') return { label: t('cols3.use.text'), measure: false }
   if (role === 'geography') return { label: t('cols3.use.geo'), measure: false }
   return { label: t('cols3.use.dim'), measure: false }
@@ -100,6 +111,16 @@ export default function ColumnMeaningPanel(
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
+  // Each column's profile card, measured once per version of the data and
+  // served as this reader may see it (server: services/discovery/profile.py).
+  const [profile, setProfile] = useState<Record<string, ColumnProfileCard>>({})
+  useEffect(() => {
+    let live = true
+    discoveryApi?.profile?.(dataset.id)
+      ?.then(r => { if (live) setProfile(Object.fromEntries(r.columns.map(c => [c.column, c]))) })
+      ?.catch(() => { /* the profile is an extra: the tab works without it */ })
+    return () => { live = false }
+  }, [dataset.id])
   const [query, setQuery] = useState('')
   const [kind, setKind] = useState<Kind>('all')
   const [open, setOpen] = useState<string | null>(null)
@@ -186,6 +207,20 @@ export default function ColumnMeaningPanel(
           ))}
         </span>
         <span className="dl-cols__muted">{t('cols3.described', { n: localDigits(String(describedCount)), total: localDigits(String(cols.length)) })}</span>
+        <button type="button" className="btn btn-sm" disabled={busy}
+          title={t('cm.askAgainTip')}
+          onClick={async () => {
+            setBusy(true)
+            try {
+              const got = await columnMetaApi.classifyAgain(dataset.id)
+              toast.success(got.asked ? t('cm.askedAgain', { n: got.classified, total: got.asked }) : t('cm.aiUnavailable'))
+              onSaved?.()
+            } catch (e: any) {
+              toast.error(e?.response?.data?.detail ?? t('cm.askFailed'))
+            } finally { setBusy(false) }
+          }}>
+          {t('cm.askAgain')}
+        </button>
         <button type="button" className="btn btn-sm dl-cols__hidden-btn" aria-pressed={showHidden}
           onClick={() => setShowHidden(v => !v)}>
           {showHidden ? t('cols3.showVisible') : t('cols3.hidden', { n: localDigits(String(hidden.length)) })}
@@ -210,12 +245,49 @@ export default function ColumnMeaningPanel(
                 canEdit={canEdit} busy={busy} editing={editing === c.name} draft={draft} setDraft={setDraft}
                 onStart={() => start(c.name)} onSave={() => void save(c.name)} onCancel={() => setEditing(null)}
                 open={open === c.name} onToggle={() => setOpen(o => (o === c.name ? null : c.name))}
-                target={targets[c.name]} eligible={!ineligible.has(c.name)} patchMeta={patchMeta} />
+                target={targets[c.name]} eligible={!ineligible.has(c.name)} patchMeta={patchMeta} profile={profile[c.name]} />
             ))}
           </tbody>
         </table>
       </div>
     </section>
+  )
+}
+
+/** A column's profile in a line of plain facts: how much of it is usable,
+ *  what is wrong with the rest, and what its values look like. Value-level
+ *  facts are simply absent for a reader who may not see every row. */
+function ColumnProfileFacts({ card }: { card: ColumnProfileCard }) {
+  const t = useT()
+  const n = (v: number) => v.toLocaleString()
+  const facts: [string, string][] = [
+    [t('cm.pf.valid'), `${n(card.valid.count)} (${card.valid.pct}%)`],
+    [t('cm.pf.missing'), `${n(card.missing.count)} (${card.missing.pct}%)`],
+  ]
+  if (card.mistyped.count) {
+    facts.push([t(card.mistyped.holds === 'number' ? 'cm.pf.notNumber' : 'cm.pf.numbersInText'), `${n(card.mistyped.count)} (${card.mistyped.pct}%)`])
+  }
+  facts.push([t('cm.pf.distinct'), n(card.distinct)], [t('cm.pf.once'), `${n(card.unique.count)} (${card.unique.pct}%)`])
+  if (card.most_common) facts.push([t('cm.pf.most'), `${card.most_common[0]} (${n(card.most_common[1])})`])
+  if (card.least) facts.push([t('cm.pf.least'), `${card.least[0]} (${n(card.least[1])})`])
+  if (card.len_max != null) {
+    facts.push([t('cm.pf.length'), card.len_min === card.len_max ? t('cm.pf.chars', { n: card.len_max })
+      : t('cm.pf.charsRange', { a: card.len_min ?? 0, b: card.len_max })])
+  }
+  if (card.pattern) facts.push([t('cm.pf.shape'), card.pattern])
+  if (card.kind === 'date' && card.delay_hours != null) {
+    const days = card.delay_hours / 24
+    facts.push([t('cm.pf.newest'), days < 2 ? t('cm.pf.hoursAgo', { n: Math.round(card.delay_hours) })
+      : t('cm.pf.daysAgo', { n: Math.round(days).toLocaleString() })])
+  }
+  return (
+    <dl data-testid="column-profile-facts" style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 18px', margin: 0, fontSize: 12 }}>
+      {facts.map(([k, v]) => (
+        <div key={k} style={{ display: 'inline-flex', gap: 5 }}>
+          <dt style={{ color: 'var(--muted)' }}>{k}</dt><dd style={{ margin: 0, fontVariantNumeric: 'tabular-nums' }}><bdi>{v}</bdi></dd>
+        </div>
+      ))}
+    </dl>
   )
 }
 
@@ -225,6 +297,7 @@ function ColumnRow(p: {
   editing: boolean; draft: string; setDraft: (v: string) => void; onStart: () => void; onSave: () => void; onCancel: () => void
   open: boolean; onToggle: () => void; target?: number; eligible: boolean
   patchMeta: (column: string, change: Partial<ColumnMeta>, note: string) => Promise<void>
+  profile?: ColumnProfileCard
 }) {
   const t = useT()
   const { dist, sum } = useColumnProfile(p.dataset, p.name, p.analysis)
@@ -278,6 +351,11 @@ function ColumnRow(p: {
           )}
         </td>
       </tr>
+      {p.open && p.profile && (
+        <tr className="dl-cols__settings">
+          <td colSpan={6}><ColumnProfileFacts card={p.profile} /></td>
+        </tr>
+      )}
       {p.open && p.canEdit && (
         <tr className="dl-cols__settings">
           <td colSpan={6}>
@@ -299,8 +377,107 @@ function ColumnRow(p: {
                       e.target.value
                         ? t('meaning.summaryNow', { col: c.name, how: summaryWord(e.target.value, t) })
                         : t('meaning.summaryAuto', { col: c.name }))}>
-                    <option value="">{t('i2d.cm.auto', { how: isSummary(defaultSummary(c.name)) ? summaryWord(defaultSummary(c.name), t) : t('cols3.agg.sum') })}</option>
+                    {/* The automatic summary of what this column IS (its stored class), not of its name alone. */}
+                    {(() => {
+                      const auto = defaultSummary(c.name, p.meta ? { [c.name]: { ...p.meta, aggregation: undefined } } : undefined)
+                      return <option value="">{t('i2d.cm.auto', { how: isSummary(auto) ? summaryWord(auto, t) : t('cols3.agg.sum') })}</option>
+                    })()}
                     {SUMMARIES.map(x => <option key={x} value={x}>{t(`i2d.cm.sum.${x}` as MessageKey)}</option>)}
+                  </select>
+                </label>
+              )}
+              {/* The stored classification (docs/suggestions/PLAN.md): decided
+                  once by the platform, corrected here, read by every engine --
+                  insights, suggestions, the dashboard designers, the data
+                  check. A correction is marked the author's and is never
+                  overwritten by a later measurement. */}
+              {c.dtype === 'numeric' && p.meta?.role !== 'category' && (
+                <>
+                  <label title={t('cm.numberTip')}>
+                    {t('cm.numberIs')}
+                    <select disabled={p.busy} value={p.meta?.number ?? ''} aria-label={t('cm.numberFor', { c: c.name })}
+                      onChange={e => void p.patchMeta(c.name,
+                        { number: (e.target.value || undefined) as ColumnMeta['number'], class_source: 'confirmed' },
+                        e.target.value ? t('cm.nowReadAs', { c: c.name, kind: t(`cm.numShort.${e.target.value}` as MessageKey) }) : t('cm.nowDetected', { c: c.name }))}>
+                      <option value="">{t('cm.notClassified')}</option>
+                      {NUMBER_KIND_OPTIONS.map(k => <option key={k} value={k}>{t(`cm.num.${k}` as MessageKey)}</option>)}
+                    </select>
+                  </label>
+                  <label title={t('cm.directionTip')}>
+                    {t('cm.higherIs')}
+                    <select disabled={p.busy} value={p.meta?.direction ?? 'neither'} aria-label={t('cm.directionFor', { c: c.name })}
+                      onChange={e => void p.patchMeta(c.name,
+                        { direction: e.target.value as ColumnMeta['direction'], class_source: 'confirmed' },
+                        t('cm.savedFor', { c: c.name }))}>
+                      <option value="higher_better">{t('cm.better')}</option>
+                      <option value="higher_worse">{t('cm.worse')}</option>
+                      <option value="neither">{t('cm.neither')}</option>
+                    </select>
+                  </label>
+                  <label title={t('cm.targetTip')}>
+                    {t('cm.target')}
+                    <input type="number" step="any" disabled={p.busy} aria-label={t('cm.targetFor', { c: c.name })}
+                      defaultValue={p.meta?.target ?? ''} key={`t${p.meta?.target ?? ''}`} style={{ width: 110 }}
+                      onBlur={e => {
+                        const raw = e.target.value.trim()
+                        const next = raw === '' ? null : Number(raw)
+                        if (next !== null && !Number.isFinite(next)) return
+                        if ((p.meta?.target ?? null) === next) return
+                        void p.patchMeta(c.name, { target: next }, next === null ? t('cm.targetRemoved', { c: c.name }) : t('cm.targetSaved', { c: c.name }))
+                      }} />
+                  </label>
+                  {p.meta?.target != null && (
+                    <label title={t('cm.targetPeriodTip')}>
+                      {t('cm.targetForWhat')}
+                      <select disabled={p.busy} value={p.meta?.target_period ?? ''} aria-label={t('cm.targetPeriodFor', { c: c.name })}
+                        onChange={e => void p.patchMeta(c.name,
+                          { target_period: (e.target.value || null) as ColumnMeta['target_period'] }, t('cm.savedFor', { c: c.name }))}>
+                        <option value="">{t('cm.tp.all')}</option>
+                        <option value="month">{t('cm.tp.month')}</option>
+                        <option value="quarter">{t('cm.tp.quarter')}</option>
+                        <option value="year">{t('cm.tp.year')}</option>
+                      </select>
+                    </label>
+                  )}
+                </>
+              )}
+              {c.dtype !== 'numeric' && c.dtype !== 'datetime' && (
+                <>
+                  <label title={t('cm.orderTip')}>
+                    {t('cm.order')}
+                    <input type="text" disabled={p.busy} defaultValue={(p.meta?.order ?? []).join(', ')}
+                      aria-label={t('cm.orderFor', { c: c.name })} placeholder={t('cm.orderExample')}
+                      onBlur={e => {
+                        const order = e.target.value.split(',').map(x => x.trim()).filter(Boolean)
+                        if (order.join('|') === (p.meta?.order ?? []).join('|')) return
+                        void p.patchMeta(c.name, order.length >= 2
+                          ? { level: 'ordinal', order, class_source: 'confirmed' }
+                          : { level: 'nominal', order: undefined, class_source: 'confirmed' },
+                          order.length >= 2 ? t('cm.orderSet', { c: c.name }) : t('cm.orderNone', { c: c.name }))
+                      }} />
+                  </label>
+                  <label title={t('cm.outcomeTip')}>
+                    <input type="checkbox" disabled={p.busy} aria-label={t('cm.outcomeFor', { c: c.name })} checked={!!p.meta?.outcome}
+                      onChange={e => void p.patchMeta(c.name,
+                        { outcome: e.target.checked ? true : undefined, class_source: 'confirmed' },
+                        e.target.checked ? t('cm.outcomeOn', { c: c.name }) : t('cm.outcomeOff', { c: c.name }))} />
+                    {t('cm.outcome')}
+                  </label>
+                </>
+              )}
+              {/* A place. Country names get a map; a region or a city gets its
+                  place in a hierarchy (country > region > city) and is never
+                  mistaken for an ordinary measure or code. */}
+              {c.dtype !== 'datetime' && (
+                <label title={t('cm.placeTip')}>
+                  {t('cm.place')}
+                  <select disabled={p.busy} value={p.meta?.geo_level ?? ''} aria-label={t('cm.placeFor', { c: c.name })}
+                    onChange={e => void p.patchMeta(c.name,
+                      { geo_level: (e.target.value || undefined) as ColumnMeta['geo_level'], class_source: 'confirmed' },
+                      e.target.value ? t('cm.placeSet', { c: c.name, kind: t(`cm.geo.${e.target.value}` as MessageKey) }) : t('cm.placeNone', { c: c.name }))}>
+                    <option value="">{t('cm.notPlace')}</option>
+                    {GEO_LEVEL_OPTIONS.filter(g => (c.dtype === 'numeric') === g.numeric || g.value === 'postcode')
+                      .map(g => <option key={g.value} value={g.value}>{t(`cm.geo.${g.value}` as MessageKey)}</option>)}
                   </select>
                 </label>
               )}

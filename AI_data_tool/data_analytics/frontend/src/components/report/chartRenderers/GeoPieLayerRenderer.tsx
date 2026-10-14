@@ -1,3 +1,4 @@
+import { useT } from '../../../i18n'
 import { useMemo, useState } from 'react'
 import type { ChartRendererProps } from './types'
 import { fmtStr, seriesColor } from '../chartUtils'
@@ -20,6 +21,7 @@ function arcPath(cx: number, cy: number, r: number, a0: number, a1: number): str
  */
 export function GeoPiesRenderer({ data, measureFmt, broadcasts, localSelected,
                                  onClickPoint, plotW, plotH }: ChartRendererProps) {
+  const t9 = useT()
   const [hover, setHover] = useState<string | null>(null)
   const { ref, w, h, tiles, view } = useMapBox(plotW, plotH)
   const rows = (data as { rows?: { name: string; total: number; slices: { label: string; value: number }[] }[] })?.rows ?? []
@@ -52,7 +54,7 @@ export function GeoPiesRenderer({ data, measureFmt, broadcasts, localSelected,
 
   return (
     <div ref={ref} style={MAP_WRAP_STYLE}>
-      <MapSvg view={view} w={w} h={h} projection={projection} tiles={tiles} role="img" aria-label="Pie map">
+      <MapSvg view={view} w={w} h={h} projection={projection} tiles={tiles} role="img" aria-label={t9('cr.pieMap')}>
         {COUNTRIES.map(f => (
           <path key={f.properties.name} d={path(f) ?? undefined}
             fill="var(--surface2)" stroke="var(--border)" strokeWidth={0.5} />
@@ -100,7 +102,7 @@ export function GeoPiesRenderer({ data, measureFmt, broadcasts, localSelected,
       {unmatched > 0 && (
         <div data-testid="geo-unmatched" style={{ position: 'absolute', bottom: 4, left: 8,
           fontSize: 10, color: 'var(--muted)' }}>
-          {unmatched} row{unmatched === 1 ? '' : 's'} did not match a country
+          {t9(unmatched === 1 ? 'cr.rowNoCountry' : 'cr.rowsNoCountry', { n: unmatched })}
         </div>
       )}
     </div>
@@ -121,6 +123,7 @@ export function GeoLayersRenderer(props: ChartRendererProps) {
 
 function TwoLayerMap({ data, measureFmt, broadcasts, localSelected,
                        onClickPoint, plotW, plotH }: ChartRendererProps) {
+  const t9 = useT()
   const [hover, setHover] = useState<string | null>(null)
   const { ref, w, h, tiles, view } = useMapBox(plotW, plotH)
   const regions = (data as { regions?: { name: string; value: number }[] })?.regions ?? []
@@ -161,7 +164,7 @@ function TwoLayerMap({ data, measureFmt, broadcasts, localSelected,
 
   return (
     <div ref={ref} style={MAP_WRAP_STYLE}>
-      <MapSvg view={view} w={w} h={h} projection={projection} tiles={tiles} role="img" aria-label="Layered map">
+      <MapSvg view={view} w={w} h={h} projection={projection} tiles={tiles} role="img" aria-label={t9('cr.layeredMap')}>
         {COUNTRIES.map(f => {
           const v = valueByCountry.get(f.properties.name)
           const source = sourceByCountry.get(f.properties.name)
@@ -199,6 +202,7 @@ function TwoLayerMap({ data, measureFmt, broadcasts, localSelected,
  * cluster map sizes bubbles with.
  */
 export function GeoDensityRenderer({ rows, data, plotW, plotH }: ChartRendererProps) {
+  const t9 = useT()
   const { ref, w, h, tiles, view } = useMapBox(plotW, plotH)
   const cell = (data as { cell_degrees?: number })?.cell_degrees ?? 5
   const cells = (rows as { lat: number; lon: number; count: number }[]).filter(
@@ -211,7 +215,7 @@ export function GeoDensityRenderer({ rows, data, plotW, plotH }: ChartRendererPr
 
   return (
     <div ref={ref} style={MAP_WRAP_STYLE}>
-      <MapSvg view={view} w={w} h={h} projection={projection} tiles={tiles} role="img" aria-label="Density map">
+      <MapSvg view={view} w={w} h={h} projection={projection} tiles={tiles} role="img" aria-label={t9('cr.densityMap')}>
       {COUNTRIES.map(f => (
         <path key={f.properties.name} d={path(f) ?? undefined}
           fill="var(--surface2)" stroke="var(--border)" strokeWidth={0.5} />
@@ -224,7 +228,7 @@ export function GeoDensityRenderer({ rows, data, plotW, plotH }: ChartRendererPr
         return (
           <rect key={i} x={tl[0]} y={tl[1]} width={Math.max(1, br[0] - tl[0])} height={Math.max(1, br[1] - tl[1])}
             data-density-cell={c.count} fill={seriesColor(0)} opacity={t * 0.8} rx={1}>
-            <title>{c.count.toLocaleString()} points</title>
+            <title>{t9('cr.points', { n: c.count.toLocaleString() })}</title>
           </rect>
         )
       })}

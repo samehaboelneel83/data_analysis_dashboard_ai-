@@ -29,6 +29,11 @@ export function classify(columns: Pick<DatasetColumn, 'name' | 'dtype'>[]) {
   return { numeric, dates, labels }
 }
 
+/** The stored classification of a column (ColumnMeta.number / .role), when known. */
+export type ColumnClasses = Record<string, { number?: string; role?: string } | undefined>
+
+const ADDS_UP = new Set(['amount', 'count'])
+
 /** Which picture a suggestion card shows (SuggestionGrid maps it to an icon). */
 export type SuggestionIcon = 'total' | 'top' | 'trend' | 'average' | 'highest' | 'count' | 'rows' | 'summary' | 'columns' | 'tables'
 
@@ -40,21 +45,34 @@ export type SuggestionIcon = 'total' | 'top' | 'trend' | 'average' | 'highest' |
  */
 export interface SuggestionCard { text: string; icon: SuggestionIcon; columns: string[] }
 
-/** 4-6 cards this dataset can answer; generic ones when the columns say little. */
+/** 4-6 cards this dataset can answer; generic ones when the columns say little.
+ *  With the stored classes, a level, a score, a duration or a share is averaged
+ *  and never totalled, and a code is never a measure (persona test 2026-10-12:
+ *  "Total car age years by make", "Total review score by days late"). */
 export function datasetSuggestionCards(
-  columns: Pick<DatasetColumn, 'name' | 'dtype'>[] | undefined, t: Translate,
+  columns: Pick<DatasetColumn, 'name' | 'dtype'>[] | undefined, t: Translate, classes?: ColumnClasses,
 ): SuggestionCard[] {
-  const { numeric, dates, labels } = classify(columns ?? [])
+  const kind = (c: string) => classes?.[c]?.number
+  const isCode = (c: string) => kind(c) === 'code' || classes?.[c]?.role === 'identifier'
+  const sorted = classify(columns ?? [])
+  const numeric = sorted.numeric.filter(c => !isCode(c))
+  // An amount first: what a "total" is about.
+  numeric.sort((a, b) => Number(!ADDS_UP.has(kind(a) ?? 'amount')) - Number(!ADDS_UP.has(kind(b) ?? 'amount')))
+  const { dates } = sorted
+  const labels = sorted.labels.filter(c => !isCode(c))
   const out: SuggestionCard[] = []
   const [n0, c0, c1, d0] = [numeric[0], labels[0], labels[1], dates[0]]
   const num = n0 && humanize(n0)
+  const adds = !n0 || ADDS_UP.has(kind(n0) ?? 'amount')
   const cat = c0 && humanize(c0)
   const cat2 = c1 && humanize(c1)
-  if (num && cat) out.push({ text: t('ask.sug.totalBy', { num, cat }), icon: 'total', columns: [c0, n0] })
-  if (num && cat) out.push({ text: t('ask.sug.topBy', { num, cat }), icon: 'top', columns: [c0, n0] })
+  if (num && cat && adds) out.push({ text: t('ask.sug.totalBy', { num, cat }), icon: 'total', columns: [c0, n0] })
+  if (num && cat && adds) out.push({ text: t('ask.sug.topBy', { num, cat }), icon: 'top', columns: [c0, n0] })
   if (num && d0) out.push({ text: t('ask.sug.trend', { num }), icon: 'trend', columns: [d0, n0] })
-  if (num && cat2) out.push({ text: t('ask.sug.avgPer', { num, cat: cat2 }), icon: 'average', columns: [c1, n0] })
-  if (num && cat) out.push({ text: t('ask.sug.highest', { num, cat }), icon: 'highest', columns: [c0, n0] })
+  const avgCol = adds ? c1 : c0
+  const avgCat = adds ? cat2 : cat
+  if (num && avgCat) out.push({ text: t('ask.sug.avgPer', { num, cat: avgCat }), icon: 'average', columns: [avgCol, n0] })
+  if (num && cat) out.push({ text: t(adds ? 'ask.sug.highest' : 'ask.sug.highestAvg', { num, cat }), icon: 'highest', columns: [c0, n0] })
   if (cat) out.push({ text: t('ask.sug.countBy', { cat }), icon: 'count', columns: [c0] })
   out.push({ text: t('ask.sug.rows'), icon: 'rows', columns: [] })
   if (out.length < 4) out.push({ text: t('ask.sug.summary'), icon: 'summary', columns: [] },
@@ -65,9 +83,9 @@ export function datasetSuggestionCards(
 
 /** 4-6 questions this dataset can answer; generic ones when the columns say little. */
 export function datasetSuggestions(
-  columns: Pick<DatasetColumn, 'name' | 'dtype'>[] | undefined, t: Translate,
+  columns: Pick<DatasetColumn, 'name' | 'dtype'>[] | undefined, t: Translate, classes?: ColumnClasses,
 ): string[] {
-  return datasetSuggestionCards(columns, t).map(c => c.text)
+  return datasetSuggestionCards(columns, t, classes).map(c => c.text)
 }
 
 /** A live connection has tables, not columns, until a question names one. */

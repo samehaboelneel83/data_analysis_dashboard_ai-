@@ -76,7 +76,7 @@ import CollapsibleSide from '../components/report/CollapsibleSide'
 import ReviewPane, { reviewReport } from '../components/report/ReviewPane'
 import PopupOverlay from '../components/report/PopupOverlay'
 import TooltipPageOverlay from '../components/report/TooltipPageOverlay'
-import { ArrowLeft, Plus, Eye, Undo2, Redo2, KeyRound, ShieldCheck, Pause, Play, FileDown, Share2, Maximize2, Image as ImageIcon, EllipsisVertical, SlidersHorizontal, Printer, FileText, Package, Pencil, RefreshCw, ChevronUp, ChevronDown, Database, Search, X, Settings2 } from 'lucide-react'
+import { ArrowLeft, Plus, Eye, Undo2, Redo2, KeyRound, ShieldCheck, ShieldAlert, Pause, Play, FileDown, Share2, Maximize2, Image as ImageIcon, EllipsisVertical, SlidersHorizontal, Printer, FileText, Package, Pencil, RefreshCw, ChevronUp, ChevronDown, Database, Search, X, Settings2 } from 'lucide-react'
 import { updatedAgo } from '../lib/viewStyle'
 import { columnKind, usePageFilters } from '../lib/pageFilters'
 import PageFilterBar, { type PageFilterColumn } from '../components/report/PageFilterBar'
@@ -100,10 +100,11 @@ import { copyChartImage } from '../lib/widgetImage'
  *  and controls. Charts and maps draw SVG ("Export as image" uses the same). */
 const NO_CHART_IMAGE = /^(table|matrix|crosstab|kpi|card|text|image|slicer|filter|button|shape|iframe|grid)/
 import ViewAssist, { type AssistTab } from './reportBuilder/ViewAssist'
+import PageTakeaways from './reportBuilder/PageTakeaways'
 import FocusView from './reportBuilder/FocusView'
 import PresentControls from './reportBuilder/PresentControls'
 import { useAiOffline } from './ask/useAiOffline'
-import { datasetSuggestions } from './ask/suggestions'
+import { datasetSuggestions, type ColumnClasses } from './ask/suggestions'
 import './reportBuilder/viewMode.css'
 import './reportBuilder/builder.css'
 import PageTabs from './reportBuilder/PageTabs'
@@ -150,6 +151,9 @@ import { PageTemplateMenu } from './reportBuilder/PageTemplateMenu'
 import ConflictMergeDialog from '../components/report/ConflictMergeDialog'
 import { structuredDetail } from '../lib/friendlyError'
 import type { WidgetEdit } from '../lib/threeWayMerge'
+import { styleVars } from '../lib/dashboardStyle'
+import { useLookChrome } from '../lib/lookChrome'
+import type { DashboardStyle } from '../lib/dashboardStyle'
 // Lazy: the geography check matches against the bundled world geometry (~740 kB
 // raw), which an author who never maps a column should not download.
 const GeoMatchCheck = lazy(() => import('../components/report/GeoMatchCheck'))
@@ -160,7 +164,7 @@ const EMPTY_RULES: DisplayRule[] = []
  *  stored all along; only the label a person picks from changes. */
 const PALETTE_NAME: Record<string, string> = {
   default: 'Datalytics', ocean: 'Ocean', sunset: 'Ember', forest: 'Forest',
-  mono: 'Graphite', contrast: 'High contrast',
+  mono: 'Graphite', contrast: 'High contrast', emerald: 'Emerald', aurora: 'Aurora', ember: 'Amber',
 }
 
 /** The top-most, then left-most, grid position where a w×h box fits without
@@ -244,6 +248,8 @@ export default function ReportBuilder() {
   const badId = !/^\d+$/.test(id ?? '')
 
   const [report,     setReport]     = useState<Report | null>(null)
+  // A dark (or light) look takes the app's frame with it while this dashboard is open (lib/lookChrome).
+  useLookChrome((report?.style as { mode?: string } | null | undefined)?.mode)
   useCrumbTitle(report?.name)
   const [activePage, setActivePage] = useState<ReportPage | null>(null)
   // The reader's own filters for the whole page (the bar above the page),
@@ -1111,6 +1117,23 @@ export default function ReportBuilder() {
     try { setLoadedRevision(await reportsApi.getRevision(reportId)) } catch { /* next poll decides */ }
   }
 
+  /** Change the dashboard's look (fonts, borders, corners...) as one undoable step. */
+  const setStyleUndoable = async (next: DashboardStyle) => {
+    const prev = (report?.style ?? {}) as DashboardStyle
+    // A look names its chart palette too: the two change together, as one step.
+    const prevTheme = report?.theme ?? 'default'
+    const theme = next.palette && next.palette !== prev.palette && next.palette !== prevTheme ? next.palette : null
+    const after = { style: next, ...(theme ? { theme } : {}) }
+    const before = { style: prev, ...(theme ? { theme: prevTheme } : {}) }
+    try {
+      await reportsApi.update(reportId, after)
+    } catch { toast.error(tr('tpl.style.failed')); return }
+    pushUndo({ label: tr('tpl.style.undo'),
+      undo: () => reportsApi.update(reportId, before).then(() => {}),
+      redo: () => reportsApi.update(reportId, after).then(() => {}) })
+    await loadReport()
+  }
+
   /** Switch the report theme as one undoable step (loadReport applies it). */
   const setThemeUndoable = async (next: string) => {
     const prev = report?.theme ?? 'default'
@@ -1359,7 +1382,7 @@ export default function ReportBuilder() {
     // geography -- IMEI and A_NUMBER sat under Measures with a Sum beside them
     // (live QA 2026-09-28). `isNumericField` applies the same rule, so the
     // group, the icon, the buttons and a click always agree (Fields plan F1).
-    if (!columnMeta[c.name]?.role && c.dtype === 'numeric' && nonAdditiveKind(c.name) === 'coordinate') return 'Geography'
+    if (!columnMeta[c.name]?.role && c.dtype === 'numeric' && nonAdditiveKind(c.name, columnMeta) === 'coordinate') return 'Geography'
     return isNumericField(c) ? 'Measures' : 'Dimensions'
   }
 
@@ -2290,7 +2313,7 @@ export default function ReportBuilder() {
     const next = isNumericField(c) ? 'category' : 'measure'
     if (next === 'measure' && c.dtype !== 'numeric') return
     // The same rule as isNumericField: a year or an id is a category by default.
-    const detectedDefault = c.dtype === 'numeric' && nonAdditiveKind(c.name) == null ? 'measure' : 'category'
+    const detectedDefault = c.dtype === 'numeric' && nonAdditiveKind(c.name, columnMeta) == null ? 'measure' : 'category'
     const meta: Record<string, ColumnMeta> = {}
     for (const [k, v] of Object.entries(columnMeta)) {
       if (!k.startsWith('__')) meta[k] = { ...(v as ColumnMeta) }
@@ -2335,7 +2358,7 @@ export default function ReportBuilder() {
     // The semantic veto on the drag path: a dragged latitude, id or year starts
     // on the aggregation that means something for it, never on Sum.
     else if (target.role.startsWith('measure')) {
-      const kind = nonAdditiveKind(columnName)
+      const kind = nonAdditiveKind(columnName, columnMeta)
       if (kind) next.aggregation = SAFE_AGGREGATION[kind].value
       else {
         // Fields plan F2 (2026-10-09): a chart that was COUNTING rows (no
@@ -2730,8 +2753,13 @@ export default function ReportBuilder() {
   // the automatic chart. `model_year` used to sit under Dimensions while a
   // click drew its histogram and offered "what moves model_year?".
   // QA6 B4: one rule for a field's use (lib/semanticGuard fieldUse), shared
-  // with Assign data and the Data view.
-  const isNumericField = (c: DatasetColumn) => fieldUse(c, columnMeta[c.name]?.role) === 'measure'
+  // with Assign data and the Data view. A numeric column with no role also
+  // reads its stored class (columnMeta), so a level or a score is not a measure.
+  const isNumericField = (c: DatasetColumn) => {
+    const role = columnMeta[c.name]?.role
+    if (!role && c.dtype === 'numeric') return nonAdditiveKind(c.name, columnMeta) == null
+    return fieldUse(c, role) === 'measure'
+  }
   const visibleColumns = columns.filter(c => !columnMeta[c.name]?.hidden)
   // Fields plan F7: report filters, as the canvas filter bar shows them.
   const reportFilterChips = (report.common_filters ?? []).map(f => ({
@@ -2863,7 +2891,8 @@ export default function ReportBuilder() {
                           ...Object.entries(orgThemes).map(([key, t]) => ({ key, name: t.name, colors: t.colors })),
                         ]}
                         currentPalette={report.theme ?? 'default'}
-                        onPalette={setThemeUndoable} />
+                        onPalette={setThemeUndoable}
+                        dashboardStyle={report.style} onDashboardStyle={setStyleUndoable} />
                   }
     </>
   )
@@ -2958,7 +2987,7 @@ export default function ReportBuilder() {
                   name, then drop it onto any report. The object-level analogue of a
                   DataView; apply is a plain insert carrying the saved config. */}
               {editMode && activeView === 'report' && leftTab === 'more' && (
-                <TemplatesPane reportId={reportId} activePageId={activePage?.id ?? null} onAdded={() => { loadReport() }}
+                <TemplatesPane reportId={reportId} reportName={report?.name} activePageId={activePage?.id ?? null} onAdded={() => { loadReport() }}
                   widgetTemplates={
                 <div className="dl-bd-wtpl">
                   <div style={{ display:'flex', gap:4, marginBottom:6 }}>
@@ -3183,6 +3212,12 @@ export default function ReportBuilder() {
                               )}
                               {hints[c.name]?.related && (
                                 <span title={hintTitle(hints[c.name])} style={{ color: 'var(--accent)', fontSize: 11 }}>≈</span>
+                              )}
+                              {/* Persona test 3.7: a column holding personal data says so. */}
+                              {(c as { personal?: string | null }).personal && (
+                                <span className="dl-bd-f__personal" data-testid="field-personal" title={tr('fp.personal')}>
+                                  <ShieldAlert size={11} aria-hidden="true" /><span className="dl-sr-only">{tr('fp.personal')}</span>
+                                </span>
                               )}
                             </button>
                             <span className="dl-bd-f__acts">
@@ -3566,8 +3601,10 @@ export default function ReportBuilder() {
                 fontSize: 11, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase',
                 color: '#fff', padding: '2px 7px', borderRadius: 4,
                 background: CLASSIFICATION_COLORS[shown] ?? '#666' }}>
-                {(['Public', 'Internal', 'Confidential', 'Restricted'].includes(shown)
-                  ? tr(`sens.${shown}` as 'sens.Public') : shown)}{inherited ? ' ⤴' : ''}
+                {/* "Data: Public" -- the label is the data's sensitivity; "PUBLIC" alone beside
+                    Share read as "this dashboard is public" (persona test 2026-10-12). */}
+                {tr('sens.badge', { label: (['Public', 'Internal', 'Confidential', 'Restricted'].includes(shown)
+                  ? tr(`sens.${shown}` as 'sens.Public') : shown) })}{inherited ? ' ⤴' : ''}
               </span>
             )
           })()}
@@ -4101,7 +4138,9 @@ export default function ReportBuilder() {
                 ...(activePage?.background_url
                   ? { backgroundImage: `url(${activePage.background_url})`,
                       backgroundSize: 'cover', backgroundPosition: 'center' }
-                  : { background:'var(--surface2)' }),
+                  : { background:'var(--dl-s-page-bg, var(--surface2))' }),
+                // The dashboard's own look: fonts, card borders, corners, light or dark.
+                ...styleVars(report?.style),
                 borderRadius:'var(--radius)', border:'1px solid var(--border)',
                 ...(fitScale < 1 ? { width: MIN_CANVAS_W } : {}),
                 transform: `scale(${canvasScale})`, transformOrigin: 'top left' }}>
@@ -4300,7 +4339,7 @@ export default function ReportBuilder() {
                 <ChatPane key={`ask-view-${reportId}-${askSeed?.n ?? 0}`} datasetIds={chatDatasetIds}
                   conversationId={reportChatId} onConversationCreated={c => rememberReportChat(c.id)}
                   datasetColumns={columns.map(c => c.name)} initialInput={askSeed?.q}
-                  suggestions={datasetSuggestions(columns, tr)}
+                  suggestions={datasetSuggestions(columns, tr, columnMeta as ColumnClasses)}
                   onAddToPage={canEdit ? (draft, title) => addSuggestedWidget({
                     widget_type: draft.widget_type, title, reason: 'from Ask', config: draft.config }) : undefined} />
               ) : dataset?.data_source_id != null ? (
@@ -4308,6 +4347,7 @@ export default function ReportBuilder() {
               ) : (
                 <p style={{ padding: 14, fontSize: 13, color: 'var(--muted)', margin: 0 }}>{tr('vw.ai.noData')}</p>
               )}
+              summary={activePage ? <PageTakeaways key={activePage.id} reportId={reportId} pageId={activePage.id} /> : undefined}
               insights={<InsightsPane datasetId={report.dataset_id ?? null}
                 columnTypes={Object.fromEntries(columns.map(c => [c.name,
                   columnMeta[c.name]?.role === 'category' ? 'categorical'

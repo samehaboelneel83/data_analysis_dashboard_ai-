@@ -1,0 +1,153 @@
+{
+  "scores": {
+    "S1": {
+      "id": "S1",
+      "connection": "UK online retailer",
+      "score": 1.5,
+      "out_of": 3.0,
+      "questions": {
+        "S1.1": 1.0,
+        "S1.2": 0.0,
+        "S1.3": 0.5
+      },
+      "runs": 3,
+      "spread": 0.0,
+      "flow_id": "mean of 3"
+    },
+    "S10": {
+      "id": "S10",
+      "connection": "Demo — Live SQLite",
+      "score": 3.0,
+      "out_of": 3.0,
+      "questions": {
+        "S10.1": 1.0,
+        "S10.2": 1.0,
+        "S10.3": 1.0
+      },
+      "runs": 3,
+      "spread": 0.0,
+      "flow_id": "mean of 3"
+    },
+    "S2": {
+      "id": "S2",
+      "connection": "Taxi",
+      "score": 3.0,
+      "out_of": 4.0,
+      "questions": {
+        "S2.1": 1.0,
+        "S2.2": 1.0,
+        "S2.3": 0.5,
+        "S2.4": 0.5
+      },
+      "runs": 3,
+      "spread": 0.0,
+      "flow_id": "mean of 3"
+    },
+    "S3": {
+      "id": "S3",
+      "connection": "Olist Brazilian E-Commerce",
+      "score": 3.0,
+      "out_of": 3.0,
+      "questions": {
+        "S3.1": 1.0,
+        "S3.2": 1.0,
+        "S3.3": 1.0
+      },
+      "runs": 3,
+      "spread": 0.0,
+      "flow_id": "mean of 3"
+    },
+    "S4": {
+      "id": "S4",
+      "connection": "Employees (HR sample)",
+      "score": 3.0,
+      "out_of": 4.0,
+      "questions": {
+        "S4.1": 0.8333333333333334,
+        "S4.2": 1.0,
+        "S4.3": 1.0,
+        "S4.4": 0.16666666666666666
+      },
+      "runs": 3,
+      "spread": 1.0,
+      "flow_id": "mean of 3"
+    },
+    "S5": {
+      "id": "S5",
+      "connection": "Nile Express",
+      "score": 3.0,
+      "out_of": 3.0,
+      "questions": {
+        "S5.1": 1.0,
+        "S5.2": 1.0,
+        "S5.3": 1.0
+      },
+      "runs": 3,
+      "spread": 0.0,
+      "flow_id": "mean of 3"
+    },
+    "S6": {
+      "id": "S6",
+      "connection": "Cars DB",
+      "score": 2.6666666666666665,
+      "out_of": 3.0,
+      "questions": {
+        "S6.1": 1.0,
+        "S6.2": 1.0,
+        "S6.3": 0.6666666666666666
+      },
+      "runs": 3,
+      "spread": 1.0,
+      "flow_id": "mean of 3"
+    },
+    "S7": {
+      "id": "S7",
+      "connection": "EGX Stocks",
+      "score": 1.0,
+      "out_of": 3.0,
+      "questions": {
+        "S7.1": 1.0,
+        "S7.2": 0.0,
+        "S7.3": 0.0
+      },
+      "runs": 3,
+      "spread": 0.0,
+      "flow_id": "mean of 3"
+    },
+    "S8": {
+      "id": "S8",
+      "connection": "food",
+      "score": 1.0,
+      "out_of": 2.0,
+      "questions": {
+        "S8.1": 0.5,
+        "S8.2": 0.5
+      },
+      "runs": 3,
+      "spread": 0.0,
+      "flow_id": "mean of 3"
+    },
+    "S9": {
+      "id": "S9",
+      "connection": "sh2on_zobat",
+      "score": 4.0,
+      "out_of": 4.0,
+      "questions": {
+        "S9.1": 1.0,
+        "S9.2": 1.0,
+        "S9.3": 1.0,
+        "S9.4": 1.0
+      },
+      "runs": 3,
+      "spread": 0.0,
+      "flow_id": "mean of 3"
+    }
+  },
+  "gate": {
+    "ok": true,
+    "lowered": [],
+    "lowest": "S7",
+    "total": 25.166666666666668,
+    "out_of": 32.0
+  }
+}

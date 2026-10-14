@@ -6,6 +6,7 @@ three engines were run on the same data. Each test below pins one gap the
 comparison found: the wrong numbers it offered, and the interactive structure
 it lacked.
 """
+import pytest
 import numpy as np
 import pandas as pd
 
@@ -19,6 +20,15 @@ from app.services.fact_sheet import build_facts, one_to_one
 from app.services.insights import order_event_dates
 from app.services.semantic_guard import default_summary, is_intensive
 from app.services.suggest_dataset_dashboard import validate_widget
+
+
+@pytest.fixture(autouse=True)
+def _the_model_proposes_its_own_charts(monkeypatch):
+    """These tests are of the "free" way of designing (the model proposes,
+    lens by lens); the default is now "cards" (tests/test_suggest_cards.py)."""
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "suggest_ai_selection", "free")
+
 
 
 def _enrolments(n=240, seed=1):
@@ -51,19 +61,21 @@ def test_a_summed_year_is_refused_before_it_is_offered():
 
 
 def test_daily_distinct_counts_are_averaged_not_totalled():
-    for c in ("active_sellers", "unique_customers", "unique_products_sold", "distinct_users", "dau"):
+    for c in ("active_users", "unique_customers", "unique_products_sold", "distinct_users", "dau"):
         assert is_intensive(c) and default_summary(c) == "avg", c
     for c in ("total_orders", "total_revenue", "active_minutes", "uniqueness_score_raw"):
         assert default_summary(c) == "sum" or c == "uniqueness_score_raw", c
     w = _no_sum_of_rates({"widget_type": "line", "title": "Active sellers",
-                          "config": {"dimension": "day_date", "measure": "active_sellers", "aggregation": "sum"}})
+                          "config": {"dimension": "day_date", "measure": "active_sellers", "aggregation": "sum"}},
+                         {"active_sellers": {"number": "level"}})          # classified, not guessed from its name
     assert w["config"]["aggregation"] == "avg"
 
 
 def test_a_summed_card_drops_what_cannot_be_totalled():
     w = _no_sum_of_rates({"widget_type": "card", "title": "Summary",
                           "config": {"measures": ["total_orders", "total_revenue", "unique_customers",
-                                                  "active_sellers"]}})
+                                                  "active_sellers"]}},
+                         {"active_sellers": {"number": "level"}})
     assert w["config"]["measures"] == ["total_orders", "total_revenue"]
     assert "aggregation" not in w["config"]
 
@@ -134,8 +146,13 @@ def test_a_model_clusters_one_unit_at_a_time():
 
 
 def test_the_trend_detector_reads_the_date_a_record_happened_on():
+    """Read from the VALUES: the date every row has and that comes first is
+    when the record began -- whatever this field of work calls it."""
     cols = ["order_estimated_delivery_date", "order_delivered_customer_date", "order_purchase_timestamp"]
-    assert order_event_dates(cols)[0] == "order_purchase_timestamp"
+    assert order_event_dates(cols, _orders())[0] == "order_purchase_timestamp"
+    neutral = _orders().rename(columns={"order_purchase_timestamp": "d1", "order_delivered_customer_date": "d2"})
+    neutral.loc[neutral.index[:40], "d2"] = pd.NaT                       # still open: no finish yet
+    assert order_event_dates(["d2", "d1"], neutral) == ["d1", "d2"]
 
 
 def test_repair_and_check_applies_the_new_rules_together():
@@ -165,7 +182,9 @@ def test_each_page_gets_slicers_for_what_its_charts_split_by():
     assert slicers_for([{"widget_type": "bar", "config": {"dimension": "student_id"}}], profile) == []
     # a headline page borrows the dataset's
     assert slicers_for([{"widget_type": "kpi", "config": {"measure": "final_score"}}], profile,
-                       fallback=["faculty"])[0]["config"] == {"dimension": "faculty"}
+                       fallback=["faculty"])[0]["config"]["dimension"] == "faculty"
+    # each is the control that suits how many values there are to choose from
+    assert {x["config"]["slicer_mode"] for x in s} <= {"buttons", "list", "dropdown"}
 
 
 def test_slicers_sit_above_the_page():
@@ -589,6 +608,10 @@ def test_the_designer_and_statistics_engines_get_the_same_help(client_factory=No
     class DS:
         name, description, column_meta = "daily", None, {}
     df = _daily(700)
+    # A real movement in the last full month: the stub below is no longer
+    # mistaken for one (a thin closing month is the data's tail, insights.py).
+    busy = (df["day_date"] >= "2018-11-01") & (df["day_date"] < "2018-12-01")
+    df.loc[busy, ["total_orders", "total_revenue"]] = df.loc[busy, ["total_orders", "total_revenue"]] * 1.6
     df.loc[len(df)] = [pd.Timestamp("2019-01-01"), 5, 0, 500.0, 100.0]       # a stub period after a gap
     tm = detect_types(df)
     from app.services.widget_data import get_widget_data_from_df
@@ -619,8 +642,10 @@ def test_data_with_nothing_to_group_by_gets_period_slicers():
     from app.services.widget_data import get_widget_data_from_df, infer_date_filter_grains
     df = _daily(700)
     got = slicers_for([], _profile(df))
-    assert [s["config"] for s in got] == [{"dimension": "day_date", "dimension_granularity": "year"},
-                                         {"dimension": "day_date", "dimension_granularity": "month"}]
+    assert [(s["config"]["dimension"], s["config"]["dimension_granularity"]) for s in got] == \
+        [("day_date", "year"), ("day_date", "month")]
+    # few years are buttons; the months of two years are a dropdown
+    assert [s["config"]["slicer_mode"] for s in got] == ["buttons", "dropdown"]
     years = [r["name"] for r in get_widget_data_from_df(df, got[0]["config"], "slicer")["rows"]]
     # a picked year is a bucket every engine filters by
     f = infer_date_filter_grains([{"column": "day_date", "op": "eq", "value": years[0]}], {"day_date"})
@@ -898,19 +923,31 @@ def test_two_daily_averages_are_read_against_each_other():
     assert {"measure": "avg_order_value", "measure2": "avg_freight_cost"} in pairs
 
 
+#: What the profile measures of a date column: how much of it is empty and
+#: where its values fall. A finish is later than the start and empty for the
+#: records still open; a promise is filled for every row.
+_BEGAN = {"missing_pct": 0.0, "date_median": "2018-01-15 00:00:00"}
+_FINISHED = {"missing_pct": 3.0, "date_median": "2018-01-27 00:00:00"}
+_PROMISED = {"missing_pct": 0.0, "date_median": "2018-02-08 00:00:00"}
+
+
 def test_finished_records_are_counted_by_the_day_they_finished():
     """Olist: orders placed per month was there; orders delivered per month,
     by the delivery date, was the analysts' one question the panel missed."""
     from app.services.analyst_panel import completion_trends
     prof = {"columns": [{"name": "order_id", "role": "categorical", "is_identifier": True},
-                        {"name": "order_purchase_timestamp", "role": "datetime"},
-                        {"name": "order_delivered_customer_date", "role": "datetime"},
-                        {"name": "order_estimated_delivery_date", "role": "datetime"}]}
+                        {"name": "order_purchase_timestamp", "role": "datetime", **_BEGAN},
+                        {"name": "order_delivered_customer_date", "role": "datetime", **_FINISHED},
+                        {"name": "order_estimated_delivery_date", "role": "datetime", **_PROMISED}]}
     got = completion_trends(prof)
     assert [w["config"] for w in got] == [{"dimension": "order_delivered_customer_date",
                                            "dimension_granularity": "month",
                                            "measure": "order_id", "aggregation": "countd"}]
-    assert got[0]["title"] == "Orders delivered per month"
+    assert got[0]["title"] == "Orders per month, by delivered customer date"
+    # The same shape under names that say nothing: found from the values alone.
+    blind = {"columns": [{"name": "k_id", "role": "categorical", "is_identifier": True},
+                         {"name": "d1", "role": "datetime", **_BEGAN}, {"name": "d2", "role": "datetime", **_FINISHED}]}
+    assert [w["config"]["dimension"] for w in completion_trends(blind)] == ["d2"]
     assert completion_trends({"columns": prof["columns"][:2]}) == []   # nothing finishes
 
 
@@ -919,8 +956,8 @@ def test_the_finished_record_is_the_one_the_date_names_first():
     prof = {"columns": [{"name": "customer_id", "role": "categorical", "is_identifier": True},
                         {"name": "order_item_id", "role": "numeric", "is_identifier": True},
                         {"name": "order_id", "role": "categorical", "is_identifier": True},
-                        {"name": "order_purchase_timestamp", "role": "datetime"},
-                        {"name": "order_delivered_customer_date", "role": "datetime"}]}
+                        {"name": "order_purchase_timestamp", "role": "datetime", **_BEGAN},
+                        {"name": "order_delivered_customer_date", "role": "datetime", **_FINISHED}]}
     assert completion_trends(prof)[0]["config"]["measure"] == "order_id"
 
 
@@ -928,11 +965,11 @@ def test_a_position_number_is_not_counted_as_the_record():
     from app.services.analyst_panel import completion_trends
     prof = {"row_count": 1000,
             "columns": [{"name": "order_item_id", "role": "numeric", "is_identifier": True, "distinct": 21},
-                        {"name": "order_purchase_timestamp", "role": "datetime"},
-                        {"name": "order_delivered_customer_date", "role": "datetime"}]}
+                        {"name": "order_purchase_timestamp", "role": "datetime", **_BEGAN},
+                        {"name": "order_delivered_customer_date", "role": "datetime", **_FINISHED}]}
     got = completion_trends(prof)[0]
     assert got["config"]["aggregation"] == "count" and got["config"]["measure"] == "order_delivered_customer_date"
-    assert got["title"].startswith("Records delivered")
+    assert got["title"].startswith("Records per month")
 
 
 def test_money_is_totalled_and_split_by_the_main_categories():

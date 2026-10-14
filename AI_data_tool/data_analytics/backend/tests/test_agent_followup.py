@@ -250,8 +250,8 @@ class TestTheColumnsAChartMessageNames:
                              "format": "bar", "limit": None, "x": "city", "y": "n"})
         await resolve("Chart n by city", HISTORY, client)
         system = client.calls[0]["messages"][0]["content"]
-        assert "New message: Chart n by city" in system
-        assert '"x": "city"' in system
+        assert "New message: Chart n by region" in system
+        assert '"x": "region"' in system
 
 class TestAChartRequestWithNothingOnScreen:
     """"i need chart" typed after a greeting.

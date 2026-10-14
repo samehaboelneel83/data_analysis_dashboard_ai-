@@ -3,7 +3,8 @@ import { sanitizeErrorDetail } from '../lib/friendlyError'
 import { canceledRequest } from '../lib/canceledRequest'
 import type { Report, ReportRelease, ReportPage, Widget, HierarchyNode, Bookmark, BookmarkState, WorkspaceTree, WorkspaceNode } from '../types/report'
 import type { DisplayRule } from '../lib/displayRules'
-import type { SaidI18n } from '../lib/readbackText'
+import { sayText, type SaidI18n } from '../lib/readbackText'
+import { translate } from '../i18n'
 
 /**
  * Where the API lives, in three cases:
@@ -62,9 +63,41 @@ export function setUnauthorizedHandler(handler: (() => void) | null): void {
   onUnauthorized = handler
 }
 
+/** A refusal the server also sent as a keyed sentence (`detail_i18n`, backend
+ *  core/said_errors.py) is put into the reader's language here, once, so every
+ *  page that shows `detail` shows it translated. English is left as sent. */
+function readerLanguage(): 'en' | 'ar' {
+  try { return localStorage.getItem('datalytics.language') === 'ar' ? 'ar' : 'en' } catch { return 'en' }
+}
+function sayErrorDetail(error: any): void {
+  const data = error?.response?.data
+  const said = data?.detail_i18n as SaidI18n | undefined
+  if (!said || typeof data.detail !== 'string') return
+  const language = readerLanguage()
+  if (language === 'en') return
+  data.detail = sayText((key, vars) => translate(language, key, vars), data.detail, said)
+}
+
+/** A background job stores its error as English text when it fails, with the
+ *  sentence's key in its progress record (backend services/jobs.py). Wherever
+ *  a job arrives -- alone, or in a list -- its error is put into the reader's
+ *  language here, so a job that failed last week reads in today's language. */
+export function sayJobErrors(data: unknown): void {
+  const language = readerLanguage()
+  if (language === 'en' || !data || typeof data !== 'object') return
+  const rows = Array.isArray(data) ? data : [data, ...Object.values(data as object).filter(Array.isArray).flat()]
+  for (const row of rows as { error?: unknown; progress?: { error_i18n?: SaidI18n } | null }[]) {
+    const said = row?.progress?.error_i18n
+    if (said && typeof row.error === 'string') {
+      row.error = sayText((key, vars) => translate(language, key, vars), row.error, said)
+    }
+  }
+}
+
 export function handleResponseError(error: any) {
   // Driver exceptions become sentences before any page toasts them.
   sanitizeErrorDetail(error)
+  sayErrorDetail(error)
   // `quiet401`: the start-up "am I logged in?" check. Every visitor makes it
   // now -- the session is a cookie script cannot see -- and a 401 there just
   // means "not logged in"; redirecting would bounce a share-link or embed
@@ -75,7 +108,7 @@ export function handleResponseError(error: any) {
   return Promise.reject(error)
 }
 
-api.interceptors.response.use(r => r, handleResponseError)
+api.interceptors.response.use(r => { sayJobErrors(r.data); return r }, handleResponseError)
 
 /** The person's LLM pick from the top bar (an endpoint id, or 'auto'). Kept in
  *  this browser and sent with every request as X-LLM-Endpoint, which the
@@ -137,6 +170,17 @@ export interface CalcPreview {
     | { kind: 'number'; rows: number; empty: number; infinite: number; min: number | null; mean: number | null; max: number | null }
 }
 
+/** A chart the copilot offers when no model may be used (it is already built
+ *  and checked on the data): its own words, keyed for the reader's language. */
+export interface CopilotSuggestion {
+  title: string
+  sentence?: string
+  title_i18n?: SaidI18n | null
+  sentence_i18n?: SaidI18n | null
+  widget_type: string
+  config: Record<string, unknown>
+}
+
 export interface DatasetColumn {
   id: number
   name: string
@@ -168,6 +212,8 @@ export interface DatasetColumn {
    *  when not yet classified. Used by the codeless RLS rule builder to pre-suggest
    *  user/owner columns. */
   semantic_type?: string | null
+  /** The personal-data type (email, person_name, national_id ...), or null: the "personal data" mark. */
+  personal?: string | null
 }
 
 export interface CalcColumnFormat {
@@ -380,6 +426,10 @@ export const dataflowsApi = {
                                          { grants }).then(r => r.data),
 }
 
+/** A chart that lists single records, by the column that names each one.
+ *  `kind`: 'identifier', or a personal-data type (email, person_name, national_id ...). */
+export interface ListedRecords { widget_id: number; title: string; page: string | null; column: string; kind: string }
+
 export interface ProfiledColumn {
   name: string
   role: string
@@ -413,6 +463,10 @@ export interface SuggestedWidget {
   why?: string
   /** What the widget actually drew, read from its result (services/readback.py). */
   takeaway?: string
+  /** Guided setup: what the chart shows, in one line with its own numbers. */
+  finding?: string
+  /** Guided setup: what the chart drew, small enough to show before it is made. */
+  preview?: SetupPreview | null
   /** The same sentence as a key and its pieces, for the reader's language. */
   takeaway_i18n?: SaidI18n | null
   config: Record<string, unknown>
@@ -728,6 +782,8 @@ export interface StatisticalTestResult {
   n: number
   detail: Record<string, unknown>
   interpretation: string
+  /** The same sentence as key + pieces, for the reader's language (server: readback._s). */
+  interpretation_i18n?: { key: string; vars?: Record<string, unknown> } | null
   caveats: string[]
 }
 
@@ -784,10 +840,33 @@ export const analysisCatalogueApi = {
   /** Every registered analysis, runnable or not. */
   registry: () =>
     api.get<{ analyses: AnalysisSpec[] }>('/analysis/registry').then(r => r.data.analyses),
-  run: (datasetId: number, name: string, params: Record<string, unknown>) =>
-    api.post<AnalysisRunResponse>(
-      `/datasets/${datasetId}/analysis/run`, { name, params }).then(r => r.data),
+  /** Runs an analysis and resolves with its result. A slow analysis on a
+   *  large table is queued by the server (`background: "auto"`); this then
+   *  waits for the job and resolves the same way, so a caller's own "working"
+   *  state covers both. `onQueued` lets a caller say it is running in the
+   *  background (and offer to cancel the job). */
+  run: async (datasetId: number, name: string, params: Record<string, unknown>,
+              opts: { onQueued?: (jobId: number) => void; signal?: AbortSignal } = {}): Promise<AnalysisRunResponse> => {
+    const first = (await api.post<AnalysisRunResponse & { job_id?: number }>(
+      `/datasets/${datasetId}/analysis/run`, { name, params, background: 'auto' }, { signal: opts.signal })).data
+    if (first.job_id == null) return first
+    opts.onQueued?.(first.job_id)
+    for (;;) {
+      await new Promise(resolve => setTimeout(resolve, ANALYSIS_JOB_POLL_MS))
+      if (opts.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+      const job = (await api.get<{ state: string; result: unknown; error: string | null }>(`/jobs/${first.job_id}`)).data
+      if (job.state === 'succeeded') return job.result as AnalysisRunResponse
+      if (job.state === 'failed' || job.state === 'cancelled') {
+        // Shaped like the request's own refusal, so callers show it the same way.
+        throw Object.assign(new Error(job.error || 'The analysis did not finish.'),
+          { response: { status: 400, data: { detail: job.error || 'The analysis did not finish.' } } })
+      }
+    }
+  },
 }
+
+/** How often a queued analysis is asked about. */
+export const ANALYSIS_JOB_POLL_MS = 1500
 
 /**
  * Data alerts: watch a condition on a dataset and email someone when it becomes
@@ -1293,9 +1372,103 @@ export const subscriptionApi = {
 
 export interface ReportGrant {
   id: number
-  user_id: number
+  /** Who the share names: a person, a role or a team. `name` is their email or its name. */
+  kind?: 'user' | 'role' | 'team'
+  name?: string
+  user_id: number | null
+  role_id?: number | null
+  org_unit_id?: number | null
   email: string
   level: 'view' | 'edit' | 'data'
+  expires_at?: string | null
+  expired?: boolean
+  can_export?: boolean
+  can_share?: boolean
+}
+
+/** What a share can say beyond its level (backend routers/publishing.GrantIn). */
+export interface GrantBody {
+  email?: string
+  role_id?: number
+  org_unit_id?: number
+  level: 'view' | 'edit' | 'data'
+  expires_at?: string | null
+  can_export?: boolean
+  can_share?: boolean
+  message?: string
+}
+
+/** What the person asking may do with one dashboard, action by action. The
+ *  server decides each again when asked to do it. */
+export interface ReportAccess {
+  level: 'view' | 'edit' | 'data'
+  view: boolean; interact: boolean; drill: boolean
+  export: boolean; export_refusal: string | null
+  share: boolean; edit: boolean; publish: boolean; administer: boolean; is_owner: boolean
+  via: 'admin' | 'owner' | 'user' | 'role' | 'team' | 'published'
+  expires_at: string | null
+}
+
+export interface ReleaseSummary { id: number; revision: number; reason: string; note: string | null; released_by: number | null; released_at: string | null }
+
+export interface Publication {
+  state: 'draft' | 'published' | 'archived'
+  category: string | null
+  tags: string[]
+  owner: string | null
+  published_at: string | null
+  published_by: string | null
+  updated_at: string | null
+  archived_at: string | null
+  viewers_may_export: boolean
+  release: ReleaseSummary | null
+  unreleased_changes?: boolean
+  review: { required: boolean; state: 'none' | 'requested' | 'approved' | 'rejected'; current: boolean
+            note: string | null; requested_by: string | null; decided_by: string | null }
+  /** Only for the owner: what unpublishing or archiving would touch. */
+  depends?: { shares: number; links: number; schedules: number }
+}
+
+/** Publishing a dashboard: its details, its state, its releases, its owner. */
+export const publishingApi = {
+  access: (id: number) => api.get<ReportAccess>(`/reports/${id}/access`).then(r => r.data),
+  get: (id: number) => api.get<Publication>(`/reports/${id}/publication`).then(r => r.data),
+  set: (id: number, body: { category?: string | null; tags?: string[]; viewers_may_export?: boolean }) =>
+    api.patch<{ category: string | null; tags: string[]; viewers_may_export: boolean }>(`/reports/${id}/publication`, body).then(r => r.data),
+  archive: (id: number) => api.post<{ state: string }>(`/reports/${id}/archive`).then(r => r.data),
+  restore: (id: number) => api.post<{ state: string }>(`/reports/${id}/restore`).then(r => r.data),
+  releases: (id: number) => api.get<ReleaseSummary[]>(`/reports/${id}/releases`).then(r => r.data),
+  rollback: (id: number, releaseId: number) =>
+    api.post<{ release: ReleaseSummary; unreleased_changes: boolean }>(`/reports/${id}/releases/${releaseId}/rollback`).then(r => r.data),
+  transfer: (id: number, email: string) => api.post<{ owner: string }>(`/reports/${id}/owner`, { email }).then(r => r.data),
+  requestReview: (id: number, note?: string) => api.post<{ state: string }>(`/reports/${id}/review/request`, { note }).then(r => r.data),
+  decideReview: (id: number, approve: boolean, note?: string) =>
+    api.post<{ state: string }>(`/reports/${id}/review/decision`, { approve, note }).then(r => r.data),
+  changeGrant: (id: number, grantId: number, body: { level?: string; expires_at?: string; clear_expiry?: boolean; can_export?: boolean; can_share?: boolean }) =>
+    api.patch<ReportGrant>(`/reports/${id}/grants/${grantId}`, body).then(r => r.data),
+}
+
+export interface CatalogItem {
+  id: number; name: string; description: string | null; category: string | null; tags: string[]
+  owner: string | null; is_mine: boolean; level: 'view' | 'edit' | 'data'
+  state: 'draft' | 'published' | 'archived'
+  published_at: string | null; updated_at: string | null; data_as_of: string | null
+  favorite: boolean; last_viewed: string | null; can_export: boolean
+  via: 'owner' | 'user' | 'role' | 'team' | 'folder' | 'published'
+}
+export type CatalogSection = 'all' | 'mine' | 'shared' | 'team' | 'favorites' | 'recent' | 'archived'
+export interface Catalog { items: CatalogItem[]; total: number; limit: number; offset: number; counts: Record<CatalogSection, number> }
+export interface Facet { value: string; count: number }
+export interface PortalDelivery { id: number; report_id: number; report: string; status: string; at: string | null; error: string | null; format: string }
+
+/** The reader's portal: what they may open, found and kept at hand. */
+export const portalApi = {
+  catalog: (q: { section?: CatalogSection; q?: string; category?: string; tag?: string; owner?: string; limit?: number; offset?: number }) =>
+    api.get<Catalog>('/portal/catalog', { params: q }).then(r => r.data),
+  facets: () => api.get<{ categories: Facet[]; tags: Facet[]; owners: Facet[] }>('/portal/facets').then(r => r.data),
+  favorite: (id: number, on: boolean) =>
+    (on ? api.put(`/portal/favorites/${id}`) : api.delete(`/portal/favorites/${id}`)).then(() => undefined),
+  deliveries: () => api.get<PortalDelivery[]>('/portal/deliveries').then(r => r.data),
 }
 
 /** "Share to": per-user grants on one authored dashboard. Distinct from
@@ -1306,7 +1479,7 @@ export interface ReportGrant {
 export const reportGrantsApi = {
   list: (reportId: number) =>
     api.get<ReportGrant[]>(`/reports/${reportId}/grants`).then(r => r.data),
-  create: (reportId: number, body: { email: string; level: 'view' | 'edit' | 'data' }) =>
+  create: (reportId: number, body: GrantBody) =>
     api.post<ReportGrant>(`/reports/${reportId}/grants`, body).then(r => r.data),
   remove: (reportId: number, grantId: number) =>
     api.delete(`/reports/${reportId}/grants/${grantId}`).then(() => undefined),
@@ -1349,7 +1522,7 @@ export const reportsApi = {
   get:    (id: number)                             => api.get<Report>(`/reports/${id}`).then(r => r.data),
   create: (data: { name: string; description?: string; dataset_id?: number }) =>
     api.post<Report>('/reports', data).then(r => r.data),
-  update: (id: number, data: Partial<{ name: string; description: string; dataset_id: number; additional_dataset_ids: number[]; theme: string; display_rules: DisplayRule[] }>) =>
+  update: (id: number, data: Partial<{ name: string; description: string; dataset_id: number; additional_dataset_ids: number[]; theme: string; display_rules: DisplayRule[]; style: import('../lib/dashboardStyle').DashboardStyle }>) =>
     api.patch<Report>(`/reports/${id}`, data).then(r => r.data),
   delete: (id: number) => api.delete(`/reports/${id}`),
   /** Publish/unpublish an authored dashboard: published = the whole org may
@@ -1393,12 +1566,23 @@ export const reportsApi = {
                evidence?: AnswerEvidence | null
                /** The version captured BEFORE the copilot's change (restoring it undoes the change). */
                before_version_id?: number | null
-               summary?: string | null }>(
+               summary?: string | null
+               /** True when no model was used: the page was changed by a plain
+                *  instruction, or not at all and `suggestions` are offered. */
+               without_ai?: boolean
+               /** `reply` without its list of charts, which `suggestions` carries. */
+               lead?: string
+               /** Charts the platform already built on this data, ready to add. */
+               suggestions?: CopilotSuggestion[] }>(
       `/reports/${reportId}/pages/${pageId}/copilot`, body).then(r => r.data),
   // Cheap poll target: just the counter, none of the page/widget eager loading
   // GET /reports/{id} does.
   getRevision: (id: number) =>
     api.get<{ revision: number }>(`/reports/${id}/revision`).then(r => r.data.revision),
+  /** Charts that list single records (one mark per person, account or item):
+   *  the share screen asks the person to check before sharing (persona test 3.7). */
+  listedRecords: (id: number) =>
+    api.get<{ items: ListedRecords[] }>(`/reports/${id}/listed-records`).then(r => r.data.items),
   /** Sensitivity labels: the current label + the allowed set. */
   getClassification: (id: number) =>
     api.get<{ label: string | null; options: string[]
@@ -1618,6 +1802,26 @@ export interface ColumnMeta {
    *  run unattended instead of guessing from flag-shaped columns. */
   target_candidate_priority?: number
   label?: string
+  // The stored classification (docs/suggestions/PLAN.md, phase 1): decided once
+  // on the server, read by every engine, corrected here by the author.
+  /** What a number is: amount | count (add up) · level | duration | score | share (average) · code. */
+  number?: 'amount' | 'count' | 'level' | 'duration' | 'score' | 'share' | 'code'
+  unit?: string
+  /** Which way is good. */
+  direction?: 'higher_better' | 'higher_worse' | 'neither'
+  /** The number the author says this column should reach; never guessed. */
+  target?: number | null
+  /** What the target is for: each month, quarter or year; absent = the whole of what is shown. */
+  target_period?: 'month' | 'quarter' | 'year' | null
+  /** Measurement level. */
+  level?: 'nominal' | 'ordinal' | 'interval' | 'ratio'
+  /** An ordinal column's values in their real order. */
+  order?: string[]
+  geo_level?: 'country' | 'region' | 'city' | 'postcode' | 'latitude' | 'longitude'
+  /** Says what became of a row: groups are compared by the share with it. */
+  outcome?: boolean
+  /** measured | ai | confirmed — a confirmed entry is the author's and is never overwritten. */
+  class_source?: 'measured' | 'ai' | 'confirmed'
 }
 
 export interface PrepStep { kind: string; [k: string]: unknown }
@@ -1987,6 +2191,151 @@ export const authzApi = {
 export interface DatasetSensitivity {
   label: string | null; effective: string | null; reasons: string[]; options: string[]; redacted_on_share: string[]
 }
+/** One thing worth doing with a dataset, as the discovery engine states it
+ *  (server: services/discovery). Fit, evidence, claim and cost are separate
+ *  on purpose: there is no single "confidence". */
+/** A server sentence as its catalogue key and pieces (backend services/readback.Said). */
+export interface SaidKey { key: string; vars?: Record<string, string | SaidKey> }
+
+export interface OpportunityCard {
+  id: string
+  capability: string
+  kind: 'widget' | 'analysis'
+  family: string
+  claim: 'observation' | 'association' | 'prediction' | 'hypothesis'
+  title: string
+  sentence: string
+  why: { reason: 'fit' | 'evidence' | 'basics' | 'goal' | 'follow_up'; detail: string }
+  fields: string[]
+  evidence: { band: 'strong' | 'moderate' | 'weak'; strength: number; kind: string; p_value?: number
+    figures?: Record<string, unknown>; test?: Record<string, unknown> } | null
+  limits: string[]
+  /** What a look at the rows found for a card first offered by the table's shape. */
+  found?: string
+  found_i18n?: { key: string; vars?: Record<string, unknown> } | null
+  cost: { tier: 0 | 1 | 2; state: 'ready' | 'running' | 'queued'; job_id?: number }
+  action: { kind: 'add_widget'; widget_type: string; config: Record<string, unknown> }
+    | { kind: 'run_analysis'; analysis: string; params: Record<string, unknown> }
+    | { kind: 'open'; target: 'columns'; column?: string }
+    | ({ kind: 'decision_problem' } & DecisionShape)
+  title_i18n?: SaidKey | null
+  sentence_i18n?: SaidKey | null
+  limits_i18n?: (SaidKey | null)[]
+  /** How this analysis sits on a page: the widget that draws its result there. */
+  tile?: { widget_type: string; config: Record<string, unknown> }
+  next: string[]
+  relevance: { matches_goal: boolean } | null
+  source: 'deterministic' | 'model_assisted'
+  /** What the builder's suggestion pane reads of a server idea. */
+  suggestion?: { kind?: string | null; reason?: string | null; aligned: boolean
+    takeaway?: string | null; takeaway_i18n?: SaidI18n | null }
+}
+export interface Opportunities {
+  dataset_id: number; profile_version: string; profile_from_store: boolean; rows: number; depth: number
+  mode: 'deterministic'; goal: string | null; cards: OpportunityCard[]; supports: string[]
+  not_offered: { capability: string; kind: string; family: string; reason: string }[]
+  /** Offered by the table's shape, looked at on the rows, and not worth showing: each with why. */
+  withheld?: { capability: string; title: string; reason: string; fields: string[] }[]
+  restricted: boolean; cached: boolean
+}
+/** One column's profile (server: services/discovery/profile.card_of). Value
+ *  fields are absent for a reader under a row rule. */
+export interface ColumnProfileCard {
+  column: string; kind: 'number' | 'date' | 'flag' | 'text'; cells: number; distinct: number
+  valid: { count: number; pct: number }; unique: { count: number; pct: number }
+  nonunique: { count: number; pct: number }; invalid: { count: number; pct: number }
+  mistyped: { count: number; pct: number; holds?: 'number' | 'text' }; missing: { count: number; pct: number }
+  min?: number | string; max?: number | string; mean?: number; p50?: number
+  len_min?: number; len_max?: number; top?: [string, number][]; most_common?: [string, number]
+  least?: [string, number]; pattern?: string; patterns?: [string, number][]
+  median?: string; periods?: number; delay_hours?: number | null
+}
+export interface DatasetProfileCards {
+  dataset_id: number; version: string; from_store: boolean; rows: number; measured_rows: number
+  sampled: boolean; duplicates: number | null; restricted: boolean; columns: ColumnProfileCard[]
+}
+/** One line of a page's key takeaways (server: services/discovery/takeaways.py):
+ *  a widget's own result read back as a sentence. No model is involved. */
+export interface PageTakeaway {
+  widget_id: number; title: string; widget_type: string; family: string
+  section: 'headline' | 'over_time' | 'comparison' | 'spread' | 'where' | 'together' | 'other'
+  claim: OpportunityCard['claim']; sentence: string; sentence_i18n: SaidI18n | null; sampled: boolean
+}
+export interface PageTakeaways {
+  report_id: number; page_id: number; page: string; takeaways: PageTakeaway[]
+  widgets_read: number; nothing_to_say: number; left_out: number; source: 'deterministic'
+}
+/** One health check of a dataset (server: services/discovery/health.py). */
+export interface HealthCheck {
+  id: string; group: string; status: 'pass' | 'warn' | 'fail'
+  title: string; sentence: string; columns: string[]
+  title_i18n?: { key: string; vars?: Record<string, unknown> } | null
+  sentence_i18n?: { key: string; vars?: Record<string, unknown> } | null
+  figures: Record<string, unknown> & { checked?: boolean; series?: [string, number][] }
+}
+export interface DatasetHealth {
+  dataset_id: number; restricted: boolean
+  summary: { pass: number; warn: number; fail: number; status: 'pass' | 'warn' | 'fail'
+    not_checked: number; columns: number; rows: number | null; sampled: boolean }
+  checks: HealthCheck[]
+}
+
+/** The shape of a decision recognised on a table (server: services/discovery/decision.py). */
+export type DecisionShape =
+  | { problem: 'allocation'; key: string; amounts: string[]; options: number }
+  | { problem: 'assignment'; from: string; to: string; numbers: string[]; pairs: number; fill: number }
+  /** Levels to set, under the model a what-if fits (a dated table). */
+  | { problem: 'response'; date: string; dates: string[]; measures: string[]; factors: string[]; rows: number }
+export interface DecisionChoices {
+  problem: 'allocation' | 'assignment' | 'response'; objective: string; direction: 'largest' | 'smallest'
+  key?: string; limited?: string; limit?: number; at_most?: number
+  from_col?: string; to_col?: string; each_from?: 'exactly_one' | 'at_most_one'; each_to_at_most?: number
+  date_col?: string; factors?: string[]; ranges?: Record<string, [number, number]>; granularity?: string; periods?: number
+}
+export interface DecisionCheck { code: string; column?: string; rows?: number; options?: number; of?: number; pairs?: number; total?: number
+  observed?: [number, number]; p?: number; r2?: number; times?: number }
+/** `datalytics.decision-problem/1`: the problem as the person described it. Never solved here. */
+export interface DecisionSpecification {
+  schema: string; problem: 'allocation' | 'assignment' | 'response'; solved: false; note: string
+  objective: { direction: 'maximize' | 'minimize'; column: string; aggregate: string; horizon?: number; per?: string }
+  /** A count of rows or pairs to choose among; for `response`, one entry per factor with its range. */
+  decisions: (Record<string, unknown> & { count: number }) | { name: string; recent: number; lower: number; upper: number; observed: [number, number] }[]
+  model?: { form: string; r2: number; periods_fitted: number; coefficients: Record<string, number> }
+  constraints: ({ kind: string; column?: string; value?: number; rule?: string; lower?: number; upper?: number })[]
+  data: { rows: number; columns: string[] }
+  checks: DecisionCheck[]
+  dataset: { id?: number; name?: string; version?: string }
+}
+export const decisionApi = {
+  problems: (dsId: number) =>
+    api.get<{ dataset_id: number; problems: DecisionShape[]; restricted: boolean }>(`/datasets/${dsId}/decision-problems`).then(r => r.data),
+  specification: (dsId: number, body: DecisionChoices) =>
+    api.post<DecisionSpecification>(`/datasets/${dsId}/decision-problems/specification`, body).then(r => r.data),
+}
+
+export const discoveryApi = {
+  health: (dsId: number) => api.get<DatasetHealth>(`/datasets/${dsId}/health`).then(r => r.data),
+  takeaways: (reportId: number, pageId: number) =>
+    api.get<PageTakeaways>(`/reports/${reportId}/pages/${pageId}/takeaways`).then(r => r.data),
+  profile: (dsId: number) => api.get<DatasetProfileCards>(`/datasets/${dsId}/profile`).then(r => r.data),
+  /** depth 0 = what the data supports (no row read once its profile is kept);
+   *  depth 1 = also what its rows show. */
+  opportunities: (dsId: number, opts: { goal?: string; depth?: 0 | 1; limit?: number; fresh?: boolean } = {}) =>
+    api.get<Opportunities>(`/datasets/${dsId}/opportunities`, { params: opts }).then(r => r.data),
+  registry: () => api.get<{ kinds: string[]; claims: string[]; capabilities: Record<string, unknown>[] }>(
+    '/datasets/capabilities/registry').then(r => r.data),
+}
+
+/** "Allow AI" for a dataset: its own choice, what is in force, and who decides. */
+export interface DatasetAllowAi {
+  own: boolean | null; effective: boolean; decided_by: 'dataset' | 'connection' | 'default'; connection: string | null
+}
+export const allowAiApi = {
+  get: (dsId: number) => api.get<DatasetAllowAi>(`/datasets/${dsId}/allow-ai`).then(r => r.data),
+  set: (dsId: number, allow: boolean | null) =>
+    api.put<DatasetAllowAi>(`/datasets/${dsId}/allow-ai`, { allow }).then(r => r.data),
+}
+
 export const sensitivityApi = {
   get: (dsId: number) => api.get<DatasetSensitivity>(`/datasets/${dsId}/sensitivity`).then(r => r.data),
   set: (dsId: number, label: string) => api.put<DatasetSensitivity>(`/datasets/${dsId}/sensitivity`, { label }).then(r => r.data),
@@ -2004,7 +2353,9 @@ export const reviewApi = {
     api.get<{ findings: { message: string; widget_id: number; page_id: number; category: string }[]; publish_gate: boolean }>(
       `/reports/${reportId}/review`).then(r => r.data),
   evaluate: (reportId: number) => api.post<PerfEvaluation>(`/reports/${reportId}/evaluate-performance`).then(r => r.data),
-  settings: () => api.get<{ publish_gate: boolean }>('/review-settings').then(r => r.data),
+  settings: () => api.get<{ publish_gate: boolean; require_approval?: boolean }>('/review-settings').then(r => r.data),
+  /** Whether nothing is published or updated without an administrator's approval (admins only). */
+  setApproval: (on: boolean) => api.put<{ publish_gate: boolean; require_approval: boolean }>('/review-settings', { require_approval: on }).then(r => r.data),
   setGate: (on: boolean) => api.put<{ publish_gate: boolean }>('/review-settings', { publish_gate: on }).then(r => r.data),
 }
 
@@ -2058,11 +2409,22 @@ export const dataViewsApi = {
 }
 
 export const columnMetaApi = {
+  /** Ask the AI again what each number is. It is asked once and kept; this is
+   *  the button. What a person set by hand is not touched. */
+  classifyAgain: (dsId: number) =>
+    api.post<{ asked: number; classified: number }>(`/datasets/${dsId}/column-meta/classify-again`).then(r => r.data),
   get: (dsId: number) =>
     api.get<Record<string, ColumnMeta>>(`/datasets/${dsId}/column-meta`).then(r => r.data),
-  /** Replaces the whole map — that is what makes a bulk edit one request. */
+  /** Replaces the whole map — that is what makes a bulk edit one request.
+   *  Reserved `__keys` (export policy, preparation steps, the demo mark) ride
+   *  along on the dataset's own map but are not columns: the server keeps them
+   *  and refuses them here, so a map read from a dataset is sent without them.
+   *  Sent as they were, every control of the Columns tab failed with "Invalid
+   *  request" on any dataset that had preparation steps (found 2026-10-10). */
   set: (dsId: number, meta: Record<string, ColumnMeta>) =>
-    api.put<Record<string, ColumnMeta>>(`/datasets/${dsId}/column-meta`, { meta }).then(r => r.data),
+    api.put<Record<string, ColumnMeta>>(`/datasets/${dsId}/column-meta`, {
+      meta: Object.fromEntries(Object.entries(meta).filter(([k, v]) => !k.startsWith('__') && v && typeof v === 'object')),
+    }).then(r => r.data),
 }
 
 export interface MeasureDef {
@@ -2324,12 +2686,64 @@ export interface WidgetSuggestion {
   /** What the chart shows, read from its drawn result on every row. */
   takeaway?: string
   takeaway_i18n?: SaidI18n | null
+  /** From the discovery engine (server: services/discovery): how strong the
+   *  evidence is, what kind of claim this is, and what it cannot tell you.
+   *  Absent on a chart offered for coverage -- nothing was claimed. */
+  evidence?: OpportunityCard['evidence']
+  claim?: OpportunityCard['claim']
+  limits?: string[]
+  family?: string
+  /** The same texts as key + pieces, for the reader's language (lib/readbackText). */
+  title_i18n?: SaidKey | null
+  reason_i18n?: SaidKey | null
+  limits_i18n?: (SaidKey | null)[]
+}
+
+/** What a person did with suggested charts on a dataset: kept on the server,
+ *  so a dismissal follows them across devices and ranks what is offered next. */
+export interface SuggestionFeedback {
+  dismissed: string[]
+  types: Record<string, { added: number; dismissed: number }>
+  org_types: Record<string, { added: number; dismissed: number }>
 }
 
 export const suggestApi = {
+  feedback: (reportId: number) =>
+    api.get<SuggestionFeedback>(`/reports/${reportId}/suggestion-feedback`).then(r => r.data),
+  sendFeedback: (reportId: number, body: { signature: string; widget_type: string; action: 'dismissed' | 'added' | 'restored' }) =>
+    api.post<SuggestionFeedback>(`/reports/${reportId}/suggestion-feedback`, body).then(r => r.data),
+  /** The ideas for a dashboard, from the discovery engine: what its dataset
+   *  shows (with evidence) and what it supports (a forecast, groups of
+   *  similar rows, values that go together) -- every card one that can be
+   *  added to the page. The same engine as every other door. */
+  /** The decisions the dashboard's dataset has the shape of: set up on the
+   *  dataset's Analysis tab, offered here so the builder leads to them too. */
+  decisionsForReport: (reportId: number) =>
+    api.get<Opportunities>(`/reports/${reportId}/opportunities`).then(r => r.data.cards
+      .filter(c => c.action.kind === 'decision_problem')
+      .map(c => ({ title: c.title, sentence: c.sentence, title_i18n: c.title_i18n ?? null, sentence_i18n: c.sentence_i18n ?? null }))),
   forReport: (reportId: number) =>
-    api.post<{ suggestions: WidgetSuggestion[] }>(`/reports/${reportId}/suggest-widgets`)
-      .then(r => r.data.suggestions),
+    api.get<Opportunities>(`/reports/${reportId}/opportunities`).then(r => r.data.cards
+      // An analysis that can sit on a page is added as the tile that draws it.
+      .map(c => (c.action.kind === 'run_analysis' && c.tile
+        ? { ...c, action: { kind: 'add_widget' as const, ...c.tile } } : c))
+      .filter((c): c is OpportunityCard & { action: { kind: 'add_widget'; widget_type: string; config: Record<string, unknown> } } =>
+        c.action.kind === 'add_widget')
+      .map((c, i, all): WidgetSuggestion => ({
+        widget_type: c.action.widget_type, title: c.title,
+        reason: c.suggestion?.reason ?? c.sentence, config: c.action.config,
+        // The engine's order IS the ranking: strongest first.
+        score: all.length - i, kind: c.suggestion?.kind ?? c.capability,
+        aligned: c.suggestion?.aligned ?? !!c.relevance?.matches_goal,
+        takeaway: c.suggestion?.takeaway ?? c.found ?? (c.why.reason === 'fit' ? c.sentence : undefined),
+        takeaway_i18n: c.suggestion?.takeaway_i18n ?? (c.found_i18n as never) ?? null,
+        evidence: c.evidence, claim: c.claim, limits: c.limits, family: c.family,
+        title_i18n: c.title_i18n ?? null, reason_i18n: c.suggestion?.reason ? null : (c.sentence_i18n ?? null),
+        limits_i18n: c.limits_i18n,
+        // a card's own description, when it has no finding to lead with
+        ...(!c.suggestion?.takeaway && !c.found && c.why.reason === 'fit' && c.sentence_i18n
+          ? { takeaway_i18n: c.sentence_i18n as never } : {}),
+      }))),
   /** Build a whole page from the insights engine: summary KPIs, then the
    *  strongest findings as charts sized by rank, then detail and the
    *  narrative. Returns the new page's id. */
@@ -2352,6 +2766,101 @@ export const schedulesApi = {
 
 export const deliveriesApi = {
   list: (reportId: number) => api.get<DeliveryRow[]>(`/reports/${reportId}/deliveries`).then(r => r.data),
+}
+
+// ── Dashboard templates (the gallery; backend routers/dashboard_templates.py) ──
+
+export type TemplateSlotKind = 'measure' | 'category' | 'date' | 'stage' | 'geography' | 'flag' | 'detail'
+export interface TemplateSlot { id: string; label: string; kind: TemplateSlotKind; required?: boolean; many?: boolean
+  /** The additional dataset this slot is filled from; absent = the dashboard's own. */
+  dataset?: string | null }
+export interface TemplateFit { usable: boolean; score: number; widgets: { kept: number; total: number }; missing: string[]
+  /** Charts that read an additional dataset: not this dataset's to draw. */
+  elsewhere?: { widgets: number; datasets: string[] } | null }
+export interface TemplateCard {
+  /** "builtin:<key>" or "t:<id>". */
+  ref: string
+  source: 'builtin' | 'org' | 'personal'
+  key?: string | null
+  name: string
+  description: string
+  category: string
+  tags: string[]
+  slots: TemplateSlot[]
+  /** The first page as boxes on the 12-column grid, for a preview without data. */
+  preview: { x: number; y: number; w: number; h: number; kind: string }[]
+  style: import('../lib/dashboardStyle').DashboardStyle
+  pages: number
+  widgets: number
+  metrics: number
+  version: number
+  uses: number | null
+  updated_at: string | null
+  favorite: boolean
+  mine: boolean
+  can_change: boolean
+  fit?: TemplateFit
+}
+export interface TemplateColumn {
+  name: string; label: string; kind: 'number' | 'date' | 'category' | 'text' | 'flag'
+  distinct: number | null; identifier: boolean; geo: string | null; ordered: boolean
+}
+export interface TemplateCheck {
+  ok: boolean
+  problems: { slot: string; code: 'unknown_column' | 'wrong_kind' | 'required_missing' | 'too_many'; column?: string }[]
+  missing: string[]
+  widgets: { kept: number; total: number }
+  dropped: string[]
+}
+export interface TemplateMatch {
+  columns: TemplateColumn[]
+  slots: TemplateSlot[]
+  /** The additional datasets the template reads, and the dataset given for each. */
+  datasets?: { key: string; label: string; dataset_id: number | null }[]
+  candidates: Record<string, string[]>
+  suggested: Record<string, string[]>
+  mapping: Record<string, string[]>
+  check: TemplateCheck
+  preview: null | {
+    pages: { name: string; widgets: { widget_type: string; title: string }[] }[]
+    measures: { name: string; expression: string }[]
+    dropped: { title: string; needs: string[] }[]
+    skipped_metrics: { id: string; why: 'unmapped' | 'column_name' | 'no_permission' }[]
+    filters: { column: string; mode: string }[]
+  }
+  can_define_measures: boolean
+}
+export interface TemplateLeftOut { filters?: number; rules?: number; unknown?: string[] }
+
+export const templatesApi = {
+  list: (datasetId?: number | null) =>
+    api.get<{ templates: TemplateCard[]; categories: string[] }>('/templates',
+      { params: datasetId ? { dataset_id: datasetId } : undefined }).then(r => r.data),
+  get: (ref: string) => api.get<TemplateCard & { spec: Record<string, unknown> }>(`/templates/${ref}`).then(r => r.data),
+  /** The template drawn on its own sample rows (no dataset is read). */
+  preview: (ref: string) =>
+    api.get<{ rows: number; style: import('../lib/dashboardStyle').DashboardStyle
+              pages: { name: string; widgets: (Widget & { data: unknown })[] }[] }>(`/templates/${ref}/preview`, { params: { lang: readerLanguage() } }).then(r => r.data),
+  match: (ref: string, datasetId: number, mapping?: Record<string, string[]>, datasets?: Record<string, number>) =>
+    // What a built-in template WRITES (titles, page and measure names) is written in the reader's language.
+    api.post<TemplateMatch>(`/templates/${ref}/match`, { dataset_id: datasetId, mapping, datasets, lang: readerLanguage() }).then(r => r.data),
+  use: (ref: string, body: { dataset_id: number; mapping?: Record<string, string[]>; name?: string; datasets?: Record<string, number> }) =>
+    api.post<{ report_id: number; name: string; dropped: { title: string }[]; refused: string[]; measures: string[]
+               skipped_metrics: { id: string; why: string }[] }>(`/templates/${ref}/use`, { ...body, lang: readerLanguage() }).then(r => r.data),
+  save: (body: { report_id?: number; copy_of?: string; name: string; description?: string; category?: string
+                 tags?: string[]; visibility?: 'personal' | 'org' }) =>
+    api.post<TemplateCard & { left_out: TemplateLeftOut }>('/templates', body).then(r => r.data),
+  edit: (id: number, body: { name?: string; description?: string; category?: string; tags?: string[]
+                             visibility?: 'personal' | 'org'; report_id?: number; note?: string
+                             style?: import('../lib/dashboardStyle').DashboardStyle }) =>
+    api.put<TemplateCard & { left_out: TemplateLeftOut }>(`/templates/${id}`, body).then(r => r.data),
+  versions: (id: number) =>
+    api.get<{ current: number; versions: { id: number; version: number; name: string; note: string | null
+                                           created_at: string | null; widgets: number }[] }>(`/templates/${id}/versions`).then(r => r.data),
+  restore: (id: number, versionId: number) =>
+    api.post<{ version: number; restored: number }>(`/templates/${id}/versions/${versionId}/restore`).then(r => r.data),
+  delete: (id: number) => api.delete(`/templates/${id}`),
+  favorite: (ref: string, on: boolean) => api.put<{ favorite: boolean }>(`/templates/${ref}/favorite`, { on }).then(r => r.data),
 }
 
 export const pageTemplatesApi = {
@@ -2814,6 +3323,8 @@ export interface User {
   id: number
   email: string
   is_active: boolean
+  /** What the person wrote about themselves (components/AboutMe). */
+  about?: string | null
   organization: Organization
   role: Role
   is_super_admin?: boolean
@@ -2827,6 +3338,8 @@ export const authApi = {
   /** `quiet`: a 401 means "not logged in", not "session expired". */
   me: (opts?: { quiet?: boolean }) =>
     api.get<User>('/auth/me', opts?.quiet ? ({ quiet401: true } as object) : undefined).then(r => r.data),
+  /** Change one's own profile: what the person says about themselves. */
+  updateMe: (body: { about: string }) => api.patch<User>('/auth/me', body).then(r => r.data),
   logout: () => api.post('/auth/logout').then(() => undefined),
   /** Move a pre-T6 localStorage token into the httpOnly cookie, once. */
   adoptSession: (token: string) =>
@@ -3189,6 +3702,11 @@ export interface EvidenceClaim {
 export interface AnswerEvidence {
   claims: EvidenceClaim[]
   untraced: number
+  /** The answer with the sentences whose numbers are in no result row taken
+   *  out (the claims count over THIS text); absent when nothing was set aside. */
+  text?: string
+  /** Those sentences, shown under the details. */
+  set_aside?: string[]
 }
 
 /** Set on a run that only re-shows an earlier result ("as a bar chart"). */
@@ -3530,7 +4048,8 @@ export interface SetupBrief {
 
 export interface SetupJourney {
   id: number
-  source: { id: number; name: string; type: string }
+  /** `health`: the connection's last test (kept with it), when one was run. */
+  source: { id: number; name: string; type: string; health?: { ok: boolean; at: string; error: string | null } | null }
   step: SetupStep
   /** 1-based step on the progress bar; `total` is always 4. */
   position: number
@@ -3539,6 +4058,66 @@ export interface SetupJourney {
   dataset_ids: number[]
   report_id: number | null
   updated_at: string | null
+  /** The analysis (steps 2-4) these fields describe; a connection can have several. */
+  flow_id?: number | null
+  flow_name?: string | null
+  flows?: SetupFlow[]
+}
+
+/** One run of steps 2-4 on a connection: its own request, datasets and dashboard. */
+export interface SetupFlow {
+  id: number
+  name: string | null
+  step: SetupStep
+  position: number
+  dataset_ids: number[]
+  report_id: number | null
+  updated_at: string | null
+}
+
+/** One part of the data the person asked for, checked on the rows. */
+export interface SetupScope {
+  dataset_id: number
+  said: string
+  column: string | null
+  /** between: values = [first, last], both included. */
+  op: 'in' | 'gt' | 'gte' | 'lt' | 'lte' | 'between'
+  values: (string | number)[]
+  matched_rows: number
+  of_rows: number
+  /** in_data: the dataset holds only this; in_dashboard: charts filter to it; unmatched: not found. */
+  status: 'in_data' | 'in_dashboard' | 'unmatched'
+  candidates?: { column: string; values: string[] }[]
+}
+
+/** What the person wants, as the setup understood it (written once, binding on steps 3-4). */
+export interface SetupDemand {
+  pending: boolean
+  failed: string | null
+  written: boolean
+  sentence: string
+  who: string
+  subject: string
+  /** `asked`: the person asked it (else the setup added it); `wants`: the kind of number its answer rests on. */
+  questions: { id: string; text: string; asked?: boolean; wants?: string }[]
+  exclude: string[]
+  scope: SetupScope[]
+  source: 'ai' | 'plain' | null
+  edits: string[]
+  language: string | null
+  /** Datasets that hold events without what they are counted against: counts, never rates. */
+  base_missing?: { dataset_id: number; events: string; base: string }[]
+}
+
+/** What the check fixed by itself, and what is still worth knowing. */
+export interface SetupCleaning {
+  fixed: { id: string; said: string; ai: boolean }[]
+  know: { id: string; what: string }[]
+  more: number
+  rows_before: number | null
+  rows_after: number | null
+  actions: { id: string; said: string; ai: boolean; state: 'applied' | 'undone'; kind: string
+             column: string | null; rows: number | null }[]
 }
 
 export type SetupTableGroup = 'main' | 'supporting' | 'technical'
@@ -3580,7 +4159,7 @@ export interface SetupSummary {
   ai?: { used: boolean; pending: boolean; reason: 'off' | 'unavailable' | 'failed' | null }
   overview?: string | null
   overview_source?: 'you' | 'ai' | null
-  totals?: { tables: number; views: number; rows: number; date_from: string | null
+  totals?: { tables: number; views: number; rows: number; rows_known?: boolean; date_from: string | null
              date_to: string | null; dates_exact: boolean }
   tables?: SetupTable[]
   relationships?: { from_table: string; to_table: string }[]
@@ -3608,6 +4187,10 @@ export interface SetupProposal {
   source: 'ai' | 'auto'
   test: { columns: string[]; rows: Record<string, unknown>[]; row_count: number | null; error: string | null }
   history: { role: 'user' | 'assistant'; text: string }[]
+  /** Events without their base: this dataset can count them but not compare groups fairly. */
+  counts_only?: { events: string; base: string }[]
+  /** Join checks run on the source: rows of the main table repeated, LEFT JOIN rows with no match. */
+  joins?: { repeats: { table: string; rows: number; distinct: number } | null; unmatched: { table: string; share: number }[] }
   /** Set while a change asked in the chat is being made. */
   refining?: string
   /** Why the last change could not be made ('off' | 'failed' | 'unusable'). */
@@ -3615,13 +4198,21 @@ export interface SetupProposal {
 }
 
 export interface SetupDatasetsStep {
-  proposals: { pending: boolean; failed: string | null; items: SetupProposal[]; language: string | null; asked: boolean }
+  proposals: { pending: boolean; failed: string | null; items: SetupProposal[]; language: string | null; asked: boolean
+               /** When the running step started (server UTC). */
+               since?: string | null }
   brief: SetupBrief
-  existing: { id: number; name: string; rows: number | null; mode: string | null }[]
+  /** `used`: dashboards reading it; `mine`: made by this person. Listed in use first,
+   *  then own; unused ones made by others come last and are folded away. */
+  existing: { id: number; name: string; rows: number | null; mode: string | null; used?: number; mine?: boolean }[]
   chosen: number[]
   can_create: boolean
   allow_ai: boolean
+  /** Median seconds each AI step took over recent analyses ("proposals", "check", "designs"). */
+  usual?: SetupUsualWaits
 }
+
+export type SetupUsualWaits = Partial<Record<'proposals' | 'check' | 'designs', number>>
 
 export interface SetupCreateResult {
   items: { proposal_id: string; name: string; job_id: number | null; dataset_id: number | null; error: string | null }[]
@@ -3651,17 +4242,53 @@ export interface SetupFindings {
   fixed: string[]
   language: string | null
   checked: boolean
+  cleaning?: SetupCleaning
+  since?: string | null
 }
 
 export interface SetupCheckStep {
-  datasets: { id: number; name: string; mode: string; row_count: number | null; findings: SetupFindings }[]
+  datasets: { id: number; name: string; mode: string; row_count: number | null
+              /** True when the setup made this dataset, so it cleans it by itself. */
+              auto_clean?: boolean; findings: SetupFindings }[]
+  demand?: SetupDemand
+  usual?: SetupUsualWaits
+}
+
+/** A drawn chart in miniature: a few numbers, bars, a line, parts of a whole, or rows. */
+export interface SetupPreview {
+  kind: 'number' | 'bars' | 'line' | 'parts' | 'table'
+  percent?: boolean
+  rows: (string | number | null)[][]
+  columns?: string[]
+  more?: number
+  total?: number
+}
+
+/** How to read a connection's data: what is counted against what, what became
+ *  of a row, which numbers add up (docs/meaning-map/PLAN.md). */
+export interface SetupMeaning {
+  pending: boolean
+  failed: string | null
+  built: boolean
+  lines: { kind: 'base' | 'outcome' | 'numbers'; subject: string; text: string }[]
+  rejected: { kind: string; subject: string }[]
+  numbers: { subject: string; table: string; column: string; kind: string; unit: string
+             direction: string; source: string }[]
+  kinds: string[]
+  min_base: number
 }
 
 export interface SetupDesign {
   id: string
   dataset_id: number
   dataset_name: string
-  proposal: DashboardSuggestion
+  /** One page of the dashboard: `answer` is what its charts say, in words;
+   *  each widget's `finding` is what that chart shows. */
+  proposal: DashboardSuggestion & {
+    answer?: string; note?: string | null; unanswered?: string[]
+    /** The part of the data asked for, set once on the dashboard as its filter. */
+    scope_filters?: { column: string; op: string; value: unknown }[]
+  }
   derived: { measures?: MeasureDef[]; calculated_columns?: CalcColumn[] }
   history: { role: 'user' | 'assistant'; text: string }[]
   changing?: string
@@ -3669,9 +4296,13 @@ export interface SetupDesign {
 }
 
 export interface SetupDashboardStep {
-  designs: { pending: boolean; failed: string | null; items: SetupDesign[]; asked: boolean; report_id: number | null; language?: string | null }
+  designs: { pending: boolean; failed: string | null; items: SetupDesign[]; asked: boolean; report_id: number | null
+             /** Designs already made into pages of this analysis's dashboard. */
+             used?: string[]; language?: string | null; since?: string | null }
   has_data: boolean
   datasets: { id: number; name: string }[]
+  demand?: SetupDemand
+  usual?: SetupUsualWaits
 }
 
 export interface DataChangeOptions {
@@ -3707,29 +4338,48 @@ export const setupApi = {
     api.get<SetupFindings>(`/setup/datasets/${datasetId}/health`, { params: { lang } }).then(r => r.data),
   datasetFix: (datasetId: number, action: Record<string, unknown>, lang: string) =>
     api.post<{ steps: unknown[] }>(`/setup/datasets/${datasetId}/fix`, { action }, { params: { lang } }).then(r => r.data),
-  dashboard: (sourceId: number, lang: string) =>
-    api.get<SetupDashboardStep>(`/setup/${sourceId}/dashboard`, { params: { lang } }).then(r => r.data),
-  suggestDashboards: (sourceId: number, lang: string) =>
-    api.post<{ designs: SetupDashboardStep['designs'] }>(`/setup/${sourceId}/dashboard/suggest`, null, { params: { lang } }).then(r => r.data),
-  refineDashboard: (sourceId: number, did: string, message: string, lang: string) =>
-    api.post<{ designs: SetupDashboardStep['designs'] }>(`/setup/${sourceId}/dashboard/${did}/refine`, { message }, { params: { lang } }).then(r => r.data),
-  check: (sourceId: number, lang: string) =>
-    api.get<SetupCheckStep>(`/setup/${sourceId}/check`, { params: { lang } }).then(r => r.data),
-  runCheck: (sourceId: number, datasetId: number, lang: string) =>
-    api.post<{ findings: SetupFindings }>(`/setup/${sourceId}/check/${datasetId}/run`, null, { params: { lang } }).then(r => r.data),
-  fix: (sourceId: number, datasetId: number, itemId: string, how: 'fix' | 'check', lang: string) =>
-    api.post<{ findings: SetupFindings }>(`/setup/${sourceId}/check/${datasetId}/fix`, { item_id: itemId, how }, { params: { lang } }).then(r => r.data),
+  dashboard: (sourceId: number, lang: string, flow?: number) =>
+    api.get<SetupDashboardStep>(`/setup/${sourceId}/dashboard`, { params: { lang, flow } }).then(r => r.data),
+  suggestDashboards: (sourceId: number, lang: string, flow?: number) =>
+    api.post<{ designs: SetupDashboardStep['designs'] }>(`/setup/${sourceId}/dashboard/suggest`, null, { params: { lang, flow } }).then(r => r.data),
+  refineDashboard: (sourceId: number, did: string, message: string, lang: string, flow?: number) =>
+    api.post<{ designs: SetupDashboardStep['designs'] }>(`/setup/${sourceId}/dashboard/${did}/refine`, { message }, { params: { lang, flow } }).then(r => r.data),
+  /** The designs chosen became pages of this dashboard: the analysis is done. */
+  designsUsed: (sourceId: number, reportId: number, designIds: string[], flow?: number) =>
+    api.post<SetupJourney>(`/setup/${sourceId}/dashboard/used`, { report_id: reportId, design_ids: designIds }, { params: { flow } }).then(r => r.data),
+  check: (sourceId: number, lang: string, flow?: number) =>
+    api.get<SetupCheckStep>(`/setup/${sourceId}/check`, { params: { lang, flow } }).then(r => r.data),
+  runCheck: (sourceId: number, datasetId: number, lang: string, flow?: number) =>
+    api.post<{ findings: SetupFindings }>(`/setup/${sourceId}/check/${datasetId}/run`, null, { params: { lang, flow } }).then(r => r.data),
+  fix: (sourceId: number, datasetId: number, itemId: string, how: 'fix' | 'check', lang: string, flow?: number) =>
+    api.post<{ findings: SetupFindings }>(`/setup/${sourceId}/check/${datasetId}/fix`, { item_id: itemId, how }, { params: { lang, flow } }).then(r => r.data),
+  /** Take back an automatic fix (all of them when `actionId` is null), or put one back. */
+  undoFix: (sourceId: number, datasetId: number, actionId: string | null, redo: boolean, flow?: number) =>
+    api.post<{ findings: SetupFindings }>(`/setup/${sourceId}/check/${datasetId}/undo`, { action_id: actionId, redo }, { params: { flow } }).then(r => r.data),
+  /** How to read this database; built once on the first visit. */
+  meaning: (sourceId: number, lang: string) =>
+    api.get<SetupMeaning>(`/setup/${sourceId}/meaning`, { params: { lang } }).then(r => r.data),
+  refreshMeaning: (sourceId: number, lang: string) =>
+    api.post<SetupMeaning>(`/setup/${sourceId}/meaning/refresh`, null, { params: { lang } }).then(r => r.data),
+  editMeaning: (sourceId: number, body: { kind: string; subject: string; status?: 'active' | 'rejected'
+                                          number_kind?: string; direction?: string }, lang: string) =>
+    api.patch<SetupMeaning>(`/setup/${sourceId}/meaning`, body, { params: { lang } }).then(r => r.data),
+  /** What the setup understood the person wants. */
+  demand: (sourceId: number, lang: string, flow?: number) =>
+    api.get<{ demand: SetupDemand }>(`/setup/${sourceId}/demand`, { params: { lang, flow } }).then(r => r.data),
+  changeDemand: (sourceId: number, message: string, lang: string, flow?: number) =>
+    api.post<{ demand: SetupDemand }>(`/setup/${sourceId}/demand/change`, { message }, { params: { lang, flow } }).then(r => r.data),
   /** The latest setup findings for a dataset (plain summaries on its own pages). */
   findings: (datasetId: number) =>
-    api.get<{ findings: SetupFindings | null; source_id: number | null }>(`/setup/findings/${datasetId}`).then(r => r.data),
-  datasets: (sourceId: number, lang: string) =>
-    api.get<SetupDatasetsStep>(`/setup/${sourceId}/datasets`, { params: { lang } }).then(r => r.data),
-  suggestDatasets: (sourceId: number, lang: string) =>
-    api.post<{ proposals: SetupDatasetsStep['proposals'] }>(`/setup/${sourceId}/datasets/suggest`, null, { params: { lang } }).then(r => r.data),
-  refineDataset: (sourceId: number, pid: string, message: string, lang: string) =>
-    api.post<{ proposals: SetupDatasetsStep['proposals'] }>(`/setup/${sourceId}/datasets/${pid}/refine`, { message }, { params: { lang } }).then(r => r.data),
-  createDatasets: (sourceId: number, items: { id: string; name: string }[], mode: 'import' | 'directquery') =>
-    api.post<SetupCreateResult>(`/setup/${sourceId}/datasets/create`, { items, mode }).then(r => r.data),
+    api.get<{ findings: SetupFindings | null; source_id: number | null; flow_id?: number | null }>(`/setup/findings/${datasetId}`).then(r => r.data),
+  datasets: (sourceId: number, lang: string, flow?: number) =>
+    api.get<SetupDatasetsStep>(`/setup/${sourceId}/datasets`, { params: { lang, flow } }).then(r => r.data),
+  suggestDatasets: (sourceId: number, lang: string, flow?: number) =>
+    api.post<{ proposals: SetupDatasetsStep['proposals'] }>(`/setup/${sourceId}/datasets/suggest`, null, { params: { lang, flow } }).then(r => r.data),
+  refineDataset: (sourceId: number, pid: string, message: string, lang: string, flow?: number) =>
+    api.post<{ proposals: SetupDatasetsStep['proposals'] }>(`/setup/${sourceId}/datasets/${pid}/refine`, { message }, { params: { lang, flow } }).then(r => r.data),
+  createDatasets: (sourceId: number, items: { id: string; name: string }[], mode: 'import' | 'directquery', flow?: number) =>
+    api.post<SetupCreateResult>(`/setup/${sourceId}/datasets/create`, { items, mode }, { params: { flow } }).then(r => r.data),
   summary: (sourceId: number, lang: string) =>
     api.get<SetupSummary>(`/setup/${sourceId}/summary`, { params: { lang } }).then(r => r.data),
   refreshSummary: (sourceId: number, lang: string) =>
@@ -3742,9 +4392,15 @@ export const setupApi = {
     api.patch<{ id: number; what: string | null; what_source: 'you' | null }>(`/setup/${sourceId}/tables/${objectId}`, { text }).then(r => r.data),
   /** My unfinished setups, newest first (Home's "Continue"). */
   journeys: () => api.get<SetupJourney[]>('/setup/journeys').then(r => r.data),
-  /** My setup of this connection; started on first visit. */
-  get: (sourceId: number) => api.get<SetupJourney>(`/setup/${sourceId}`).then(r => r.data),
+  /** My setup of this connection; started on first visit. `flow` picks one of its analyses. */
+  get: (sourceId: number, flow?: number) =>
+    api.get<SetupJourney>(`/setup/${sourceId}`, { params: { flow } }).then(r => r.data),
   update: (sourceId: number, body: Partial<{ step: SetupStep; brief: SetupBrief
-                                             dataset_ids: number[]; report_id: number | null }>) =>
-    api.patch<SetupJourney>(`/setup/${sourceId}`, body).then(r => r.data),
+                                             dataset_ids: number[]; created_ids: number[]
+                                             report_id: number | null }>, flow?: number) =>
+    api.patch<SetupJourney>(`/setup/${sourceId}`, body, { params: { flow } }).then(r => r.data),
+  /** Start another analysis of this connection (steps 2-4 again, on other data). */
+  startFlow: (sourceId: number) => api.post<SetupJourney>(`/setup/${sourceId}/flows`).then(r => r.data),
+  updateFlow: (sourceId: number, flowId: number, body: { name?: string; archived?: boolean }) =>
+    api.patch<SetupJourney>(`/setup/${sourceId}/flows/${flowId}`, body).then(r => r.data),
 }

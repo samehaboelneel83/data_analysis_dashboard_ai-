@@ -147,3 +147,101 @@
 /* Dashboard (4b) */
 .setup-charts { margin: 0; padding-inline-start: 20px; display: flex; flex-direction: column; gap: 3px; font-size: 13px; line-height: 1.5; }
 .setup-charts strong { font-weight: 600; }
+
+/* ── v2: analyses (flows), what you want, cleaned for you ─────────────── */
+.setup-flows { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.setup-flows ul { list-style: none; margin: 0; padding: 0; display: flex; gap: 6px; flex-wrap: wrap; }
+.setup-flow {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 320px;
+  padding: 5px 10px; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--surface); color: var(--text); font-size: 13px; cursor: pointer;
+}
+.setup-flow:hover { border-color: var(--accent); }
+.setup-flow.is-current { border-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+.setup-flow__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.setup-flow__step { font-size: 12px; color: var(--muted); font-weight: 400; white-space: nowrap; }
+.setup-flow--new { border-style: dashed; color: var(--accent); }
+.setup-flow svg { flex: none; color: var(--success); }
+.setup-flow--new svg { color: inherit; }
+
+.setup-demand { border-inline-start: 3px solid var(--accent); }
+.setup-demand .setup-section__title { display: inline-flex; align-items: center; gap: 6px; }
+.setup-demand__sentence { margin: 0; font-size: 16px; line-height: 1.55; font-weight: 500; }
+.setup-demand__warn {
+  display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 8px;
+  background: color-mix(in srgb, var(--warning, #d97706) 12%, transparent);
+}
+.setup-demand__warn p { margin: 0; font-size: 14px; display: flex; align-items: center; gap: 6px; }
+.setup-demand__pick { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.setup-demand__details { display: flex; flex-direction: column; gap: 6px; }
+
+.setup-clean__lead {
+  margin: 0; font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px;
+}
+.setup-clean__lead svg { color: var(--success); flex: none; }
+.setup-clean__head { margin: 4px 0 0; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.setup-clean__list { margin: 0; padding-inline-start: 22px; font-size: 14px; line-height: 1.6; }
+.setup-clean__list .setup-badge { margin-inline-start: 6px; }
+.setup-clean__details { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border); padding-top: 10px; }
+.setup-clean__actions { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.setup-clean__actions li {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px;
+}
+.setup-clean__actions li.is-undone span { color: var(--muted); }
+
+.setup-design__answer {
+  margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--surface2);
+  font-size: 15px; line-height: 1.6;
+}
+.setup-table__title label { cursor: pointer; }
+
+/* ── step 4: each suggested chart, drawn small ────────────────────────── */
+.setup-previews {
+  list-style: none; margin: 0; padding: 0; display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+}
+.setup-preview {
+  display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; min-width: 0;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+}
+.setup-preview--table { grid-column: 1 / -1; }
+.setup-preview__title { font-size: 13px; font-weight: 600; line-height: 1.35; }
+.mini { color: var(--accent); min-width: 0; }
+.mini--number { display: flex; gap: 14px; flex-wrap: wrap; }
+.mini__figure { display: flex; flex-direction: column; }
+.mini__value { font-size: 24px; font-weight: 700; line-height: 1.1; }
+.mini__label { font-size: 11px; color: var(--muted); }
+.mini--bars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.mini--bars li { display: grid; grid-template-columns: minmax(0, 38%) 1fr auto; align-items: center; gap: 6px; font-size: 11px; }
+.mini__name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mini__track { height: 8px; border-radius: 4px; background: var(--surface2); overflow: hidden; display: block; }
+.mini__bar { display: block; height: 100%; border-radius: 4px; background: currentColor; }
+.mini__num { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.mini__more { color: var(--muted); }
+.mini--line svg { width: 100%; height: 56px; display: block; }
+.mini__ends { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--muted); }
+.mini--table { overflow-x: auto; color: var(--text); }
+.mini--table table { border-collapse: collapse; font-size: 11px; width: 100%; }
+.mini--table th, .mini--table td { padding: 3px 8px; border-bottom: 1px solid var(--border); text-align: start; white-space: nowrap; }
+.mini--table th { color: var(--muted); font-weight: 600; }
+
+/* ── meaning map ──────────────────────────────────────────────────────── */
+.setup-meaning .setup-section__title { display: inline-flex; align-items: center; gap: 6px; }
+.setup-meaning__lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.setup-meaning__lines li {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 12px; border-radius: 8px; background: var(--surface2); font-size: 14px; line-height: 1.5;
+}
+.setup-meaning__details { display: flex; flex-direction: column; gap: 8px; }
+.setup-meaning__numbers { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.setup-meaning__numbers li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.setup-meaning__numbers li > span:first-child { flex: 1; min-width: 160px; }
+.setup-meaning__numbers select {
+  border: 1px solid var(--border); border-radius: 6px; padding: 3px 6px; background: var(--surface); color: var(--text);
+  font-size: 12px;
+}
+.setup-counts-only { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
+
+/* How long an AI step has run, and its usual time (persona test 3.6). */
+.setup-wait { color: var(--muted); font-variant-numeric: tabular-nums; }

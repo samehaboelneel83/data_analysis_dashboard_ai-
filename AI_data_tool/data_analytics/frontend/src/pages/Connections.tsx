@@ -242,7 +242,11 @@ export default function Connections() {
           </div>
           {srcFilter.filtered.map(ds => {
             if (typeFilter && ds.type !== typeFilter) return null
-            const testRes = testResults[ds.id]
+            // The last test kept with the connection (`__health__`), until one is run here.
+            const stored = (ds.config as Record<string, unknown>).__health__ as { ok?: boolean; error?: string | null } | undefined
+            const fresh = ds.id in testResults
+            const testRes = fresh ? testResults[ds.id] : stored?.ok
+            const testError = testErrors[ds.id] || (stored?.ok === false ? stored.error ?? '' : '')
             const run = syncs[ds.id]
             const status = testRes === true ? 'ok' : testRes === false ? 'fail'
               : run?.status === 'running' ? 'syncing' : run?.status === 'failed' ? 'syncFailed'
@@ -269,12 +273,12 @@ export default function Connections() {
                     {t(`cn2.st.${status}`)}
                   </span>
                   {testRes != null && (
-                    testRes === false && testErrors[ds.id] ? (
-                      <span className="dl-cn-st__err" role="status" data-testid="conn-test-error" title={testErrors[ds.id]}>
-                        <span dir="auto">{testErrors[ds.id].split('\n')[0].replace(/\s*\(Background on this error.*$/, '').slice(0, 240)}</span>
+                    testRes === false && testError ? (
+                      <span className="dl-cn-st__err" role="status" data-testid="conn-test-error" title={testError}>
+                        <span dir="auto">{testError.split('\n')[0].replace(/\s*\(Background on this error.*$/, '').slice(0, 240)}</span>
                         {canAdminister && <button type="button" className="dl-cn-fix" onClick={() => setModal(ds)}>{t('cn2.fix')}</button>}
                       </span>
-                    ) : <span className="dl-cn-st__sub">{t('cn2.checkedNow')}</span>
+                    ) : fresh ? <span className="dl-cn-st__sub">{t('cn2.checkedNow')}</span> : null
                   )}
                   {testRes == null && run?.status === 'failed' && run.error && (
                     <span className="dl-cn-st__err" title={run.error}><span dir="auto">{run.error.slice(0, 120)}</span></span>

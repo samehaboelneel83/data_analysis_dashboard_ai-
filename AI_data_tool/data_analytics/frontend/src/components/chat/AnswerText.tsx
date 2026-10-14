@@ -85,15 +85,28 @@ export default function AnswerText({ text, evidence, onShow }: {
 }) {
   const t = useT()
   const { direction } = useDirection()
+  // The checked answer when the server set unverified sentences aside.
+  const aside = evidence?.set_aside ?? []
+  if (evidence?.text) text = evidence.text
   // By words, not letters: English data names must not outvote an Arabic sentence (QA V8).
   const dir = proseDir(text, direction)
   const claims = spans(text, evidence)
   const markup = markupSpans(text, { httpsOnly: true })
+  const asideBlock = aside.length > 0 && (
+    <details className="dl-answer-aside" data-testid="answer-set-aside">
+      <summary><AlertTriangle size={13} aria-hidden /> {t('ask.ev.setAside', { n: localDigits(String(aside.length)) })}</summary>
+      {aside.map((s, i) => <p key={i} dir={proseDir(s, direction)}>{s}</p>)}
+    </details>
+  )
   if (!claims) {
+    const plain = text
     return (
-      <p className="dl-answer-text" data-testid="answer-text" dir={dir}>
-        {renderMarkup(text, markup, 0, text.length, (a, b) => numbers(text.slice(a, b), `n${a}`, true))}
-      </p>
+      <>
+        <p className="dl-answer-text" data-testid="answer-text" dir={dir}>
+          {renderMarkup(plain, markup, 0, plain.length, (a, b) => numbers(plain.slice(a, b), `n${a}`, true))}
+        </p>
+        {asideBlock}
+      </>
     )
   }
   const claim = (c: EvidenceClaim, i: number): ReactNode => {
@@ -142,6 +155,7 @@ export default function AnswerText({ text, evidence, onShow }: {
             : t('ask.ev.untracedMany', { n: localDigits(String(untraced)) })}
         </p>
       )}
+      {asideBlock}
     </>
   )
 }

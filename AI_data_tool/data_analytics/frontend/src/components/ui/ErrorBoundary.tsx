@@ -1,4 +1,28 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { useT } from '../../i18n'
+
+/** The card itself is a function component so it can speak the reader's language. */
+function Fallback({ error, inline, onRetry }: { error: Error; inline?: boolean; onRetry: () => void }) {
+  const t = useT()
+  return (
+      <div role="alert" className="card" style={{ margin: inline ? 0 : 24, padding: '22px 24px', maxWidth: 640,
+        borderInlineStart: '3px solid var(--danger, #c0392b)' }}>
+        <p style={{ fontWeight: 600, marginBottom: 6 }}>{t('eb.title')}</p>
+        <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 14 }}>
+          {t('eb.body')}
+        </p>
+        <details style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
+          <summary style={{ cursor: 'pointer' }}>{t('eb.details')}</summary>
+          <pre style={{ whiteSpace: 'pre-wrap', marginTop: 6, fontSize: 11 }}>{String(error?.message || error)}</pre>
+        </details>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button type="button" className="btn btn-primary btn-sm" onClick={onRetry}>{t('sb.retry')}</button>
+          <button type="button" className="btn btn-sm" onClick={() => { window.history.back() }}>{t('eb.back')}</button>
+          <a className="btn btn-ghost btn-sm" href="/">{t('eb.home')}</a>
+        </div>
+      </div>
+  )
+}
 
 /**
  * The last line of defence: a render error anywhere below this used to take
@@ -19,23 +43,6 @@ export default class ErrorBoundary extends Component<{ children: ReactNode; rese
   }
   render() {
     if (!this.state.error) return this.props.children
-    return (
-      <div role="alert" className="card" style={{ margin: this.props.inline ? 0 : 24, padding: '22px 24px', maxWidth: 640,
-        borderInlineStart: '3px solid var(--danger, #c0392b)' }}>
-        <p style={{ fontWeight: 600, marginBottom: 6 }}>Something went wrong on this page</p>
-        <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 14 }}>
-          The rest of the app still works. Try again, or go back to where you were.
-        </p>
-        <details style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
-          <summary style={{ cursor: 'pointer' }}>Technical details</summary>
-          <pre style={{ whiteSpace: 'pre-wrap', marginTop: 6, fontSize: 11 }}>{String(this.state.error?.message || this.state.error)}</pre>
-        </details>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button type="button" className="btn btn-primary btn-sm" onClick={() => this.setState({ error: null })}>Try again</button>
-          <button type="button" className="btn btn-sm" onClick={() => { window.history.back() }}>Go back</button>
-          <a className="btn btn-ghost btn-sm" href="/">Home</a>
-        </div>
-      </div>
-    )
+    return <Fallback error={this.state.error} inline={this.props.inline} onRetry={() => this.setState({ error: null })} />
   }
 }

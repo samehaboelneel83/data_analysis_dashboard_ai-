@@ -270,8 +270,15 @@ def partial_period(df: pd.DataFrame, dim: str | None, granularity: str | None,
     through = mx.date()
     ps = period_start(through, unit)
     last_day = add_periods(ps, unit, 1) - timedelta(days=1)
+    thin = None
     if (last_day - through).days < cadence_days(dt):
-        return None
+        # The dates cannot tell (a summary table keyed by the first day of each
+        # month): a last bucket holding far fewer rows than the usual one is
+        # still being filled (persona test 2026-10-12: a month the data stops on
+        # the 9th "fell 23%").
+        thin = thin_last_bucket(dt, unit)
+        if thin is None:
+            return None
     if unit == "year":
         label = str(ps.year)
     elif unit == "quarter":
@@ -284,6 +291,59 @@ def partial_period(df: pd.DataFrame, dim: str | None, granularity: str | None,
     names = {str(r.get("name")) for r in (result.get("rows") or []) if isinstance(r, dict)}
     if label not in names:
         return None
+    if thin is not None:
+        return {"label": label, "through": through.isoformat(), "granularity": unit, "thin": True,
+                "text": f"{label} holds {thin:.0%} of the rows of a usual {unit}: it is probably not complete"}
     return {"label": label, "through": through.isoformat(), "granularity": unit,
             "text": f"{label} is partial: the data runs to {_fmt(through)}, "
                     f"the {unit} ends {_fmt(last_day)}"}
+
+
+#: A last bucket holding less than this share of the usual bucket's rows is
+#: taken as unfinished when the dates themselves cannot say.
+THIN_BUCKET_SHARE = 0.5
+THIN_BUCKET_MIN_PERIODS = 4
+
+
+def thin_last_bucket(dt: pd.Series, unit: str) -> float | None:
+    """The last bucket's rows as a share of the median earlier bucket, when it
+    is below THIN_BUCKET_SHARE; else None."""
+    freq = {"year": "Y", "quarter": "Q", "month": "M", "week": "W"}.get(unit)
+    d = dt.dropna()
+    if not freq or d.empty:
+        return None
+    counts = d.dt.to_period(freq).value_counts().sort_index()
+    if len(counts) < THIN_BUCKET_MIN_PERIODS + 1:
+        return None
+    usual = float(counts.iloc[:-1].tail(12).median())
+    share = float(counts.iloc[-1]) / usual if usual else 1.0
+    return share if share < THIN_BUCKET_SHARE else None
+
+
+#: Dates this far outside a column's main range are strays (persona test
+#: 2026-10-12: 18 trips dated 2002-2023 in a month of taxi data became the
+#: "prior 3 months" a 64,182,344% rise was measured against).
+STRAY_TAIL = 0.005
+STRAY_MAX_SHARE = 0.005
+STRAY_MIN_GAP_DAYS = 31
+STRAY_GAP_SHARE = 0.1
+STRAY_MIN_ROWS = 200
+
+
+def stray_dates(series: pd.Series) -> dict | None:
+    """{"lo", "hi", "rows", "mask"} when a few dates sit far outside the
+    column's main range: beyond its 0.5-99.5% range by more than a gap of
+    max(31 days, a tenth of that range), and at most 0.5% of the dates. `mask`
+    is True for the stray rows of `series` (same index). None otherwise."""
+    dt = as_dates(series)
+    d = dt.dropna()
+    if len(d) < STRAY_MIN_ROWS:
+        return None
+    lo, hi = d.quantile(STRAY_TAIL), d.quantile(1 - STRAY_TAIL)
+    gap = pd.Timedelta(days=max(STRAY_MIN_GAP_DAYS, STRAY_GAP_SHARE * max((hi - lo).days, 1)))
+    mask = ((dt < lo - gap) | (dt > hi + gap)).fillna(False)
+    n = int(mask.sum())
+    if not n or n > STRAY_MAX_SHARE * len(d):
+        return None
+    kept = dt[~mask].dropna()
+    return {"lo": kept.min(), "hi": kept.max(), "rows": n, "mask": mask}

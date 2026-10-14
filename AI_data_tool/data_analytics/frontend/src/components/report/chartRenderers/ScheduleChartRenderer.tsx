@@ -1,3 +1,4 @@
+import { useT } from '../../../i18n'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell, ResponsiveContainer } from 'recharts'
 import { COLORS, TT } from '../chartUtils'
 import type { ChartRendererProps } from './types'
@@ -11,10 +12,11 @@ function toMs(v: unknown): number {
 }
 
 export default function ScheduleChartRenderer({ data, cfg, rtl, ruleStyles, plotH }: ChartRendererProps) {
+  const t9 = useT()
   const rows: { name: string; start: unknown; end: unknown; group?: string }[] = data?.rows ?? []
 
   if (rows.length === 0) {
-    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>Configure widget to see data</div>
+    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>{t9('cr.configure')}</div>
   }
 
   // origIndex tracks each row's position in the widget's original result rows, which is
@@ -24,7 +26,7 @@ export default function ScheduleChartRenderer({ data, cfg, rtl, ruleStyles, plot
   const validRows = parsed.filter(r => !isNaN(r.startMs) && !isNaN(r.endMs))
 
   if (validRows.length === 0) {
-    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>Configure widget to see data</div>
+    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>{t9('cr.configure')}</div>
   }
 
   const minStart = Math.min(...validRows.map(r => r.startMs))

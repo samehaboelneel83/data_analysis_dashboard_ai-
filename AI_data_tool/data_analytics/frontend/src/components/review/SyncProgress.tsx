@@ -25,7 +25,7 @@ const STAGE_LABELS: Record<string, MessageKey> = {
 /** The words for a status the server sends; an unknown one shows as sent. */
 const STATUS_LABELS: Record<string, MessageKey> = {
   ok: 'i2c.sp.st.ok', failed: 'i2c.sp.st.failed', skipped: 'i2c.sp.st.skipped',
-  partial: 'i2c.sp.st.partial', running: 'i2c.sp.st.running',
+  partial: 'i2c.sp.st.partial', running: 'i2c.sp.st.running', pending: 'syp.st.pending',
 }
 
 const STATUS_COLOR: Record<string, string> = {

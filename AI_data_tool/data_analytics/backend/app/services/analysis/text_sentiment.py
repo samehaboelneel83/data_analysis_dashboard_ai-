@@ -19,6 +19,8 @@ What it reports beyond the split, because a lexicon is easy to over-trust:
 """
 from __future__ import annotations
 
+from ..readback import _s, as_i18n
+
 from collections import Counter, defaultdict
 
 import pandas as pd
@@ -59,22 +61,20 @@ def _label_from_column(v) -> str | None:
 def text_sentiment(df: pd.DataFrame, column: str, group_by: str | None = None,
                    validate_against: str | None = None) -> dict:
     if column not in df.columns:
-        raise TextSentimentError(f"Column '{column}' not found")
+        raise TextSentimentError(_s("no.automated_prediction.1", "Column '{a}' not found", cap=False, a=column))
     series = df[column]
     if pd.api.types.is_numeric_dtype(series) or pd.api.types.is_datetime64_any_dtype(series):
         raise TextSentimentError(
-            f"'{column}' is not text. Sentiment is read from what people wrote, so "
-            f"this needs a column of comments or reviews.")
+            _s("no.text_sentiment.1", "'{a}' is not text. Sentiment is read from what people wrote, so this needs a column of comments or reviews.", cap=False, a=column))
     for extra, what in ((group_by, "Group"), (validate_against, "Label")):
         if extra and extra not in df.columns:
-            raise TextSentimentError(f"{what} column '{extra}' not found")
+            raise TextSentimentError(_s("no.text_sentiment.2", "{a} column '{b}' not found", cap=False, a=what, b=extra))
 
     mask = series.notna() & (series.astype(str).str.strip().str.len() >= MIN_DOCUMENT_CHARS)
     frame = df.loc[mask]
     if len(frame) < MIN_DOCUMENTS:
         raise TextSentimentError(
-            f"Only {len(frame)} usable comments; at least {MIN_DOCUMENTS} are needed "
-            f"for a split worth reading.")
+            _s("no.text_sentiment.3", "Only {a} usable comments; at least {b} are needed for a split worth reading.", cap=False, a=len(frame), b=MIN_DOCUMENTS))
     texts = frame[column].astype(str).tolist()
     langs = detect_languages(texts)
 
@@ -97,8 +97,7 @@ def text_sentiment(df: pd.DataFrame, column: str, group_by: str | None = None,
     scored = len(texts) - counts.get("unscored", 0)
     if scored == 0:
         raise TextSentimentError(
-            f"None of the {len(texts):,} comments contains a word the lexicon knows "
-            f"(it covers English and Arabic). Nothing can be said about tone here.")
+            _s("no.text_sentiment.4", "None of the {a} comments contains a word the lexicon knows (it covers English and Arabic). Nothing can be said about tone here.", cap=False, a=f'{len(texts):,}'))
     scored_values = [s for s in scores if s is not None]
     split = {k: counts.get(k, 0) for k in ("positive", "neutral", "negative", "unscored")}
 
@@ -161,18 +160,19 @@ def text_sentiment(df: pd.DataFrame, column: str, group_by: str | None = None,
     lang_names = [LANGUAGE_NAMES.get(code, code) for code in langs["languages"]]
     uncovered = [n for n in lang_names if n not in ("English", "Arabic")]
     caveats = [
-        "A lexicon estimate: each comment is scored from the words it contains, with "
-        "negation, intensifiers and 'but' handled. It misses sarcasm, and a domain word "
-        "can read the wrong way -- check the words that drove the result.",
-        f"{split['unscored']:,} of {len(texts):,} comments contain no scored word and are "
-        f"left unscored rather than counted as neutral.",
+        _s("ts.lexicon", "A lexicon estimate: each comment is scored from the words it contains, with "
+           "negation, intensifiers and 'but' handled. It misses sarcasm, and a domain word "
+           "can read the wrong way -- check the words that drove the result."),
+        _s("ts.unscored", "{n} of {total} comments contain no scored word and are "
+           "left unscored rather than counted as neutral.", n=f"{split['unscored']:,}", total=f"{len(texts):,}"),
     ]
     if uncovered:
-        caveats.append(f"The lexicon covers English and Arabic; this column also looks "
-                       f"{', '.join(uncovered)}, whose words are not scored.")
+        caveats.append(_s("ts.uncovered", "The lexicon covers English and Arabic; this column also looks "
+                          "{langs}, whose words are not scored.", langs=', '.join(uncovered)))
     if agreement and agreement.get("agreement") is not None:
-        caveats.append(f"Against '{validate_against}', the lexicon agrees on "
-                       f"{agreement['agreement'] * 100:.0f}% of {agreement['compared']:,} comments.")
+        caveats.append(_s("ts.agrees", "Against '{col}', the lexicon agrees on "
+                          "{pct}% of {n} comments.", col=validate_against,
+                          pct=f"{agreement['agreement'] * 100:.0f}", n=f"{agreement['compared']:,}"))
 
     return {
         "kind": "text_sentiment",
@@ -189,5 +189,6 @@ def text_sentiment(df: pd.DataFrame, column: str, group_by: str | None = None,
         "most_negative": most_negative,
         "groups": groups,
         "agreement": agreement,
-        "caveats": caveats,
+        "caveats": [str(c) for c in caveats],
+        "caveats_i18n": [as_i18n(c) for c in caveats],
     }

@@ -8,6 +8,7 @@ import type { ReactNode } from 'react'
 import PlainSummary, { type PlainItem } from '../ui/PlainSummary'
 import { useT } from '../../i18n'
 import type { SetupFindingItem, SetupFindings } from '../../services/api'
+import { sayText } from '../../lib/readbackText'
 
 export default function FindingsSummary({ findings, onFix, busy, details, healthTitle, insightsTitle }: {
   findings: SetupFindings
@@ -22,7 +23,7 @@ export default function FindingsSummary({ findings, onFix, busy, details, health
   const t = useT()
   const done = new Set(findings.fixed)
   const toItem = (i: SetupFindingItem): PlainItem => ({
-    id: i.id, tone: i.tone, what: i.what, why: i.why || undefined, todo: i.todo ?? undefined,
+    id: i.id, tone: i.tone, what: sayText(t, i.what, (i as { what_i18n?: unknown }).what_i18n as never), why: sayText(t, i.why ?? '', (i as { why_i18n?: unknown }).why_i18n as never) || undefined, todo: i.todo ?? undefined,
     action: onFix && i.action ? {
       label: i.action.label, onClick: () => onFix(i, 'fix'),
       busy: busy === `${i.id}|fix`, done: done.has(`${i.id}|fix`),

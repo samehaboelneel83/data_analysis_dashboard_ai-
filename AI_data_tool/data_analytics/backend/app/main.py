@@ -7,6 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from .core.widget_errors import CodedHTTPException
+from .core.said_errors import SaidHTTPException
+from .services.memory_guard import TooLargeToLoad as _TooLargeToLoad
 from .core.config import settings
 from .services.quotas import QuotaExceeded
 
@@ -18,6 +20,7 @@ from .routers import boundary_sets, map_settings, calendar_settings, prediction_
 from .routers import workspace
 from .routers import dataflows
 from .routers import pins
+from .routers import publishing
 from .routers import guided_setup
 from .routers import jobs as jobs_router
 from .routers import automation as automation_router
@@ -57,6 +60,7 @@ async def _migrate(conn):
         "ALTER TABLE report_pages ADD COLUMN IF NOT EXISTS layout_template VARCHAR(40)",
         # 0038: session revocation cut-off (see User.tokens_valid_after).
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS tokens_valid_after TIMESTAMP WITH TIME ZONE",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS about TEXT",
         # 0039: duplicate-upload detection (see Dataset.content_sha256).
         "ALTER TABLE datasets ADD COLUMN IF NOT EXISTS content_sha256 VARCHAR(64)",
         # 0056: each refresh run's check results (see RefreshRun.checks).
@@ -106,6 +110,32 @@ async def _migrate(conn):
         "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS fiscal_year_start_month INTEGER NOT NULL DEFAULT 1",
         "ALTER TABLE reports ADD COLUMN IF NOT EXISTS theme VARCHAR(20) NOT NULL DEFAULT 'default'",
         "ALTER TABLE reports ADD COLUMN IF NOT EXISTS display_rules JSON DEFAULT '[]'",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS style JSON DEFAULT '{}'",
+        # ── Publishing and sharing (docs/publishing/PLAN.md; alembic 0068) ───
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS category VARCHAR(60)",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS tags JSON DEFAULT '[]'",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS published_at TIMESTAMP WITH TIME ZONE",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS published_by INTEGER REFERENCES users(id) ON DELETE SET NULL",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP WITH TIME ZONE",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS viewers_may_export BOOLEAN NOT NULL DEFAULT true",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS review_state VARCHAR(12) NOT NULL DEFAULT 'none'",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS review_revision INTEGER",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS review_requested_by INTEGER REFERENCES users(id) ON DELETE SET NULL",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS review_decided_by INTEGER REFERENCES users(id) ON DELETE SET NULL",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS review_note VARCHAR(500)",
+        "CREATE INDEX IF NOT EXISTS ix_reports_category ON reports (category)",
+        "CREATE INDEX IF NOT EXISTS ix_reports_archived_at ON reports (archived_at)",
+        "CREATE INDEX IF NOT EXISTS ix_reports_org_published ON reports (org_id, published)",
+        "ALTER TABLE report_user_grants ALTER COLUMN user_id DROP NOT NULL",
+        "ALTER TABLE report_user_grants ADD COLUMN IF NOT EXISTS role_id INTEGER REFERENCES roles(id) ON DELETE CASCADE",
+        "ALTER TABLE report_user_grants ADD COLUMN IF NOT EXISTS org_unit_id INTEGER REFERENCES org_units(id) ON DELETE CASCADE",
+        "ALTER TABLE report_user_grants ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE",
+        "ALTER TABLE report_user_grants ADD COLUMN IF NOT EXISTS can_export BOOLEAN NOT NULL DEFAULT true",
+        "ALTER TABLE report_user_grants ADD COLUMN IF NOT EXISTS can_share BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE report_user_grants ADD COLUMN IF NOT EXISTS created_by INTEGER REFERENCES users(id) ON DELETE SET NULL",
+        "CREATE INDEX IF NOT EXISTS ix_report_user_grants_role_id ON report_user_grants (role_id)",
+        "CREATE INDEX IF NOT EXISTS ix_report_user_grants_org_unit_id ON report_user_grants (org_unit_id)",
+        "ALTER TABLE org_review_settings ADD COLUMN IF NOT EXISTS require_approval BOOLEAN NOT NULL DEFAULT false",
         # ── Layer 1 — Connectors & Ingestion ────────────────────────────────
         # The four new metadata tables come free from create_all; these are the
         # columns Layer 1 adds to tables that already exist in live databases.
@@ -122,6 +152,9 @@ async def _migrate(conn):
         "ALTER TABLE datasets ADD COLUMN IF NOT EXISTS description_source VARCHAR(20)",
         "ALTER TABLE datasets ADD COLUMN IF NOT EXISTS last_profiled_at TIMESTAMP WITH TIME ZONE",
         "ALTER TABLE data_sources ADD COLUMN IF NOT EXISTS allow_llm_sampling BOOLEAN NOT NULL DEFAULT FALSE",
+        # "Allow AI" per dataset (0064): NULL = follow the connection, or the
+        # installation default for an uploaded file (services/ai_policy.py).
+        "ALTER TABLE datasets ADD COLUMN IF NOT EXISTS allow_ai BOOLEAN",
         # Guided setup (0059): the Understand step's kept summary, added after the
         # table first shipped -- create_all never adds a column to a live table.
         "ALTER TABLE setup_journeys ADD COLUMN IF NOT EXISTS summary JSON",
@@ -696,6 +729,8 @@ app.include_router(analysis.router,     prefix="/api/v1")
 app.include_router(analysis.registry_router, prefix="/api/v1")
 app.include_router(reports.router,      prefix="/api/v1")
 app.include_router(report_copilot.router, prefix="/api/v1")
+app.include_router(publishing.router,   prefix="/api/v1")
+app.include_router(publishing.portal,   prefix="/api/v1")
 app.include_router(hierarchy.router,    prefix="/api/v1")
 app.include_router(widget_data.router,  prefix="/api/v1")
 app.include_router(data_sources.router, prefix="/api/v1")
@@ -716,6 +751,8 @@ app.include_router(notifications.router, prefix="/api/v1")
 app.include_router(shared.router,        prefix="/api/v1")
 app.include_router(embed.router,         prefix="/api/v1")
 app.include_router(widget_templates.router, prefix="/api/v1")
+from .routers import dashboard_templates as _dashboard_templates  # noqa: E402
+app.include_router(_dashboard_templates.router, prefix="/api/v1")
 app.include_router(workspace.router,     prefix="/api/v1")
 app.include_router(dataflows.router,     prefix="/api/v1")
 app.include_router(platform.router,      prefix="/api/v1")
@@ -746,6 +783,23 @@ app.include_router(guided_setup.router, prefix="/api/v1")
 # test_router_reachability.py now pins every router to the prefix the client
 # actually uses, so a future unprefixed mount fails instead of going dark.
 app.include_router(agent_router.router,  prefix="/api/v1")
+
+
+@app.exception_handler(_TooLargeToLoad)
+async def _too_large_to_load_handler(request, exc: _TooLargeToLoad):
+    """A dataset that does not fit in this server's free memory: said, with
+    what still works, instead of a dead process (services/memory_guard.py)."""
+    return JSONResponse(status_code=413, content={"detail": str(exc), "code": "too_large_to_load"})
+
+
+@app.exception_handler(SaidHTTPException)
+async def _said_http_exception_handler(request, exc: SaidHTTPException):
+    """A refusal with its sentence's key beside the English, so the browser
+    says it in the reader's language -- see core/said_errors.py. On the
+    subclass, for the reason given below."""
+    return JSONResponse(status_code=exc.status_code,
+                        content={"detail": exc.detail, "detail_i18n": exc.detail_i18n},
+                        headers=getattr(exc, "headers", None))
 
 
 @app.exception_handler(CodedHTTPException)

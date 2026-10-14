@@ -163,6 +163,20 @@ class TestRepairIsBounded:
         assert len(client.generate_calls) == 3, "repair is bounded at 3 total attempts"
 
 
+    async def test_a_sum_that_only_v7_doubts_is_answered_after_the_repairs(self, db_session, world):
+        # Persona test 2026-10-12 (plan 0.9): "busiest" on a summary table,
+        # where COUNT(*) would count summary rows, was refused outright.
+        summed = {"sql": "SELECT sum(total) AS t FROM orders"}
+        client = ScriptedClient(classify=[NOT_AMBIGUOUS], plan=[ONE_STEP],
+                                generate=[summed, summed, summed])
+        run = await run_agent(db_session, question="when were we busiest",
+                              source=world["ds"], user=world["user"], client=client)
+        await db_session.commit()
+        assert run.status == "ok"
+        step = (await db_session.execute(select(AgentStep))).scalar_one()
+        assert [f["rung"] for f in step.validation_failures] == ["V7", "V7", "V7"]
+
+
 class TestPoliciesBind:
     async def test_a_row_policy_filters_the_agents_query(self, db_session, world,
                                                           monkeypatch):

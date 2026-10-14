@@ -174,13 +174,13 @@ export default function SuggestFromSourceDialog(
         <label style={label}>
           {t('i2c.sfs.who')}
           <input style={input} value={role} autoFocus disabled={busy || building}
-            placeholder={t('i2c.sfs.whoPh')}
+            placeholder={t('sfs.whoPh')}
             onChange={e => setRole(e.target.value)} />
         </label>
         <label style={{ ...label, marginTop: 10 }}>
           {t('i2c.sfs.goal')}
           <input style={input} value={goal} disabled={busy || building}
-            placeholder={t('i2c.sfs.goalPh')}
+            placeholder={t('sfs.goalPh')}
             onChange={e => setGoal(e.target.value)} />
         </label>
 

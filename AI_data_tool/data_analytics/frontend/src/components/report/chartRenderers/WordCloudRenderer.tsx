@@ -1,3 +1,4 @@
+import { useT } from '../../../i18n'
 import { useEffect, useRef, useState } from 'react'
 import cloud from 'd3-cloud'
 import { COLORS } from '../chartUtils'
@@ -6,6 +7,7 @@ import type { ChartRendererProps } from './types'
 interface PlacedWord { text: string; size: number; x: number; y: number; rotate: number; fill: string }
 
 export default function WordCloudRenderer({ rows, onClickPoint, broadcasts, localSelected }: ChartRendererProps) {
+  const t9 = useT()
   const containerRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ width: 600, height: 400 })
   const [placed, setPlaced] = useState<PlacedWord[]>([])
@@ -51,7 +53,7 @@ export default function WordCloudRenderer({ rows, onClickPoint, broadcasts, loca
   }, [JSON.stringify(rows), size.width, size.height])
 
   if ((rows ?? []).length === 0) {
-    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>Configure widget to see data</div>
+    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>{t9('cr.configure')}</div>
   }
 
   return (

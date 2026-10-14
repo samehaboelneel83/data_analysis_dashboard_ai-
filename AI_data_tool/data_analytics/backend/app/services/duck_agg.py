@@ -86,6 +86,9 @@ _SUPPORTED_KEYS = frozenset({
     # returns. Listed because new table widgets are created carrying them, and
     # an unlisted key would push every one of those onto pandas.
     "show_subtotals", "totals_position", "totals_scope",
+    # Groups with fewer rows are left out of a ranking of averages: HAVING below.
+    # `size_column`: on summary rows, the column saying how many rows each stands for.
+    "min_group_rows", "size_column",
 })
 
 
@@ -128,8 +131,10 @@ class DuckPlan:
     #: ("01/02/2024"), so the aggregation only runs when every non-null
     #: value cast and at least one did. Otherwise: pandas.
     probe_sql: str | None
-    dimension: str
+    dimension: str | None
     measure: str | None
+    #: A single number that is a count: the frame carries the count itself.
+    scalar_count: bool = False
 
 
 #: `:r0`, `:r1` ... as `sql_expr._Translator._param` emits them. Anchored to
@@ -170,7 +175,11 @@ def plan(config: dict, columns: list[str], source: str,
     agg = (config.get("aggregation") or "sum").lower()
 
     if not dim:
-        raise Ineligible("no dimension (scalar/KPI shape)")
+        # ONE number over all the (filtered) rows: a headline number. Added
+        # 2026-10-11 for large data -- every dashboard leads with these, and
+        # on the pandas path each one loaded the whole file to answer with a
+        # single figure.
+        return _scalar_plan(config, columns, source, extra_where, meas, agg)
     if dim not in columns:
         raise Ineligible(f"dimension '{dim}' is not a real column")
     # No measure: "how many rows per value" -- the most common chart there is.
@@ -198,6 +207,42 @@ def plan(config: dict, columns: list[str], source: str,
     if sort_col and sort_col != dim:
         raise Ineligible("sort_col on a non-dimension column")
 
+    where, params = _where(config, columns, extra_where)
+
+    dim_i = _quote_ident(dim)
+    meas_i = _quote_ident(meas) if meas else None
+    return _grouped_plan(config, source, where, params, dim, meas, agg, count_mode, dim_i, meas_i)
+
+
+#: Aggregations of ONE number over all rows. The last two count, so the frame
+#: carries the count and the shaper is told to pass it through.
+_SCALAR_COUNTS = {"count": "COUNT({col})", "countd": "COUNT(DISTINCT {col})"}
+
+
+def _scalar_plan(config: dict, columns: list[str], source: str, extra_where, meas, agg) -> DuckPlan:
+    if not meas:
+        raise Ineligible("no dimension and no measure (a table of rows)")
+    if meas not in columns:
+        raise Ineligible(f"measure '{meas}' is not a real column")
+    counted = agg in _SCALAR_COUNTS
+    if not counted and (agg not in GRAIN_SAFE_AGGREGATIONS or agg not in _SQL_AGG):
+        raise Ineligible(f"aggregation '{agg}' is not grain-safe")
+    for key in ("dimension_granularity", "sort_col", "limit"):
+        if config.get(key):
+            raise Ineligible(f"'{key}' on a single number")
+    where, params = _where(config, columns, extra_where)
+    meas_i = _quote_ident(meas)
+    template = _SCALAR_COUNTS[agg] if counted else _SQL_AGG[agg]
+    agg_expr = template.format(col=meas_i) if "{col}" in template else f"{template}({meas_i})"
+    filtered = " AND ".join(where) if where else "TRUE"
+    return DuckPlan(sql=f"SELECT {agg_expr} AS __value__ FROM {source} WHERE {filtered}",
+                    count_sql=f"SELECT COUNT(*), 0 FROM {source} WHERE {filtered}", params=params,
+                    probe_sql=None, dimension=None, measure=meas, scalar_count=counted)
+
+
+def _where(config: dict, columns: list[str], extra_where) -> tuple[list[str], list]:
+    """The WHERE of a pushdown, and its parameters: translated predicates
+    first, then the widget's own filters."""
     where, params = [], []
     # Predicates translated elsewhere -- an RLS rule, a report filter
     # expression -- arrive as (sql, {name: value}) with `:rN` placeholders,
@@ -237,10 +282,11 @@ def plan(config: dict, columns: list[str], source: str,
         else:
             where.append(f"{ident} {_SQL_COMPARISON[op]} ?")
             params.append(f.get("value"))
+    return where, params
 
-    dim_i = _quote_ident(dim)
-    meas_i = _quote_ident(meas) if meas else None
 
+def _grouped_plan(config: dict, source: str, where: list[str], params: list, dim, meas, agg, count_mode,
+                  dim_i, meas_i) -> DuckPlan:
     granularity = str(config.get("dimension_granularity") or "").lower()
     probe_sql = None
     if granularity:
@@ -281,6 +327,14 @@ def plan(config: dict, columns: list[str], source: str,
         f"WHERE {' AND '.join(where)} "
         f"GROUP BY {dim_expr}"
     )
+    min_rows = int(config.get("min_group_rows") or 0)
+    if min_rows > 1 and not count_mode and str(agg or "").lower() not in ("sum", ""):
+        # Same rule as the pandas path: applied only when two groups or more pass it.
+        size = config.get("size_column")
+        n_expr = f"SUM({_quote_ident(size)})" if isinstance(size, str) and size else "COUNT(*)"
+        sql = (f"WITH g AS ({sql.replace(f'AS __value__ ', f'AS __value__, {n_expr} AS __n__ ', 1)}) "
+               f"SELECT __dim__, __value__ FROM g WHERE __n__ >= {min_rows} "
+               f"OR (SELECT COUNT(*) FROM g WHERE __n__ >= {min_rows}) < 2")
     return DuckPlan(sql=sql, count_sql=count_sql, params=params,
                     probe_sql=probe_sql, dimension=dim, measure=meas or COUNT_COL)
 
@@ -342,6 +396,18 @@ def aggregate(file_path: str, config: dict, columns: list[str],
     finally:
         con.close()
 
+    if p.dimension is None:
+        # One row, one number. A count travels in COUNT_COL so the shaper sums
+        # it (one row: the sum is the count) instead of counting one row.
+        frame = frame.rename(columns={"__value__": COUNT_COL if p.scalar_count else p.measure})
+        if not total:
+            # No row passed the filters: the shaper says "empty" of an empty
+            # frame, as it does on the pandas path -- not "0" of one row.
+            frame = frame.iloc[0:0]
+        frame.attrs["source_row_count"] = int(total)
+        frame.attrs["scalar"] = True
+        frame.attrs["scalar_count"] = p.scalar_count
+        return frame
     frame = frame.rename(columns={"__dim__": p.dimension, "__value__": p.measure})
     frame.attrs["source_row_count"] = int(total)
     frame.attrs["missing_dimension_rows"] = int(missing)
@@ -367,3 +433,146 @@ def try_aggregate(file_path: str, config: dict, columns: list[str],
     except Exception as e:  # noqa: BLE001 -- deliberate: never fail a render
         logger.warning("DuckDB pushdown failed, falling back to pandas: %s", e)
         return None, f"error: {type(e).__name__}"
+
+
+# ── Datasets too large to load ───────────────────────────────────────────────
+# The shapes below are declined above because a small dataset draws them from
+# its rows with something extra (a partial-period note, a history, a pivot).
+# On a dataset that cannot be loaded at all the choice is not "rows or
+# DuckDB" but "DuckDB or nothing": measured at 200,000,000 rows, reading even
+# just the two columns of a count by month into pandas took five minutes and
+# 17 GB. So for such a dataset -- and only for it -- these are aggregated
+# here into a small frame the ordinary shaper then finishes, and the extras
+# are rebuilt from frames just as small. Parity with the pandas path is
+# tested shape by shape (tests/test_duck_large.py).
+
+#: Aggregations a frame grouped more finely can be grouped AGAIN by: the
+#: shaper pivots a (group, split) frame and re-buckets a daily one.
+_REGROUP = {"sum": "SUM", "min": "MIN", "minimum": "MIN", "max": "MAX", "maximum": "MAX"}
+#: Aggregations that cannot: computed once per group here and passed through
+#: the shaper as the group's one value.
+_PASS = {"std": "STDDEV_SAMP({col})", "stdev": "STDDEV_SAMP({col})", "variance": "VAR_SAMP({col})",
+         "var": "VAR_SAMP({col})", "countd": "COUNT(DISTINCT {col})", "distinct": "COUNT(DISTINCT {col})"}
+PASS_COL = "__value__"
+_LARGE_KEYS = _SUPPORTED_KEYS | {"dimension2", "sparkline_date", "sparkline_granularity"}
+
+
+def _run(sql: str, params: list) -> pd.DataFrame:
+    import duckdb
+    con = duckdb.connect()
+    try:
+        con.execute(f"SET threads TO {max(1, settings.widget_duckdb_threads)}")
+        return con.execute(sql, params).fetch_df()
+    finally:
+        con.close()
+
+
+def _all_dates_parse(source: str, col_i: str, filtered: str, params: list) -> None:
+    unparsable, parsed = _run(f"SELECT COUNT({col_i}) - COUNT(TRY_CAST({col_i} AS TIMESTAMP)), "
+                              f"COUNT(TRY_CAST({col_i} AS TIMESTAMP)) FROM {source} WHERE {filtered}", params).iloc[0]
+    if unparsable:
+        raise Ineligible(f"{int(unparsable)} date values TRY_CAST cannot read")
+    if not parsed:
+        raise Ineligible("no date values to bucket")
+
+
+def days_frame(file_path: str, column: str, config: dict, columns: list[str], extra_where=None) -> pd.DataFrame:
+    """Every distinct DAY the (filtered) rows fall on, as a one-column frame
+    named `column`: all `relative_dates.partial_period` reads of the rows."""
+    source = _source_expr(file_path)
+    where, params = _where(config, columns, extra_where)
+    day = f"CAST(TRY_CAST({_quote_ident(column)} AS TIMESTAMP) AS DATE)"
+    frame = _run(f"SELECT DISTINCT {day} AS d FROM {source} WHERE {' AND '.join(where + [day + ' IS NOT NULL'])}",
+                 params)
+    return pd.DataFrame({column: pd.to_datetime(frame["d"])})
+
+
+def large_aggregate(file_path: str, config: dict, columns: list[str], extra_where=None) -> pd.DataFrame:
+    """A small frame for one of the shapes described above, or `Ineligible`.
+    `attrs["shape"]` says which: "count_by_date", "split" or "pass"."""
+    unknown = sorted(k for k, v in config.items() if k not in _LARGE_KEYS and v not in (None, "", [], {}))
+    if unknown:
+        raise Ineligible(f"config uses {unknown[0]!r}")
+    if config.get("sparkline_date"):
+        raise Ineligible("a number with its history (see daily_frame)")
+    dim, dim2 = config.get("dimension") or None, config.get("dimension2") or None
+    meas = config.get("measure") or None
+    agg = (config.get("aggregation") or "sum").lower()
+    if not dim or dim not in columns:
+        raise Ineligible("no real dimension")
+    if meas and meas not in columns:
+        raise Ineligible(f"measure '{meas}' is not a real column")
+    if config.get("sort_col") and config.get("sort_col") != dim:
+        raise Ineligible("sort_col on a non-dimension column")
+    count_mode = not meas
+    if count_mode and agg not in ("count", "sum", "", "none"):
+        raise Ineligible(f"no measure with aggregation '{agg}'")
+    source = _source_expr(file_path)
+    where, params = _where(config, columns, extra_where)
+    filtered = " AND ".join(where) if where else "TRUE"
+    dim_i = _quote_ident(dim)
+    granularity = str(config.get("dimension_granularity") or "").lower()
+    if granularity:
+        if granularity not in _GRANULARITY_SQL:
+            raise Ineligible(f"granularity {granularity!r}")
+        _all_dates_parse(source, dim_i, filtered, params)
+        dim_expr = _GRANULARITY_SQL[granularity].format(ts=f"TRY_CAST({dim_i} AS TIMESTAMP)")
+    else:
+        dim_expr = dim_i
+    total, missing = _run(f"SELECT COUNT(*), COUNT(*) - COUNT({dim_expr}) FROM {source} WHERE {filtered}",
+                          params).iloc[0]
+    keep = where + [f"{dim_expr} IS NOT NULL"]
+    if dim2:
+        if dim2 not in columns or dim2 == dim:
+            raise Ineligible("second split is not another real column")
+        if not count_mode and agg not in _REGROUP:
+            raise Ineligible(f"aggregation '{agg}' cannot be regrouped")
+        value = "COUNT(*)" if count_mode else f"{_REGROUP[agg]}({_quote_ident(meas)})"
+        dim2_i = _quote_ident(dim2)
+        frame = _run(f"SELECT {dim_expr} AS a, {dim2_i} AS b, {value} AS v FROM {source} "
+                     f"WHERE {' AND '.join(keep + [dim2_i + ' IS NOT NULL'])} GROUP BY ALL", params)
+        frame = frame.rename(columns={"a": dim, "b": dim2, "v": COUNT_COL if count_mode else meas})
+        # A split chart leaves out a row with EITHER category empty, and says how many.
+        missing = _run(f"SELECT COUNT(*) FROM {source} WHERE {filtered} AND ({dim_expr} IS NULL OR {dim2_i} IS NULL)",
+                       params).iloc[0, 0]
+        shape = "split"
+    elif count_mode:
+        if not granularity:
+            raise Ineligible("a count by a column is the ordinary path's")
+        frame = _run(f"SELECT {dim_expr} AS a, COUNT(*) AS v FROM {source} WHERE {' AND '.join(keep)} GROUP BY ALL",
+                     params).rename(columns={"a": dim, "v": COUNT_COL})
+        shape = "count_by_date"
+    elif agg in _PASS:
+        value = _PASS[agg].format(col=_quote_ident(meas))
+        frame = _run(f"SELECT {dim_expr} AS a, {value} AS v FROM {source} WHERE {' AND '.join(keep)} GROUP BY ALL",
+                     params).rename(columns={"a": dim, "v": PASS_COL})
+        shape = "pass"
+    else:
+        raise Ineligible("not one of the shapes for a dataset too large to load")
+    frame.attrs.update(source_row_count=int(total), missing_dimension_rows=int(missing), shape=shape,
+                       count_mode=count_mode)
+    return frame
+
+
+def daily_frame(file_path: str, config: dict, columns: list[str], extra_where=None) -> pd.DataFrame:
+    """A headline number's history: its value per DAY, which the ordinary
+    trend code then re-buckets to weeks, months or years exactly as it would
+    the rows. Only for aggregations that can be regrouped, and a count."""
+    date_col, meas = config.get("sparkline_date"), config.get("measure") or None
+    agg = (config.get("aggregation") or "sum").lower()
+    if not date_col or date_col not in columns or not meas or meas not in columns:
+        raise Ineligible("history needs a real date and a real number")
+    counted = agg == "count"
+    if not counted and agg not in _REGROUP:
+        raise Ineligible(f"aggregation '{agg}' cannot be regrouped")
+    source = _source_expr(file_path)
+    where, params = _where(config, columns, extra_where)
+    date_i, meas_i = _quote_ident(date_col), _quote_ident(meas)
+    _all_dates_parse(source, date_i, " AND ".join(where) if where else "TRUE", params)
+    day = f"CAST(TRY_CAST({date_i} AS TIMESTAMP) AS DATE)"
+    value = f"COUNT({meas_i})" if counted else f"{_REGROUP[agg]}({meas_i})"
+    frame = _run(f"SELECT {day} AS d, {value} AS v FROM {source} WHERE {' AND '.join(where + [day + ' IS NOT NULL'])} "
+                 "GROUP BY ALL", params)
+    out = pd.DataFrame({date_col: pd.to_datetime(frame["d"]), (COUNT_COL if counted else meas): frame["v"]})
+    out.attrs["counted"] = counted
+    return out
