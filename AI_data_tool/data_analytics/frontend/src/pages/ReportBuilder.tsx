@@ -3682,10 +3682,15 @@ export default function ReportBuilder() {
                   const next = e.target.value
                   const updated = await reportsApi.setClassification(reportId, next)
                   setReport(updated)
+                  // C-17: this write bumped the revision; knowing it is ours keeps
+                  // the poll from calling it "changed in another session".
+                  if (typeof updated?.revision === 'number') setLoadedRevision(updated.revision)
+                  else void syncRevisionAfterOwnWrite()
                   pushUndo({ label: next ? tr('bc.shell.u.classify', { label: next }) : tr('bc.shell.u.clearClass'),
-                    undo: () => reportsApi.setClassification(reportId, prev).then(() => {}),
-                    redo: () => reportsApi.setClassification(reportId, next).then(() => {}) })
-                  toast.success(e.target.value ? tr('bc.shell.t.classified', { label: e.target.value }) : tr('bc.shell.t.classCleared'))
+                    undo: () => reportsApi.setClassification(reportId, prev).then(() => syncRevisionAfterOwnWrite()),
+                    redo: () => reportsApi.setClassification(reportId, next).then(() => syncRevisionAfterOwnWrite()) })
+                  // The captured choice, not e.target.value read after an await.
+                  toast.success(next ? tr('bc.shell.t.classified', { label: next }) : tr('bc.shell.t.classCleared'))
                 } catch (err) {
                   toast.error((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? tr('bc.shell.t.classifyFailed'))
                 }

@@ -3139,3 +3139,26 @@ describe('C-05: the dataset chosen at create time shows as soon as the builder o
     expect(await screen.findByRole('button', { name: /^[#ƒx Aa]* ?sales$/ })).toBeInTheDocument()
   })
 })
+
+describe('C-17: my own classification is not "changed in another session"', () => {
+  it('classifying syncs the known revision; the next poll raises no banner', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      vi.mocked(reportsApi.get).mockReset().mockResolvedValue({ ...baseReport(), revision: 3 } as any)
+      vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+      vi.mocked(reportsApi.getRevision).mockReset().mockResolvedValue(3)
+      vi.mocked(reportsApi.setClassification).mockReset().mockImplementation(async () => {
+        // The server bumps the revision for this write.
+        vi.mocked(reportsApi.getRevision).mockResolvedValue(4)
+        return { ...baseReport(), classification: 'Confidential', revision: 4 } as any
+      })
+      renderBuilder()
+      await screen.findByTestId('view-strip')
+      await waitFor(() => expect(reportsApi.getRevision).toHaveBeenCalled())
+      fireEvent.change(screen.getByLabelText('Sensitivity label'), { target: { value: 'Confidential' } })
+      await waitFor(() => expect(reportsApi.setClassification).toHaveBeenCalledWith(1, 'Confidential'))
+      await act(async () => { await vi.advanceTimersByTimeAsync(21_000) })
+      expect(screen.queryByText(/changed in another session/i)).not.toBeInTheDocument()
+    } finally { vi.useRealTimers() }
+  })
+})
