@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
@@ -7,6 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.main import app
+from tests._task_guard import cancel_tasks_started_since
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -191,8 +194,12 @@ async def client(db_session):
         yield db_session
     app.dependency_overrides[get_db] = _override_get_db
     transport = ASGITransport(app=app)
+    before = set(asyncio.all_tasks())
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
+    # Work a request detached (a sync, a metered job) must not outlive the
+    # test and fail a later one when it is garbage-collected (test_task_guard).
+    await cancel_tasks_started_since(before)
     app.dependency_overrides.clear()
 
 
