@@ -202,6 +202,29 @@ describe('MonitoringDeliveries', () => {
   })
 })
 
+describe('the Monitoring tables stack on a phone (AD-20)', () => {
+  it('every cell names its column, in all three tables', async () => {
+    vi.mocked(monitoringApi.jobs).mockResolvedValue([
+      { kind: 'dataset_refresh', id: 1, name: 'Orders', interval_minutes: 60, last_run_at: null, status: null, error: null },
+    ])
+    vi.mocked(monitoringApi.deliveries).mockResolvedValue([
+      { id: 1, created_at: '2026-09-01T10:00:00Z', report_id: 3, report_name: 'R', kind: 'schedule',
+        status: 'sent', error: null, recipients: ['a@b.com'], file_name: null, artifact_kind: 'pdf', duration_ms: 10 },
+    ] as never)
+    vi.mocked(monitoringApi.activity).mockResolvedValue([
+      { id: 1, user_email: 'a@b.com', action: 'dataset.upload', entity: 'dataset', entity_id: 4, detail: 'x', created_at: '2026-09-01T10:00:00Z' },
+    ])
+    for (const Page of [MonitoringJobs, MonitoringDeliveries, MonitoringActivity]) {
+      const { container, unmount } = renderIn(<Page />)
+      await waitFor(() => expect(container.querySelector('table.dl-table--stack tbody td')).not.toBeNull())
+      const cells = [...container.querySelectorAll('table.dl-table--stack td')]
+      expect(cells.length).toBeGreaterThan(0)
+      for (const td of cells) expect(td.getAttribute('data-label')).toBeTruthy()
+      unmount()
+    }
+  })
+})
+
 describe('MonitoringActivity', () => {
   it('lists the audit-log rows -- the first reader this endpoint has had', async () => {
     vi.mocked(monitoringApi.activity).mockResolvedValue([

@@ -3125,6 +3125,20 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--da
   .dl-llmep td.acts { flex-direction: row; flex-wrap: wrap; gap: 6px; }
 }
 
+/* AD-20: a table that becomes cards on a phone. Each row is a card and each
+   cell is "Column: value" from its data-label, instead of a 560 px table
+   scrolled sideways with only a faint shadow to say so. Generalises the LLM
+   endpoints table's stacking (above); used by the Monitoring tables. */
+@media (max-width: 600px) {
+  .dl-table-card > .dl-table--stack, .dl-table--stack { min-inline-size: 0; }
+  .dl-table--stack thead { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .dl-table--stack tbody, .dl-table--stack tr { display: block; }
+  .dl-table--stack tr { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .dl-table--stack td { display: flex; gap: 10px; align-items: baseline; padding: 3px 0 !important; border: 0 !important;
+    text-align: start !important; white-space: normal !important; max-width: none !important; }
+  .dl-table--stack td[data-label]::before { content: attr(data-label); flex: 0 0 7.5rem; font-size: 11px; font-weight: 600; color: var(--muted); }
+}
+
 /* Chart tooltips (QA2 Visual 6): Recharts writes each item in its series
    colour, unreadable when that is a dark green on the dark card. The value and
    the label take the text colour; the series name keeps its colour as the cue.

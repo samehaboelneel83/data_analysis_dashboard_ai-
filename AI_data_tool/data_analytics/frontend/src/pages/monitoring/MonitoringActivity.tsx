@@ -137,7 +137,7 @@ export default function MonitoringActivity() {
       {noMatches && <p style={{ color: 'var(--muted)' }}>{t('activity.noMatch')}</p>}
 
       {!loading && loadError == null && filtered.length > 0 && (
-        <div className="card dl-table-card"><table className="dl-table">
+        <div className="card dl-table-card"><table className="dl-table dl-table--stack">
           <thead>
             <tr>
               <th>{t('col.when')}</th>
@@ -152,17 +152,17 @@ export default function MonitoringActivity() {
               <Fragment key={r.id}>
               <tr onClick={() => setOpen(open === r.id ? null : r.id)} aria-expanded={open === r.id}
                 style={{ cursor: 'pointer' }}>
-                <td style={{ whiteSpace: 'nowrap' }}>{formatDate(r.created_at)}</td>
-                <td>{r.user_email ? <bdi dir="ltr">{r.user_email}</bdi> : '—'}</td>
-                <td style={{ fontWeight: 600 }}>
+                <td data-label={t('col.when')} style={{ whiteSpace: 'nowrap' }}>{formatDate(r.created_at)}</td>
+                <td data-label={t('col.who')}>{r.user_email ? <bdi dir="ltr">{r.user_email}</bdi> : '—'}</td>
+                <td data-label={t('col.action')} style={{ fontWeight: 600 }}>
                   {actionName(r.action) === r.action
                     ? <bdi dir="ltr">{r.action}</bdi>
                     : <span title={r.action}>{actionName(r.action)}</span>}
                 </td>
-                <td>
+                <td data-label={t('col.entity')}>
                   {r.entity ? <bdi dir="ltr">{`${r.entity}${r.entity_id != null ? ` #${r.entity_id}` : ''}`}</bdi> : '—'}
                 </td>
-                <td style={{ color: 'var(--muted)' }}>
+                <td data-label={t('col.detail')} style={{ color: 'var(--muted)' }}>
                   {(() => {
                     const parts = detailParts(r.detail, t('pg.dataPages.act.noLimit'))
                     if (!parts) return '—'
@@ -176,7 +176,7 @@ export default function MonitoringActivity() {
               </tr>
               {open === r.id && (
                 <tr data-testid={`activity-detail-${r.id}`}>
-                  <td colSpan={5} style={{ background: 'var(--surface2)', whiteSpace: 'normal' }}>
+                  <td data-label={t('col.detail')} colSpan={5} style={{ background: 'var(--surface2)', whiteSpace: 'normal' }}>
                     <div><b>{t('col.when')}:</b> {new Date(r.created_at).toISOString().replace('T', ' ').slice(0, 19)} UTC</div>
                     <div><b>{t('col.action')}:</b> <bdi dir="ltr">{r.action}</bdi></div>
                     {r.entity && <div><b>{t('col.entity')}:</b>{' '}
