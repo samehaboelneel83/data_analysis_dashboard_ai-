@@ -131,6 +131,34 @@ export function fmtStr(value: unknown, fmt?: CalcColumnFormat | null): string {
   return localDigits(fmtStrLatin(value, fmt))
 }
 
+/** Aggregations whose result counts rows or values: a whole number of things,
+ *  never in the unit of the column counted ("Rows" over revenue is not "$ 2,000"). */
+const COUNT_AGGREGATIONS = new Set(['count', 'countd', 'count_distinct', 'distinct', 'frequency', 'nmiss'])
+
+/** The format a measure's AGGREGATED value is shown in (C-02). A count is a
+ *  plain integer whatever the column's format; a share (`pct`, 0-100) is a
+ *  percent; anything else keeps the measure column's own format. */
+export function measureFormat(fmt: CalcColumnFormat | null | undefined, aggregation?: unknown): CalcColumnFormat | undefined {
+  const agg = typeof aggregation === 'string' ? aggregation.toLowerCase() : ''
+  if (COUNT_AGGREGATIONS.has(agg)) return { type: 'integer' } as CalcColumnFormat
+  if (agg === 'pct') return { type: 'percent', decimals: 1 } as CalcColumnFormat
+  return fmt ?? undefined
+}
+
+/** One measure value as text, the same way in every table, crosstab, matrix,
+ *  KPI, card and list (C-02): the aggregation-aware format when there is one,
+ *  otherwise thousands grouped with at most 2 decimals. */
+export function formatMeasure(value: unknown, fmt: CalcColumnFormat | null | undefined, aggregation?: unknown): string {
+  return fmtStr(value, measureFormat(fmt, aggregation))
+}
+
+/** formatMeasure for a table cell: the node form (bars, badges) when the
+ *  format draws one, grouped text for an unformatted number. */
+export function formatMeasureCell(value: unknown, fmt: CalcColumnFormat | null | undefined): React.ReactNode {
+  if ((!fmt || fmt.type === 'none') && typeof value === 'number') return fmtStr(value, null)
+  return formatValue(value, fmt)
+}
+
 function fmtStrLatin(value: unknown, fmt?: CalcColumnFormat | null): string {
   if (!fmt || fmt.type === 'none') {
     if (value == null) return '—'

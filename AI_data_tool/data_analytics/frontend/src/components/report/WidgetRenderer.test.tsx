@@ -594,6 +594,39 @@ describe('WidgetRenderer matrix', () => {
   })
 })
 
+describe('C-02: table, crosstab and KPI numbers use the measure format', () => {
+  const usd = { revenue: { type: 'currency', symbol: '$', decimals: 0 } } as never
+  const plainText = (t: string) => (_: string, el: Element | null) =>
+    !!el && el.children.length === 0 && (el.textContent ?? '').replace(/[\u2066-\u2069]/g, '') === t
+  beforeEach(() => { vi.mocked(widgetDataApi.query).mockReset() })
+
+  it('a crosstab cell and its subtotal carry the measure\'s currency', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ type: 'crosstab',
+      columns: ['region', 'Hardware', '__total__'], rows: [['Asia', 700019.84, 1.2e6]], total: 1 } as never)
+    renderWidget({ columnFormats: usd, widget: barWidget({ widget_type: 'crosstab',
+      config: { dimension: 'region', dimension2: 'category', measure: 'revenue', aggregation: 'sum' } }) })
+    expect(await screen.findByText('Asia')).toBeInTheDocument()
+    expect(screen.getByText(plainText('$ 700,020'))).toBeInTheDocument()
+    expect(screen.getByText(plainText('$ 1,200,000'))).toBeInTheDocument()
+  })
+
+  it('a grouped table\'s value column is formatted; without a format it is grouped', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'Asia', value: 795152.7 }], total: 10 } as never)
+    renderWidget({ widget: barWidget({ widget_type: 'table',
+      config: { dimension: 'region', measure: 'units', aggregation: 'sum' } }) })
+    expect(await screen.findByText('Asia')).toBeInTheDocument()
+    expect(screen.getByText('795,152.7')).toBeInTheDocument()
+  })
+
+  it('a KPI counting a currency column shows no currency symbol', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'revenue', value: 2000 }] } as never)
+    renderWidget({ columnFormats: usd, widget: barWidget({ widget_type: 'kpi', title: 'Rows',
+      config: { measure: 'revenue', aggregation: 'count' } }) })
+    expect(await screen.findAllByText('2,000')).not.toHaveLength(0)
+    expect(screen.queryByText(/\$/)).toBeNull()
+  })
+})
+
 describe('WidgetRenderer card', () => {
   it('renders one label+value row per measure', async () => {
     vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'revenue', value: 60 }, { name: 'cost', value: 20 }], sampled: false })
@@ -1097,7 +1130,8 @@ describe('WidgetRenderer totals row', () => {
 
     const footRow = await screen.findByTestId('table-totals-row')
     expect(footRow).toHaveTextContent('Total')
-    expect(footRow).toHaveTextContent('1500')
+    // C-02: the measure's total is grouped like every other measure value.
+    expect(footRow).toHaveTextContent('1,500')
   })
 
   it('renders no totals row when the server sent none', async () => {

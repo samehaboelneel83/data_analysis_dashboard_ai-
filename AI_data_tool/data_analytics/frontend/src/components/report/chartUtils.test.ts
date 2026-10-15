@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import { COLORS, applyTheme, fmtStr, formatValue, getFillFactory } from './chartUtils'
+import { COLORS, applyTheme, fmtStr, formatValue, getFillFactory, formatMeasure, measureFormat } from './chartUtils'
 import { THEMES } from './themes'
 
 describe('applyTheme', () => {
@@ -210,5 +210,27 @@ describe('one series, one colour (persona test 3.5)', () => {
   it('parts of a whole keep a colour each', () => {
     const getFill = getFillFactory(false, null)
     expect(getFill('b', 1).fill).toBe(COLORS[1])
+  })
+})
+
+// C-02: one formatter for a measure's value, aware of the aggregation.
+describe('formatMeasure', () => {
+  const plain = (s: string) => s.replace(/[\u2066-\u2069]/g, '')
+  const usd = { type: 'currency', symbol: '$', decimals: 0 } as const
+  it('applies the measure column\'s format', () => {
+    expect(plain(formatMeasure(700019.84, usd, 'sum'))).toBe('$ 700,020')
+  })
+  it('a count of a currency column is a grouped integer with no symbol', () => {
+    expect(formatMeasure(2000, usd, 'count')).toBe('2,000')
+    expect(formatMeasure(12, usd, 'countd')).toBe('12')
+    expect(measureFormat(usd, 'count')).toEqual({ type: 'integer' })
+  })
+  it('a share is a percent', () => {
+    expect(plain(formatMeasure(23.456, usd, 'pct'))).toBe('23.5%')
+  })
+  it('no format: grouped, at most 2 decimals', () => {
+    expect(formatMeasure(795152.7, { type: 'none' }, 'sum')).toBe('795,152.7')
+    expect(formatMeasure(2221091.6612, undefined, 'avg')).toBe('2,221,091.66')
+    expect(formatMeasure(null, undefined, 'sum')).toBe('—')
   })
 })

@@ -1,5 +1,5 @@
 import type { CalcColumnFormat } from '../../services/api'
-import { fmtStr } from './chartUtils'
+import { formatMeasure } from './chartUtils'
 
 /** The nested crosstab the server returns as `type: 'pivot'`
  *  (backend services/pivot.py). */
@@ -98,7 +98,7 @@ export default function PivotTable({ data, rtl, formats }: {
                 const mn = measures[vi % m]
                 return (
                   <td key={vi} style={{ ...td, textAlign: 'end', whiteSpace: 'nowrap', color: v == null ? 'var(--muted)' : undefined }}>
-                    {v == null ? '—' : fmtStr(v, formats?.[mn])}
+                    {v == null ? '—' : formatMeasure(v, formats?.[mn], data.aggregation)}
                   </td>
                 )
               })}
