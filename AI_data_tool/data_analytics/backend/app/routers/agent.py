@@ -21,7 +21,7 @@ from ..core.capability import require_dataset_read
 from ..core.database import get_db
 from ..core.org_scope import check_org
 from .data_sources import _visible_source_ids
-from ..dependencies import get_current_user, require_org_admin, ai_meter
+from ..dependencies import get_current_user, require_org_admin, ai_meter, require_role_capability
 from ..services.llm import UsageMeter
 from ..models.models import (AgentFeedback, AgentMessage, AgentRun, AgentStep,
                              Conversation, Dataset, DataSource,
@@ -398,7 +398,7 @@ _EXPORT_MEDIA = {
 @router.get("/runs/{run_id}/export")
 async def export_run(run_id: int, format: str = "xlsx",
                      db: AsyncSession = Depends(get_db),
-                     user: User = Depends(get_current_user)):
+                     user: User = Depends(require_role_capability("export"))):
     """One answer's result as a file. Same ownership rule as /runs/{id}; the
     rows come from the stored snapshot, so what downloads is exactly what the
     chat showed -- same RLS, same cap -- in a different format. CSV stays

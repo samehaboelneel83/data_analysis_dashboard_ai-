@@ -10,10 +10,11 @@ from ..core.database import get_db
 from ..core.said_errors import refused
 from ..core.config import settings
 from ..core.org_scope import check_org
+from ..core import role_permissions as _role_permissions
 from ..core.capability import (readable_dataset_ids, require_dataset_capability,
                                require_dataset_read, require_dataset_write)
 from ..core.rls import author_items_over_denied, resolve_denied_columns, resolve_rls_expr
-from ..dependencies import get_current_user, require_org_admin, ai_meter
+from ..dependencies import get_current_user, require_org_admin, ai_meter, require_role_capability
 from ..services.llm import UsageMeter
 from ..services.audit import record as audit
 from pydantic import BaseModel, Field
@@ -623,7 +624,7 @@ async def upload_dataset(
     description: str = Form(""),
     sheet: str = Form(""),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role_capability("upload_data")),
 ):
     # An Access file holds many tables and so yields many datasets, which cannot
     # be returned as one DatasetOut. Rejecting here (rather than widening this
@@ -853,7 +854,7 @@ async def upload_datasets(
     description: str = Form(""),
     mode: str = Form("separate"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role_capability("upload_data")),
 ):
     """Upload several files at once.
 
@@ -1415,6 +1416,7 @@ async def export_dataset(
     ds = (await db.execute(select(Dataset).where(Dataset.id == dataset_id))).scalar_one_or_none()
     check_org(ds, current_user, "Dataset not found")
     await require_dataset_read(db, current_user, dataset_id)
+    _role_permissions.check(current_user, "export")       # QA E-08
     policy_ds = await _policy_dataset(db, ds)
     if _exports_disabled(policy_ds, fmt, await _dataset_has_security(db, dataset_id)):
         raise HTTPException(403, "Exports are disabled for this dataset")

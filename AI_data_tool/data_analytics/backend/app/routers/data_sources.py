@@ -17,7 +17,7 @@ from ..core.org_scope import check_org
 from ..services import connectors, secrets
 from ..services.custom_connectors import apply_preset_locks
 from ..services.frame_cache import write_parquet_sidecar
-from ..dependencies import get_current_user, require_org_admin
+from ..dependencies import get_current_user, require_org_admin, require_role_capability
 from ..models.models import CustomConnector, DataSource, Dataset, DatasetColumn, User
 from ..schemas.schemas import DataSourceCreate, DataSourceUpdate, DataSourceOut, TablePreviewRequest, ImportRequest
 from ..services.connections import test_connection, list_tables, preview_table, import_to_dataframe
@@ -122,7 +122,8 @@ async def list_data_sources(db: AsyncSession = Depends(get_db), current_user: Us
 
 
 @router.post("", response_model=DataSourceOut)
-async def create_data_source(body: DataSourceCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def create_data_source(body: DataSourceCreate, db: AsyncSession = Depends(get_db),
+                             current_user: User = Depends(require_role_capability("create_connection"))):
     preset = None
     if body.custom_connector_id is not None:
         preset = (await db.execute(

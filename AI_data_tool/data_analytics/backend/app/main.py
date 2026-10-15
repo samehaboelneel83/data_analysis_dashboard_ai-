@@ -61,6 +61,8 @@ async def _migrate(conn):
         # 0038: session revocation cut-off (see User.tokens_valid_after).
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS tokens_valid_after TIMESTAMP WITH TIME ZONE",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS about TEXT",
+        # 0072 (QA E-08): what each role may do; NULL = every capability allowed.
+        "ALTER TABLE roles ADD COLUMN IF NOT EXISTS permissions JSON",
         # 0039: duplicate-upload detection (see Dataset.content_sha256).
         "ALTER TABLE datasets ADD COLUMN IF NOT EXISTS content_sha256 VARCHAR(64)",
         # 0056: each refresh run's check results (see RefreshRun.checks).
