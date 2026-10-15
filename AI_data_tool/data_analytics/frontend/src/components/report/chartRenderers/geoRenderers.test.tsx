@@ -853,3 +853,15 @@ describe('C-10: the country-match note belongs to country mode only', () => {
     expect(screen.queryByTestId('geo-unmatched')).toBeNull()
   })
 })
+
+describe('C-29: overlapping cluster bubbles merge into one readable count', () => {
+  it('two cells over the same city draw one bubble with the summed count', () => {
+    const { container } = render(<GeoClustersRenderer {...base} rows={[
+      { lat: 35.3, lon: 139.7, count: 3 }, { lat: 35.9, lon: 139.7, count: 27 },
+      { lat: 51.5, lon: -0.1, count: 12 }] as any} />)
+    const clusters = [...container.querySelectorAll('[data-cluster]')]
+    expect(clusters.map(c => c.getAttribute('data-cluster')).sort()).toEqual(['12', '30'])
+    expect(container.textContent).toContain('30')
+    expect(container.textContent).not.toMatch(/\b27\b/)
+  })
+})
