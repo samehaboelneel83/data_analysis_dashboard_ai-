@@ -37,6 +37,15 @@ def _own_duckdb_metadata_cache(tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def _no_demo_sync_by_default(monkeypatch):
+    """B-26: loading the demo starts a background catalog sync. Tests that
+    seed the demo must not leave a real sync running against their database;
+    test_demo_endpoint opts in with the sync itself faked."""
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "demo_sync_on_seed", False)
+
+
+@pytest.fixture(autouse=True)
 def _fresh_llm_endpoint_health(monkeypatch):
     """B-11: a call skips an endpoint found down moments ago. Health is
     process-wide state; one test's failed call must not make the next test's

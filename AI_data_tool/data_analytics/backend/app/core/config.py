@@ -224,6 +224,8 @@ class Settings(BaseSettings):
     # model stage (describe, entities) gets metadata_llm_stage_timeout_s and is
     # recorded "skipped" when it runs over, so the rest of the run still lands.
     metadata_sync_timeout_s: float = Field(default=1800.0, gt=0)
+    # B-26: read the demo connection's catalog when the demo is loaded.
+    demo_sync_on_seed: bool = True
     metadata_llm_stage_timeout_s: float = Field(default=600.0, gt=0)
 
     # Foreign-key inference thresholds (services/metadata/infer_keys.py), as
