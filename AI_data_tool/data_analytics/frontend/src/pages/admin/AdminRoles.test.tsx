@@ -57,16 +57,16 @@ describe('AdminRoles permission matrix (QA E-08)', () => {
     renderPage()
     const table = await screen.findByRole('table')
     expect(within(table).getAllByRole('columnheader').map(h => h.textContent)).toEqual(
-      ['Role', 'Upload data', 'Add connections', 'Create dashboards', 'Use AI', 'Download and export'])
-    const adminUpload = screen.getByRole('checkbox', { name: 'Upload data for Admin' })
+      ['Role', 'Add data (upload, import, combine)', 'Add connections', 'Create dashboards', 'Use AI', 'Download and export'])
+    const adminUpload = screen.getByRole('checkbox', { name: 'Add data (upload, import, combine) for Admin' })
     expect(adminUpload).toBeChecked()
     expect(adminUpload).toBeDisabled()
     expect(screen.getByRole('checkbox', { name: 'Download and export for Analyst' })).not.toBeChecked()
-    const upload = screen.getByRole('checkbox', { name: 'Upload data for Analyst' })
+    const upload = screen.getByRole('checkbox', { name: 'Add data (upload, import, combine) for Analyst' })
     expect(upload).toBeChecked()
     fireEvent.click(upload)
     await waitFor(() => expect(adminRolesApi.update).toHaveBeenCalledWith(2, { permissions: { upload_data: false } }))
-    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Upload data for Analyst' })).not.toBeChecked())
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Add data (upload, import, combine) for Analyst' })).not.toBeChecked())
   })
 
   it('a role from an older server (no permissions) shows every box on', async () => {

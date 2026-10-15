@@ -15,7 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.database import get_db
-from ..dependencies import get_current_user
+from ..dependencies import require_org_admin
 from ..models.models import Report, ReportPage, ReportWidget, User
 from ..services.demo_content import (
     remove_demo_content,
@@ -73,9 +73,12 @@ async def _start_demo_sync(db: AsyncSession, org_id: int, source) -> int | None:
 @router.post("/seed")
 async def seed_demo(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_org_admin),
 ) -> dict:
     """Fill the caller's org with the demo datasets and reports.
+
+    Org admins only (QA E-08 follow-up): it writes org-wide datasets, a
+    connection and dashboards, and DELETE removes them for everyone.
 
     Idempotent: each pass removes its own previously seeded content first, so calling
     this twice leaves one demo, and content the user made themselves is untouched --
@@ -126,7 +129,7 @@ async def seed_demo(
 @router.delete("/seed")
 async def unseed_demo(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_org_admin),
 ) -> dict:
     """Remove the demo content from the caller's org, leaving their own data alone."""
     removed = await remove_demo_content(db, current_user.org_id)

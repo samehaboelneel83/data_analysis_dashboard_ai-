@@ -4,9 +4,17 @@ A role was a name plus "Org admin". Nothing could stop a role from uploading
 files, adding connections or creating dashboards. Each role now carries a
 small, fixed set of capabilities, each enforced at ONE server choke point:
 
-  upload_data        POST /datasets, POST /datasets/batch (file uploads)
+  upload_data        "Add data": every request that makes a NEW dataset --
+                     POST /datasets, /datasets/batch (uploads, combine into
+                     one), /datasets/{id}/materialize, /{id}/aggregates, a
+                     dataflow run with `output_name`, batch scoring
+                     (score-jobs). Import from a connection, combine across
+                     connections and guided-setup imports are admin-only, so
+                     always allowed here. Refreshing what exists is not new.
   create_connection  POST /data-sources
-  create_dashboard   POST /reports, duplicate, create from a template
+  create_dashboard   POST /reports, duplicate, create from a template, and an
+                     automated analysis (refused at POST /automation/runs and
+                     again by its compose step, as the run's creator)
   use_ai             every model call made for the person (services/llm.py
                      refuses it; Ask AI and the page copilot answer 403)
   export             routers/shared.download_gate (every dashboard, widget and
@@ -33,7 +41,7 @@ CAPABILITIES: tuple[str, ...] = (
 
 #: What the person was trying to do, for the 403 text.
 _ACTION = {
-    "upload_data": "upload data",
+    "upload_data": "add or upload data",
     "create_connection": "add connections",
     "create_dashboard": "create dashboards",
     "use_ai": "use AI features",

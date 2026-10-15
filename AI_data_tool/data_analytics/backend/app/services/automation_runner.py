@@ -1501,6 +1501,12 @@ async def _compose_step(ctx: StepContext, session) -> str:
         raise StepRefused("creator is no longer available")
     if not await can_read_dataset(session, user, ds.id):
         raise StepRefused("dataset not found for this creator")
+    # QA E-08: the dashboard is the creator's, so their role must still be
+    # allowed to create one now -- it may have changed since the run started.
+    from ..core.role_permissions import user_may
+    why = await user_may(session, ctx.user_id, "create_dashboard")
+    if why:
+        raise StepRefused(why)
 
     previous = await _previous_output_ref(session, ctx, "review")
     try:

@@ -31,7 +31,7 @@ from ..core.said_errors import refused
 from ..core.database import get_db
 from ..core.org_scope import check_org
 from ..core.rls import resolve_denied_columns, resolve_rls_expr
-from ..dependencies import get_current_user
+from ..dependencies import get_current_user, require_role_capability
 from ..models.models import Dataset, PredictionModel, User
 from ..services.analysis.model_store import (ModelStoreError, PackagedModel,
                                              fit_and_package, score_frame)
@@ -429,7 +429,9 @@ async def drift_history(
 @router.post("/{dataset_id}/prediction-models/{model_id}/score-jobs", status_code=202)
 async def queue_score_job(
     dataset_id: int, model_id: int,
-    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    # QA E-08: the job keeps its result as a NEW dataset -- "Add data".
+    current_user: User = Depends(require_role_capability("upload_data")),
 ):
     """Score every row the caller may see with this version, as a durable job
     that keeps the result as a new dataset (E13). Authoring: it creates one."""
