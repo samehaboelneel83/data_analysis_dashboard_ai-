@@ -272,6 +272,10 @@ export default function ReportBuilder() {
   // True once the datasets map (calc columns, formats, meta) has resolved --
   // the widget canvas waits on it; see the loading effect below.
   const [datasetsReady, setDatasetsReady] = useState(false)
+  // C-05: the attached dataset could not be loaded (after one retry). Said in
+  // the Fields pane with a Retry, not as "Attach a dataset" -- which made
+  // people think the pick at create time was lost and attach it twice.
+  const [datasetLoadError, setDatasetLoadError] = useState(false)
   const [allDatasets,setAllDatasets]= useState<Dataset[]>([])
   // Primary dataset's connection name, for the header breadcrumb -- fetched only
   // when there is one (source-backed dataset); an upload's dataset has no
@@ -750,7 +754,10 @@ export default function ReportBuilder() {
     ]
     if (ids.length === 0) { setDatasetsReady(true); return }
     try {
-      const list = await Promise.all(ids.map(id => datasetsApi.get(id)))
+      const fetchAll = () => Promise.all(ids.map(id => datasetsApi.get(id)))
+      // One retry: the first open of a just-created dashboard is the slowest
+      // moment, and one failed fetch used to stick until a reload.
+      const list = await fetchAll().catch(() => fetchAll())
       const map: Record<number, Dataset> = {}
       list.forEach(ds => { map[ds.id] = ds })
       setDatasets(map)
@@ -762,9 +769,11 @@ export default function ReportBuilder() {
         setColumnMeta(primary.column_meta ?? {})
         setColumnFormats(primary.column_formats ?? {})
       }
+      setDatasetLoadError(false)
       setDatasetsReady(true)
     } catch {
       // A failed dataset fetch must not blank the canvas forever.
+      setDatasetLoadError(true)
       setDatasetsReady(true)
     }
   }, [])
@@ -3478,7 +3487,13 @@ export default function ReportBuilder() {
                   missing). The list above is THE list of fields; the folders
                   are an arrangement tool, folded away until asked for. */}
               {!dataset
-                ? <p style={{ fontSize:12, color:'var(--muted)', textAlign:'center', marginTop:20 }}>{tr('bc.shell.ds.attachToBrowse')}</p>
+                ? (report?.dataset_id && datasetLoadError
+                  ? <p data-testid="dataset-load-error" role="alert" style={{ fontSize:12, color:'var(--muted)', textAlign:'center', marginTop:20 }}>
+                      {tr('bc.shell.ds.loadFailed')}{' '}
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => { if (report) void reloadAttachedDatasets(report) }}>{tr('bc.shell.ds.retry')}</button>
+                    </p>
+                  : <p style={{ fontSize:12, color:'var(--muted)', textAlign:'center', marginTop:20 }}>
+                      {tr(report?.dataset_id ? 'bc.shell.ds.loadingFields' : 'bc.shell.ds.attachToBrowse')}</p>)
                 : (
                   <details className="dl-bd-hier" data-testid="hierarchy-folders">
                     <summary className="dl-bd-gh" style={{ cursor: 'pointer' }}>{tr('bc.shell.hier.organize')}</summary>

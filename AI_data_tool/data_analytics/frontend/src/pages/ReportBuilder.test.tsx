@@ -3092,3 +3092,34 @@ describe('C-04: a page change drops a selection that is not on the new page', ()
     expect(reportsApi.updateWidget).not.toHaveBeenCalledWith(1, 101, 5, expect.anything())
   })
 })
+
+describe('C-05: the dataset chosen at create time shows as soon as the builder opens', () => {
+  const ds = () => ({ id: 10, name: 'Demo — Sales', columns: [
+    { id: 1, name: 'region', dtype: 'text', missing_pct: 0, stats: {} },
+    { id: 2, name: 'sales', dtype: 'numeric', missing_pct: 0, stats: {} }] })
+
+  it('a failed first dataset fetch is retried; the fields appear and "Attach a dataset" never shows', async () => {
+    vi.mocked(reportsApi.get).mockReset().mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockReset()
+      .mockRejectedValueOnce(new Error('timeout'))
+      .mockResolvedValue(ds() as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    expect(await screen.findByRole('button', { name: /^[#ƒx Aa]* ?sales$/ })).toBeInTheDocument()
+    expect(screen.queryByText('Attach a dataset to this report to browse columns.')).toBeNull()
+  })
+
+  it('a dataset that keeps failing says so and offers Retry, not "Attach a dataset"', async () => {
+    vi.mocked(reportsApi.get).mockReset().mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockReset().mockRejectedValue(new Error('down'))
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    expect(await screen.findByTestId('dataset-load-error')).toHaveTextContent(/couldn.t load/i)
+    expect(screen.queryByText('Attach a dataset to this report to browse columns.')).toBeNull()
+    vi.mocked(datasetsApi.get).mockResolvedValue(ds() as any)
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(await screen.findByRole('button', { name: /^[#ƒx Aa]* ?sales$/ })).toBeInTheDocument()
+  })
+})

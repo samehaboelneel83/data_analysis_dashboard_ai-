@@ -218,6 +218,9 @@ export const en = {
   'bc.shell.hier.autoTitle': 'Rebuild the folders?',
   'bc.shell.hier.autoBody': 'This replaces every folder and level with new ones built from the columns. Folders you arranged by hand are lost.',
   'bc.shell.ds.attachToBrowse': 'Attach a dataset to this report to browse columns.',
+  'bc.shell.ds.loadingFields': 'Loading the dataset’s fields…',
+  'bc.shell.ds.loadFailed': 'Couldn’t load this report’s dataset.',
+  'bc.shell.ds.retry': 'Retry',
 
   // Header
   'bc.shell.h.name': 'Dashboard name',
@@ -530,6 +533,9 @@ export const ar: Record<keyof typeof en, string> = {
   'bc.shell.hier.autoTitle': 'إعادة بناء المجلدات؟',
   'bc.shell.hier.autoBody': 'يستبدل هذا كل المجلدات والمستويات بأخرى جديدة مبنية من الأعمدة. ستفقد المجلدات التي رتّبتها بنفسك.',
   'bc.shell.ds.attachToBrowse': 'أرفق مجموعة بيانات بهذا التقرير لتتصفح أعمدتها.',
+  'bc.shell.ds.loadingFields': 'جارٍ تحميل حقول مجموعة البيانات…',
+  'bc.shell.ds.loadFailed': 'تعذّر تحميل مجموعة بيانات هذا التقرير.',
+  'bc.shell.ds.retry': 'إعادة المحاولة',
 
   'bc.shell.h.name': 'اسم لوحة المعلومات',
   'bc.shell.h.rename': 'إعادة تسمية لوحة المعلومات هذه',
