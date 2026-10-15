@@ -26,6 +26,7 @@ import PlainSummary from '../../components/ui/PlainSummary'
 import LoadError from '../../components/ui/LoadError'
 import LoadingState from '../../components/ui/LoadingState'
 import { sayText } from '../../lib/readbackText'
+import { useConfirm } from '../../components/ui/ConfirmDialog'
 
 const POLL_MS = 4000
 const POLL_LIMIT = 60
@@ -46,6 +47,9 @@ export default function CheckStep({ sourceId, flow, onNext, onBack }: {
   // A "Fix it" / "Warn me" that failed, shown inline under the findings (B-02).
   const [fixError, setFixError] = useState<{ datasetId: number; text: string } | null>(null)
   const polls = useRef(0)
+  const confirm = useConfirm()
+  // B-33: datasets whose "changes it for everyone" the person already accepted.
+  const accepted = useRef(new Set<number>())
 
   const load = useCallback(async () => {
     try {
@@ -74,6 +78,18 @@ export default function CheckStep({ sourceId, flow, onNext, onBack }: {
   }
 
   async function fix(datasetId: number, item: SetupFindingItem, how: 'fix' | 'check') {
+    // B-33: a fix on a dataset this setup did not make, and that dashboards
+    // already read, changes it for everyone -- asked once per dataset.
+    const d = data?.datasets.find(x => x.id === datasetId)
+    const n = d?.used_by?.dashboards ?? 0
+    if (how === 'fix' && d && !d.auto_clean && n > 0 && !accepted.current.has(datasetId)) {
+      const ok = await confirm({
+        title: t('setup.c.inUseTitle', { name: d.name }),
+        body: t('setup.c.inUseBody', { n: num(n) }),
+        confirmLabel: t('setup.c.inUseOk'), destructive: false })
+      if (!ok) return
+      accepted.current.add(datasetId)
+    }
     setBusy(`${item.id}|${how}`)
     setFixError(null)
     try {

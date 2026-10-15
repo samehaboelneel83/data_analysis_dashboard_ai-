@@ -238,6 +238,18 @@ class TestRoutes:
         await db_session.refresh(ds)
         assert (ds.row_count, ds.col_count) == (350, smaller.shape[1])
 
+    async def test_each_dataset_says_how_many_dashboards_use_it(self, client, auth_headers, setup, db_session, two_orgs):
+        """B-33: a fix on a dataset already in use changes it for everyone; the
+        step needs to know that before it asks."""
+        from app.models.models import Report
+        src, ds = setup
+        got = (await client.get(f"/api/v1/setup/{src.id}/check", headers=auth_headers["a"])).json()
+        assert got["datasets"][0]["used_by"] == {"dashboards": 0}
+        db_session.add(Report(name="Ops", dataset_id=ds.id, org_id=two_orgs["a"]["org"].id))
+        await db_session.commit()
+        got = (await client.get(f"/api/v1/setup/{src.id}/check", headers=auth_headers["a"])).json()
+        assert got["datasets"][0]["used_by"] == {"dashboards": 1}
+
     async def test_findings_are_offered_to_the_datasets_own_pages(self, client, auth_headers, setup):
         src, ds = setup
         await client.get(f"/api/v1/setup/{src.id}/check", headers=auth_headers["a"])

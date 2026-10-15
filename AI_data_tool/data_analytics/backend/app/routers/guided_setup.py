@@ -1565,7 +1565,11 @@ async def get_check_step(source_id: int, lang: str = "en", flow: int | None = No
     lang = _language(lang)
     await _ensure_demand(db, user, f, lang)
     out = []
-    for ds in await _journey_datasets(db, user, f):
+    journey = await _journey_datasets(db, user, f)
+    # B-33: a one-click fix on a dataset dashboards already read changes it for
+    # everyone -- the step confirms first, so it needs the count.
+    used = await _dashboards_using(db, user, [d.id for d in journey])
+    for ds in journey:
         entry = dict((f.findings or {}).get(str(ds.id)) or {})
         if not entry or (entry.get("pending") and _pending_is_stale(entry)):
             await _start_check(db, user, f, ds.id, lang)
@@ -1576,6 +1580,7 @@ async def get_check_step(source_id: int, lang: str = "en", flow: int | None = No
                               _failer(f.id, "findings", entry["attempt"], key=str(ds.id)))
         out.append({"id": ds.id, "name": ds.name, "mode": ds.mode, "row_count": ds.row_count,
                     "auto_clean": ds.id in (f.created_ids or []) and ds.mode != "directquery",
+                    "used_by": {"dashboards": used.get(ds.id, 0)},
                     "findings": _finding_of(f, ds.id)})
     # The pages are designed while the person reads this step: by the time they
     # press Next the dashboard is usually ready (PLAN_V2 4f). Once, like any

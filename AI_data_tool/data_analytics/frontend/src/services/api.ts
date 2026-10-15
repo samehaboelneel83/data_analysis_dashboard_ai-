@@ -4285,7 +4285,10 @@ export interface SetupFindings {
 export interface SetupCheckStep {
   datasets: { id: number; name: string; mode: string; row_count: number | null
               /** True when the setup made this dataset, so it cleans it by itself. */
-              auto_clean?: boolean; findings: SetupFindings }[]
+              auto_clean?: boolean
+              /** B-33: how many dashboards already read it. */
+              used_by?: { dashboards: number }
+              findings: SetupFindings }[]
   demand?: SetupDemand
   usual?: SetupUsualWaits
 }
