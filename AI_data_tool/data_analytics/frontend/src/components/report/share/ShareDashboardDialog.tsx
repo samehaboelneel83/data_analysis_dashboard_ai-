@@ -78,7 +78,8 @@ export default function ShareDashboardDialog({ report, canEdit, isAdmin, pageId,
 
   const [grants, setGrants] = useState<ReportGrant[] | null>(null)
   const [email, setEmail] = useState('')
-  const [level, setLevel] = useState<'view' | 'edit' | 'data'>('edit')
+  // Least privilege (F-06): a new share starts at Can view; more is a choice.
+  const [level, setLevel] = useState<'view' | 'edit' | 'data'>('view')
   const [busy, setBusy] = useState(false)
   const [kind, setKind] = useState<Kind>('user')
   const [options, setOptions] = useState<WorkspaceShareOptions | null>(null)
@@ -151,7 +152,7 @@ export default function ShareDashboardDialog({ report, canEdit, isAdmin, pageId,
     try {
       const g = await reportGrantsApi.create(report.id, body)
       setGrants(prev => [...(prev ?? []).filter(x => x.id !== g.id && (g.user_id == null || x.user_id !== g.user_id)), g])
-      setEmail(''); setGroupId(''); setMessage(''); setUntil(''); setMayDownload(true); setMayShare(false)
+      setEmail(''); setGroupId(''); setMessage(''); setUntil(''); setMayDownload(true); setMayShare(false); setLevel('view')
       toast.success(kind === 'user' ? t('dsh.sd.shared', { email: g.email }) : t('pub.sh.sharedWith', { name: nameOf(g) }))
     } catch (e) {
       toast.error(failure(e, t('dsh.sd.failed')))
@@ -203,7 +204,7 @@ export default function ShareDashboardDialog({ report, canEdit, isAdmin, pageId,
       {manages ? (<>
         <div className="shx-seg" role="group" aria-label={t('pub.sh.kind')} style={{ marginBottom: 10 }}>
           {(['user', 'role', 'team'] as const).map(k => (
-            <button key={k} type="button" aria-pressed={kind === k} onClick={() => { setKind(k); setGroupId(''); if (k !== 'user') setLevel('view') /* many people at once start at view */ }}>
+            <button key={k} type="button" aria-pressed={kind === k} onClick={() => { setKind(k); setGroupId(''); setLevel('view') /* every new share starts at view */ }}>
               {t(k === 'user' ? 'pub.sh.person' : k === 'role' ? 'pub.sh.role' : 'pub.sh.team')}
             </button>
           ))}

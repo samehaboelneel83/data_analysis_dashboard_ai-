@@ -122,6 +122,27 @@ describe('ShareDashboardDialog', () => {
     expect(await within(screen.getByTestId('share-people')).findByText('North')).toBeInTheDocument()
   })
 
+  it('a new person starts at Can view, and is back at Can view after each invite and each switch (F-06)', async () => {
+    vi.mocked(reportGrantsApi.create).mockResolvedValue({ id: 6, user_id: 3, email: 'b@x.io', level: 'edit' } as never)
+    vi.mocked(workspaceApi.shareOptions).mockResolvedValue({ roles: [], org_units: [] } as never)
+    open()
+    const dialog = await screen.findByRole('dialog')
+    const level = () => within(dialog).getByLabelText('Access level') as HTMLSelectElement
+    expect(level().value).toBe('view')
+    fireEvent.change(within(dialog).getByLabelText('Email to share with'), { target: { value: 'b@x.io' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Invite' }))
+    await waitFor(() => expect(reportGrantsApi.create).toHaveBeenCalledWith(7, { email: 'b@x.io', level: 'view' }))
+    fireEvent.change(level(), { target: { value: 'edit' } })
+    fireEvent.change(within(dialog).getByLabelText('Email to share with'), { target: { value: 'c@x.io' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Invite' }))
+    await waitFor(() => expect(reportGrantsApi.create).toHaveBeenLastCalledWith(7, { email: 'c@x.io', level: 'edit' }))
+    await waitFor(() => expect(level().value).toBe('view'))
+    fireEvent.change(level(), { target: { value: 'edit' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'A team' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'A person' }))
+    expect(level().value).toBe('view')
+  })
+
   it('sends an end date, no downloads, sharing on and a message only when chosen', async () => {
     vi.mocked(reportGrantsApi.create).mockResolvedValue({ id: 6, user_id: 3, email: 'b@x.io', level: 'view', can_export: false, can_share: true,
       expires_at: '2030-01-31T23:59:59Z' } as never)

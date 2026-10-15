@@ -177,6 +177,15 @@ async def test_a_team_share_is_listed_under_my_team_even_when_the_reader_is_also
     assert (await client.get(f"{API}/portal/catalog?section=team", headers=hdr(people["reader"]))).json()["total"] == 0
 
 
+async def test_a_share_that_names_no_level_gives_view(client, people):
+    """F-06: least privilege on the server too -- an unsaid level is view."""
+    a, r = people["author"], people["reader"]
+    rid, _, _ = await dashboard(client, a)
+    got = await client.post(f"{API}/reports/{rid}/grants", json={"email": r.email}, headers=hdr(a))
+    assert got.status_code == 201 and got.json()["level"] == "view"
+    assert (await client.get(f"{API}/reports/{rid}", headers=hdr(r))).json()["my_capability"] == "view"
+
+
 async def test_an_expired_share_gives_nothing(client, db_session, people):
     a, r = people["author"], people["reader"]
     rid, _, _ = await dashboard(client, a)

@@ -776,8 +776,8 @@ async def create_grant(report_id: int, body: dict,
     report = await db.get(Report, report_id)
     check_org(report, current_user, "Report not found")
     try:
-        # The level a share had before it could say more: 'edit' when unsaid.
-        asked = GrantIn(**{"level": "edit", **{k: v for k, v in (body or {}).items() if k in GrantIn.model_fields}})
+        # Least privilege (F-06): a share that does not say its level is view.
+        asked = GrantIn(**{k: v for k, v in (body or {}).items() if k in GrantIn.model_fields})
     except ValidationError as e:
         raise HTTPException(400, f"That share could not be read: {e.errors()[0].get('msg')}")
     return await create_or_update_grant(db, report, current_user, asked)
