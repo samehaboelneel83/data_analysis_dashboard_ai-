@@ -219,6 +219,12 @@ class Settings(BaseSettings):
     # still set it -- removing a setting out from under someone is not a safe
     # change even when nothing reads it anymore.
     metadata_describe_concurrency: int = Field(default=12, ge=1)
+    # B-04: a metadata sync must end on its own. The whole run gets
+    # metadata_sync_timeout_s (then it is recorded "failed -- timed out"); each
+    # model stage (describe, entities) gets metadata_llm_stage_timeout_s and is
+    # recorded "skipped" when it runs over, so the rest of the run still lands.
+    metadata_sync_timeout_s: float = Field(default=1800.0, gt=0)
+    metadata_llm_stage_timeout_s: float = Field(default=600.0, gt=0)
 
     # Foreign-key inference thresholds (services/metadata/infer_keys.py), as
     # value-overlap ratios. At or above _high: proposed with high confidence and

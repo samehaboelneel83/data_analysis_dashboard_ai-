@@ -126,11 +126,23 @@ export default function UnderstandStep({ sourceId, onNext }: { sourceId: number;
       }
       polls.current = 0; setGaveUp(false); load()
     }
+    const cancelRun = async (runId: number) => {
+      try {
+        await metadataApi.cancelSync(sourceId, runId)
+        toast.success(t('pg.dataPages.sr.cancelled'))
+      } catch { toast.error(t('pg.dataPages.sr.cancelFailed')) }
+      polls.current = 0; setGaveUp(false); load()
+    }
     return (
       <section className="card setup-card" aria-live="polite">
         <p className="setup-card__lead">{t(key)}</p>
         {data.status === 'syncing' && running && run && (
           <p className="setup-section__sub">{progress({ started_at: run.started_at, done: run.stages_done, total: run.stages_total })}</p>
+        )}
+        {data.status === 'syncing' && running && run && data.can_edit && (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => void cancelRun(run.id)}>
+            {t('pg.dataPages.sr.cancelSync')}
+          </button>
         )}
         {failedRun && run?.error && <p className="setup-section__sub">{run.error}</p>}
         {readMsg && (

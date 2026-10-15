@@ -996,8 +996,12 @@ async def run_catalog_sync(
     else:
         _skip(context, "infer_keys", "no cached samples")
 
-    await _run_stage(context, "describe", stage_describe)
-    await _run_stage(context, "entities", stage_entities)
+    # B-04: the model stages wait on an endpoint that may never answer; each
+    # gets its own budget and is recorded "skipped" when it runs over.
+    from ...core.config import settings
+    llm_budget = settings.metadata_llm_stage_timeout_s
+    await _run_stage(context, "describe", stage_describe, timeout_s=llm_budget)
+    await _run_stage(context, "entities", stage_entities, timeout_s=llm_budget)
     await _run_stage(context, "drift", stage_drift)
     await _run_stage(context, "link_datasets", stage_link_datasets)
 

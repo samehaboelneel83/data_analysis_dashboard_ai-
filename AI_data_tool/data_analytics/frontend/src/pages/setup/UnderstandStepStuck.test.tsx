@@ -7,7 +7,7 @@ import { setupApi, metadataApi, type SetupSummary } from '../../services/api'
 vi.mock('../../services/api', async (orig) => {
   const real = await orig<typeof import('../../services/api')>()
   return { ...real, setupApi: { ...real.setupApi, summary: vi.fn(), refreshSummary: vi.fn() },
-    metadataApi: { ...real.metadataApi, sync: vi.fn(), latestSync: vi.fn() } }
+    metadataApi: { ...real.metadataApi, sync: vi.fn(), latestSync: vi.fn(), cancelSync: vi.fn() } }
 })
 
 /** QA6 B1: a connection nothing is reading (never synced) must not leave
@@ -78,6 +78,9 @@ describe('guided setup step 1 on a connection that was never read (QA6 B1)', () 
     expect(await screen.findByText(/step 5 of 8/)).toBeInTheDocument()
     expect(screen.queryByText(/nothing is reading it now/)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Read the database now/ })).not.toBeInTheDocument()
+    vi.mocked(metadataApi.cancelSync).mockResolvedValue({} as never)
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel sync' }))
+    await waitFor(() => expect(metadataApi.cancelSync).toHaveBeenCalledWith(1, 9))
   })
 
   it('a failed read shows its error and offers to read again (B-03)', async () => {

@@ -98,37 +98,41 @@ class SyncContext:
         self.stages: list[StageResult] = []
 
 
-async def _run_stage(context: SyncContext, name: str, fn) -> StageResult:
+async def _run_stage(context: SyncContext, name: str, fn,
+                     timeout_s: float | None = None) -> StageResult:
     """Execute one stage, recording its outcome either way.
 
     The broad except is the point of the function: a stage raising must become a
     recorded failure, not an aborted run. Anything narrower would let an
     unanticipated driver error take down the other five stages.
+
+    `timeout_s` (B-04) bounds a stage that waits on something outside our
+    control -- the model stages, against an endpoint that may not answer. A
+    stage that runs over is recorded "skipped" with the reason, and the run
+    goes on to the next stage.
     """
     started = time.monotonic()
+    budget = asyncio.timeout(timeout_s) if timeout_s else None
     try:
-        detail = await fn(context) or {}
+        if budget is None:
+            detail = await fn(context) or {}
+        else:
+            async with budget:
+                detail = await fn(context) or {}
         result = StageResult(name, "ok", int((time.monotonic() - started) * 1000), detail)
+    except TimeoutError as exc:
+        if budget is None or not budget.expired():
+            result = await _stage_failed(context, name, started, exc)
+        else:
+            logger.warning("metadata sync stage %s ran over its %.0fs budget", name, timeout_s)
+            try:
+                await context.db.rollback()
+            except Exception:
+                logger.warning("could not roll back after stage %s timed out", name, exc_info=True)
+            result = StageResult(name, "skipped", int((time.monotonic() - started) * 1000),
+                                 detail={"reason": f"took longer than {timeout_s:g} s"})
     except Exception as exc:
-        logger.exception("metadata sync stage %s failed", name)
-        # A stage that raised mid-write can leave partial changes pending on
-        # the session (e.g. some but not all of a batch flushed). Without
-        # rolling those back, the progress-publish commit just below would
-        # persist them anyway -- a "failed" stage silently keeping its
-        # half-done writes. Rolling back only discards uncommitted state;
-        # `context.run` was already flushed/committed by an earlier stage or
-        # the caller, so it survives (SQLAlchemy just re-fetches it on next
-        # access) and the `context.run.stages = ...` assignment right after
-        # this still lands cleanly.
-        try:
-            await context.db.rollback()
-        except Exception:
-            logger.warning(
-                "could not roll back after stage %s failed", name, exc_info=True)
-        result = StageResult(
-            name, "failed", int((time.monotonic() - started) * 1000),
-            error=f"{type(exc).__name__}: {exc}",
-        )
+        result = await _stage_failed(context, name, started, exc)
     context.stages.append(result)
 
     # Publish progress after every stage. Without this the row only changes at
@@ -142,6 +146,29 @@ async def _run_stage(context: SyncContext, name: str, fn) -> StageResult:
             logger.warning("could not publish sync progress", exc_info=True)
 
     return result
+
+
+async def _stage_failed(context: SyncContext, name: str, started: float, exc: Exception) -> StageResult:
+    """Record a stage that raised (called from inside the except block)."""
+    logger.exception("metadata sync stage %s failed", name)
+    # A stage that raised mid-write can leave partial changes pending on
+    # the session (e.g. some but not all of a batch flushed). Without
+    # rolling those back, the progress-publish commit just below would
+    # persist them anyway -- a "failed" stage silently keeping its
+    # half-done writes. Rolling back only discards uncommitted state;
+    # `context.run` was already flushed/committed by an earlier stage or
+    # the caller, so it survives (SQLAlchemy just re-fetches it on next
+    # access) and the `context.run.stages = ...` assignment right after
+    # this still lands cleanly.
+    try:
+        await context.db.rollback()
+    except Exception:
+        logger.warning(
+            "could not roll back after stage %s failed", name, exc_info=True)
+    return StageResult(
+        name, "failed", int((time.monotonic() - started) * 1000),
+        error=f"{type(exc).__name__}: {exc}",
+    )
 
 
 def _skip(context: SyncContext, name: str, why: str) -> StageResult:
@@ -762,7 +789,9 @@ async def run_sync(
     # real one.
     if any(context.cache.has_sample(d.id) for d in context.datasets):
         await _run_stage(context, "infer_keys", stage_infer_keys)
-        await _run_stage(context, "infer_semantic", stage_infer_semantic)
+        from ...core.config import settings
+        await _run_stage(context, "infer_semantic", stage_infer_semantic,
+                         timeout_s=settings.metadata_llm_stage_timeout_s)
     else:
         _skip(context, "infer_keys", "no cached samples")
         _skip(context, "infer_semantic", "no cached samples")
@@ -801,6 +830,25 @@ async def find_active_run(db, data_source_id: int) -> SyncRun | None:
     )).scalar_one_or_none()
 
 
+#: B-04: the task running each sync in THIS process, by run id, so an admin's
+#: Cancel can stop it (POST /data-sources/{id}/sync/{run_id}/cancel). Filled
+#: and emptied by run_sync_background itself, whichever route started it.
+RUNNING_TASKS: dict[int, asyncio.Task] = {}
+
+
+async def _end_run(db, run_id: int, data_source_id: int, error: str) -> None:
+    """Record a run that did not finish (timed out / cancelled) as failed."""
+    run = await db.get(SyncRun, run_id)
+    if run is not None and run.status == "running":
+        run.status = "failed"
+        run.error = error
+        run.finished_at = datetime.utcnow()
+    source = await db.get(DataSource, data_source_id)
+    if source is not None:
+        source.sync_status = "failed"
+    await db.commit()
+
+
 async def run_sync_background(
     session_factory, run_id: int, data_source_id: int, org_id: int, *,
     cache, llm_client=None, allow_llm: bool = False,
@@ -811,59 +859,91 @@ async def run_sync_background(
     Runs detached from any request, so it owns its session and its errors. The
     outer try/except is not optional: an exception escaping here would leave the
     row saying "running" forever, and the source unsyncable.
+
+    B-04: the whole run is bounded by settings.metadata_sync_timeout_s (then
+    recorded "Timed out after N min"), and the task is registered in
+    RUNNING_TASKS so it can be cancelled.
     """
-    async with session_factory() as db:
-        try:
-            async with source_sync_lock(db, data_source_id) as acquired:
-                if not acquired:
-                    run = await db.get(SyncRun, run_id)
-                    if run is not None:
-                        run.status = "failed"
-                        run.error = "Another sync acquired the lock first"
-                        run.finished_at = datetime.utcnow()
-                        await db.commit()
-                    return
-
-                run = await db.get(SyncRun, run_id)
-                source = await db.get(DataSource, data_source_id)
-
-                # Describe the DATABASE from its connection, not just the
-                # datasets someone happened to import from it. The dataset-level
-                # pipeline (`run_sync`) remains for sources that have no live
-                # connection to introspect — an uploaded file has a dataset and
-                # nothing else to read.
-                from .catalog_sync import run_catalog_sync
-
-                if source is not None and source_config:
-                    from .cache import get_object_cache
-                    await run_catalog_sync(
-                        db, source, cache=get_object_cache(),
-                        llm_client=llm_client, allow_llm=allow_llm,
-                        source_config=source_config, run=run,
-                    )
-                else:
-                    await run_sync(
-                        db, data_source_id, org_id,
-                        cache=cache, llm_client=llm_client, allow_llm=allow_llm,
-                        source_config=source_config, run=run,
-                    )
-
-                source = await db.get(DataSource, data_source_id)
-                if source is not None and run is not None:
-                    source.sync_status = run.status
-                    source.last_synced_at = run.finished_at
-                await db.commit()
-        except Exception as exc:
-            logger.exception("background sync failed for source %s", data_source_id)
+    from ...core.config import settings
+    limit = settings.metadata_sync_timeout_s
+    task = asyncio.current_task()
+    if task is not None:
+        RUNNING_TASKS[run_id] = task
+    try:
+        async with session_factory() as db:
+            budget = asyncio.timeout(limit)
             try:
+                async with budget:
+                    await _run_sync_body(db, run_id, data_source_id, org_id, cache=cache,
+                                         llm_client=llm_client, allow_llm=allow_llm,
+                                         source_config=source_config)
+            except TimeoutError:
+                if not budget.expired():
+                    raise
+                logger.warning("sync run %s timed out after %ss", run_id, limit)
+                try:
+                    await db.rollback()
+                    await _end_run(db, run_id, data_source_id,
+                                   f"Timed out after {max(1, round(limit / 60))} min")
+                except Exception:
+                    logger.exception("could not record the timeout of run %s", run_id)
+    finally:
+        RUNNING_TASKS.pop(run_id, None)
+
+
+async def _run_sync_body(db, run_id: int, data_source_id: int, org_id: int, *,
+                         cache, llm_client, allow_llm: bool, source_config: dict | None) -> None:
+    try:
+        async with source_sync_lock(db, data_source_id) as acquired:
+            if not acquired:
                 run = await db.get(SyncRun, run_id)
-                if run is not None and run.status == "running":
+                if run is not None:
                     run.status = "failed"
-                    run.error = f"{type(exc).__name__}: {exc}"
+                    run.error = "Another sync acquired the lock first"
                     run.finished_at = datetime.utcnow()
                     await db.commit()
-            except Exception:
-                logger.exception("could not record the failure of run %s", run_id)
+                return
+
+            run = await db.get(SyncRun, run_id)
+            source = await db.get(DataSource, data_source_id)
+
+            # Describe the DATABASE from its connection, not just the
+            # datasets someone happened to import from it. The dataset-level
+            # pipeline (`run_sync`) remains for sources that have no live
+            # connection to introspect — an uploaded file has a dataset and
+            # nothing else to read.
+            from .catalog_sync import run_catalog_sync
+
+            if source is not None and source_config:
+                from .cache import get_object_cache
+                await run_catalog_sync(
+                    db, source, cache=get_object_cache(),
+                    llm_client=llm_client, allow_llm=allow_llm,
+                    source_config=source_config, run=run,
+                )
+            else:
+                await run_sync(
+                    db, data_source_id, org_id,
+                    cache=cache, llm_client=llm_client, allow_llm=allow_llm,
+                    source_config=source_config, run=run,
+                )
+
+            source = await db.get(DataSource, data_source_id)
+            if source is not None and run is not None:
+                source.sync_status = run.status
+                source.last_synced_at = run.finished_at
+            await db.commit()
+    except Exception as exc:
+        logger.exception("background sync failed for source %s", data_source_id)
+        try:
+            run = await db.get(SyncRun, run_id)
+            if run is not None and run.status == "running":
+                run.status = "failed"
+                run.error = f"{type(exc).__name__}: {exc}"
+                run.finished_at = datetime.utcnow()
+                await db.commit()
+        except Exception:
+            logger.exception("could not record the failure of run %s", run_id)
 
 
 @asynccontextmanager

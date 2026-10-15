@@ -3845,6 +3845,9 @@ export const metadataApi = {
     api.get<SyncRun>(`/data-sources/${sourceId}/sync/latest`).then(r => r.data),
   syncStatus: (sourceId: number, runId: number) =>
     api.get<SyncRun>(`/data-sources/${sourceId}/sync/${runId}`).then(r => r.data),
+  /** B-04: stop a stuck sync; the run comes back recorded as failed. */
+  cancelSync: (sourceId: number, runId: number) =>
+    api.post<SyncRun>(`/data-sources/${sourceId}/sync/${runId}/cancel`).then(r => r.data),
   review:     (sourceId: number) =>
     api.get<ReviewQueue>(`/data-sources/${sourceId}/review`).then(r => r.data),
   confirm:    (sourceId: number, body: {
