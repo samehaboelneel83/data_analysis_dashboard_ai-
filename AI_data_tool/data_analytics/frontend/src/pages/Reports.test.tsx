@@ -18,7 +18,7 @@ import { axeViolations } from '../test/axe'
  */
 
 vi.mock('../services/api', () => ({
-  reportsApi: { list: vi.fn(), recent: vi.fn(), delete: vi.fn(), create: vi.fn(), update: vi.fn(), setPublished: vi.fn(),
+  reportsApi: { list: vi.fn(), recent: vi.fn(), delete: vi.fn(), create: vi.fn(), update: vi.fn(), setPublished: vi.fn(), duplicate: vi.fn(),
     downloadPdf: vi.fn(), deletePage: vi.fn() },
   reportGrantsApi: { list: vi.fn(), create: vi.fn(), remove: vi.fn() },
   datasetsApi: { list: vi.fn() },
@@ -923,5 +923,17 @@ describe('the search box while the list loads (QA2 B8)', () => {
     expect(await screen.findByTestId('dash-card-4')).toBeInTheDocument()
     expect(screen.queryByTestId('dash-card-1')).toBeNull()
     expect(screen.getByRole('searchbox', { name: /Search dashboards/ })).toHaveValue('Board 3')
+  })
+})
+
+describe('C-20: duplicating a dashboard', () => {
+  it('the card menu copies it and opens the copy in Edit', async () => {
+    vi.mocked(reportsApi.duplicate).mockResolvedValue({ id: 91, name: 'Revenue (copy)' } as never)
+    renderReports()
+    await screen.findByTestId('dash-card-1')
+    fireEvent.click(within(card(1)).getByRole('button', { name: 'More actions for Revenue' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Duplicate' }))
+    await waitFor(() => expect(reportsApi.duplicate).toHaveBeenCalledWith(1))
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/reports/91?edit=1'))
   })
 })
