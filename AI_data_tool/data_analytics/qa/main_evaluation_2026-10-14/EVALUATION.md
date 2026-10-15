@@ -16,7 +16,7 @@
 
 ## 1. Executive summary
 
-**Overall score: 3.5 / 5.** Datalytics on main is a broad, ambitious BI product. Its core paths and most of its new features work, and the visual design is calm and consistent. What holds it back is two Critical defects, a handful of security gaps in sharing and admin, AI features that don't fail fast when the model is down, and a long tail of edge-case bugs.
+**Overall score: 3.5 / 5.** Datalytics on main is a broad, ambitious BI product. Its core paths and most of its new features work, and the visual design is calm and consistent. What holds it back is a Critical guest-link defect, a handful of security gaps in sharing and admin, AI features that don't fail fast when the model is down, and a long tail of edge-case bugs.
 
 **What works well:**
 - **Ask AI handles an outage honestly:** a "model server unreachable" banner, a paused composer, a no-AI fallback answer and a Stop button.
@@ -30,7 +30,7 @@
 - **Shell:** command palette, dark mode, Arabic/RTL, a setup checklist for new orgs, and Profile ("About you").
 
 **What holds it back:**
-- **Two Critical bugs:** a fresh install can't load demo content, and guest links fail whenever a dashboard has a map.
+- **A Critical bug:** guest links fail whenever a dashboard has a map. (A database first built from `init.sql` also can't load demo content; see #1, which is High, not Critical.)
 - **Security gaps:**
   - "No downloads" shares can be bypassed through Print/PowerPoint.
   - An org admin is shown Edit/Delete on the platform super admin.
@@ -62,7 +62,7 @@ High and Medium counts are the tags in the per-screen notes; one problem can be 
 | Frontend Vitest | **389 files, 4,689 passed** |
 | Frontend TypeScript (`tsc --noEmit`) | clean |
 | Backend pytest (Python 3.12) | **8,564 passed, 4 skipped, 1 failed** |
-| Schema check: a database built from `init.sql` reaches the ORM schema | **fails: 8 columns missing** (Critical #1) |
+| Schema check: a database built from `init.sql` reaches the ORM schema | **fails: 8 columns missing** (High #1) |
 
 **The one failing backend test:** `tests/test_widget_roles.py::TestParityWithTheFrontend::test_the_spec_file_was_actually_read` expects 75 frontend chart types, but the frontend has 77. The other 131 parity checks pass, so only the hard-coded count is stale, but it leaves CI red.
 
@@ -76,7 +76,7 @@ High and Medium counts are the tags in the per-screen notes; one problem can be 
 
 | # | Severity | Area | Issue | Evidence | Suggested fix |
 |---|---|---|---|---|---|
-| 1 | **Critical** | Install | A fresh `docker compose up` creates tables from `postgres/init.sql`, then stamps Alembic at head. 8 columns are never added (`datasets.aggregate_of_dataset_id`, `datasets.aggregate_spec`, `reports.origin`, `report_pages.background_url`, `dataset_columns.source_column_id`, `analysis_results.run_id/params/created_by`), so **"Load demo content" fails with HTTP 500** on every new install. | schema check above | Add the 8 columns to `_migrate` in `app/main.py`, or update `init.sql` |
+| 1 | **High** *(corrected from Critical, 15 Oct)* | Install | A database first created from `postgres/init.sql` gets its tables from that file, then is stamped at Alembic head. 8 columns are never added (`datasets.aggregate_of_dataset_id`, `datasets.aggregate_spec`, `reports.origin`, `report_pages.background_url`, `dataset_columns.source_column_id`, `analysis_results.run_id/params/created_by`), so **"Load demo content" fails with HTTP 500**. *Correction:* since commit `5ffbb917`, `docker-compose.yml` no longer mounts `init.sql`, so a normal fresh Docker install is **not** affected. This still breaks developer volumes created before that commit, and anyone loading `init.sql` by hand as README / `first-stop.md` describe. | schema check above | Add the 8 columns to `_migrate` in `app/main.py`, or update `init.sql` |
 | 2 | **Critical** | Sharing | **Guest links bounce to the login page whenever the dashboard has a map.** The map tile calls the authenticated `/api/v1/map-settings`, gets a 401, and the global redirect fires. The shared payload itself returns 200. | F2-55 | Serve map settings in the shared payload, or mark the call `quiet401`; make `/shared` immune to the global 401 redirect |
 | 3 | **High** | Sharing | **"No downloads" can be bypassed.** A reader whose share has *May download* off still opens the print view and uses *Print / Save as PDF* and *Download PowerPoint* (built in the browser, no server check). | F-95, F-96 | Gate the print route and PPTX on the share's download right, server-side |
 | 4 | **High** | Admin | An **org admin is shown Edit and Delete on the platform super admin** (`admin@datalytics.local`). Server-side enforcement was not tried, to protect the shared session. | E-111 | Hide super admins from org lists; refuse PUT/DELETE unless the caller is a super admin |
