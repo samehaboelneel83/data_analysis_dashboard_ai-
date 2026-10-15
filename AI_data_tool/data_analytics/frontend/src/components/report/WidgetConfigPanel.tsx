@@ -1323,6 +1323,12 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
       <DataRolesList specs={roleSpecs} values={assignedFields} kindOf={fieldKind} displayName={displayName}
         onAdd={role => setAddRole(role)} onRemove={removeField} renderDetails={fieldDetails} addBlocked={addBlocked}
         onDropField={dropFieldOnRole} />
+      {/* C-10: which of a point/bubble map's two modes is in force. */}
+      {(wt === 'map_points' || wt === 'map_bubbles') && (roleValues.category || roleValues.lat || roleValues.lon) && (
+        <div data-testid="map-mode-hint" style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
+          {tt(roleValues.lat && roleValues.lon ? 'cr.mapModeCoords' : roleValues.lat || roleValues.lon ? 'cr.mapModeHalf' : 'cr.mapModeCountry')}
+        </div>
+      )}
       {/* C-06: a word cloud sizes WORDS; a numeric column as its text draws
           numbers as words (and "Word text" accepts any column). Said here. */}
       {wt === 'word_cloud' && roleValues.category && fieldKind(roleValues.category) === 'measure' && (

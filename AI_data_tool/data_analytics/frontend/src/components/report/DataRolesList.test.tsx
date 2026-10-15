@@ -290,3 +290,16 @@ describe('C-06: a number chosen as Word text', () => {
     expect(screen.queryByTestId('word-text-numeric')).toBeNull()
   })
 })
+
+describe('C-10: a point map says how it places its markers', () => {
+  const map = (config: Record<string, unknown>) => ({ ...bar(config), widget_type: 'map_points' } as Widget)
+  it('by coordinates when both are set, by country otherwise', () => {
+    const { unmount } = render(<CrossFilterProvider><WidgetConfigPanel widget={map({ lat: 'a', lon: 'b', dimension: 'region' })}
+      columns={COLUMNS} onUpdate={vi.fn()} pages={page([map({})])} /></CrossFilterProvider>)
+    expect(screen.getByTestId('map-mode-hint')).toHaveTextContent(/coordinates/i)
+    unmount()
+    render(<CrossFilterProvider><WidgetConfigPanel widget={map({ dimension: 'region' })}
+      columns={COLUMNS} onUpdate={vi.fn()} pages={page([map({})])} /></CrossFilterProvider>)
+    expect(screen.getByTestId('map-mode-hint')).toHaveTextContent(/country/i)
+  })
+})
