@@ -415,6 +415,14 @@ describe('DatasetDetail DirectQuery gating', () => {
     await waitFor(() => expect(dataPreviewApi.query).toHaveBeenLastCalledWith(28, [], [], 100, 100))
   })
 
+  it('explains on Rules & alerts why a live dataset has no data checks (B-20)', async () => {
+    vi.mocked(datasetsApi.get).mockResolvedValue(directQueryDataset())
+    renderDetail(28, 'rules')
+    const card = await screen.findByTestId('rules-checks-live')
+    expect(card).toHaveTextContent('Data checks run when a dataset is refreshed')
+    expect(within(card).getByRole('link', { name: /alert/i })).toHaveAttribute('href', '#dl-rules-alerts')
+  })
+
   it('shows a shared empty state instead of a bare table with no rows when the preview matches nothing', async () => {
     vi.mocked(datasetsApi.get).mockResolvedValue(directQueryDataset())
     vi.mocked(dataPreviewApi.query).mockResolvedValue({ columns: ['region'], rows: [], total: 0 })

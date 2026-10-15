@@ -1460,7 +1460,17 @@ export default function DatasetDetail() {
               </details>
             </ChecksPanel>
           )}
-          <AlertsPanel datasetId={ds.id} columns={ds.columns ?? []} />
+          {ds.mode === 'directquery' && (
+            // B-20: data checks run when a dataset is refreshed into a file; a
+            // live dataset never is, so they are not offered -- said, not hidden.
+            <section className="dl-rules__card" data-testid="rules-checks-live">
+              <header className="dl-rules__head">
+                <div><h3>{tr('rules3.checksLiveTitle')}</h3><p>{tr('rules3.checksLive')}</p></div>
+              </header>
+              <a href="#dl-rules-alerts">{tr('rules3.checksLiveGo')}</a>
+            </section>
+          )}
+          <div id="dl-rules-alerts"><AlertsPanel datasetId={ds.id} columns={ds.columns ?? []} /></div>
           <section className="dl-rules__card" data-testid="rules-freshness">
             <header className="dl-rules__head">
               <div><h3>{tr('rules3.freshness')}</h3><p>{tr('rules3.freshnessCopy')}</p></div>
