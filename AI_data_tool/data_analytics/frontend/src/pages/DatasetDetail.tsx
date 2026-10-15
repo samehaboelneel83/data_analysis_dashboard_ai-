@@ -287,22 +287,26 @@ export default function DatasetDetail() {
       // one (the backend would 400) — skip the request entirely rather than
       // firing a call that can only fail.
       if (ds.mode === 'directquery') { setLoading(false); return }
-      analysisApi.get(dsId).then(setAnalysis)
+      // B-15: no profile yet answers 204 -> null (it used to be a 404).
+      const noProfile = () => {
+        // Once per dataset: the load runs twice (StrictMode in development,
+        // or a reload of the same dataset), both GETs answer "none" before
+        // either run lands, and `searchParams` still says new=1 after
+        // replaceState -- two scans and two "Analysis complete" toasts (live QA
+        // 2026-09-28).
+        if (searchParams.get('new') === '1' && autoAnalysedRef.current !== dsId) {
+          autoAnalysedRef.current = dsId
+          window.history.replaceState(null, '', window.location.pathname)
+          void runAnalysisRef.current?.()
+        }
+      }
+      analysisApi.get(dsId)
+        .then(a => { if (a == null) noProfile(); else setAnalysis(a) })
         // E06: straight after an import the profile is run, not left behind a
         // button -- the first thing a person does with new data is look at it.
         // Only then: a normal visit does not trigger a full scan. `new` is
         // dropped from the address so a reload does not scan again.
-        .catch(() => {
-          // Once per dataset: the load runs twice (StrictMode in development,
-          // or a reload of the same dataset), both GETs 404 before either
-          // run lands, and `searchParams` still says new=1 after replaceState
-          // -- two scans and two "Analysis complete" toasts (live QA 2026-09-28).
-          if (searchParams.get('new') === '1' && autoAnalysedRef.current !== dsId) {
-            autoAnalysedRef.current = dsId
-            window.history.replaceState(null, '', window.location.pathname)
-            void runAnalysisRef.current?.()
-          }
-        })
+        .catch(noProfile)
         .finally(() => setLoading(false))
     }).catch(e => { setLoadError(e ?? new Error('failed')); setLoading(false) })
   }, [dsId])

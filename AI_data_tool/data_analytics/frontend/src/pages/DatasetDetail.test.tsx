@@ -1403,6 +1403,15 @@ describe('a dataset just imported (E06)', () => {
     await screen.findAllByText('CSV Upload')
     expect(analysisApi.run).not.toHaveBeenCalled()
   })
+
+  it('a dataset with no profile yet (GET answers 204 -> null) still runs it on arrival (B-15)', async () => {
+    vi.mocked(analysisApi.get).mockResolvedValue(null as never)
+    render(
+      <MemoryRouter initialEntries={['/datasets/29?new=1']}>
+        <Routes><Route path="/datasets/:id" element={<DatasetDetail />} /></Routes>
+      </MemoryRouter>)
+    await waitFor(() => expect(analysisApi.run).toHaveBeenCalledWith(29))
+  })
 })
 
 describe('the first look after an upload', () => {

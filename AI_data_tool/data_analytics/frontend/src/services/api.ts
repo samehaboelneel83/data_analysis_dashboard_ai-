@@ -1261,8 +1261,9 @@ export const aggregatesApi = {
 export const analysisApi = {
   run: (id: number, type = 'full') =>
     api.post(`/datasets/${id}/analysis`, { analysis_type: type }).then(r => r.data),
+  /** The saved profile; null when none has been run yet (204, B-15). */
   get: (id: number) =>
-    api.get(`/datasets/${id}/analysis`).then(r => r.data),
+    api.get(`/datasets/${id}/analysis`).then(r => (r.status === 204 || r.data === '' ? null : r.data)),
   // A2: KMeans segmentation over selected (or all usable) numeric columns.
   segment: (id: number, columns?: string[]) =>
     api.post<SegmentResult>(`/datasets/${id}/segment`, { columns: columns ?? null }).then(r => r.data),

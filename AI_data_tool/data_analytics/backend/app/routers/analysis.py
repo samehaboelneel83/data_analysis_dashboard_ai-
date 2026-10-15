@@ -1,6 +1,6 @@
 import asyncio
 import pandas as pd
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -237,7 +237,10 @@ async def get_analysis(dataset_id: int, db: AsyncSession = Depends(get_db), curr
     )
     ar = result.scalar_one_or_none()
     if not ar:
-        raise HTTPException(404, "No analysis found — run POST first")
+        # B-15: "not profiled yet" is a normal state, not a missing resource --
+        # 204, so every dataset page load stops logging a 404. 404 stays for a
+        # dataset that does not exist (and for restricted callers, above).
+        return Response(status_code=204)
     return as_response(ar.result)
 
 

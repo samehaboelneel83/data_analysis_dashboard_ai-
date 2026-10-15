@@ -110,3 +110,18 @@ class TestContractShape:
         clean = safe_clean(dirty)
         assert clean == {"a": 3, "b": 1.5, "c": None, "d": [True], "e": None}
         assert isinstance(clean["a"], int) and not isinstance(clean["a"], np.integer)
+
+
+class TestNoProfileYet:
+    """B-15: a dataset nobody has profiled yet is not an error -- every dataset
+    page load used to log a 404 for it."""
+
+    async def test_no_analysis_yet_is_204(self, client, db_session, two_orgs, auth_headers, tmp_path):
+        ds = await _seed_dataset_with_file(db_session, tmp_path, two_orgs["a"]["org"].id, _fixture_df())
+        r = await client.get(f"/api/v1/datasets/{ds.id}/analysis", headers=auth_headers["a"])
+        assert r.status_code == 204
+        assert r.content == b""
+
+    async def test_an_unknown_dataset_is_still_404(self, client, auth_headers):
+        r = await client.get("/api/v1/datasets/999999/analysis", headers=auth_headers["a"])
+        assert r.status_code == 404
