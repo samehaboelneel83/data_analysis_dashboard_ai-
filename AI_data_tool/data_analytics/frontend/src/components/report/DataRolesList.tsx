@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import type { RoleField } from '../../types/report'
 import { useModalDialog } from '../ui/useModalDialog'
 import { useT } from '../../i18n'
@@ -31,6 +31,9 @@ export interface DataRolesListProps {
   /** Why a role cannot take a field just now (another role's choice rules
    *  it out), or null. Its "+ Add" is greyed and says so. */
   addBlocked?: (role: string) => string | null
+  /** C-27: a field dragged from the Fields panel and dropped on a role.
+   *  Returns false when the role cannot take it (the drop is refused). */
+  onDropField?: (role: string, column: string) => boolean
 }
 
 /** "Dimension (Group / X-axis)" -> heading "Dimension", hint "Group / X-axis". */
@@ -72,8 +75,12 @@ export function FieldIcon({ kind }: { kind: FieldKind }) {
   return (<svg {...common}><path d="M3 13V6M6.3 13V3M9.6 13V8M13 13V5" /><path d="M2 13.5h12" /></svg>)
 }
 
-export default function DataRolesList({ specs, values, kindOf, displayName, onAdd, onRemove, renderDetails, addBlocked }: DataRolesListProps) {
+export default function DataRolesList({ specs, values, kindOf, displayName, onAdd, onRemove, renderDetails, addBlocked, onDropField }: DataRolesListProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  // C-27: the role a field is being dragged over, and one that just refused a drop.
+  const [dropOver, setDropOver] = useState<string | null>(null)
+  const [refused, setRefused] = useState<string | null>(null)
+  const carriesField = (e: ReactDragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('application/x-field')
   const [open, setOpen] = useState<string | null>(null)
   const t = useT()
   const role = useRoleLabel()
@@ -99,7 +106,27 @@ export default function DataRolesList({ specs, values, kindOf, displayName, onAd
         const canAdd = !blocked && (rf.multi || fields.length === 0)
         const sectionId = `data-role-section-${rf.role}`
         return (
-          <section key={rf.role} data-roles-section={rf.role} style={{ marginBottom: 6 }}>
+          <section key={rf.role} data-roles-section={rf.role}
+            onDragOver={onDropField ? e => {
+              if (!carriesField(e)) return
+              e.preventDefault()
+              try { e.dataTransfer.dropEffect = 'copy' } catch { /* read-only in some browsers */ }
+              if (dropOver !== rf.role) setDropOver(rf.role)
+            } : undefined}
+            onDragLeave={onDropField ? () => setDropOver(d => (d === rf.role ? null : d)) : undefined}
+            onDrop={onDropField ? e => {
+              const col = e.dataTransfer?.getData('application/x-field')
+              setDropOver(null)
+              if (!col) return
+              e.preventDefault()
+              if (!onDropField(rf.role, col)) {
+                setRefused(rf.role)
+                setTimeout(() => setRefused(r => (r === rf.role ? null : r)), 1500)
+              }
+            } : undefined}
+            title={refused === rf.role ? t('bc.canvas.dropRefused', { role: heading }) : undefined}
+            style={{ marginBottom: 6, borderRadius: 6,
+              outline: dropOver === rf.role ? '2px dashed var(--accent)' : refused === rf.role ? '2px dashed var(--danger, #c0392b)' : undefined }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4, minHeight: 28 }}>
               <button type="button" aria-expanded={!isCollapsed} aria-controls={sectionId}
                 onClick={() => toggleRole(rf.role)} title={hint}

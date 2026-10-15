@@ -230,3 +230,23 @@ describe('C-26: a several-field role applies each tick at once', () => {
     expect(onClose).toHaveBeenCalled()
   })
 })
+
+describe('C-27: a field dropped onto a role in the Properties pane', () => {
+  const dt = (field: string) => ({ types: ['application/x-field'], getData: (k: string) => (k === 'application/x-field' ? field : ''),
+    dropEffect: 'none', effectAllowed: 'all' })
+  it('a numeric field dropped on the Measure role fills it', () => {
+    const onUpdate = renderPanel(bar({ dimension: 'region' }))
+    const section = document.querySelector('[data-roles-section="measure"]') as HTMLElement
+    fireEvent.dragOver(section, { dataTransfer: dt('sales') })
+    fireEvent.drop(section, { dataTransfer: dt('sales') })
+    act(() => { vi.advanceTimersByTime(700) })
+    expect(lastConfig(onUpdate)).toMatchObject({ dimension: 'region', measure: 'sales' })
+  })
+  it('a text field dropped on the Measure role is refused', () => {
+    const onUpdate = renderPanel(bar({ dimension: 'ordered_at' }))
+    const section = document.querySelector('[data-roles-section="measure"]') as HTMLElement
+    fireEvent.drop(section, { dataTransfer: dt('region') })
+    act(() => { vi.advanceTimersByTime(700) })
+    expect(onUpdate.mock.calls.every(c => c[0].measure !== 'region')).toBe(true)
+  })
+})

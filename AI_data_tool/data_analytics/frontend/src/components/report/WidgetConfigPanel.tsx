@@ -1224,6 +1224,18 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
   const objectLabel = (w: { title?: string | null; widget_type: string; id: number }) =>
     w.title || `${w.widget_type.charAt(0).toUpperCase()}${w.widget_type.slice(1).replace(/_/g, ' ')} ${w.id}`
   const openAssign = (role: string | null) => { setAssignRole(role); setAssignOpen(true) }
+  // C-27: a field dropped on a role from the Fields panel -- taken only when the
+  // role's own picker would offer it (the same rule, roleChoices), so a text
+  // field dropped on Latitude is refused rather than saved.
+  const dropFieldOnRole = (role: string, column: string): boolean => {
+    const rf = roleSpecs.find(r => r.role === role)
+    if (!rf || addBlocked(role)) return false
+    const current = fieldsOf(rf)
+    if (current.includes(column)) return true
+    if (!roleChoices(rf, current).some(c => c.value === column)) return false
+    setFields(rf, rf.multi ? [...current, column] : [column])
+    return true
+  }
   const removeField = (role: string, f: string) => {
     const rf = roleSpecs.find(r => r.role === role)
     if (!rf) return
@@ -1310,7 +1322,8 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
         <span aria-hidden style={{ fontSize:17, lineHeight:1 }}>+</span> {L("Assign data")}
       </button>
       <DataRolesList specs={roleSpecs} values={assignedFields} kindOf={fieldKind} displayName={displayName}
-        onAdd={role => setAddRole(role)} onRemove={removeField} renderDetails={fieldDetails} addBlocked={addBlocked} />
+        onAdd={role => setAddRole(role)} onRemove={removeField} renderDetails={fieldDetails} addBlocked={addBlocked}
+        onDropField={dropFieldOnRole} />
     </div>
   )
   // Which fields a role may be given -- the ONE rule both the dialog's pickers
@@ -2949,7 +2962,8 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
         <AssignDataDialog objectName={objectLabel({ title, widget_type: wt, id: widget.id })}
           focusRole={assignRole} onClose={() => setAssignOpen(false)}>
           <DataRolesList specs={roleSpecs} values={assignedFields} kindOf={fieldKind} displayName={displayName}
-            onAdd={role => setAddRole(role)} onRemove={removeField} addBlocked={addBlocked} />
+            onAdd={role => setAddRole(role)} onRemove={removeField} addBlocked={addBlocked}
+            onDropField={dropFieldOnRole} />
         </AssignDataDialog>
       )}
       {addRole && (() => {
