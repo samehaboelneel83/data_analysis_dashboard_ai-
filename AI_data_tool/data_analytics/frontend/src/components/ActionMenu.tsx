@@ -54,7 +54,9 @@ export default function ActionMenu({
   align = 'start', className, portal = false,
 }: Props) {
   const [open, setOpen] = useState(false)
-  const [placement, setPlacement] = useState<{ top?: boolean; left?: boolean }>({})
+  const [placement, setPlacement] = useState<{ top?: boolean; left?: boolean; maxH?: number }>({})
+  // F-16: when it opened and where its trigger was -- see `activate`.
+  const openedRef = useRef<{ at: number; rect: DOMRect | null }>({ at: 0, rect: null })
   const [fixedAt, setFixedAt] = useState<{ top: number; left: number } | null>(null)
   const [activeIndex, setActiveIndex] = useState(0)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -71,6 +73,7 @@ export default function ActionMenu({
   }
 
   const doOpen = () => {
+    openedRef.current = { at: Date.now(), rect: triggerRef.current?.getBoundingClientRect() ?? null }
     setOpen(true)
     setActiveIndex(enabledIndices[0] ?? 0)
   }
@@ -98,9 +101,15 @@ export default function ActionMenu({
     // or a menu on the last row "fits" and is then cut by the window edge.
     const overflowsBottom = tRect.bottom + 4 + mRect.height + 4 > window.innerHeight
     const overflowsRight = tRect.left + mRect.width > window.innerWidth
-    setPlacement({ top: overflowsBottom, left: overflowsRight })
+    // F-16: flip above only when it FITS above. Clamped to the top of a short
+    // window it used to cover its own trigger, and the second press of a
+    // double-click landed on whatever item was there (a widget duplicated by
+    // accident). With room on neither side it opens below and scrolls.
+    const above = overflowsBottom && tRect.top - 4 - mRect.height - 4 >= 0
+    const maxH = overflowsBottom && !above ? Math.max(80, window.innerHeight - (tRect.bottom + 4) - 4) : undefined
+    setPlacement({ top: above, left: overflowsRight, maxH })
     if (portal) {
-      const top = overflowsBottom ? Math.max(4, tRect.top - mRect.height - 4) : tRect.bottom + 4
+      const top = above ? tRect.top - mRect.height - 4 : tRect.bottom + 4
       const left = overflowsRight || align === 'end'
         ? Math.max(4, tRect.right - mRect.width) : tRect.left
       setFixedAt({ top, left })
@@ -142,8 +151,13 @@ export default function ActionMenu({
     setActiveIndex(enabledIndices[nextPos])
   }
 
-  const activate = (item: ActionMenuItem) => {
+  const activate = (item: ActionMenuItem, at?: { x: number; y: number }) => {
     if (item.disabled) return
+    // F-16: a click landing where the trigger was, moments after it opened
+    // the menu, is the trigger's double-click -- not a choice of this item.
+    const o = openedRef.current
+    if (at && o.rect && o.rect.width > 0 && o.rect.height > 0 && Date.now() - o.at < 400
+        && at.x >= o.rect.left && at.x <= o.rect.right && at.y >= o.rect.top && at.y <= o.rect.bottom) return
     close(true)
     item.onSelect()
   }
@@ -185,6 +199,7 @@ export default function ActionMenu({
             visibility: fixedAt ? 'visible' : 'hidden',
             minWidth: 160, background: 'var(--surface)', border: '1px solid var(--border)',
             borderRadius: 8, boxShadow: '0 8px 28px rgba(0,0,0,.25)', zIndex: 1200, padding: 4,
+            ...(placement.maxH ? { maxHeight: placement.maxH, overflowY: 'auto' as const } : {}),
           } : {
             position: 'absolute',
             top: placement.top ? 'auto' : '100%',
@@ -201,6 +216,7 @@ export default function ActionMenu({
             boxShadow: '0 8px 28px rgba(0,0,0,.25)',
             zIndex: 950,
             padding: 4,
+            ...(placement.maxH ? { maxHeight: placement.maxH, overflowY: 'auto' as const } : {}),
           }}
         >
           {items.map((item, i) => (
@@ -213,7 +229,7 @@ export default function ActionMenu({
               disabled={item.disabled}
               aria-disabled={item.disabled || undefined}
               title={item.disabled ? item.disabledReason : undefined}
-              onClick={() => activate(item)}
+              onClick={e => activate(item, e.detail > 0 ? { x: e.clientX, y: e.clientY } : undefined)}
               onMouseEnter={() => { if (!item.disabled) setActiveIndex(i) }}
               style={{
                 display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'start',

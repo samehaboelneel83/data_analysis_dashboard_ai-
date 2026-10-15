@@ -184,3 +184,55 @@ describe('a portalled menu and scrolling (autopilot step 3)', () => {
     expect(queryByRole('menu')).toBeNull()
   })
 })
+
+describe('F-16 step 3: no item opens under the trigger', () => {
+  const rect = (top: number, height: number, left = 100, width = 30) =>
+    ({ top, bottom: top + height, left, right: left + width, width, height, x: left, y: top, toJSON: () => ({}) }) as DOMRect
+  function setup(onDup = vi.fn()) {
+    const realH = window.innerHeight
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 300 })
+    const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.getAttribute('role') === 'menu') return rect(0, 250, 100, 180)
+      if (this.getAttribute('aria-haspopup') === 'menu') return rect(100, 20)
+      return rect(0, 0)
+    })
+    render(<ActionMenu portal label="More" items={[{ key: 'dup', label: 'Duplicate', onSelect: onDup },
+      { key: 'del', label: 'Delete', onSelect: vi.fn() }]} />)
+    return { onDup, restore: () => { spy.mockRestore(); Object.defineProperty(window, 'innerHeight', { configurable: true, value: realH }) } }
+  }
+  it('with room neither below nor above, it opens below the trigger and scrolls, never over it', () => {
+    const { restore } = setup()
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'More' }))
+      const menu = screen.getByRole('menu')
+      expect(parseFloat(menu.style.top)).toBeGreaterThanOrEqual(120)
+      expect(parseFloat(menu.style.maxHeight)).toBeLessThanOrEqual(300 - 120)
+      expect(menu.style.overflowY).toBe('auto')
+    } finally { restore() }
+  })
+  it('the second press of a double-click on the trigger does not choose the item under it', () => {
+    vi.useFakeTimers()
+    const { onDup, restore } = setup()
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'More' }))
+      const dup = screen.getByRole('menuitem', { name: 'Duplicate' })
+      // 120 ms later, at the trigger's spot (where the item would be under a menu that covered it)
+      vi.advanceTimersByTime(120)
+      fireEvent.mouseDown(dup, { clientX: 110, clientY: 110 })
+      fireEvent.click(dup, { clientX: 110, clientY: 110, detail: 2 })
+      expect(onDup).not.toHaveBeenCalled()
+    } finally { restore(); vi.useRealTimers() }
+  })
+  it('a deliberate click on the item still works at once', () => {
+    vi.useFakeTimers()
+    const { onDup, restore } = setup()
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'More' }))
+      const dup = screen.getByRole('menuitem', { name: 'Duplicate' })
+      vi.advanceTimersByTime(120)
+      fireEvent.mouseDown(dup, { clientX: 150, clientY: 140 })
+      fireEvent.click(dup, { clientX: 150, clientY: 140, detail: 1 })
+      expect(onDup).toHaveBeenCalledTimes(1)
+    } finally { restore(); vi.useRealTimers() }
+  })
+})
