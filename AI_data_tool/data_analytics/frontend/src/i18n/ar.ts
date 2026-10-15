@@ -3677,6 +3677,7 @@ export const ar: Record<MessageKey, string> = {
   'ov3.facts': 'حقائق',
   'ov3.first.title': 'وصلت بياناتك',
   'ov3.first.body': 'قرأنا {rows, plural, one{صفًا واحدًا} two{صفّين} few{# صفوف} many{# صفًا} other{# صف}} و{cols, plural, one{عمودًا واحدًا} two{عمودين} few{# أعمدة} many{# عمودًا} other{# عمود}}. ثلاث خطوات تستحق القيام بها:',
+  'ov3.first.bodyLive': 'تُستعلم مجموعة البيانات هذه مباشرة من مصدرها: {cols, plural, one{عمود واحد} two{عمودان} few{# أعمدة} many{# عمودًا} other{# عمود}}، وتُعدّ صفوفها في المصدر. ثلاث خطوات تستحق القيام بها:',
   'ov3.first.s1': '1 · راجع الأعمدة',
   'ov3.first.s1b': 'راجع الأنواع والأدوار المكتشفة في الأعمدة، وصحّح ما هو خاطئ.',
   'ov3.first.s2': '2 · صِفها',

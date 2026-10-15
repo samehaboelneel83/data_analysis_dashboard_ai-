@@ -3678,6 +3678,7 @@ export const en = {
   'ov3.facts': 'Facts',
   'ov3.first.title': 'Your data is in',
   'ov3.first.body': 'We read {rows} rows and {cols} columns. Three things worth doing next:',
+  'ov3.first.bodyLive': 'This dataset is queried live from its source: {cols} columns, with its rows counted at the source. Three things worth doing next:',
   'ov3.first.s1': '1 · Check the columns',
   'ov3.first.s1b': 'Look over the detected types and roles in Columns; fix anything that’s wrong.',
   'ov3.first.s2': '2 · Describe it',
