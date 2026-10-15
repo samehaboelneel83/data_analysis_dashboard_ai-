@@ -33,9 +33,10 @@ vi.mock('../../services/api', () => ({
   adminRolesApi: { list: vi.fn().mockResolvedValue([
     { id: 1, name: 'Analyst', is_org_admin: false }, { id: 3, name: 'Admin', is_org_admin: true }]) },
   datasetsApi: { list: vi.fn().mockResolvedValue([dataset, dataset2]) },
+  orgUnitsApi: { list: vi.fn().mockResolvedValue([]) },
 }))
 
-import { adminRlsRulesApi } from '../../services/api'
+import { adminRlsRulesApi, orgUnitsApi } from '../../services/api'
 
 const renderPage = () => render(<ConfirmProvider><AdminRowSecurityRules /></ConfirmProvider>)
 
@@ -254,5 +255,36 @@ describe('AdminRowSecurityRules — nothing pre-selected (QA E-05)', () => {
     expect(screen.getByLabelText('Dataset *')).toHaveValue('')
     expect((screen.getByRole('option', { name: /Admin \(admin/ }) as HTMLOptionElement).disabled).toBe(true)
     expect(adminRlsRulesApi.autoGenerate).not.toHaveBeenCalled()
+  })
+})
+
+describe('MYSCOPE hint examples (QA E-18 step 4)', () => {
+  const unit = (id: number, name: string, match_value: string) =>
+    ({ id, parent_id: null, name, level_name: null, match_value, position: id, child_count: 0 })
+
+  it('lists a few of the scope values the organization chart gives today', async () => {
+    vi.mocked(orgUnitsApi.list).mockResolvedValueOnce([
+      unit(1, 'Cairo Branch', 'Cairo'), unit(2, 'Giza Branch', 'Giza'), unit(3, 'Alex', 'Alexandria'),
+      unit(4, 'Aswan', 'Aswan'), unit(5, 'Luxor', 'Luxor'), unit(6, 'Suez', 'Suez'), unit(7, 'Dup', 'Cairo'),
+    ] as never)
+    renderPage()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'New rule' })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('button', { name: 'New rule' }))
+    pickRoleAndDataset()
+    fireEvent.change(screen.getByLabelText('Match'), { target: { value: 'myscope' } })
+    const examples = await screen.findByTestId('myscope-examples')
+    expect(examples).toHaveTextContent('Cairo')
+    expect(examples).toHaveTextContent('Luxor')
+    expect(examples).not.toHaveTextContent('Suez')
+    expect(examples).toHaveTextContent('+1 more')
+  })
+
+  it('says so when no unit exists yet', async () => {
+    renderPage()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'New rule' })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('button', { name: 'New rule' }))
+    pickRoleAndDataset()
+    fireEvent.change(screen.getByLabelText('Match'), { target: { value: 'myscope' } })
+    expect(await screen.findByTestId('myscope-examples')).toHaveTextContent('No units yet')
   })
 })
