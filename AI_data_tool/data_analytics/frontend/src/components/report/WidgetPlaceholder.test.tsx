@@ -124,3 +124,20 @@ describe('a bar of several measures and no category (score group items)', () => 
     expect(missingRequiredRoles(one).length).toBeGreaterThan(0)
   })
 })
+
+describe('C-14: a category chart given only a measure is unfinished', () => {
+  it('a pie with a measure and a scalar answer shows "Needs Dimension", not one solid disc', () => {
+    render(<WidgetBody widget={{ id: 1, page_id: 1, widget_type: 'pie', title: 'Pie',
+      config: { measure: 'revenue' }, layout: { x: 0, y: 0, w: 6, h: 4 } } as never}
+      data={{ type: 'scalar', rows: [{ name: 'revenue', value: 100 }] }}
+      localSelected={null} onClickPoint={() => {}} broadcasts={false} />)
+    expect(screen.getByTestId('widget-placeholder')).toHaveTextContent(/Needs Dimension/)
+  })
+  it('a KPI with a scalar answer draws its number', () => {
+    render(<WidgetBody widget={{ id: 1, page_id: 1, widget_type: 'kpi', title: 'K',
+      config: { measure: 'revenue' }, layout: { x: 0, y: 0, w: 3, h: 3 } } as never}
+      data={{ type: 'scalar', rows: [{ name: 'revenue', value: 100 }] }}
+      localSelected={null} onClickPoint={() => {}} broadcasts={false} />)
+    expect(screen.queryByTestId('widget-placeholder')).toBeNull()
+  })
+})

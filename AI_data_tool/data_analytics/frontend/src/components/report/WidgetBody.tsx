@@ -335,7 +335,11 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
     // meaningless squiggle. A CHART receiving a raw table is unfinished; a
     // table receiving one is working exactly as designed.
     const rawTableForChart = data?.type === 'table' && familyOf(widget.widget_type) !== 'table'
-    if (missing.length && (nothingToDraw || rawTableForChart)) {
+    // C-14: likewise a measure with no dimension is answered as one scalar
+    // row, which a pie drew as a single solid disc. Only a KPI-like widget
+    // (or a table) is finished with a single number.
+    const scalarForChart = data?.type === 'scalar' && !['table', 'kpi'].includes(familyOf(widget.widget_type))
+    if (missing.length && (nothingToDraw || rawTableForChart || scalarForChart)) {
       return <WidgetPlaceholder widget={widget} missing={missing} onAssignData={onAssignData} />
     }
   }
