@@ -126,6 +126,10 @@ _meter: ContextVar[UsageMeter | None] = ContextVar("llm_usage_meter", default=No
 #: forget the switch: with AI off for the data, its call returns None and its
 #: own no-model path runs, exactly as when the endpoint is down.
 AI_NOT_ALLOWED = "AI is switched off for this data"
+#: What `last_error` says when every endpoint the call could use was marked
+#: down moments ago (llm_endpoints.known_down): no request is sent, so the
+#: caller's no-model path runs at once instead of after a connect timeout.
+MODEL_UNREACHABLE = "the AI model is unreachable"
 _ai_denied: ContextVar[str | None] = ContextVar("llm_ai_denied", default=None)
 
 
@@ -348,6 +352,13 @@ class LLMClient:
             out.append((ep.id or None, ep.base_url.rstrip("/"), ep.model, ep.api_key, max_tokens))
         return out
 
+    def _http_timeout(self) -> httpx.Timeout:
+        """The full timeout for reading a slow answer, but a short one for
+        CONNECTING: an unreachable host must fail in seconds, not minutes
+        (a single float would make connect wait the whole 180 s too)."""
+        connect = min(float(settings.llm_connect_timeout_s), float(self.timeout))
+        return httpx.Timeout(self.timeout, connect=connect)
+
     async def _post(self, payload: dict[str, Any], weight: str = "normal") -> str | None:
         meter = _meter.get()
         if meter is not None and meter.spent:
@@ -355,10 +366,18 @@ class LLMClient:
             self.last_error = BUDGET_SPENT
             logger.info("LLM call refused: AI budget spent (org %s, %s)", meter.org_id, meter.feature)
             return None
-        self.call_count += 1
         from . import llm_endpoints
 
         targets = self._targets(payload, weight)
+        # AD-01: skip endpoints whose light turned red moments ago. Dialling
+        # one only waits for the connect timeout to learn the same thing.
+        live = [t for t in targets if not llm_endpoints.known_down(t[0])]
+        if targets and not live:
+            self.last_error = MODEL_UNREACHABLE
+            logger.info("LLM call skipped: every endpoint is known to be down")
+            return None
+        targets = live
+        self.call_count += 1
         data = None
         errors: list[str] = []
         for n, (eid, base, model, key, max_tokens) in enumerate(targets):
@@ -369,7 +388,7 @@ class LLMClient:
             llm_endpoints.begin_call(eid)
             try:
                 async with httpx.AsyncClient(
-                    timeout=self.timeout, transport=self._transport
+                    timeout=self._http_timeout(), transport=self._transport
                 ) as http:
                     response = await http.post(f"{base}/chat/completions", json=body, headers=headers)
                     if response.status_code >= 400:

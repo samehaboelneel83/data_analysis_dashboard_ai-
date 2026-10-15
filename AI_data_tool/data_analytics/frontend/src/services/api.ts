@@ -1060,6 +1060,8 @@ export interface LlmEndpointsOut {
   auto_pick: string | null
   source: 'saved' | 'deployment' | 'environment'
   endpoints: LlmEndpoint[]
+  /** Whether the default choice can be used now (AD-01's server-side gate). */
+  ai_available?: boolean
   /** This person's most recent answered calls, oldest first. */
   last_used?: LlmUse[]
 }

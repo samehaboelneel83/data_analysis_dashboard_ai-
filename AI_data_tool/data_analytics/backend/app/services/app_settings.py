@@ -84,6 +84,8 @@ SPECS: list[Spec] = [
     _S("llm_endpoints_default", "ai", "Built-in default (LLM_ENDPOINTS_DEFAULT)",
        "An endpoint id from the built-in list, or auto.", editable=False),
     _S("llm_timeout_s", "ai", "Request timeout (seconds)"),
+    _S("llm_connect_timeout_s", "ai", "Connect timeout (seconds)",
+       "How long to wait for the model server to accept a connection before treating it as down."),
     _S("llm_max_concurrency", "ai", "Concurrent LLM calls", "Across the whole install."),
     _S("llm_reserved_interactive", "ai", "Calls reserved for people",
        "Of the concurrent calls, how many background work may never take."),

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useT } from '../../i18n'
 import { choiceLight, effectiveChoice } from '../../components/LlmPicker'
 import { getLlmChoice, lastLlmEndpoints, LLM_CHOICE_EVENT, LLM_ENDPOINTS_EVENT } from '../../services/api'
 
@@ -25,4 +26,16 @@ export function useAiOffline(): { offline: boolean; checkedAt: number | null } {
   }, [])
   if (!seen) return { offline: false, checkedAt: null }
   return { offline: choiceLight(seen.data, effectiveChoice(seen.data, picked)) === 'down', checkedAt: seen.at }
+}
+
+/**
+ * The one AI gate for buttons that start model work (AD-01): `offline` from
+ * the same broadcast as `useAiOffline`, plus the sentence to show as the
+ * disabled control's title. A trigger either gets `disabled={offline}` with
+ * `title={reason}`, or goes straight to its no-AI path.
+ */
+export function useAiGate(): { offline: boolean; reason: string | undefined } {
+  const { offline } = useAiOffline()
+  const t = useT()
+  return { offline, reason: offline ? t('off.composer') : undefined }
 }

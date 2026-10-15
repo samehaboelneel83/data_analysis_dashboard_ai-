@@ -101,6 +101,9 @@ class Settings(BaseSettings):
     # the self-hosted vLLM this was written against expects.
     llm_api_key: str = ""
     llm_timeout_s: float = Field(default=180.0, gt=0)
+    # Connecting to the model is quick or it is not going to happen; only the
+    # answer itself may take llm_timeout_s (AD-01).
+    llm_connect_timeout_s: float = Field(default=5.0, gt=0)
     llm_enabled: bool = True
     # Where the charts of an AI-designed dashboard come from.
     #   cards -- the model CHOOSES among charts the platform has already built,

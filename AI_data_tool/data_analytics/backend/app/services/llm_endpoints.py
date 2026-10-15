@@ -249,7 +249,40 @@ def mark(endpoint_id: str | None, ok: bool, error: str | None = None,
     _health[endpoint_id] = {
         "ok": ok, "error": None if ok else (error or "did not answer")[:300],
         "latency_ms": latency_ms, "checked_at": datetime.now(timezone.utc).isoformat(),
+        # Monotonic time of this mark, for `known_down`'s freshness window.
+        "at": time.monotonic(),
     }
+
+
+def known_down(endpoint_id: str | None, fresh_s: float | None = None) -> bool:
+    """True only when the endpoint was marked down RECENTLY (within
+    `fresh_s`, default two probe intervals). Never checked, up, or a red
+    light older than the window all count as "worth trying": a stale mark
+    must not stop a call that would now succeed, but a fresh one means a
+    call would only wait for its connect timeout to say the same thing."""
+    if not endpoint_id:
+        return False
+    h = _health.get(endpoint_id)
+    if h is None or h.get("ok"):
+        return False
+    window = 2 * PROBE_SECONDS if fresh_s is None else fresh_s
+    at = h.get("at")
+    return at is not None and time.monotonic() - at <= window
+
+
+def model_available(choice: str | None = None) -> tuple[bool, str | None]:
+    """(available, why not) for the endpoint(s) a call with `choice` would
+    use -- the one shared gate every AI feature can ask before it starts
+    work that only makes sense with a model (AD-01)."""
+    if not settings.llm_enabled:
+        return False, "AI features are switched off"
+    targets = candidates(choice)
+    if not targets:
+        return False, "no AI model endpoint is enabled"
+    if any(not known_down(e.id) for e in targets):
+        return True, None
+    first = _health.get(targets[0].id) or {}
+    return False, first.get("error") or "the AI model is unreachable"
 
 
 def candidates(choice: str | None = None) -> list[Endpoint]:
@@ -556,6 +589,11 @@ async def reset(db: AsyncSession) -> None:
 # What the browser sees
 # ---------------------------------------------------------------------------
 
+def _public_health(endpoint_id: str) -> dict[str, Any] | None:
+    h = _health.get(endpoint_id)
+    return None if h is None else {k: v for k, v in h.items() if k != "at"}
+
+
 def describe(*, admin: bool = False, user_id: int | None = None) -> dict[str, Any]:
     """The list with a status light each. Addresses only for admins; an API
     key never, only whether one is set."""
@@ -564,7 +602,7 @@ def describe(*, admin: bool = False, user_id: int | None = None) -> dict[str, An
     for e in endpoints():
         item: dict[str, Any] = {
             "id": e.id, "name": e.name, "model": e.model, "enabled": e.enabled,
-            "is_default": e.id == default, "status": _health.get(e.id),
+            "is_default": e.id == default, "status": _public_health(e.id),
             "strength": strength_of(e), "context": context_of(e) or None,
         }
         if admin:
@@ -573,5 +611,6 @@ def describe(*, admin: bool = False, user_id: int | None = None) -> dict[str, An
                         max_model_len=(_meta.get(e.id) or {}).get("max_model_len"))
         items.append(item)
     return {"llm_enabled": settings.llm_enabled, "default": default,
+            "ai_available": model_available()[0],
             "auto_pick": auto_pick(), "source": source(), "endpoints": items,
             "last_used": last_used(user_id)}
