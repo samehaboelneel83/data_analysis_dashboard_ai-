@@ -74,6 +74,12 @@ export default function PublishingPanel({ report, isAdmin, onStateChange }: {
     await run(() => publishingApi.archive(report.id), t('pub.archive.done'))
     onStateChange?.('archived')
   }
+  // F-09: this switch is the ORGANISATION's, not this dashboard's -- asked first, saying so.
+  const setApproval = async (on: boolean) => {
+    if (!(await confirm({ title: t(on ? 'pub.review.confirmOn' : 'pub.review.confirmOff'), body: t('pub.review.confirmBody'),
+      confirmLabel: t(on ? 'pub.review.turnOn' : 'pub.review.turnOff'), destructive: false, focusCancel: true }))) return
+    await run(() => reviewApi.setApproval(on), t('pub.saved'))
+  }
   const restore = async () => {
     // F-04: the server restores as a draft; tell the builder what it answered.
     const out: { state?: Publication['state'] } = {}
@@ -117,7 +123,7 @@ export default function PublishingPanel({ report, isAdmin, onStateChange }: {
       {isAdmin && !archived && (
         <label className="shx-ck" data-testid="approval-switch">
           <input type="checkbox" checked={review.required} disabled={busy}
-            onChange={e => void run(() => reviewApi.setApproval(e.target.checked), t('pub.saved'))} />
+            onChange={e => void setApproval(e.target.checked)} />
           <span>{t('pub.review.switch')}<br /><small style={{ color: 'var(--muted)' }}>{t('pub.review.switchHelp')}</small></span>
         </label>
       )}

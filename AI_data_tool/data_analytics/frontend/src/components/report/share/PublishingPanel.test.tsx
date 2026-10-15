@@ -141,7 +141,22 @@ describe('PublishingPanel', () => {
     vi.mocked(reviewApi.setApproval).mockResolvedValue({ publish_gate: false, require_approval: true } as never)
     open(true)
     fireEvent.click(within(await screen.findByTestId('approval-switch')).getByRole('checkbox'))
+    // F-09: organisation-wide, so it is asked about first, saying so.
+    const ask = await screen.findByRole('alertdialog')
+    expect(ask).toHaveTextContent('every dashboard in the organisation')
+    expect(reviewApi.setApproval).not.toHaveBeenCalled()
+    fireEvent.click(within(ask).getByRole('button', { name: 'Turn on' }))
     await waitFor(() => expect(reviewApi.setApproval).toHaveBeenCalledWith(true))
+  })
+
+  it('cancelling the organisation-wide approval question changes nothing (F-09)', async () => {
+    open(true)
+    const box = within(await screen.findByTestId('approval-switch')).getByRole('checkbox')
+    fireEvent.click(box)
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    expect(reviewApi.setApproval).not.toHaveBeenCalled()
+    expect(box).not.toBeChecked()
   })
 
   it('an approval given before a later change counts as not asked for', async () => {
