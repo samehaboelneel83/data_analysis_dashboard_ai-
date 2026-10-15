@@ -291,7 +291,7 @@ export const PIVOT_WIDGETS: readonly string[] = ['crosstab', 'matrix']
  *  Unknown roles take anything, so a role added later is usable before it is
  *  classified here rather than presenting an empty dropdown.
  */
-export type RoleColumnKind = 'numeric' | 'datetime' | 'any'
+export type RoleColumnKind = 'numeric' | 'datetime' | 'category' | 'any'
 
 const NUMERIC_ROLES = new Set([
   'measure', 'measure2', 'measures', 'size', 'target', 'color',
@@ -300,10 +300,14 @@ const NUMERIC_ROLES = new Set([
 //: `animation` is deliberately absent: bubble_change animates over a date OR an
 //: ordered category, and narrowing it would remove a legitimate choice.
 const DATE_ROLES = new Set(['start', 'end'])
+//: C-23: roles that split a chart into groups -- a text or date field, never a
+//: measure (one panel per revenue value is a thousand panels of one bar).
+const CATEGORY_ROLES = new Set(['facet'])
 
 export function roleAccepts(role: string): RoleColumnKind {
   if (NUMERIC_ROLES.has(role)) return 'numeric'
   if (DATE_ROLES.has(role)) return 'datetime'
+  if (CATEGORY_ROLES.has(role)) return 'category'
   return 'any'
 }
 

@@ -350,3 +350,17 @@ describe('C-09 step 3: the Latitude / Longitude pickers', () => {
     expect(screen.queryByTestId('coord-range-warning')).toBeNull()
   })
 })
+
+describe('C-23 round 2: the Split into multiples by picker', () => {
+  it('offers text and date fields only, never a measure', () => {
+    const w = { ...bar({ dimension: 'region', measure: 'sales' }), widget_type: 'small_multiples' } as Widget
+    render(<CrossFilterProvider><WidgetConfigPanel widget={w} columns={COLUMNS}
+      onUpdate={vi.fn()} pages={page([w])} /></CrossFilterProvider>)
+    fireEvent.click(screen.getByRole('button', { name: 'Add Split into multiples by' }))
+    const dialog = screen.getByRole('dialog', { name: 'Add Split into multiples by' })
+    const names = within(dialog).getAllByRole('option').map(o => o.textContent ?? '')
+    expect(names.some(n => /region/.test(n))).toBe(true)
+    expect(names.some(n => /ordered_at/.test(n))).toBe(true)
+    expect(names.some(n => /sales/.test(n))).toBe(false)
+  })
+})

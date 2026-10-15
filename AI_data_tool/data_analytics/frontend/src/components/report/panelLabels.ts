@@ -427,6 +427,7 @@ export const PANEL_AR: Record<string, string> = {
   'No dataset is attached to this report yet.': 'لم تُرفق أي مجموعة بيانات بهذا التقرير بعد.',
   'This dataset has no numeric columns to measure.': 'لا تحوي مجموعة البيانات هذه أعمدة رقمية للقياس.',
   "This dataset has no date columns. Set a column's type to date in the Data tab, or use a chart that takes a category.": 'لا تحوي مجموعة البيانات هذه أعمدة تاريخ. اجعل نوع أحد الأعمدة تاريخًا من تبويب البيانات، أو استخدم مخططًا يقبل فئة.',
+  'This dataset has no text or date columns to split by.': 'لا تحوي مجموعة البيانات هذه أعمدة نصية أو تاريخ للتقسيم حسبها.',
   'No columns of the right kind for this field.': 'لا توجد أعمدة من النوع المناسب لهذا الحقل.',
 }
 

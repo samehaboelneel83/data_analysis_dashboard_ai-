@@ -1387,6 +1387,8 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
       kind === 'numeric'  ? measureOptions([chosen])
     : kind === 'datetime' ? colOptions.filter(o =>
         effectiveCols.find(c => c.name === o.value)?.dtype === 'datetime')
+    : kind === 'category' ? colOptions.filter(o =>
+        effectiveCols.find(c => c.name === o.value)?.dtype !== 'numeric')
     : colOptions
     return (chosen && !narrowed.some(o => o.value === chosen))
       ? [...narrowed, { value: chosen, label: L('{name} (current)', { name: chosen }) }]

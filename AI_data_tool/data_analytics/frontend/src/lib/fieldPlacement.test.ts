@@ -87,3 +87,11 @@ describe('C-09: map roles take fields of the matching kind', () => {
     expect(roleForField(lines, { lat: 'origin_lat', lon: 'origin_lon' }, 'dest_lon', false)?.role).toBe('lon2')
   })
 })
+
+describe('C-23: roleAccepts', () => {
+  it('a facet takes a category (text or date), not a number', async () => {
+    const { roleAccepts } = await import('../types/report')
+    expect(roleAccepts('facet')).toBe('category')
+    expect(roleAccepts('category')).toBe('any')
+  })
+})

@@ -28,6 +28,7 @@ export function emptyPickerReason(hasAnyColumns: boolean, kind: string | undefin
   if (!hasAnyColumns) return 'No dataset is attached to this report yet.'
   if (kind === 'numeric') return 'This dataset has no numeric columns to measure.'
   if (kind === 'datetime') return 'This dataset has no date columns. Set a column\'s type to date in the Data tab, or use a chart that takes a category.'
+  if (kind === 'category') return 'This dataset has no text or date columns to split by.'
   return 'No columns of the right kind for this field.'
 }
 
