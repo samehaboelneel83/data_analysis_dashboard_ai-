@@ -2443,6 +2443,8 @@ export const en = {
   'prt.pptx': 'Download PowerPoint',
   'prt.back': 'Back to report',
   'prt.preparing': 'Preparing print view…',
+  'prt.refusedTitle': 'Printing is not available',
+  'prt.refused': 'Your access to this dashboard does not include downloads, printing or PowerPoint.',
   'wr.menu.why': 'Why am I seeing this?',
   'wr.menu.explain': 'Explain {m}',
   'wr.menu.difference': 'Is this difference real?',

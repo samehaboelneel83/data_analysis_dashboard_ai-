@@ -9,7 +9,7 @@ import type { Widget, ReportPage, HierarchyNode } from '../../types/report'
 
 vi.mock('../../services/api', () => ({
   pinsApi: { create: vi.fn().mockResolvedValue({ id: 1, widget_id: 1, already_pinned: false }), list: vi.fn().mockResolvedValue([]), remove: vi.fn().mockResolvedValue(undefined) },
-  widgetDataApi: { query: vi.fn() },
+  widgetDataApi: { query: vi.fn(), export: vi.fn() },
   // The lazily-imported map renderers reach this module through
   // geo/regionSetCache. Without the export the dynamic import fails and the
   // widget sits on "Loading map…" forever, which reads as a renderer bug.
@@ -3042,5 +3042,27 @@ describe('groups too small to rank (persona test, plan 1.6)', () => {
     renderWidget({ widget: barWidget() })
     expect(await screen.findByTestId('too-few-to-rank-note')).toHaveTextContent('fewer than 30 rows')
     expect(screen.queryByTestId('small-groups-note')).not.toBeInTheDocument()
+  })
+})
+
+describe('WidgetRenderer chart download (F-02)', () => {
+  it("names the widget's dashboard, so the server asks that dashboard's \"may download\"", async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'A', value: 1 }], sampled: false })
+    vi.mocked(widgetDataApi.export).mockResolvedValue(undefined as never)
+    renderWidget({ reportId: 7 })
+    await waitFor(() => expect(widgetDataApi.query).toHaveBeenCalled())
+    fireEvent.click(await screen.findByRole('button', { name: 'Analyse Sales' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Export data as CSV' }))
+    await waitFor(() => expect(widgetDataApi.export).toHaveBeenCalled())
+    expect(vi.mocked(widgetDataApi.export).mock.calls[0][5]).toEqual({ reportId: 7 })
+  })
+
+  it('offers no data download when the dashboard says no downloads', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'A', value: 1 }], sampled: false })
+    renderWidget({ reportId: 7, allowExport: false })
+    await waitFor(() => expect(widgetDataApi.query).toHaveBeenCalled())
+    fireEvent.click(await screen.findByRole('button', { name: 'Analyse Sales' }))
+    await screen.findAllByRole('menuitem')
+    expect(screen.queryByRole('menuitem', { name: 'Export data as CSV' })).toBeNull()
   })
 })

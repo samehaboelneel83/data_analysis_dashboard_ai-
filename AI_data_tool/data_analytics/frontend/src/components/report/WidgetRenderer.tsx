@@ -1063,7 +1063,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
     setShowContextMenu(false)
     if (widgetDatasetId == null) return
     try {
-      await widgetDataApi.export(widgetDatasetId, mergedConfig, wt, format, effectiveCalcCols)
+      await widgetDataApi.export(widgetDatasetId, mergedConfig, wt, format, effectiveCalcCols, { reportId })
     } catch {
       toast.error(t('bc.canvas.exportFailed'))
     }

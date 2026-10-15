@@ -2443,6 +2443,8 @@ export const ar: Record<MessageKey, string> = {
   'prt.pptx': 'تنزيل PowerPoint',
   'prt.back': 'العودة إلى التقرير',
   'prt.preparing': 'جارٍ تجهيز عرض الطباعة…',
+  'prt.refusedTitle': 'الطباعة غير متاحة',
+  'prt.refused': 'وصولك إلى لوحة المعلومات هذه لا يشمل التنزيل أو الطباعة أو PowerPoint.',
   'wr.menu.why': 'لماذا أرى هذا؟',
   'wr.menu.explain': 'اشرح {m}',
   'wr.menu.difference': 'هل هذا الفرق حقيقي؟',

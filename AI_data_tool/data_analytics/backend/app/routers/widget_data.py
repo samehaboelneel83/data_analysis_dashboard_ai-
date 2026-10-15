@@ -1038,6 +1038,35 @@ async def reconcile_widget(
     return {**result, "file": file.filename, "recorded_on": item.id if recorded else None}
 
 
+async def _require_export_route(db: AsyncSession, user: User, dataset_id: int,
+                                report: Report | None) -> None:
+    """F-02: data this person reads only THROUGH a dashboard may leave only
+    through that dashboard -- so its "may download" right is the one asked.
+
+    Without this, a widget export that named no report (the widget menu sent
+    none) reached `download_gate(report=None)`, which skips the dashboard's
+    switch and the grant's `can_export`, while the read check still passed via
+    the dashboard rung. Data the user may read directly (owner, dataset share,
+    admin) is theirs to export as before; anything else needs a dashboard they
+    can open that actually draws on this dataset."""
+    from ..core.capability import (_dashboard_rung_ids, _directly_readable_ids, can_read_dataset,
+                                   effective_capability)
+    is_admin = bool(user.role and user.role.is_org_admin)
+    direct = await _directly_readable_ids(db, user.org_id, user.id, is_admin)
+    if direct is None or dataset_id in direct:
+        return
+    if not await can_read_dataset(db, user, dataset_id, report_id=report.id if report is not None else None):
+        # Not readable at all: the same 404 the data route gives, never a 403 that confirms the id.
+        raise widget_error(404, "not_found", "Dataset not found")
+    if report is not None:
+        level = await effective_capability(db, user, report.id)
+        if level != "none" and dataset_id in await _dashboard_rung_ids(
+                db, [report.id], viewer_ids={report.id} if level == "view" else frozenset()):
+            return
+    raise widget_error(403, "forbidden",
+                       "You can read this data only through a dashboard; export this chart from its dashboard.")
+
+
 @router.post("/{dataset_id}/widget-data/export")
 async def export_widget(
     dataset_id: int, req: WidgetDataRequest, format: str = "csv",
@@ -1064,6 +1093,7 @@ async def export_widget(
     report = await db.get(Report, req.report_id) if req.report_id else None
     if report is not None and report.org_id != current_user.org_id:
         report = None
+    await _require_export_route(db, current_user, dataset_id, report)
     label = await download_gate(db, current_user, report=report, dataset_id=dataset_id)
     data = await _resolve_widget_data(dataset_id, req, db, current_user,
                                       redact_columns=await redacted_columns(db, dataset_id, label))

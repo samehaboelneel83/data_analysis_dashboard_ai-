@@ -1678,6 +1678,20 @@ describe('ReportBuilder — a view-only viewer gets the dashboard, not the studi
     expect(screen.queryByRole('menuitem', { name: 'Version history' })).not.toBeInTheDocument()
   })
 
+  it('offers no Print when the share does not include downloads (F-02)', async () => {
+    vi.mocked(authzApi.decisions).mockResolvedValue([
+      { resource: 'report', id: 1, action: 'view', allowed: true, reason: 'Shared with you.' },
+      { resource: 'report', id: 1, action: 'download', allowed: false, reason: 'Your access to this dashboard does not include downloads.' },
+    ] as never)
+    try {
+      await renderViewOnly()
+      await waitFor(() => expect(authzApi.decisions).toHaveBeenCalled())
+      fireEvent.click(screen.getByRole('button', { name: 'More' }))
+      expect(await screen.findByRole('menuitem', { name: /Your access/ })).toBeInTheDocument()
+      expect(screen.queryByRole('menuitem', { name: 'Print' })).not.toBeInTheDocument()
+    } finally { vi.mocked(authzApi.decisions).mockResolvedValue([]) }
+  })
+
   it('drops the authoring chrome: panels, add-widget, page controls, copilot', async () => {
     await renderViewOnly()
     for (const gone of [/More panels/i, /Add widget/i, /^\+ Page$/i, /Ask the page/i]) {

@@ -1528,7 +1528,10 @@ export const reportsApi = {
   recent: (limit = 8) =>
     api.get<RecentReport[]>('/reports/recent', { params: { limit } }).then(r => r.data),
   list:   ()                                       => api.get<Report[]>('/reports').then(r => r.data),
-  get:    (id: number)                             => api.get<Report>(`/reports/${id}`).then(r => r.data),
+  // `view: 'print'` is a download (F-02): the server refuses it with the reason
+  // when this reader's share does not include downloads.
+  get:    (id: number, opts?: { view?: 'print' | 'released' }) =>
+    api.get<Report>(`/reports/${id}`, opts?.view ? { params: { view: opts.view } } : undefined).then(r => r.data),
   create: (data: { name: string; description?: string; dataset_id?: number }) =>
     api.post<Report>('/reports', data).then(r => r.data),
   update: (id: number, data: Partial<{ name: string; description: string; dataset_id: number; additional_dataset_ids: number[]; theme: string; display_rules: DisplayRule[]; style: import('../lib/dashboardStyle').DashboardStyle }>) =>
@@ -3044,12 +3047,17 @@ export const widgetDataApi = {
 
   /** Downloads the widget's data. Goes through the same endpoint family as `query`,
    *  so the file contains exactly what the widget shows -- including row-level
-   *  security, which is applied server-side and must never be re-derived here. */
+   *  security, which is applied server-side and must never be re-derived here.
+   *  `reportId` names the widget's dashboard: the server then applies that
+   *  dashboard's "may download" right (F-02), and refuses data the reader can
+   *  reach only through a dashboard when none is named. */
   export: async (dsId: number, config: Record<string, unknown>, widgetType: string,
-                 format: 'csv' | 'xlsx', calculatedColumns: CalcColumn[] = []) => {
+                 format: 'csv' | 'xlsx', calculatedColumns: CalcColumn[] = [],
+                 opts: { reportId?: number } = {}) => {
     const r = await api.post(
       `/datasets/${dsId}/widget-data/export?format=${format}`,
-      { config, calculated_columns: calculatedColumns, widget_type: widgetType },
+      { config, calculated_columns: calculatedColumns, widget_type: widgetType,
+        ...(opts.reportId != null ? { report_id: opts.reportId } : {}) },
       { responseType: 'blob' },
     )
     // The filename is the server's to choose: it has already sanitised it for the

@@ -265,6 +265,11 @@ export default function ReportBuilder() {
   const [cfSpec, setCfSpec] = useState<RelativeSpec>({ ...DEFAULT_SPEC })
   // Phase 7.3: what this user may do here, with reasons, and the sensitivity in force.
   const [access, setAccess] = useState<Record<string, AuthzDecision>>({})
+  // F-02: the share's "may download". The server refuses every export path
+  // (print view, PDF, workbook, a chart's CSV/Excel) on its own; this only
+  // keeps the UI from offering what will be refused. A screenshot or the
+  // browser's own print of the live view cannot be prevented by any app.
+  const mayDownload = access.download?.allowed !== false
   const [sens, setSens] = useState<{ floor?: string | null; floor_reasons?: string[]; effective?: string | null; effective_reasons?: string[] } | null>(null)
   const [accessOpen2, setAccessOpen2] = useState(false)
   const [dataset,    setDataset]    = useState<Dataset | null>(null)
@@ -3733,7 +3738,7 @@ export default function ReportBuilder() {
               <ActionMenu label={tr('vw.more')} align="end" portal triggerClassName="btn btn-ghost btn-sm dl-vw-more"
                 trigger={<EllipsisVertical size={15} aria-hidden />}
                 items={[
-                  { key: 'print', label: tr('shx.ex.print'), icon: <Printer size={14} />, onSelect: () => navigate(`/reports/${reportId}/print`) },
+                  ...(mayDownload ? [{ key: 'print', label: tr('shx.ex.print'), icon: <Printer size={14} />, onSelect: () => navigate(`/reports/${reportId}/print`) }] : []),
                   ...(canEdit ? [
                     // QA2 N2: over the view while reading; the rail panel while editing.
                     { key: 'history', label: tr('shx.vh.title'), icon: <History size={14} />, onSelect: () => {
@@ -4049,7 +4054,7 @@ export default function ReportBuilder() {
                         <WidgetRenderer
                           widget={localisedWidgets.get(widget.id) ?? widget}
                           datasetId={report.dataset_id}
-                          reportId={reportId}
+                          reportId={reportId} allowExport={mayDownload}
                           parameters={effectiveParams}
                           onSetParameter={stableOnSetParameter}
                           calculatedColumns={calcCols}
@@ -4225,7 +4230,7 @@ export default function ReportBuilder() {
                             <Maximize2 size={15} aria-hidden />
                           </button>
                           {/* 9-polish: the chart as a picture, for a chart drawn as SVG. */}
-                          {!NO_CHART_IMAGE.test(widget.widget_type) && (
+                          {mayDownload && !NO_CHART_IMAGE.test(widget.widget_type) && (
                             <button type="button" aria-label={tr('pol.copyImage', { title: widget.title || widget.widget_type })} title={tr('pol.copyImageShort')}
                               onClick={e => {
                                 const el = (e.currentTarget as HTMLElement).closest('[data-widget-id]')
@@ -4259,7 +4264,7 @@ export default function ReportBuilder() {
                       <WidgetRenderer
                         widget={localisedWidgets.get(widget.id) ?? widget}
                         datasetId={report.dataset_id}
-                        reportId={reportId}
+                        reportId={reportId} allowExport={mayDownload}
                         parameters={effectiveParams}
                         onSetParameter={stableOnSetParameter}
                         calculatedColumns={calcCols}
@@ -4659,7 +4664,7 @@ export default function ReportBuilder() {
           askDisabled={aiOffline}
           onAsk={q => { setFocusW(null); setAiOpen(true); setAiTab('ask'); setAskSeed(s => ({ q, n: (s?.n ?? 0) + 1 })) }}
           render={w => (
-            <WidgetRenderer widget={w} datasetId={report.dataset_id} reportId={reportId}
+            <WidgetRenderer widget={w} datasetId={report.dataset_id} reportId={reportId} allowExport={mayDownload}
               parameters={effectiveParams} onSetParameter={stableOnSetParameter}
               calculatedColumns={calcCols} columnFormats={columnFormats} geography={geography}
               datasets={datasets} relationships={relationships} editMode={false}
@@ -4764,7 +4769,7 @@ export default function ReportBuilder() {
             <WidgetRenderer
               widget={localise(widget)}
               datasetId={report.dataset_id}
-              reportId={reportId}
+              reportId={reportId} allowExport={mayDownload}
               parameters={effectiveParams}
               onSetParameter={stableOnSetParameter}
               calculatedColumns={calcCols}
@@ -4794,7 +4799,7 @@ export default function ReportBuilder() {
             <WidgetRenderer
               widget={localise(widget)}
               datasetId={report.dataset_id}
-              reportId={reportId}
+              reportId={reportId} allowExport={mayDownload}
               parameters={effectiveParams}
               onSetParameter={stableOnSetParameter}
               calculatedColumns={calcCols}
