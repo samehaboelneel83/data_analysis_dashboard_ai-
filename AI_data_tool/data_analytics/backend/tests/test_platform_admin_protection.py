@@ -12,7 +12,7 @@ against the live API before this fix:
   allowlist is matched case-insensitively. An org admin of ANY org could create
   `ADMIN@datalytics.local` in their own org, sign in with it and hold every
   /platform route. The same held for an allowlisted address no account had
-  claimed yet (e.g. the compose default `admin@admin.com`).
+  claimed yet (the compose default used to list `admin@admin.com`).
 * Same class -- an org admin configures their org's SSO provider, and the SSO
   callback signed in any active user of that org the provider named,
   including a platform admin.
