@@ -275,3 +275,18 @@ describe('C-28: the field picker from the keyboard', () => {
     expect(screen.getByRole('option', { name: 'Use origin_lat for Latitude' })).toBeTruthy()
   })
 })
+
+describe('C-06: a number chosen as Word text', () => {
+  it('is flagged in the Data roles pane', () => {
+    const w = { ...bar({ dimension: 'sales' }), widget_type: 'word_cloud' } as Widget
+    render(<CrossFilterProvider><WidgetConfigPanel widget={w} columns={COLUMNS}
+      onUpdate={vi.fn()} pages={page([w])} /></CrossFilterProvider>)
+    expect(screen.getByTestId('word-text-numeric')).toHaveTextContent(/number/i)
+  })
+  it('a text column raises no flag', () => {
+    const w = { ...bar({ dimension: 'region' }), widget_type: 'word_cloud' } as Widget
+    render(<CrossFilterProvider><WidgetConfigPanel widget={w} columns={COLUMNS}
+      onUpdate={vi.fn()} pages={page([w])} /></CrossFilterProvider>)
+    expect(screen.queryByTestId('word-text-numeric')).toBeNull()
+  })
+})

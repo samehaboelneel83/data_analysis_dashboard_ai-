@@ -1232,6 +1232,7 @@ export const ar: Record<MessageKey, string> = {
   'cr.communityColour': 'التجمّع: {c} ← اللون',
   'cr.configure': 'اضبط العنصر لعرض البيانات',
   'cr.wordsTooLong': 'الكلمات أطول من أن تتسع — كبّر الإطار.',
+  'cr.wordTextNumeric': '{field} رقم: سحابة الكلمات ترسم كلمات — اختر عمودًا نصيًا لنص الكلمة.',
   'cr.scatterNeedsNumericX': 'يجب أن يكون المحور X رقمًا — عيّن عمودًا رقميًا للمحور X.',
   'cr.pieMap': 'خريطة دوائر',
   'cr.rowNoCountry': '{n} صف لم يطابق دولة',

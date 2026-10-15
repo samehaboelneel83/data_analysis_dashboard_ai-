@@ -1323,6 +1323,13 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
       <DataRolesList specs={roleSpecs} values={assignedFields} kindOf={fieldKind} displayName={displayName}
         onAdd={role => setAddRole(role)} onRemove={removeField} renderDetails={fieldDetails} addBlocked={addBlocked}
         onDropField={dropFieldOnRole} />
+      {/* C-06: a word cloud sizes WORDS; a numeric column as its text draws
+          numbers as words (and "Word text" accepts any column). Said here. */}
+      {wt === 'word_cloud' && roleValues.category && fieldKind(roleValues.category) === 'measure' && (
+        <div role="note" data-testid="word-text-numeric" style={{ fontSize: 11, color: 'var(--danger, #c0392b)', marginTop: 6 }}>
+          {tt('cr.wordTextNumeric', { field: roleValues.category })}
+        </div>
+      )}
     </div>
   )
   // Which fields a role may be given -- the ONE rule both the dialog's pickers
