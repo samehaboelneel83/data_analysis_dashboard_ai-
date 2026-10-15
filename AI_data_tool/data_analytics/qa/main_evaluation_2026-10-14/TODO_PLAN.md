@@ -6,6 +6,52 @@
 | **Source** | `qa/main_evaluation_2026-10-14/EVALUATION.md`: 147 Critical/High/Medium findings from the exhaustive UI journey, the QA plan failures (DASH-04, INS-02, MAP-02, SEC-02) and the automated test results. Duplicates were merged into **122 tasks**, and each was traced to the code on this branch. |
 | **Date** | 15 Oct 2026 |
 
+## Progress
+
+| Date | Done | Commits on `s_mostafa` |
+|---|---|---|
+| 15 Oct 2026 | **F-01, E-01, E-02** (the three Critical issues) and **B-01** | `16a84654` F-01 · `55c6ac61` E-01/E-02 · `62a54a56` B-01 |
+
+What each fix found and changed, and where it differs from the original task text:
+- **F-01 — guest links and embeds on map dashboards.**
+  - *Reproduced 3/3:* a logged-out guest of "Demo — World Sales Map" was sent to `/login`. The no-map control stayed on the shared view.
+  - *Implemented as planned:* `map_settings` in the shared and embed payloads, plus new `GET /shared/{token}/boundary-sets/{id}` and `GET /embed/boundary-sets/{id}` routes.
+  - The new routes serve a set only if the published report references it and it belongs to the report's org; anything else returns 404.
+  - A 401 on `/shared/*` or `/embed` no longer triggers the login redirect.
+  - One deviation: the boundary-set loader switch lives in a new `frontend/src/components/report/geo/boundarySource.ts`, so the world atlas stays lazily loaded (`atlasLazy.test.ts`).
+- **E-01 — org admin could change or delete the platform admin.**
+  - *Reproduced live:* PATCH returned 200 and demoted the super admin.
+  - *Fix:* PATCH, DELETE and org-unit changes on a platform admin now return 403 unless the caller is a platform admin. `/admin/users` marks those rows, and the Users page hides Edit/Delete on them for org admins.
+- **E-02 — case-variant super-admin email.**
+  - *Reproduced live:* a Contoso admin created `ADMIN@datalytics.local`, signed in, and got 200 on `/platform/organizations` with all orgs visible.
+  - *Fix:* emails are normalised (trim + lower) and duplicates are checked case-insensitively on create, rename, bulk import and new-org admin.
+  - Giving any account an allowlisted address now returns 403 unless the caller is a platform admin.
+  - Login matches the address exactly first, then case-insensitively when that is unambiguous.
+  - *Added beyond the task:* the SSO callbacks (OIDC and SAML) now refuse platform admins, because an org admin configures their own org's identity provider.
+  - *Not done:* step 2 of the task (a migration adding a unique index on `lower(email)`). It would fail on databases that already hold case-duplicates, so it needs a cleanup decision first. See "Open follow-ups".
+- **B-01 — schema gap on databases first built from `init.sql`.** The root cause on this branch was worse than the task described.
+  - Such a database (stamped at head) made the backend **fail to start**: `_migrate` created `ix_reports_org_published` before the statement that adds `reports.published`.
+  - *Fix:* that index now comes after its column, and the 8 missing columns and their indexes are in `_migrate`.
+  - The schema-coverage test is no longer xfail. A new test fails if `_migrate` ever indexes a column before adding it.
+  - *Verified on Postgres:* a previously crashing stamped database, a new `init.sql` database and a fresh empty database all start, have 0 missing tables/columns and seed the demo. A second boot is clean.
+  - Step 3 of the task (also editing `init.sql`) was **not** done on purpose: the file is no longer loaded by anything. README now says so.
+
+Verification for these four:
+- **Backend:** full suite, 8,599 tests. 8,594 passed, 4 skipped, 5 failed.
+  - 4 failures were `test_architecture_doc.py`: the documented test-file counts were behind after adding the new test files. They are fixed by updating `ARCHITECTURE.md` / `.html`, and that test now passes 35/35.
+  - The remaining failure, `test_widget_roles.py::...test_the_spec_file_was_actually_read` (expects 75 chart types, frontend has 77), is pre-existing: it fails the same way on `main` (task B-14).
+- **Frontend:** 391 files, 4,704 tests passed; `tsc` clean. One unhandled timer error from `CopilotChat.tsx` during `ReportBuilder.test.tsx` makes the run exit non-zero. It is pre-existing: 2 of 4 runs on untouched `main` hit it.
+- **Browser QA re-run (57 high cases):** 46 pass / 4 fail / 7 blocked, against 45 / 4 / 8 on `main`.
+  - The only change is SHARE-02 (guest link on a map dashboard), blocked → pass.
+  - The 4 fails are unchanged and are other tasks: DASH-04 → C-30, MAP-02 → C-29, INS-02 → AD-06, SEC-02 → E-12.
+- Report: `qa_rerun_2026-10-15/REPORT.md`.
+- **A real `docker compose up` could not be run.** This environment's network blocks every container registry (Docker Hub returns 403). The same code path was tested instead: an empty Postgres database followed by backend start-up.
+
+### Open follow-ups from this work
+- **E-02 data cleanup:** an account created *before* this fix with a case-variant of an allowlisted address still counts as a platform admin. Check every deployment once with `SELECT id, org_id, email FROM users WHERE lower(email) IN (<allowlisted addresses, lower-case>) ORDER BY lower(email);` More than one row per address means a copy exists. Then add a unique index on `lower(email)`.
+- **E-02 config:** `docker-compose.yml` still defaults `SUPER_ADMIN_EMAILS` to `admin@datalytics.local,admin,admin@admin.com`. Org admins can no longer claim those addresses, but the bare `admin` and `admin@admin.com` should be removed from the default (task E-02 step 4, left unchanged here because it changes deployment config).
+- **Flaky test (pre-existing):** `ReportBuilder.test.tsx` lets a `CopilotChat` timer fire after teardown.
+
 ## How to use this plan
 
 - Work **phase by phase**. Inside a phase, the order shown is the recommended order.
@@ -33,15 +79,15 @@
 > - **E-01:** the server lets an org admin edit or delete the platform super admin, not just show the buttons.
 > - **E-02:** user emails are checked case-sensitively, but the super-admin allowlist is compared lower-cased. Any org admin can therefore create `ADMIN@datalytics.local` and get platform super-admin rights.
 >
-> Fix both before anything else.
+> Fix both before anything else. *(Both fixed on 15 Oct: `55c6ac61`.)*
 
 ## Phase 1 — Security & access (do first)
 
 Privilege escalation, data leaving the app against the share settings, guest links, row security, admin validation. 9 tasks, ≈ 5 dev-days.
 
-- [ ] **E-01** — Block org admins from editing or deleting platform super-admin accounts · *Critical, effort S*
-- [ ] **E-02** — Normalise emails case-insensitively and close the super-admin allowlist escalation · *Critical, effort M*
-- [ ] **F-01** — Serve map settings to guest/embed viewers and stop 401 → /login redirects on public pages · *Critical, effort M*
+- [x] **E-01** — Block org admins from editing or deleting platform super-admin accounts · *Critical, effort S* · ✅ **done** `55c6ac61`
+- [x] **E-02** — Normalise emails case-insensitively and close the super-admin allowlist escalation · *Critical, effort M* · ✅ **done** `55c6ac61`
+- [x] **F-01** — Serve map settings to guest/embed viewers and stop 401 → /login redirects on public pages · *Critical, effort M* · ✅ **done** `16a84654`
 - [ ] **F-02** — Enforce the "may download" right on the server for every export path (print, PPTX, widget CSV/Excel) · *High, effort M*
 - [ ] **E-03** — Expand MYSCOPE() during row-rule validation so org-chart rules can be saved · *High, effort S*
 - [ ] **E-04** — Validate email and password server-side for users and new org admins · *High, effort M*
@@ -55,7 +101,7 @@ Hard errors, data that can be silently overwritten, stale or wrong results, and 
 
 - [ ] **B-14** — Update the stale widget-type count in the backend parity test (CI red) · *Medium, effort S*
 - [ ] **B-13** — Give the test suite its own DuckDB metadata cache path · *Medium, effort S*
-- [ ] **B-01** — Close the fresh-install schema gap (8 columns missing on an init.sql-built database) · *High, effort S*
+- [x] **B-01** — Close the fresh-install schema gap (8 columns missing on an init.sql-built database) · *High, effort S* · ✅ **done** `62a54a56`
 - [ ] **B-02** — Fix the ImportError behind "Warn me on every refresh" (guided setup step 3) · *High, effort S*
 - [ ] **B-08** — Default Edit cells to a unique row key and say how many rows an edit changes · *High, effort M*
 - [ ] **B-07** — Reload the data grid when the last filter is removed · *High, effort S*
@@ -209,6 +255,7 @@ Several fix tasks also include a small decision step: B-03, E-02 (store super-ad
 ## Admin, security & access control
 
 ### E-01 — Block org admins from editing or deleting platform super-admin accounts
+- **Status:** ✅ Done on 15 Oct 2026 in `55c6ac61` (see Progress at the top for what changed vs this text).
 - **Severity:** Critical
 - **Evidence:** #24 · E-110..112 (E-111-example-admin-users.png), EVALUATION top issues "E-111"
 - **Problem:** On a Default-org admin's Users page, the platform super admin admin@datalytics.local has working Edit and Delete buttons. The server lets that org admin change the account's email or password or demote it, which is a takeover of the whole platform. They can also delete it.
@@ -223,6 +270,7 @@ Several fix tasks also include a small decision step: B-03, E-02 (store super-ad
 - **Depends on / related:** E-02
 
 ### E-02 — Normalise emails case-insensitively and close the super-admin allowlist escalation
+- **Status:** ✅ Done on 15 Oct 2026 in `55c6ac61` (see Progress at the top for what changed vs this text).
 - **Severity:** Critical
 - **Evidence:** #5, #18 · E-06/07/08, E-64..70 (E-65-settings-search-super.png)
 - **Problem:** "DEMO-GLOBAL@example.invalid" was created next to demo-global@example.invalid. The super-admin allowlist shows "admin@datalytics.local,admin,admin@admin.com". Together these let any org admin in any tenant make themselves a platform super admin. Not executed, confirmed from the code.
@@ -467,6 +515,7 @@ Coverage: worklist items 1..24 all mapped. Merged: #2+#10 → E-05; #3+#4+#20 �
 ## Sharing, publishing, templates & suggestions
 
 ### F-01 — Serve map settings to guest/embed viewers and stop 401 → /login redirects on public pages
+- **Status:** ✅ Done on 15 Oct 2026 in `16a84654` (see Progress at the top for what changed vs this text).
 - **Severity:** Critical
 - **Evidence:** #17 · F2-48..55 (F2-55), F2 top issue "F2-55"; F-101 not exercised
 - **Problem:** When a logged-out visitor opens a guest link (`/shared/<token>`) to a dashboard with a map, they are sent to the sign-in page, so guest links to any map dashboard do not work. The backend serves the link itself (`GET /api/v1/shared/<token>` → 200). The `/embed` view hits the same problem.
@@ -686,6 +735,7 @@ Coverage: worklist items 1..17 all mapped (merged: #2+#3 → F-03. Marked "Decis
 ## Data, upload, connections & guided setup
 
 ### B-01 — Close the fresh-install schema gap (8 columns missing on an init.sql-built database)
+- **Status:** ✅ Done on 15 Oct 2026 in `62a54a56` (see Progress at the top for what changed vs this text).
 - **Severity:** High (downgraded from Critical: since commit `5ffbb917`, `docker-compose.yml` no longer mounts `postgres/init.sql`, so a normal fresh Docker install is not affected. It still breaks any database first built from `init.sql`, which covers developer volumes created before that commit and anyone following README / `first-stop.md`, which still mention the file.)
 - **Evidence:** cross-cutting (EVALUATION.md §2 #1; schema check "fails: 8 columns missing")
 - **Problem:** A database whose tables were first created from `postgres/init.sql` is stamped at Alembic head without running revisions, so 8 ORM columns never exist and "Load demo content" (POST /api/v1/demo/seed) returns 500 on a new install.
