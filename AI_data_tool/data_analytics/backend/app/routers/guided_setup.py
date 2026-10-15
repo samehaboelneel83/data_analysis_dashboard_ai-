@@ -1703,9 +1703,14 @@ async def findings_for_dataset(dataset_id: int, db: AsyncSession = Depends(get_d
 
 # ── Step 4: Dashboard ───────────────────────────────────────────────────────
 
-async def _plain_design(db: AsyncSession, user: User, ds: Dataset, f: SetupFlow, count: int) -> list[dict]:
+async def _plain_design(db: AsyncSession, user: User, ds: Dataset, f: SetupFlow,
+                        count: int) -> tuple[list[dict], dict]:
     """Without a model: the app's statistics designer, narrowed to what the
-    person asked for. No goal is passed, so it never waits on a model."""
+    person asked for. No goal is passed, so it never waits on a model.
+
+    Returns the pages AND the derived fields (rate measures, durations) their
+    widgets use: the builder creates those on the dataset first, so dropping
+    them shipped widgets naming fields that do not exist (B-05)."""
     from ..schemas.schemas import SuggestDashboardsRequest
     from ..services.guided_setup import answer, demand
     from .datasets import suggest_dashboards
@@ -1718,7 +1723,7 @@ async def _plain_design(db: AsyncSession, user: User, ds: Dataset, f: SetupFlow,
         if widgets:
             out.append({**p, "widgets": widgets, "answer": "", "unanswered": [], "answers": [],
                         "scope_filters": filters})
-    return out
+    return out, dict(got.get("derived") or {})
 
 
 async def write_designs(db: AsyncSession, flow_id: int, lang: str, attempt: str) -> None:
@@ -1801,7 +1806,7 @@ async def write_designs(db: AsyncSession, flow_id: int, lang: str, attempt: str)
             if not proposals:
                 try:
                     await access.release(s)
-                    proposals = await _plain_design(s, owner, ds, f2, count)
+                    proposals, derived = await _plain_design(s, owner, ds, f2, count)
                 except Exception:                               # noqa: BLE001
                     logger.exception("guided setup: the plain design for dataset %s failed", ds.id)
             return ([{"id": uuid.uuid4().hex[:10], "dataset_id": ds.id, "dataset_name": ds.name,

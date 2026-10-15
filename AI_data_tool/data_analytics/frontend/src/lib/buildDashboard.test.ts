@@ -5,8 +5,9 @@ const api = vi.hoisted(() => ({
   update: vi.fn(), get: vi.fn(), addCommonFilter: vi.fn(),
 }))
 vi.mock('../services/api', () => ({
-  reportsApi: api, calcColumnsApi: { save: vi.fn() }, measuresApi: { save: vi.fn() },
+  reportsApi: api, calcColumnsApi: { save: vi.fn() }, measuresApi: { save: vi.fn() }, datasetsApi: { get: vi.fn() },
 }))
+import { datasetsApi } from '../services/api'
 
 import { buildPages, filledLayout, sizeFor } from './buildDashboard'
 
@@ -26,9 +27,27 @@ beforeEach(() => {
   api.addWidget.mockImplementation(async () => ({ id: nextWidget++ }))
   api.updatePage.mockResolvedValue({})
   api.updateWidget.mockResolvedValue({})
+  vi.mocked(datasetsApi.get).mockReset()
 })
 
 describe('pages built from the guided setup', () => {
+  it('leaves out a widget naming a field that is neither on the dataset nor created for it (B-05)', async () => {
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 1, columns: [{ name: 'group' }, { name: 'amount' }],
+      calculated_columns: [], measures: [] } as never)
+    const broken = { widget_type: 'kpi', title: 'Late %', config: { measure: 'late_pct_vs_promised' } }
+    await buildPages([plan('Overview', [text, bar('group'), broken])], 'Dash', '')
+    const titles = api.addWidget.mock.calls.map(c => (c[2] as { title: string }).title)
+    expect(titles).toContain('group')
+    expect(titles).not.toContain('Late %')
+  })
+
+  it('keeps every widget when the dataset cannot be read for the check (B-05)', async () => {
+    vi.mocked(datasetsApi.get).mockRejectedValue(new Error('offline'))
+    const other = { widget_type: 'kpi', title: 'Late %', config: { measure: 'late_pct' } }
+    await buildPages([plan('Overview', [text, other])], 'Dash', '')
+    expect(api.addWidget.mock.calls.map(c => (c[2] as { title: string }).title)).toContain('Late %')
+  })
+
   it('wires each button to the page of the title it names, once every page exists', async () => {
     await buildPages([
       plan('Overview', [text, go('By group'), go('Over time'), bar('group')]),
