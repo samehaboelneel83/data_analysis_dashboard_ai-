@@ -2203,6 +2203,14 @@ def shape_xy_numeric(df: pd.DataFrame, config: dict) -> dict:
         # which on a large table is one sliver at the left edge.
         sub = both.sample(limit, random_state=7).sort_values(x)
         _truncation = _cut(both, limit, "points")[1]
+    elif not config.get("limit") and len(both) > limit:
+        # C-24 (step 2): as a line, the WHOLE x range, evenly thinned, unless
+        # the author asked for a number of rows. The first `limit` rows by x
+        # drew one sliver at the left edge. The cap is still disclosed.
+        ordered = both.sort_values(x, kind="mergesort")
+        idx = sorted({round(i * (len(ordered) - 1) / (limit - 1)) for i in range(limit)}) if limit > 1 else [0]
+        sub = ordered.iloc[idx]
+        _truncation = _cut(both, limit, "points")[1]
     else:
         sub, _truncation = _cut(both.sort_values(x), limit, "points")
     rows = [{"x": _safe(r[x]), "y": _safe(r[y])} for _, r in sub.iterrows()]
