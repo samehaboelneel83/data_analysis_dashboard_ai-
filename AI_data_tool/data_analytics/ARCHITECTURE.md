@@ -1510,7 +1510,7 @@ breaks an org's tokens down by day, feature and person.
 
 ### Routers
 
-**39 router modules**, mounted with 42 `include_router` calls in `main.py` --
+**40 router modules**, mounted with 43 `include_router` calls in `main.py` --
 `analysis`, `metadata` and `publishing` each expose a second router. All under `/api/v1`
 except the agent:
 
@@ -1525,6 +1525,7 @@ except the agent:
 | `relationships` | Model relationships |
 | `metadata` (+ `stats`) | Catalog and profiling |
 | `dataset_glossary` | Business terms scoped to one dataset (B-21) |
+| `org_glossary` | Organization-wide business terms, `/glossary` (B-21) |
 | `auth`, `sso` | Login, SAML/OIDC, provisioning |
 | `admin`, `platform` | Administration, tenancy |
 | `shared`, `embed` | Public links, embedded reports |
@@ -2362,8 +2363,8 @@ Agent pane (7)
 
 | Suite | Scope | Count |
 |-------|-------|-------|
-| Backend | `backend/tests/` | ~6,670 tests across 557 modules |
-| Frontend | colocated `*.test.ts(x)` | ~3,410 tests across 410 files |
+| Backend | `backend/tests/` | ~6,670 tests across 559 modules |
+| Frontend | colocated `*.test.ts(x)` | ~3,410 tests across 411 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |
 | Doc audit | `tests/test_architecture_doc.py` | Enforces the *counts* in this document |

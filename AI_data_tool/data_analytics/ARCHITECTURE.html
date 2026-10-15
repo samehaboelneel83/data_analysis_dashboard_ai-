@@ -834,7 +834,7 @@ llm_reserved_interactive = 2</code></pre>
   <p class="owns"><strong>Owns:</strong> the HTTP surface, identity, and everything that leaves the system.</p>
 
   <h3>Routers</h3>
-  <p><strong>39 router modules</strong>, mounted with 42 <code>include_router</code> calls in <code>main.py</code> — <code>analysis</code>, <code>metadata</code> and <code>publishing</code> each expose a second router. All under <code>/api/v1</code> except the agent.</p>
+  <p><strong>40 router modules</strong>, mounted with 43 <code>include_router</code> calls in <code>main.py</code> — <code>analysis</code>, <code>metadata</code> and <code>publishing</code> each expose a second router. All under <code>/api/v1</code> except the agent.</p>
   <div class="scroll">
     <table>
       <thead><tr><th>Router</th><th>Surface</th></tr></thead>
@@ -848,6 +848,7 @@ llm_reserved_interactive = 2</code></pre>
         <tr><th><code>relationships</code></th><td>Model relationships</td></tr>
         <tr><th><code>metadata</code> (+ <code>stats</code>)</th><td>Catalog and profiling</td></tr>
         <tr><th><code>dataset_glossary</code></th><td>Business terms scoped to one dataset (B-21)</td></tr>
+        <tr><th><code>org_glossary</code></th><td>Organization-wide business terms, <code>/glossary</code> (B-21)</td></tr>
         <tr><th><code>auth</code>, <code>sso</code></th><td>Login, SAML/OIDC, provisioning</td></tr>
         <tr><th><code>admin</code>, <code>platform</code></th><td>Administration, tenancy</td></tr>
         <tr><th><code>shared</code>, <code>embed</code></th><td>Public links, embedded reports</td></tr>
@@ -1164,8 +1165,8 @@ llm_reserved_interactive = 2</code></pre>
     <table>
       <thead><tr><th>Suite</th><th>Scope</th><th>Count</th></tr></thead>
       <tbody>
-        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~6,670 tests · 557 modules</td></tr>
-        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~3,410 tests · 410 files</td></tr>
+        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~6,670 tests · 559 modules</td></tr>
+        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~3,410 tests · 411 files</td></tr>
         <tr><th>Evals</th><td><code>backend/evals/</code></td><td>Agent quality gates (<code>run_eval_gate.ps1</code>)</td></tr>
         <tr><th>Conformance</th><td><code>tests/test_layer_conformance.py</code></td><td>Enforces the layer boundaries above</td></tr>
         <tr><th>Doc audit</th><td><code>tests/test_architecture_doc.py</code></td><td>Enforces the <em>counts</em> in this document</td></tr>
