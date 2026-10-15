@@ -2639,13 +2639,15 @@ export default function ReportBuilder() {
   const resizeStartRef = useRef(handleResizeStart); resizeStartRef.current = handleResizeStart
   const perWidgetHandlers = useMemo(() => {
     const m = new Map<number, { onSelect: (e: React.MouseEvent) => void; onDelete: () => void
-      onDuplicate: () => void
+      onDuplicate: () => void; onEditOptions: () => void
       onDragStart: (e: React.MouseEvent) => void; onResizeStart: (e: React.MouseEvent) => void }>()
     for (const w of (activePage?.widgets ?? [])) {
       m.set(w.id, {
         onSelect: (e) => widgetActionsRef.current.selectWidget(w, e),
         onDelete: () => { void widgetActionsRef.current.deleteWidget(w) },
         onDuplicate: () => { void widgetActionsRef.current.duplicateWidget(w) },
+        // F-16: the widget menu's "Edit options…" -- its Format options, opened.
+        onEditOptions: () => { setSelectedW(w); setRightPanelMode('default'); setPropSection('format'); setRightOpenSignal(n => n + 1) },
         onDragStart: (e) => dragStartRef.current(w)(e),
         onResizeStart: (e) => resizeStartRef.current(w)(e),
       })
@@ -4318,6 +4320,7 @@ export default function ReportBuilder() {
                         onSelect={editMode ? perWidgetHandlers.get(widget.id)?.onSelect : undefined}
                         onDelete={editMode ? perWidgetHandlers.get(widget.id)?.onDelete : undefined}
                         onDuplicate={editMode ? perWidgetHandlers.get(widget.id)?.onDuplicate : undefined}
+                        onEditOptions={editMode ? perWidgetHandlers.get(widget.id)?.onEditOptions : undefined}
                         editMode={editMode}
                         promptFilter={activePromptFilter}
                         onDragStart={editMode ? perWidgetHandlers.get(widget.id)?.onDragStart : undefined}

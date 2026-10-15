@@ -43,7 +43,7 @@ import {
   CUSTOM_SHAPE_WIDGET_TYPES, RUNNING_OPTIONS, readCssVarColor,
   seedRoleValues, seedMultiRoleValues, widgetIcon,
 } from './widgetConfigPanel/helpers'
-import ModelSettings, { type ModelOpts, modelOptsConfig, seedModelOpts } from './ModelSettings'
+import ModelSettings, { MODEL_DISPLAY_SPLIT, type ModelOpts, modelOptsConfig, seedModelOpts } from './ModelSettings'
 
 interface Props {
   widget: Widget
@@ -1105,7 +1105,7 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
   // equals the set that exists -- so a group added later with no home here
   // fails the suite rather than quietly becoming unreachable.
   const TAB_OF_GROUP: Record<string, string> = {
-    'Appearance': 'Options', 'Formatting': 'Options', 'Sort & limit': 'Options',
+    'Appearance': 'Options', 'Formatting': 'Options', 'Sort & limit': 'Options', 'Model display': 'Options',
     'Data & aggregation': 'Data',
     // Both repeat or play the same chart over another field -- a data
     // arrangement, like the aggregation beside them.
@@ -1148,6 +1148,7 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
 const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Multi-column sort', 'Row limit', 'Auto-reload', 'Custom order', 'Filter aggregated values', 'Rank', 'Quick calculation', 'Suppress small groups', 'Bins', 'Baseline', 'Fit Line', 'Target value', 'Gauge shape', 'Animation value']
   const FORMATTING_SEARCH_TERMS   = ['X axis label', 'Y axis label', 'Category label angle', 'Value label angle', 'Tick size', 'Tick colour', 'Show axis line', 'Show tick marks', 'Y axis scale', 'Y axis min', 'Y axis max', 'Show gridlines', 'Gridline style', 'Gridline colour', 'Wall colour', 'Show legend', 'Legend position', 'Overview axis', 'Show data labels', 'Distinguish groups by pattern', 'Show as table', 'Show totals', 'Show row subtotals', 'Row numbers', 'Row lines', 'Banded rows', 'Condensed', 'Row trend sparkline']
   const APPEARANCE_SEARCH_TERMS   = ['Background', 'Border colour', 'Border width', 'Corner radius', 'Padding', 'Skin', 'Widget description']
+  const MODEL_DISPLAY_SEARCH_TERMS = ['Drawn as', 'Bubbles', 'Bars', 'Higher', 'Lower', 'Influencers', 'Decimals', 'Details']
   const ACTIONS_SEARCH_TERMS      = ['Button action', 'Navigate to page', 'Apply bookmark', 'Open external URL', 'Go to another report', 'Set a parameter', 'Target page', 'Target URL', 'Target report ID', 'Parameter name', 'Value to set', 'Target bookmark']
   const RULES_SEARCH_TERMS        = ['rule', 'condition', 'threshold', 'bands']
   const INTERACTIONS_SEARCH_TERMS = ['cross-filter', 'drillthrough', 'tooltip', 'sync']
@@ -1779,9 +1780,20 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               sit with its roles: together they ARE the model specification. */}
           {isModel && (
             <ModelSettings widget={widget} pages={pages} value={modelOpts} onChange={setModelOpts}
-              datasetId={Number(datasetId) || primaryDatasetId || null} />
+              datasetId={Number(datasetId) || primaryDatasetId || null}
+              part={MODEL_DISPLAY_SPLIT.has(wt) ? 'spec' : 'all'} />
           )}
           </ExpandableGroup>
+
+          {/* F-16: how a model's result is drawn sits with the other display
+              options (Format), not only inside its specification. */}
+          {MODEL_DISPLAY_SPLIT.has(wt) && (
+            <ExpandableGroup id="model-display" title="Model display" defaultOpen // i18n-ok: ExpandableGroup translates its title
+              searchTerms={MODEL_DISPLAY_SEARCH_TERMS} {...groupFilterProps('Model display', MODEL_DISPLAY_SEARCH_TERMS)}>
+              <ModelSettings widget={widget} pages={pages} value={modelOpts} onChange={setModelOpts}
+                datasetId={Number(datasetId) || primaryDatasetId || null} part="display" />
+            </ExpandableGroup>
+          )}
 
           {!isModel && (<>
           <ExpandableGroup id="data" title="Data & aggregation" defaultOpen // i18n-ok: ExpandableGroup translates its title

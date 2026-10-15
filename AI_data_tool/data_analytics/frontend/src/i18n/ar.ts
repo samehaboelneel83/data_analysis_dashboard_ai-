@@ -4384,6 +4384,7 @@ export const ar: Record<MessageKey, string> = {
   'group.identity': 'الهوية',
   'group.interactions': 'التفاعلات',
   'group.lattice_small_multiples': 'الشبكة (مضاعفات صغيرة)',
+  'group.model_display': 'عرض النموذج',
   'group.layout': 'التخطيط',
   'group.prompt': 'المُحفِّز',
   'group.ranking': 'الترتيب',

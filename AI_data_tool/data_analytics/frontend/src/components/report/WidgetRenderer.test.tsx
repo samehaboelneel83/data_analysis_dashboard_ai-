@@ -2083,6 +2083,20 @@ describe('widget header action menu (U1)', () => {
   })
 })
 
+describe('the edit-mode menu leads with the options, not with Duplicate (F-16)', () => {
+  it('"Edit options…" comes first and opens the options; opening the menu fires nothing', () => {
+    const onDuplicate = vi.fn(), onEditOptions = vi.fn()
+    renderWidget({ editMode: true, onDelete: vi.fn(), onDuplicate, onEditOptions })
+    fireEvent.click(screen.getByRole('button', { name: 'More actions for widget Sales' }))
+    const items = screen.getAllByRole('menuitem').map(i => i.textContent)
+    expect(items[0]).toBe('Edit options…')
+    expect(onDuplicate).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Edit options…' }))
+    expect(onEditOptions).toHaveBeenCalledTimes(1)
+    expect(onDuplicate).not.toHaveBeenCalled()
+  })
+})
+
 describe('a refused request explains itself', () => {
   // The import row cap is enforced server-side and returns 413 with a message
   // naming the limit, the actual row count and the two remedies. The widget

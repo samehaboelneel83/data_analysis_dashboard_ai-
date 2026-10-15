@@ -4385,6 +4385,7 @@ export const en = {
   'group.identity': 'Identity',
   'group.interactions': 'Interactions',
   'group.lattice_small_multiples': 'Lattice (small multiples)',
+  'group.model_display': 'Model display',
   'group.layout': 'Layout',
   'group.prompt': 'Prompt',
   'group.ranking': 'Ranking',
