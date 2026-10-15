@@ -1,5 +1,5 @@
 import { sayText } from '../lib/readbackText'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { datasetsApi, insightsApi } from '../services/api'
 import type { Dataset } from '../services/api'
@@ -85,6 +85,8 @@ export default function InsightsHub() {
   // identical scan moments later if the author clicks through, and sharing
   // the in-flight request is the whole reason that variant exists.
   interface ScanResult {
+    /** The dataset this result is about (AD-04): a late answer for another one is never shown. */
+    forId: number
     narrative: string
     findings: { kind: string; title: string; detail: string; score: number; columns: string[] }[]
   }
@@ -92,15 +94,21 @@ export default function InsightsHub() {
   const [scanLoading, setScanLoading] = useState(false)
   const [scanError, setScanError] = useState<unknown>(null)
 
+  // AD-04: each scan gets a number; only the latest one may write its result.
+  // Switching Sales -> Metrics quickly let the slower Sales answer land last
+  // and sit under the Metrics picker.
+  const scanSeq = useRef(0)
   const runScan = () => {
+    const seq = ++scanSeq.current
     if (selected == null || isDirectQuery) return
+    const forId = selected
     setScan(null)
     setScanError(null)
     setScanLoading(true)
-    insightsApi.runShared(selected)
-      .then(r => setScan(r as ScanResult))
-      .catch(setScanError)
-      .finally(() => setScanLoading(false))
+    insightsApi.runShared(forId)
+      .then(r => { if (seq === scanSeq.current) setScan({ ...(r as Omit<ScanResult, 'forId'>), forId }) })
+      .catch(e => { if (seq === scanSeq.current) setScanError(e) })
+      .finally(() => { if (seq === scanSeq.current) setScanLoading(false) })
   }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(runScan, [selected, isDirectQuery])
@@ -177,7 +185,7 @@ export default function InsightsHub() {
             </div>
           )}
 
-          {!isDirectQuery && !scanLoading && scanError == null && scan
+          {!isDirectQuery && !scanLoading && scanError == null && scan && scan.forId === selected
             && (scan.narrative || scan.findings.length > 0) && (() => {
             // Filtered for the PREVIEW only. The panel itself still renders
             // whenever the scan returned anything, so "View full scan →"
@@ -188,8 +196,8 @@ export default function InsightsHub() {
             <div style={{ marginBottom: 16, padding: 14, background: 'var(--surface)',
               border: '1px solid var(--border)', borderRadius: 'var(--radius, 8px)' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: scan.narrative || strong.length ? 8 : 0 }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.05em' }}>
-                  {t('insights.top')}
+                <span data-testid="insights-top-heading" style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                  {t('insights.top')}{current ? <> · <bdi style={{ textTransform: 'none' }}>{current.name}</bdi></> : null}
                 </span>
                 <Link to={`/datasets/${selected}#insights`} style={{ fontSize: 12 }}>{t('insights.fullScan')}</Link>
               </div>

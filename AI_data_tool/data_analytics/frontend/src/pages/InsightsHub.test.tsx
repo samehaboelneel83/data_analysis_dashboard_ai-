@@ -293,4 +293,22 @@ describe("the preview shows only findings worth the reader's attention", () => {
     expect(await screen.findByText('The only real one')).toBeInTheDocument()
     expect(screen.queryByText('This should not appear.')).toBeNull()
   })
+
+  it('ignores a slower, earlier scan: the card shows the dataset now chosen, and names it (AD-04)', async () => {
+    const OTHER = { id: 7, name: 'Metrics', mode: 'import', created_at: '2026-03-01T00:00:00Z', columns: [] } as any
+    vi.mocked(datasetsApi.list).mockResolvedValue([IMPORT_DS, OTHER])
+    const pending: Record<number, (v: any) => void> = {}
+    vi.mocked(insightsApi.runShared).mockImplementation((id: number) => new Promise(res => { pending[id] = res }) as any)
+    await renderHub(5)
+    await waitFor(() => expect(pending[5]).toBeDefined())
+    fireEvent.change(screen.getByLabelText('Dataset'), { target: { value: '7' } })
+    await waitFor(() => expect(pending[7]).toBeDefined())
+    pending[7]({ narrative: 'Metrics story.', findings: [] })
+    expect(await screen.findByText('Metrics story.')).toBeInTheDocument()
+    pending[5]({ narrative: 'Orders story.', findings: [] })
+    await new Promise(r => setTimeout(r, 20))
+    expect(screen.queryByText('Orders story.')).toBeNull()
+    expect(screen.getByText('Metrics story.')).toBeInTheDocument()
+    expect(screen.getByTestId('insights-top-heading')).toHaveTextContent('Metrics')
+  })
 })
