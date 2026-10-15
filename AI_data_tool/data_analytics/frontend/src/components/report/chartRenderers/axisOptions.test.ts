@@ -437,3 +437,18 @@ describe('seriesName -- tooltips and legends use the axis words, never the data 
     expect(seriesName({ y_axis: 'margin', measure: 'revenue' } as never)).toBe('margin')
   })
 })
+
+describe('C-11: the second measure is named by the summary the server applies', () => {
+  it('a blank aggregation2 under Sum names a percentage by its average, as the server computes it', () => {
+    expect(axisTitles({ dimension: 'month', measure: 'revenue', aggregation: 'sum', measure2: 'margin_pct' }).measure2)
+      .toBe('avg(margin_pct)')
+  })
+  it('an additive second measure still inherits Sum', () => {
+    expect(axisTitles({ dimension: 'month', measure: 'revenue', aggregation: 'sum', measure2: 'cost' }).measure2)
+      .toBe('sum(cost)')
+  })
+  it("an author's own aggregation2 is kept", () => {
+    expect(axisTitles({ dimension: 'month', measure: 'revenue', aggregation: 'sum', measure2: 'margin_pct', aggregation2: 'max' }).measure2)
+      .toBe('max(margin_pct)')
+  })
+})

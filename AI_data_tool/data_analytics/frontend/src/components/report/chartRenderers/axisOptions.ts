@@ -14,6 +14,7 @@ import { createElement, type ComponentType } from 'react'
 import { LineChart, Line } from 'recharts'
 import { fmtStr, isolateLtr, LegendWithTitle } from '../chartUtils'
 import { hijriLabel, symbolAfter } from '../../../lib/arabicFormats'
+import { defaultSummary } from '../../../lib/semanticGuard'
 
 export interface FormatConfig {
   overview_axis?: boolean
@@ -483,7 +484,12 @@ export function axisTitles(cfg: FormatConfig): {
     // COUNT names no column -- "how many rows" -- and the axis should say so
     // rather than stay blank on the one aggregation that has nothing to name.
     ?? (agg === 'count' ? 'count' : undefined)
-  const measure2 = applied(text(cfg.measure2), text(cfg.aggregation2) ?? agg)
+  // C-11: a blank aggregation2 inherits the first axis's -- except that the
+  // server (shape_dual_series) never sums a percentage or a rate there, and
+  // the title must name what it actually drew ("avg(margin_pct)").
+  const m2 = text(cfg.measure2)
+  const sensible2 = m2 && !text(cfg.aggregation2) && (agg ?? 'sum') === 'sum' ? defaultSummary(m2) : undefined
+  const measure2 = applied(m2, text(cfg.aggregation2) ?? (sensible2 && sensible2 !== 'sum' ? sensible2 : agg))
   // Several measures on one axis (extra_measures): no single field names it,
   // and "sum(revenue)" over revenue, cost and profit would say something false.
   // The legend names each series; an author's own title still wins.
