@@ -1231,6 +1231,7 @@ export const ar: Record<MessageKey, string> = {
   'cr.size': 'الحجم',
   'cr.communityColour': 'التجمّع: {c} ← اللون',
   'cr.configure': 'اضبط العنصر لعرض البيانات',
+  'cr.wordsTooLong': 'الكلمات أطول من أن تتسع — كبّر الإطار.',
   'cr.pieMap': 'خريطة دوائر',
   'cr.rowNoCountry': '{n} صف لم يطابق دولة',
   'cr.rowsNoCountry': '{n} صفوف لم تطابق دولة',
