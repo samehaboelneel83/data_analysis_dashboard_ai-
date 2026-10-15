@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderWithProviders as render, screen, waitFor, fireEvent, act } from '../test/renderWithProviders'
+import { renderWithProviders as render, screen, waitFor, fireEvent, act, within } from '../test/renderWithProviders'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { DirectionProvider } from '../contexts/DirectionContext'
 import DatasetDetail from './DatasetDetail'
@@ -409,6 +409,29 @@ describe('DatasetDetail DirectQuery gating', () => {
 
     await waitFor(() => expect(dataPreviewApi.query).toHaveBeenCalled())
     expect(await screen.findByText(/no rows match/i)).toBeInTheDocument()
+  })
+})
+
+describe('DatasetDetail data filters (B-07)', () => {
+  const withRegion = (): Dataset => ({ ...importDataset(), row_count: 2000,
+    columns: [{ name: 'region', dtype: 'categorical' }] as never })
+
+  it('removing the last filter in the Filters panel reloads the grid unfiltered', async () => {
+    vi.mocked(datasetsApi.get).mockResolvedValue(withRegion())
+    vi.mocked(analysisApi.get).mockRejectedValue(new Error('no analysis yet'))
+    vi.mocked(dataPreviewApi.query).mockResolvedValue({ columns: ['region'], rows: [['Europe']], total: 514 })
+    renderDetail(29)
+    await screen.findByRole('heading', { name: 'CSV Upload' })
+    fireEvent.click(screen.getByRole('tab', { name: /^Data/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /^Filter$/ }))
+    fireEvent.change(screen.getByPlaceholderText('value…'), { target: { value: 'Europe' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Apply Filters' }))
+    await waitFor(() => expect(dataPreviewApi.query).toHaveBeenLastCalledWith(
+      29, [{ column: 'region', op: 'eq', value: 'Europe' }], [], 100, 0, undefined, 'asc', undefined))
+    const panel = screen.getByText('Filters').closest('div')!.parentElement!
+    fireEvent.click(within(panel).getByRole('button', { name: 'Remove filter region Europe' }))
+    await waitFor(() => expect(dataPreviewApi.query).toHaveBeenLastCalledWith(
+      29, [], [], 100, 0, undefined, 'asc', undefined))
   })
 })
 

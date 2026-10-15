@@ -2664,6 +2664,7 @@ export const en = {
   'al.deleteName': 'Delete {name}',
   'data3.f.title': 'Filters',
   'data3.f.add': '+ Add',
+  'data3.f.clearAll': 'Clear all filters',
   'data3.f.none': 'No filters',
   'data3.f.value': 'value…',
   'data3.f.apply': 'Apply Filters',

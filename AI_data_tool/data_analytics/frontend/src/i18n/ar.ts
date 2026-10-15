@@ -2663,6 +2663,7 @@ export const ar: Record<MessageKey, string> = {
   'al.deleteName': 'حذف {name}',
   'data3.f.title': 'عوامل التصفية',
   'data3.f.add': '+ إضافة',
+  'data3.f.clearAll': 'مسح كل المرشحات',
   'data3.f.none': 'لا توجد عوامل تصفية',
   'data3.f.value': 'القيمة…',
   'data3.f.apply': 'تطبيق التصفية',

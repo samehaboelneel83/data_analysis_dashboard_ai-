@@ -441,8 +441,27 @@ export default function DatasetDetail() {
   const updateFilter = (id: number, key: string, val: string) =>
     setFilterRows(p => p.map(f => f.id === id ? { ...f, [key]: val } : f))
 
-  const removeFilter = (id: number) =>
-    setFilterRows(p => p.filter(f => f.id !== id))
+  /** B-07: removing a filter that was narrowing the grid re-queries it at
+   *  once -- the panel's × used to change only the list, and with no rows
+   *  left the Apply button was gone, so the grid stayed filtered. */
+  const removeFilter = (id: number) => {
+    const gone = filterRows.find(f => f.id === id)
+    const rest = filterRows.filter(f => f.id !== id)
+    setFilterRows(rest)
+    if (gone && gone.column && gone.value !== '') {
+      setPage(0)
+      loadPreview(0, rest, calcCols, sortBy, sortDir, search)
+    }
+  }
+
+  const clearFilters = () => {
+    const hadActive = filterRows.some(f => f.column && f.value !== '')
+    setFilterRows([])
+    if (hadActive) {
+      setPage(0)
+      loadPreview(0, [], calcCols, sortBy, sortDir, search)
+    }
+  }
 
   const handleCalcColsChanged = (cols: CalcColumn[]) => {
     setCalcCols(cols)
@@ -1488,12 +1507,7 @@ export default function DatasetDetail() {
               <span key={f.id} className="dl-data3__chip" dir="ltr">
                 {f.column} {OPS.find(o => o.value === f.op)?.label ?? f.op} {f.value}
                 <button type="button" aria-label={tr('data3.removeFilter', { what: `${f.column} ${f.value}` })}
-                  onClick={() => {
-                    const rest = filterRows.filter(x => x.id !== f.id)
-                    removeFilter(f.id)
-                    setPage(0)
-                    loadPreview(0, rest, calcCols, sortBy, sortDir, search)
-                  }}><X size={12} aria-hidden /></button>
+                  onClick={() => removeFilter(f.id)}><X size={12} aria-hidden /></button>
               </span>
             ))}
             {sortBy && (
@@ -1534,9 +1548,16 @@ export default function DatasetDetail() {
                 <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
                   {tr('data3.f.title')}
                 </span>
-                <button className="btn btn-ghost btn-sm" onClick={addFilter} style={{ fontSize: 11, padding: '2px 7px' }}>
-                  {tr('data3.f.add')}
-                </button>
+                <span style={{ display: 'flex', gap: 4 }}>
+                  {filterRows.length > 0 && (
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={clearFilters} style={{ fontSize: 11, padding: '2px 7px' }}>
+                      {tr('data3.f.clearAll')}
+                    </button>
+                  )}
+                  <button className="btn btn-ghost btn-sm" onClick={addFilter} style={{ fontSize: 11, padding: '2px 7px' }}>
+                    {tr('data3.f.add')}
+                  </button>
+                </span>
               </div>
 
               {filterRows.length === 0 && (
@@ -1550,7 +1571,8 @@ export default function DatasetDetail() {
                       style={{ flex: 1, fontSize: 11, padding: '3px 4px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', minWidth: 0 }}>
                       {allColNames.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
-                    <button onClick={() => removeFilter(f.id)}
+                    <button type="button" onClick={() => removeFilter(f.id)}
+                      aria-label={tr('data3.removeFilter', { what: `${f.column} ${f.value}`.trim() })}
                       style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 14, padding: '0 2px', flexShrink: 0 }}>×</button>
                   </div>
                   <div style={{ display: 'flex', gap: 4 }}>
