@@ -174,3 +174,45 @@ describe('AdminUsers — nothing is pre-selected in a new user (QA E-05)', () =>
     toastError.mockRestore()
   })
 })
+
+describe('AdminUsers — search, filters and pages (QA E-16)', () => {
+  const org = { id: 1, name: 'Default' }
+  const analyst = { id: 1, name: 'Analyst', is_org_admin: false }
+  const admin = { id: 2, name: 'Admin', is_org_admin: true }
+  const user = (id: number, email: string, role = analyst, is_active = true) =>
+    ({ id, email, is_active, organization: org, role, is_super_admin: false })
+
+  it('typing in search narrows the rows; role and status filters narrow further', async () => {
+    vi.mocked(adminUsersApi.list).mockResolvedValueOnce([
+      user(1, 'demo-global@example.com'), user(2, 'demo-emea@example.com', analyst, false),
+      user(3, 'boss@example.com', admin), user(4, 'zed@example.com'),
+    ] as never)
+    renderPage()
+    expect(await screen.findByText('zed@example.com')).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search users by email' }), { target: { value: 'DEMO' } })
+    expect(screen.queryByText('zed@example.com')).not.toBeInTheDocument()
+    expect(screen.getByText('demo-global@example.com')).toBeInTheDocument()
+    expect(screen.getByText('demo-emea@example.com')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'inactive' } })
+    expect(screen.queryByText('demo-global@example.com')).not.toBeInTheDocument()
+    expect(screen.getByText('demo-emea@example.com')).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search users by email' }), { target: { value: '' } })
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'all' } })
+    fireEvent.change(screen.getByLabelText('Filter by role'), { target: { value: '1' } })
+    expect(screen.getByText('zed@example.com')).toBeInTheDocument()
+    expect(screen.queryByText('boss@example.com')).not.toBeInTheDocument()
+  })
+
+  it('pages long lists, sorted by email', async () => {
+    vi.mocked(adminUsersApi.list).mockResolvedValueOnce(
+      Array.from({ length: 60 }, (_, i) => user(i + 1, `u${String(60 - i).padStart(2, '0')}@example.com`)) as never)
+    renderPage()
+    expect(await screen.findByText('u01@example.com')).toBeInTheDocument()
+    expect(screen.getByText('u50@example.com')).toBeInTheDocument()
+    expect(screen.queryByText('u51@example.com')).not.toBeInTheDocument()
+    expect(screen.getByText('1–50 of 60')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    expect(screen.getByText('u51@example.com')).toBeInTheDocument()
+    expect(screen.queryByText('u01@example.com')).not.toBeInTheDocument()
+  })
+})

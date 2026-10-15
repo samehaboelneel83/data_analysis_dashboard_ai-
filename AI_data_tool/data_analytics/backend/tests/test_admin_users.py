@@ -129,3 +129,38 @@ async def test_update_user_checks_email_and_password_only_when_sent(client, db_s
     assert ok.status_code == 200
     user = (await db_session.execute(select(User).where(User.id == created["id"]))).scalar_one()
     assert user.email == "edit.me@example.com"
+
+
+# ── E-16: the Users list can be searched, filtered and paged ─────────────────
+
+async def _many_users(db_session, two_orgs):
+    from app.models.models import Role
+    org = two_orgs["a"]["org"]
+    analyst = Role(org_id=org.id, name="Analyst", is_org_admin=False)
+    db_session.add(analyst)
+    await db_session.flush()
+    for i, email in enumerate(["zed@example.com", "demo-global@example.com", "demo-emea@example.com",
+                               "bob@example.com", "carol@example.com"]):
+        db_session.add(User(org_id=org.id, role_id=analyst.id, email=email, password_hash="x",
+                            is_active=(email != "carol@example.com")))
+    await db_session.commit()
+    return analyst
+
+
+async def test_list_users_filters_by_q_role_and_active(client, db_session, two_orgs, auth_headers):
+    analyst = await _many_users(db_session, two_orgs)
+    get = lambda **p: client.get("/api/v1/admin/users", params=p, headers=auth_headers["a"])  # noqa: E731
+    assert [u["email"] for u in (await get(q="DEMO")).json()] == ["demo-emea@example.com", "demo-global@example.com"]
+    assert len((await get(role_id=analyst.id)).json()) == 5
+    assert [u["email"] for u in (await get(active="false")).json()] == ["carol@example.com"]
+    assert "carol@example.com" not in [u["email"] for u in (await get(active="true")).json()]
+
+
+async def test_list_users_paginates_sorted_by_email(client, db_session, two_orgs, auth_headers):
+    await _many_users(db_session, two_orgs)
+    r = await client.get("/api/v1/admin/users", params={"limit": 2, "offset": 2}, headers=auth_headers["a"])
+    assert r.status_code == 200
+    assert r.headers["X-Total-Count"] == "6"
+    assert [u["email"] for u in r.json()] == ["carol@example.com", "demo-emea@example.com"]
+    everyone = (await client.get("/api/v1/admin/users", headers=auth_headers["a"])).json()
+    assert [u["email"] for u in everyone] == sorted(u["email"] for u in everyone) and len(everyone) == 6

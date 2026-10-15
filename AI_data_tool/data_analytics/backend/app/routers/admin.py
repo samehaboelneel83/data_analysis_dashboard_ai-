@@ -1,7 +1,7 @@
 import asyncio
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -141,12 +141,29 @@ async def _email_taken(db: AsyncSession, email: str, *, except_id: int | None = 
 
 
 @router.get("/users", response_model=list[UserOut])
-async def list_users(db: AsyncSession = Depends(get_db), current_user: User = Depends(require_org_admin)):
-    result = await db.execute(
-        select(User).options(selectinload(User.role), selectinload(User.organization))
-        .where(User.org_id == current_user.org_id)
-    )
-    users = result.scalars().all()
+async def list_users(response: Response, q: str | None = None, role_id: int | None = None,
+                     active: bool | None = None,
+                     limit: int | None = Query(default=None, ge=1, le=500),
+                     offset: int = Query(default=0, ge=0),
+                     db: AsyncSession = Depends(get_db), current_user: User = Depends(require_org_admin)):
+    """The org's users, sorted by email (QA E-16: unordered, unfiltered and
+    unpaged). Optional `q` (email contains, any case), `role_id`, `active`,
+    and `limit`/`offset`; X-Total-Count is the number matching before paging.
+    Without `limit` every match is returned, as every existing caller expects."""
+    where = [User.org_id == current_user.org_id]
+    if q and q.strip():
+        where.append(func.lower(User.email).contains(q.strip().lower()))
+    if role_id is not None:
+        where.append(User.role_id == role_id)
+    if active is not None:
+        where.append(User.is_active.is_(active))
+    total = (await db.execute(select(func.count(User.id)).where(*where))).scalar_one()
+    response.headers["X-Total-Count"] = str(total)
+    stmt = (select(User).options(selectinload(User.role), selectinload(User.organization))
+            .where(*where).order_by(func.lower(User.email), User.id).offset(offset))
+    if limit is not None:
+        stmt = stmt.limit(limit)
+    users = (await db.execute(stmt)).scalars().all()
     # Transient, as on /auth/me: lets the UI hide Edit/Delete on a platform
     # admin's row for an org admin, who may not change it (E-01).
     for u in users:

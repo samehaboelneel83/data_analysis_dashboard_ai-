@@ -101,7 +101,7 @@ describe('the security admin pages, in Arabic (8-i18n)', () => {
       created_count: 1, created: ['a@x.com'], errors: [{ row: 2, email: 'bad', error: 'invalid email' }],
     } as never)
     renderAr(<AdminUsers />)
-    expect(await screen.findByText('غير نشط')).toBeInTheDocument()
+    expect(await screen.findByText('غير نشط', { selector: 'span' })).toBeInTheDocument()   // the row's tag, not the status filter's option
     expect(screen.getByText('(مسؤول)')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: ar('admin.delete') }))
