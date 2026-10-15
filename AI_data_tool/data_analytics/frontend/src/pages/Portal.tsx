@@ -22,7 +22,7 @@ type Section = CatalogSection | 'sent'
 const SECTIONS: Section[] = ['all', 'mine', 'shared', 'team', 'favorites', 'recent', 'archived', 'sent']
 const PAGE = 24
 const EMPTY: Partial<Record<Section, MessageKey>> = {
-  shared: 'pub.empty.shared', team: 'pub.empty.shared', favorites: 'pub.empty.favorites', recent: 'pub.empty.recent',
+  shared: 'pub.empty.shared', team: 'pub.empty.team', favorites: 'pub.empty.favorites', recent: 'pub.empty.recent',
 }
 
 export default function Portal() {

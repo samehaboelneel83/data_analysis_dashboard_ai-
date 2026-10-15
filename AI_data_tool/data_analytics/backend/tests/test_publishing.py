@@ -148,6 +148,35 @@ async def test_sharing_with_a_person_a_role_and_a_team_and_taking_it_back(client
     assert (await client.post(f"{API}/reports/{rid}/grants", json={"email": people["other_org"].email}, headers=hdr(a))).status_code == 404
 
 
+async def test_a_team_share_is_listed_under_my_team_even_when_the_reader_is_also_named(client, db_session, people):
+    """F-05: the personal share decides the rights, but the dashboard was still
+    shared with the reader's team -- My team must list it (also for a member
+    of a team below the one named)."""
+    a, org = people["author"], people["org"]
+    _, member_ = await member(db_session, org.id, "teammate")
+    _, in_child = await member(db_session, org.id, "teammate-child")
+    unit = OrgUnit(org_id=org.id, name="QA F Team", match_value="QA F Team")
+    db_session.add(unit)
+    await db_session.flush()
+    child = OrgUnit(org_id=org.id, name="QA F Sub", match_value="QA F Sub", parent_id=unit.id)
+    db_session.add(child)
+    await db_session.flush()
+    db_session.add_all([UserOrgUnit(user_id=member_.id, org_unit_id=unit.id),
+                        UserOrgUnit(user_id=in_child.id, org_unit_id=child.id)])
+    await db_session.commit()
+    rid, _, _ = await dashboard(client, a)
+    for body in ({"email": member_.email, "level": "view"}, {"org_unit_id": unit.id, "level": "view"}):
+        assert (await client.post(f"{API}/reports/{rid}/grants", json=body, headers=hdr(a))).status_code == 201
+    for u in (member_, in_child):
+        team = (await client.get(f"{API}/portal/catalog?section=team", headers=hdr(u))).json()
+        assert [i["id"] for i in team["items"]] == [rid] and team["counts"]["team"] == 1, u.email
+    # Named personally, it is ALSO under Shared with me, and "how it reached you" is still the personal share.
+    shared = (await client.get(f"{API}/portal/catalog?section=shared", headers=hdr(member_))).json()
+    assert [i["id"] for i in shared["items"]] == [rid] and shared["items"][0]["via"] == "user"
+    # Someone outside the team: not under My team.
+    assert (await client.get(f"{API}/portal/catalog?section=team", headers=hdr(people["reader"]))).json()["total"] == 0
+
+
 async def test_an_expired_share_gives_nothing(client, db_session, people):
     a, r = people["author"], people["reader"]
     rid, _, _ = await dashboard(client, a)

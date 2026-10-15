@@ -523,8 +523,9 @@ async def _catalogue(db: AsyncSession, user: User) -> list[dict]:
     ids = [r[0] for r in rows]
     caps = await effective_capabilities(db, user, ids)
     grants = await report_grants(db, user, ids)
-    from ..core.capability import folder_granted_reports
+    from ..core.capability import folder_granted_reports, team_shared_report_ids
     folder = {} if _is_admin(user) else await folder_granted_reports(db, user)
+    team_shared = await team_shared_report_ids(db, user, ids)
     favorites = set((await db.execute(select(ReportFavorite.report_id).where(ReportFavorite.user_id == user.id))).scalars().all())
     recent = dict((await db.execute(select(RecentView.report_id, RecentView.viewed_at).where(RecentView.user_id == user.id))).all())
     out = []
@@ -543,7 +544,9 @@ async def _catalogue(db: AsyncSession, user: User) -> list[dict]:
                     "data_as_of": _iso(refreshed), "favorite": rid in favorites, "last_viewed": _iso(recent.get(rid)),
                     "can_export": can_export,
                     # How it reached them: named on it, through their role or team, a shared folder, or published.
-                    "via": "owner" if mine else (g.via if g else "folder" if rid in folder else "published")})
+                    "via": "owner" if mine else (g.via if g else "folder" if rid in folder else "published"),
+                    # Shared with one of their teams, whatever decided their rights (F-05).
+                    "via_team": rid in team_shared})
     return out
 
 
@@ -553,7 +556,7 @@ def _in_section(row: dict, section: str) -> bool:
     if row["state"] == "archived":
         return False
     return {"all": True, "mine": row["is_mine"], "shared": row["via"] in ("user", "role", "folder"),
-            "team": row["via"] == "team", "favorites": row["favorite"],
+            "team": row["via"] == "team" or bool(row.get("via_team")), "favorites": row["favorite"],
             "recent": row["last_viewed"] is not None}.get(section, False)
 
 

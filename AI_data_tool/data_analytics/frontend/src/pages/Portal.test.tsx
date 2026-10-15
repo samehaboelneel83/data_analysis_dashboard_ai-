@@ -54,6 +54,14 @@ describe('Portal', () => {
     await waitFor(() => expect(portalApi.catalog).toHaveBeenLastCalledWith(expect.objectContaining({ section: 'shared', offset: 0 })))
   })
 
+  it('an empty My team says it is about the team, not about you (F-05)', async () => {
+    open()
+    await screen.findByTestId('portal-grid')
+    vi.mocked(portalApi.catalog).mockResolvedValue(page([]) as never)
+    fireEvent.click(screen.getByRole('tab', { name: /My team/ }))
+    expect(await screen.findByText('Nothing has been shared with your team yet.')).toBeInTheDocument()
+  })
+
   it('asks the server to search and filter', async () => {
     open()
     await screen.findByTestId('portal-grid')
