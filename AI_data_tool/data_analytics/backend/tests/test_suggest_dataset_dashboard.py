@@ -349,10 +349,40 @@ class TestACategoryAxisStaysReadable:
         return build_profile(df)
 
     def test_a_bar_chart_over_many_categories_is_capped(self):
+        # F-14: a bar chart is laid on its side and shows up to 20; beyond that, the top 20.
         got = polish_widget(
             {"widget_type": "bar", "title": "x",
              "config": {"dimension": "dept", "measure": "cost", "aggregation": "sum"}},
             self.cfg(26))
+        assert got["config"]["limit"] == 20 and got["config"]["orientation"] == "horizontal"
+        got = polish_widget(
+            {"widget_type": "bar", "title": "x",
+             "config": {"dimension": "dept", "measure": "cost", "aggregation": "sum"}},
+            self.cfg(35))
+        assert got["config"]["limit"] == 20
+
+    def test_fourteen_countries_are_drawn_whole_on_a_bar_chart(self):
+        """F-14: "Rows by country" showed "12 of 14 (row limit)" -- a bar
+        chart of 13 to 20 categories is drawn whole, on its side so the
+        labels fit."""
+        got = polish_widget(
+            {"widget_type": "bar", "title": "x",
+             "config": {"dimension": "dept", "measure": "cost", "aggregation": "count"}},
+            self.cfg(14))
+        assert "limit" not in got["config"] and got["config"]["orientation"] == "horizontal"
+
+    def test_an_orientation_the_model_chose_is_kept(self):
+        got = polish_widget(
+            {"widget_type": "bar", "title": "x",
+             "config": {"dimension": "dept", "measure": "cost", "aggregation": "sum", "orientation": "vertical"}},
+            self.cfg(14))
+        assert got["config"]["orientation"] == "vertical" and "limit" not in got["config"]
+
+    def test_a_ring_of_many_slices_is_still_cut_to_twelve(self):
+        got = polish_widget(
+            {"widget_type": "donut", "title": "x",
+             "config": {"dimension": "dept", "measure": "cost", "aggregation": "sum"}},
+            self.cfg(14))
         assert got["config"]["limit"] == 12
 
     def test_a_handful_of_categories_is_left_alone(self):

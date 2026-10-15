@@ -221,6 +221,8 @@ _CATEGORY_AXIS = ("bar", "pie", "donut", "treemap", "dot_plot", "needle",
                   "butterfly", "waterfall", "funnel", "step", "word_cloud",
                   "box_plot", "dual_axis_bar", "dual_axis_line", "dual_axis_bar_line")
 READABLE_CATEGORIES = 12
+#: A horizontal bar chart: a label per row reads up to here (F-14).
+BAR_CATEGORIES = 20
 
 
 _COUNTRY_WORDS = ("country", "nation", "country_name", "country_code", "iso_country")
@@ -1019,7 +1021,14 @@ def polish_widget(widget: dict, profile: dict) -> dict:
     if isinstance(dim, str) and not config.get("limit") and not is_time_axis:
         distinct = known.get(dim, {}).get("distinct") or 0
         is_time = known.get(dim, {}).get("role") == "datetime"
-        if distinct > HIGH_CARDINALITY:
+        if widget.get("widget_type") == "bar" and not is_time and distinct > READABLE_CATEGORIES:
+            # F-14: a bar chart laid on its side has room for a label per bar:
+            # 14 countries are drawn whole ("12 of 14 (row limit)" read as
+            # missing data); beyond BAR_CATEGORIES, the top ones.
+            config.setdefault("orientation", "horizontal")
+            if distinct > BAR_CATEGORIES:
+                config["limit"] = BAR_CATEGORIES
+        elif distinct > HIGH_CARDINALITY:
             config["limit"] = 20
         elif (widget.get("widget_type") in _CATEGORY_AXIS
               and not is_time and distinct > READABLE_CATEGORIES):
