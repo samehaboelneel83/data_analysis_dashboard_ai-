@@ -215,7 +215,7 @@ export default function Automations() {
                     </li>
                   ))}
                 </ol>
-                <span style={{ marginInlineStart: 'auto', display: 'flex', gap: 6 }}>
+                <span className="dl-rows__acts">
                   {run.result_report && (
                     <Link className="btn btn-sm" to={`/reports/${run.result_report.id}`}>{t('auto.openReport')}</Link>
                   )}

@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
+import fs from 'node:fs'
+import path from 'node:path'
 import Automations from './Automations'
 import { automationApi, datasetsApi } from '../services/api'
 
@@ -167,3 +169,16 @@ describe('run summary in the reader\'s language', () => {
     expect(runSummary({ ...(base as object) } as never, tt as never)).toBeNull()
   })
 })
+
+describe('the run row on a phone (AD-21)', () => {
+  /* jsdom applies no stylesheet, so the rule is pinned (home/layout.test.ts). */
+  const css = fs.readFileSync(path.join(__dirname, '..', 'index.css'), 'utf8')
+  it('gives the title block a real basis, so the controls wrap below it', () => {
+    const r = css.match(/\.dl-rows__row--stack \.dl-rows__main\s*\{([^}]*)\}/)?.[1] ?? ''
+    expect(r).toMatch(/flex:\s*1 1 (?!0)\d/)
+  })
+  it('lets the actions start a line of their own under 600 px', () => {
+    expect(css).toMatch(/@media \(max-width: 600px\)\s*\{[^@]*\.dl-rows__row--stack \.dl-rows__main\s*\{[^}]*flex-basis:\s*100%/)
+  })
+})
+
