@@ -296,6 +296,9 @@ class DatasetOut(BaseModel):
     # SH1: transient, computed per-request from DatasetShare -- true when THIS
     # viewer has an explicit share grant (never persisted on Dataset itself).
     shared:                   bool = False
+    # Transient, single-dataset read only: may THIS viewer change the data
+    # model (calculated columns, measures)? None where not computed.
+    can_model:                Optional[bool] = None
     # Transient, resolved per-request by `services/knowledge.py` from the source
     # catalog through each column's provenance. Never persisted here: the
     # descriptions live on `source_columns`, one copy shared by every dataset

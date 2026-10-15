@@ -285,3 +285,41 @@ async def resolve_denied_columns(db: AsyncSession, current_user: User, dataset_i
             expanded.extend(derived_measure_names(spec, c))
         denied = [c for c in dict.fromkeys(expanded) if c != "row_count"]
     return denied
+
+
+def expression_reads_any(expression: str, names: set[str]) -> bool:
+    """Whether an author expression (a measure or a calculated column) reads
+    any of `names`: bare names via the AST, plus a whole-token match so a
+    backtick-quoted name, or a formula the AST cannot parse, is caught too.
+    Fail-closed: a string literal equal to one of the names also counts."""
+    if not expression or not names:
+        return False
+    from ..services.measure_sql import referenced_names
+    if referenced_names(expression) & names:
+        return True
+    return any(re.search(r"(?<![\w])" + re.escape(n) + r"(?![\w])", expression) for n in names)
+
+
+def author_items_over_denied(calc_cols, measures, denied) -> tuple[set[str], set[str]]:
+    """The calculated columns and measures built on a column this reader is
+    denied -- directly, or through a calculated column that is (QA E-12/E-13).
+    Returns (calc column names, measure names). Their formulas name the hidden
+    column, and their values are derived from it, so a restricted reader gets
+    neither the definition nor the data."""
+    denied = set(denied or [])
+    if not denied:
+        return set(), set()
+    calc = {c.get("name"): c.get("expression") or "" for c in (calc_cols or [])
+            if isinstance(c, dict) and c.get("name")}
+    tainted = set(denied)
+    changed = True
+    while changed:                      # calc columns built on calc columns
+        changed = False
+        for name, expr in calc.items():
+            if name not in tainted and expression_reads_any(expr, tainted):
+                tainted.add(name)
+                changed = True
+    bad_measures = {m["name"] for m in (measures or [])
+                    if isinstance(m, dict) and m.get("name")
+                    and expression_reads_any(m.get("expression") or "", tainted)}
+    return tainted - denied, bad_measures

@@ -12,7 +12,7 @@ from ..core.config import settings
 from ..core.org_scope import check_org
 from ..core.capability import (readable_dataset_ids, require_dataset_capability,
                                require_dataset_read, require_dataset_write)
-from ..core.rls import resolve_denied_columns, resolve_rls_expr
+from ..core.rls import author_items_over_denied, resolve_denied_columns, resolve_rls_expr
 from ..dependencies import get_current_user, require_org_admin, ai_meter
 from ..services.llm import UsageMeter
 from ..services.audit import record as audit
@@ -69,6 +69,11 @@ async def _without_denied_columns(db: AsyncSession, current_user: User, ds: Data
     denied = set(await resolve_denied_columns(db, current_user, ds.id))
     if denied:
         item.columns = [c for c in item.columns if c.name not in denied]
+        # A calculated column over a denied column names it in its formula and
+        # derives its values from it (QA E-13): gone for this reader too.
+        hidden_calc, _ = author_items_over_denied(item.calculated_columns, [], denied)
+        item.calculated_columns = [c for c in item.calculated_columns
+                                   if not (isinstance(c, dict) and c.get("name") in hidden_calc)]
     # Columns the prep pipeline creates (a partition, a split) are real to
     # every widget but absent from the uploaded file's column list; list them
     # so the pickers can offer them. Negative ids: they have no stored row.
@@ -87,6 +92,15 @@ async def _without_denied_columns(db: AsyncSession, current_user: User, ds: Data
     # a shelf of them. The single-dataset read is what the builder and the
     # dataset page load, and they are the surfaces that show this.
     if with_knowledge:
+        # Whether THIS reader may change the data model (calculated columns,
+        # measures): lets the UI hide edit/delete the server would refuse
+        # (QA E-13). Single read only -- a few queries per dataset.
+        from ..core.capability import require_dataset_capability
+        try:
+            await require_dataset_capability(db, current_user, ds.id, "data")
+            item.can_model = True
+        except HTTPException:
+            item.can_model = False
         from ..services import knowledge as knowledge_service
         try:
             know = await knowledge_service.for_dataset(db, ds, denied=denied)
@@ -1399,7 +1413,9 @@ async def list_calculated_columns(dataset_id: int, db: AsyncSession = Depends(ge
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
     await require_dataset_read(db, current_user, dataset_id)
-    return ds.calculated_columns or []
+    denied = await resolve_denied_columns(db, current_user, dataset_id)
+    hidden, _ = author_items_over_denied(ds.calculated_columns, [], denied)
+    return [c for c in (ds.calculated_columns or []) if not (isinstance(c, dict) and c.get("name") in hidden)]
 
 
 @router.put("/{dataset_id}/calculated-columns")
@@ -1572,7 +1588,11 @@ async def list_measures(dataset_id: int, db: AsyncSession = Depends(get_db), cur
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
     await require_dataset_read(db, current_user, dataset_id)
-    return ds.measures or []
+    # A measure over a column this reader is denied shows its formula -- and so
+    # the hidden column's name and use (QA E-13): left out for them.
+    denied = await resolve_denied_columns(db, current_user, dataset_id)
+    _, hidden = author_items_over_denied(ds.calculated_columns, ds.measures, denied)
+    return [m for m in (ds.measures or []) if not (isinstance(m, dict) and m.get("name") in hidden)]
 
 
 @router.post("/{dataset_id}/measures")

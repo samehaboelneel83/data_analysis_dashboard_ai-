@@ -149,20 +149,6 @@ def _config_names(config: dict, name: str) -> bool:
 
 
 
-def _reads_denied(expression: str, tainted: set[str]) -> bool:
-    """Whether an author expression (measure or calculated column) reads any of
-    `tainted`. Bare names via the AST, plus a token match so a backtick-quoted
-    name, or a formula the AST can't parse, is caught too -- the fail-closed
-    side: a string literal equal to a denied name is refused as well."""
-    import re
-    from ..services.measure_sql import referenced_names
-    if not expression or not tainted:
-        return False
-    if referenced_names(expression) & tainted:
-        return True
-    return any(re.search(r"(?<![\w])" + re.escape(name) + r"(?![\w])", expression) for name in tainted)
-
-
 def _refuse_denied_measures(config: dict, filters, measure_defs: list, calc_cols: list,
                             denied: list[str]) -> None:
     """403 `forbidden_column` for a widget whose measure or calculated column is
@@ -172,24 +158,11 @@ def _refuse_denied_measures(config: dict, filters, measure_defs: list, calc_cols
     THAT is refused too. The message names nothing."""
     if not denied:
         return
-    tainted = set(denied)
-    calc_by_name = {c.get("name"): c.get("expression") or "" for c in (calc_cols or [])
-                    if isinstance(c, dict) and c.get("name")}
-    changed = True
-    while changed:                       # calc columns built on calc columns
-        changed = False
-        for name, expr in calc_by_name.items():
-            if name not in tainted and _reads_denied(expr, tainted):
-                tainted.add(name)
-                changed = True
+    from ..core.rls import author_items_over_denied
+    bad_calc, bad_measures = author_items_over_denied(calc_cols, measure_defs, denied)
     used = lambda name: _config_names(config or {}, name) or _config_names(filters or [], name)  # noqa: E731
-    for name in tainted - set(denied):
-        if used(name):
-            raise widget_error(403, "forbidden_column", "This widget references a column your role cannot access")
-    for m in measure_defs or []:
-        if isinstance(m, dict) and m.get("name") and used(m["name"]) \
-                and _reads_denied(m.get("expression") or "", tainted):
-            raise widget_error(403, "forbidden_column", "This widget references a column your role cannot access")
+    if any(used(n) for n in bad_calc | bad_measures):
+        raise widget_error(403, "forbidden_column", "This widget references a column your role cannot access")
 
 
 

@@ -1683,6 +1683,7 @@ export default function DatasetDetail() {
                 datasetId={dsId}
                 columns={ds.columns}
                 onChanged={() => {}}
+                canModel={ds.can_model !== false}
               />
             </div>
             </div>
