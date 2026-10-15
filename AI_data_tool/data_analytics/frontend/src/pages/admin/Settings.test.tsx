@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom'
 import Settings from './Settings'
 import { AuthContext } from '../../contexts/AuthContext'
 import { DirectionProvider } from '../../contexts/DirectionContext'
+import { ConfirmProvider } from '../../components/ui/ConfirmDialog'
 import { platformSettingsApi, mapSettingsApi, type PlatformSetting } from '../../services/api'
 import toast from 'react-hot-toast'
 
@@ -19,6 +20,8 @@ vi.mock('../../services/api', async () => {
       // The endpoint list has its own tests (LlmEndpointsPanel.test.tsx).
       getLlmEndpoints: vi.fn(() => new Promise(() => {})), saveLlmEndpoints: vi.fn(), resetLlmEndpoints: vi.fn() },
     mapSettingsApi: { get: vi.fn(), set: vi.fn() },
+    // F-09: the organisation's approval switch (its own test: OrgApprovalSetting.test.tsx).
+    reviewApi: { settings: vi.fn().mockResolvedValue({ publish_gate: false, require_approval: true }), setApproval: vi.fn() },
   }
 })
 
@@ -51,7 +54,7 @@ const PAYLOAD = {
 function show(user: { is_super_admin?: boolean; org_admin?: boolean }, scope?: 'all' | 'platform') {
   const value = { user: { is_super_admin: !!user.is_super_admin, role: { is_org_admin: !!user.org_admin } } } as never
   return render(
-    <MemoryRouter><AuthContext.Provider value={value}><Settings scope={scope} /></AuthContext.Provider></MemoryRouter>)
+    <MemoryRouter><ConfirmProvider><AuthContext.Provider value={value}><Settings scope={scope} /></AuthContext.Provider></ConfirmProvider></MemoryRouter>)
 }
 
 beforeEach(() => {
@@ -68,6 +71,8 @@ describe('Admin -> Settings', () => {
     expect(screen.getByRole('link', { name: 'Single sign-on' })).toHaveAttribute('href', '/admin/sso')
     expect(platformSettingsApi.get).not.toHaveBeenCalled()
     expect(screen.getByText(/shown to platform admins/)).toBeInTheDocument()
+    // F-09: the organisation-wide approval switch lives here now.
+    expect(await screen.findByRole('checkbox', { name: /Ask for approval before anything is published/ })).toBeChecked()
   })
 
   it('shows a platform admin every category, with deploy-time values read-only', async () => {
