@@ -61,3 +61,67 @@ async def test_someone_who_cannot_open_it_cannot_copy_it(client, auth_headers):
     rep, *_ = await _report_with_content(client, auth_headers["a"])
     r = await client.post(f"/api/v1/reports/{rep['id']}/duplicate", json={}, headers=auth_headers["b"])
     assert r.status_code == 404
+
+
+# ── C-20 round 2: the copy is filed beside the original ──────────────────────
+async def _folder(client, headers, name="Team", **extra):
+    r = await client.post("/api/v1/workspace/nodes", json={"node_type": "folder", "name": name}, headers=headers)
+    assert r.status_code == 201, r.text
+    fid = r.json()["id"]
+    if extra:
+        r = await client.patch(f"/api/v1/workspace/nodes/{fid}", json=extra, headers=headers)
+        assert r.status_code == 200, r.text
+    return fid
+
+
+async def _file(client, headers, report_id, folder_id):
+    r = await client.post("/api/v1/workspace/nodes", json={"node_type": "report", "report_id": report_id,
+                                                           "parent_id": folder_id}, headers=headers)
+    assert r.status_code == 201, r.text
+
+
+async def _node_of(db_session, report_id):
+    from app.models.models import WorkspaceNode
+    return (await db_session.execute(select(WorkspaceNode).where(WorkspaceNode.report_id == report_id))).scalars().first()
+
+
+async def test_the_copy_lands_in_the_originals_folder(client, auth_headers, db_session):
+    h = auth_headers["a"]
+    rep, *_ = await _report_with_content(client, h)
+    fid = await _folder(client, h)
+    await _file(client, h, rep["id"], fid)
+    copy = (await client.post(f"/api/v1/reports/{rep['id']}/duplicate", json={}, headers=h)).json()
+    node = await _node_of(db_session, copy["id"])
+    assert node is not None and node.parent_id == fid
+
+
+async def test_an_unfiled_original_gives_an_unfiled_copy(client, auth_headers, db_session):
+    h = auth_headers["a"]
+    rep, *_ = await _report_with_content(client, h)
+    copy = (await client.post(f"/api/v1/reports/{rep['id']}/duplicate", json={}, headers=h)).json()
+    assert await _node_of(db_session, copy["id"]) is None
+
+
+async def test_a_published_folder_does_not_publish_the_private_copy(client, auth_headers, db_session):
+    # Filing under a published folder publishes what is filed: the copy is a
+    # private draft, so it stays unfiled (at the root) instead.
+    h = auth_headers["a"]
+    rep, *_ = await _report_with_content(client, h)
+    fid = await _folder(client, h, published=True)
+    await _file(client, h, rep["id"], fid)
+    copy = (await client.post(f"/api/v1/reports/{rep['id']}/duplicate", json={}, headers=h)).json()
+    assert await _node_of(db_session, copy["id"]) is None
+
+
+async def test_a_shared_folder_does_not_share_the_private_copy(client, auth_headers, db_session):
+    from app.models.models import WorkspaceFolderGrant, WorkspaceNode, User
+    h = auth_headers["a"]
+    rep, *_ = await _report_with_content(client, h)
+    fid = await _folder(client, h)
+    await _file(client, h, rep["id"], fid)
+    other = (await db_session.execute(select(User).where(User.id != rep.get("created_by", 0)))).scalars().first()
+    folder = await db_session.get(WorkspaceNode, fid)
+    db_session.add(WorkspaceFolderGrant(org_id=folder.org_id, node_id=fid, user_id=other.id, level="view"))
+    await db_session.commit()
+    copy = (await client.post(f"/api/v1/reports/{rep['id']}/duplicate", json={}, headers=h)).json()
+    assert await _node_of(db_session, copy["id"]) is None
