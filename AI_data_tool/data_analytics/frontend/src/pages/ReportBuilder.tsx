@@ -515,7 +515,7 @@ export default function ReportBuilder() {
 
   // Drag / resize state
   const [dragging,  setDragging]  = useState<{ widgetId:number; startX:number; startY:number; layout:Widget['layout']; offsetX:number; offsetY:number; packed:boolean; items:ReturnType<typeof toLayoutItems> } | null>(null)
-  const [resizing,  setResizing]  = useState<{ widgetId:number; startX:number; startY:number; layout:Widget['layout']; packed:boolean; items:ReturnType<typeof toLayoutItems> } | null>(null)
+  const [resizing,  setResizing]  = useState<{ widgetId:number; startX:number; startY:number; layout:Widget['layout']; packed:boolean; items:ReturnType<typeof toLayoutItems>; axis?: 'both' | 'x' | 'y' } | null>(null)
   const [localLayouts, setLocalLayouts] = useState<Record<number, Widget['layout']>>({})
   // Mirrored in a ref so the drag effect's mouseup can read the LATEST layout
   // without listing localLayouts in its deps -- with it listed, every
@@ -2688,10 +2688,11 @@ export default function ReportBuilder() {
     })
   }, [containerW, canvasScale, activePage])
 
-  const handleResizeStart = useCallback((widget: Widget) => (e: React.MouseEvent) => {
+  const handleResizeStart = useCallback((widget: Widget) => (e: React.MouseEvent, axis: 'both' | 'x' | 'y' = 'both') => {
     e.preventDefault()
     if (!activePage) return
     setResizing({
+      axis,
       widgetId: widget.id, startX: e.clientX, startY: e.clientY, layout: shownLayout(widget),
       packed: isPackedMode(activePage.layout_mode),
       items: toLayoutItems(activePage.widgets.map(w => ({ ...w, layout: shownLayout(w) }))),
@@ -2706,7 +2707,7 @@ export default function ReportBuilder() {
   const perWidgetHandlers = useMemo(() => {
     const m = new Map<number, { onSelect: (e: React.MouseEvent) => void; onDelete: () => void
       onDuplicate: () => void; onEditOptions: () => void
-      onDragStart: (e: React.MouseEvent) => void; onResizeStart: (e: React.MouseEvent) => void }>()
+      onDragStart: (e: React.MouseEvent) => void; onResizeStart: (e: React.MouseEvent, axis?: 'both' | 'x' | 'y') => void }>()
     for (const w of (activePage?.widgets ?? [])) {
       m.set(w.id, {
         onSelect: (e) => widgetActionsRef.current.selectWidget(w, e),
@@ -2715,7 +2716,7 @@ export default function ReportBuilder() {
         // F-16: the widget menu's "Edit options…" -- its Format options, opened.
         onEditOptions: () => { setSelectedW(w); setRightPanelMode('default'); setPropSection('format'); setRightOpenSignal(n => n + 1) },
         onDragStart: (e) => dragStartRef.current(w)(e),
-        onResizeStart: (e) => resizeStartRef.current(w)(e),
+        onResizeStart: (e, axis) => resizeStartRef.current(w)(e, axis),
       })
     }
     return m
@@ -2742,8 +2743,9 @@ export default function ReportBuilder() {
       if (resizing) {
         const dx = (e.clientX - resizing.startX) / scale
         const dy = (e.clientY - resizing.startY) / scale
-        const rawW = resizing.layout.w + Math.round(dx / (cellW + GAP))
-        const rawH = resizing.layout.h + Math.round(dy / (ROW_H + GAP))
+        // C-19: an edge handle moves one dimension only.
+        const rawW = resizing.axis === 'y' ? resizing.layout.w : resizing.layout.w + Math.round(dx / (cellW + GAP))
+        const rawH = resizing.axis === 'x' ? resizing.layout.h : resizing.layout.h + Math.round(dy / (ROW_H + GAP))
         const next = resizing.packed
           ? resizePacked(resizing.items, resizing.widgetId, rawW, rawH)
           : resizeFree(resizing.items, resizing.widgetId, rawW, rawH)
@@ -2776,7 +2778,7 @@ export default function ReportBuilder() {
     const body = document.body.style
     const was = { userSelect: body.userSelect, cursor: body.cursor }
     body.userSelect = 'none'
-    body.cursor = resizing ? 'nwse-resize' : 'grabbing'
+    body.cursor = resizing ? (resizing.axis === 'x' ? 'ew-resize' : resizing.axis === 'y' ? 'ns-resize' : 'nwse-resize') : 'grabbing'
     return () => {
       body.userSelect = was.userSelect
       body.cursor = was.cursor

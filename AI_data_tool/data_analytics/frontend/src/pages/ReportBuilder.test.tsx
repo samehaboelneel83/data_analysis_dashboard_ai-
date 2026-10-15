@@ -3287,3 +3287,39 @@ describe('C-17 (sweep): any write this session makes is not "changed in another 
     } finally { vi.useRealTimers() }
   })
 })
+
+describe('C-19 round 2: edge handles resize one way', () => {
+  // jsdom has no PointerEvent, so a fired pointerdown carries no coordinates.
+  class PE extends MouseEvent {
+    pointerId: number
+    constructor(type: string, init: PointerEventInit = {}) { super(type, init); this.pointerId = init.pointerId ?? 1 }
+  }
+  beforeEach(() => { vi.stubGlobal('PointerEvent', PE) })
+  afterEach(() => { vi.unstubAllGlobals() })
+  const run = async (testId: string) => {
+    vi.mocked(reportsApi.get).mockReset().mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    vi.mocked(reportsApi.updateWidget).mockReset().mockResolvedValue({} as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    const handle = await screen.findByTestId(testId)
+    fireEvent.pointerDown(handle, { clientX: 100, clientY: 100, pointerId: 1 })
+    await waitFor(() => expect(document.body.style.userSelect).toBe('none'))
+    // jsdom's pointer events carry no coordinates; the builder listens to the mouse too.
+    fireEvent.mouseMove(window, { clientX: 400, clientY: 400 })
+    fireEvent.mouseUp(window, { clientX: 400, clientY: 400 })
+    await waitFor(() => expect(reportsApi.updateWidget).toHaveBeenCalled())
+    return vi.mocked(reportsApi.updateWidget).mock.calls.at(-1)![3] as { layout: { w: number; h: number } }
+  }
+  it('the right edge changes only the width', async () => {
+    const { layout } = await run('widget-resize-edge-x')
+    expect(layout.w).toBeGreaterThan(6)
+    expect(layout.h).toBe(5)
+  })
+  it('the bottom edge changes only the height', async () => {
+    const { layout } = await run('widget-resize-edge-y')
+    expect(layout.w).toBe(6)
+    expect(layout.h).toBeGreaterThan(5)
+  })
+})
