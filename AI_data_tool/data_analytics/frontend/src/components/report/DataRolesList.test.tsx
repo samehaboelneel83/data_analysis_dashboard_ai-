@@ -3,6 +3,7 @@ import { render, screen, fireEvent, act, within } from '@testing-library/react'
 import WidgetConfigPanel from './WidgetConfigPanel'
 import { CrossFilterProvider } from './CrossFilterContext'
 import { ASSIGN_DATA_EVENT } from './WidgetPlaceholder'
+import { AddFieldDialog } from './DataRolesList'
 import type { Widget, ReportPage } from '../../types/report'
 import type { DatasetColumn } from '../../services/api'
 
@@ -105,7 +106,7 @@ describe('+ Add', () => {
     expect(box('sales').checked).toBe(true)
     expect(within(dialog).queryByRole('checkbox', { name: /region/ })).toBeNull()   // numbers only
     fireEvent.click(box('cost'))
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }))  // C-26: ticks apply at once
     act(() => { vi.advanceTimersByTime(700) })
     expect(lastConfig(onUpdate)).toMatchObject({ measure: 'sales', extra_measures: ['cost'] })
     expect(screen.getByRole('button', { name: 'cost, Measure' })).toBeTruthy()
@@ -137,7 +138,7 @@ describe('+ Add', () => {
     expect(within(dialog).queryByRole('checkbox', { name: /region/ })).toBeNull()
     fireEvent.click(box('units'))
     fireEvent.click(box('cost'))
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }))  // C-26: ticks apply at once
     act(() => { vi.advanceTimersByTime(700) })
     expect(lastConfig(onUpdate).measures).toEqual(['sales', 'units', 'cost'])
   })
@@ -211,5 +212,21 @@ describe('Assign data', () => {
     window.removeEventListener(ASSIGN_DATA_EVENT, spy)
     expect(seen).toEqual([{ widgetId: 2, open: false }])
     expect(screen.queryByRole('dialog')).toBeNull()
+  })
+})
+
+describe('C-26: a several-field role applies each tick at once', () => {
+  it('ticking a field calls onApply without a footer button, and the dialog stays open', () => {
+    const onApply = vi.fn(), onClose = vi.fn()
+    render(<AddFieldDialog heading="Rows" multi selected={[]} onApply={onApply} onClose={onClose}
+      choices={[{ value: 'region', label: 'region' }, { value: 'product', label: 'product' }]} />)
+    const dialog = screen.getByRole('dialog', { name: 'Add Rows' })
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: /^region/ }))
+    expect(onApply).toHaveBeenLastCalledWith(['region'])
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: /^product/ }))
+    expect(onApply).toHaveBeenLastCalledWith(['region', 'product'])
+    expect(onClose).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }))
+    expect(onClose).toHaveBeenCalled()
   })
 })

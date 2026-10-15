@@ -227,8 +227,8 @@ export interface FieldChoice { value: string; label: string; group?: string }
 /**
  * "+ Add" on a role: only the fields that role accepts, grouped (Categories,
  * Dates, Numbers...). A role that takes several fields is a checklist -- what
- * it holds already ticked, new ones appended in the order ticked -- applied
- * with Add; a one-field role applies on the click.
+ * it holds already ticked, new ones appended in the order ticked -- each tick
+ * applied at once (C-26); a one-field role applies on the click.
  */
 export function AddFieldDialog({ heading, multi, choices, selected, onApply, onClose, emptyText }: {
   heading: string
@@ -251,9 +251,15 @@ export function AddFieldDialog({ heading, multi, choices, selected, onApply, onC
   const needle = q.trim().toLowerCase()
   const shown = choices.filter(c => !needle || c.label.toLowerCase().includes(needle))
   const groups = [...new Set(shown.map(c => c.group ?? ''))]
-  const toggle = (v: string) => setPicked(p => p.includes(v) ? p.filter(x => x !== v) : [...p, v])
+  // C-26: a several-field role applies each tick at once, like a one-field
+  // role applies its click -- ticking used to look like it did nothing until
+  // a separate "Add". The dialog stays open for the next field; Done closes.
+  const toggle = (v: string) => {
+    const next = picked.includes(v) ? picked.filter(x => x !== v) : [...picked, v]
+    setPicked(next)
+    onApply(next)
+  }
   const choose = (v: string) => { onApply([v]); onClose() }
-  const changed = picked.length !== selected.length || picked.some((v, i) => v !== selected[i])
   return (
     <div {...backdrop}
       style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center',
@@ -304,11 +310,9 @@ export function AddFieldDialog({ heading, multi, choices, selected, onApply, onC
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '10px 16px',
           borderTop: '1px solid var(--border)' }}>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>{t('bc.canvas.cancel')}</button>
-          {multi && (
-            <button type="button" className="btn btn-primary btn-sm" disabled={!changed}
-              onClick={() => { onApply(picked); onClose() }}>{t('bc.canvas.add')}</button>
-          )}
+          {multi
+            ? <button type="button" className="btn btn-primary btn-sm" onClick={onClose}>{t('bc.canvas.done')}</button>
+            : <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>{t('bc.canvas.cancel')}</button>}
         </div>
       </div>
     </div>
