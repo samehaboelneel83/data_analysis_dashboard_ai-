@@ -48,7 +48,7 @@ export default function OutlierDetailsDialog({ datasetId, column, onClose }: {
 
   const s = details?.stats
   // B-28: the inspected column first (and sticky), the others in dataset order.
-  const cols = details?.outliers.columns ?? []
+  const cols = details?.outliers?.columns ?? []
   const inspected = cols.indexOf(column)
   const order = inspected < 0 ? cols.map((_, j) => j) : [inspected, ...cols.map((_, j) => j).filter(j => j !== inspected)]
 

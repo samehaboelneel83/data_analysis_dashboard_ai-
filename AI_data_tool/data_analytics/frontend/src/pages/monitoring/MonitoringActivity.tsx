@@ -177,7 +177,7 @@ export default function MonitoringActivity() {
               {open === r.id && (
                 <tr data-testid={`activity-detail-${r.id}`}>
                   <td data-label={t('col.detail')} colSpan={5} style={{ background: 'var(--surface2)', whiteSpace: 'normal' }}>
-                    <div><b>{t('col.when')}:</b> {new Date(r.created_at).toISOString().replace('T', ' ').slice(0, 19)} UTC</div>
+                    <div><b>{t('col.when')}:</b> {t('pg.dataPages.act.utcTime', { time: new Date(r.created_at).toISOString().replace('T', ' ').slice(0, 19) })}</div>
                     <div><b>{t('col.action')}:</b> <bdi dir="ltr">{r.action}</bdi></div>
                     {r.entity && <div><b>{t('col.entity')}:</b>{' '}
                       {entityLink(r) ? <Link to={entityLink(r)!}>{`${r.entity} #${r.entity_id}`}</Link>

@@ -130,7 +130,7 @@ describe('AI offline', () => {
       await act(async () => { await llmApi.endpoints() })
       expect(await screen.findByTestId('ai-offline')).toHaveTextContent('AI is off for you')
       const box = screen.getByRole('textbox', { name: 'Your question' })
-      expect(box).toBeDisabled()
+      expect(box).toHaveAttribute('aria-disabled', 'true')  // B-18: read-only, not disabled
       expect(box.getAttribute('placeholder')).toMatch(/AI is off/)
     } finally { setLlmChoice(null) }
   })

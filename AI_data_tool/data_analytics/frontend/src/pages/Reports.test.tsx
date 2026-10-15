@@ -165,7 +165,7 @@ describe('publish and share', () => {
 
   it('the share dialog lists grants and posts a new one by email', async () => {
     vi.mocked(reportGrantsApi.list).mockResolvedValue([{ id: 5, user_id: 2, email: 'a@x.io', level: 'view' }] as never)
-    vi.mocked(reportGrantsApi.create).mockResolvedValue({ id: 6, user_id: 3, email: 'b@x.io', level: 'edit' } as never)
+    vi.mocked(reportGrantsApi.create).mockResolvedValue({ id: 6, user_id: 3, email: 'b@x.io', level: 'view' } as never)
     renderReports()
     await screen.findByTestId('dash-card-1')
     fireEvent.click(within(card(1)).getByRole('button', { name: 'Share Revenue' }))
@@ -173,7 +173,8 @@ describe('publish and share', () => {
     expect(await within(dialog).findByText('a@x.io')).toBeInTheDocument()
     fireEvent.change(within(dialog).getByLabelText('Email to share with'), { target: { value: 'b@x.io' } })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Invite' }))
-    await waitFor(() => expect(reportGrantsApi.create).toHaveBeenCalledWith(1, { email: 'b@x.io', level: 'edit' }))
+    // F-06: a new person share starts at "Can view" (least privilege).
+    await waitFor(() => expect(reportGrantsApi.create).toHaveBeenCalledWith(1, { email: 'b@x.io', level: 'view' }))
   })
 })
 
