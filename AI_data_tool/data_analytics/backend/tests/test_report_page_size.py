@@ -142,3 +142,19 @@ async def test_a_rename_leaves_the_size_alone(client, auth_headers):
     await client.patch(f"/api/v1/reports/{rid}/pages/{pid}", json={"name": "Renamed"}, headers=h)
     p = await _page(client, h, rid)
     assert (p["page_size"], p["custom_width"], p["custom_height"]) == ("custom", 1600, 1200)
+
+
+def test_shared_and_embedded_pages_carry_the_size():
+    """C-21: guest-link and embed views draw a fixed page at its size, so the
+    page shape they are served carries it -- from a live page or a snapshot."""
+    from types import SimpleNamespace
+    from app.routers.shared import _shape_page
+    live = SimpleNamespace(id=1, name="P", page_type="normal", position=0, mobile_layout=None, widgets=[],
+                           page_size="custom", custom_width=1600, custom_height=1200)
+    assert {k: _shape_page(live)[k] for k in ("page_size", "custom_width", "custom_height")} == \
+        {"page_size": "custom", "custom_width": 1600, "custom_height": 1200}
+    snap = {"id": 1, "name": "P", "page_type": "normal", "widgets": [], "page_size": "4:3",
+            "custom_width": 960, "custom_height": 720}
+    assert _shape_page(snap)["custom_width"] == 960
+    old_snap = {"id": 1, "name": "P", "widgets": []}
+    assert _shape_page(old_snap)["custom_width"] is None

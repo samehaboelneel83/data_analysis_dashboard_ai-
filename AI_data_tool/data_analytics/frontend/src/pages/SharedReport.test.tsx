@@ -218,3 +218,19 @@ describe('SharedReport accessibility', () => {
     expect(await axeViolations(container)).toEqual([])
   })
 })
+
+describe('C-21: a shared page with a fixed size', () => {
+  it('is drawn at that width and at least that height', async () => {
+    vi.mocked(sharedApi.report).mockResolvedValue({ ...payload,
+      pages: [{ ...payload.pages[0], page_size: 'custom', custom_width: 1600, custom_height: 1200 }] } as never)
+    mount()
+    const pageEl = await screen.findByTestId('shared-page')
+    expect(pageEl.style.maxWidth).toBe('1600px')
+    expect(parseFloat(pageEl.style.height)).toBeGreaterThanOrEqual(1200)
+  })
+  it('a page with no stored size keeps the flowing width', async () => {
+    mount()
+    const pageEl = await screen.findByTestId('shared-page')
+    expect(pageEl.style.maxWidth).toBe('1400px')
+  })
+})
