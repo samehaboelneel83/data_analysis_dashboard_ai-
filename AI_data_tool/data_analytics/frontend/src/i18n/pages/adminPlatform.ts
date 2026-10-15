@@ -212,7 +212,7 @@ export const en = {
   'pg.adminPlatform.cc.loadWhat': 'custom connectors',
   'pg.adminPlatform.cc.empty': 'No custom connectors yet',
   'pg.adminPlatform.cc.emptyDesc': 'Create a sanctioned, pre-configured preset of a connector type for the rest of your org to use.',
-  'pg.adminPlatform.cc.lockedCount': '{n} locked field(s)',
+  'pg.adminPlatform.cc.lockedCount': '{n, plural, one {# locked field} other {# locked fields}}',
 
   // Maps
   'pg.adminPlatform.maps.intro': 'Basemap tiles and region boundaries for every map in the organisation.',

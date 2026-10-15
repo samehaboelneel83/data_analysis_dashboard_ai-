@@ -32,10 +32,30 @@ def validate_custom_connector_def(base_type: str, base_config: dict, locked_fiel
         raise CustomConnectorError(
             f"Unknown locked field(s) for '{base_type}': {', '.join(sorted(unknown_locked))}")
 
+    # Values are checked against each field's kind now, not when a connection
+    # first uses the preset (QA E-11: Port "abc" was saved).
+    by_name = {f.name: f for f in connectors.resolve(base_type).config_fields}
+    for name, value in (base_config or {}).items():
+        _check_value(by_name[name], value)
+
     not_in_base = set(locked_fields or []) - set(base_config or {})
     if not_in_base:
         raise CustomConnectorError(
             f"Locked field(s) have no value to lock: {', '.join(sorted(not_in_base))}")
+
+
+def _check_value(field: "connectors.ConfigField", value) -> None:
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return                                  # unset: the connection supplies it
+    if field.kind == "number":
+        text = str(value).strip()
+        if isinstance(value, bool) or not text.isdigit():
+            raise CustomConnectorError(f"{field.label} must be a whole number")
+        if field.name == "port" and not 1 <= int(text) <= 65535:
+            raise CustomConnectorError(f"{field.label} must be between 1 and 65535")
+    elif field.kind == "select" and field.options and value not in field.options:
+        raise CustomConnectorError(
+            f"{field.label} must be one of: {', '.join(field.options)}")
 
 
 def apply_preset_locks(config: dict, preset: CustomConnector) -> dict:
