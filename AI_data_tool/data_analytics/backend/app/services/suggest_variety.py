@@ -78,6 +78,7 @@ class _Profile:
         from .semantic_guard import default_summary, is_identifier
         from .widget_data import _is_id_like_column
         self.df = df
+        self.column_meta = column_meta
         blocked = {c.casefold() for c in (ineligible or set())}
         cols = [c for c in df.columns if c in roles and str(c).casefold() not in blocked]
         self.card = {c: self._nunique(c) for c in cols}
@@ -396,11 +397,20 @@ def catalogue_suggestions(p: _Profile) -> list[dict]:
             f"{_cap(_h(share))} is a share (it runs from 0 to {top}), so it is shown as how far along it is.",
             {"measure": share, "aggregation": "avg", "gauge_shape": "progress", "target_value": top}, 7.8)
     if len(p.nums) >= 3:
-        kind = max(("sum", "avg", "median"), key=lambda k: sum(1 for m in p.nums if p.summary[m] == k))
-        same = [m for m in p.nums if p.summary[m] == kind][:5]
+        # B-36: one card holds numbers of ONE unit ("Total of 5 numbers" put
+        # kilograms, money and delivery attempts side by side as totals), and
+        # its title names them rather than counting them.
+        from .derived_fields import _unit_of
+        groups: dict[tuple[str, str | None], list[str]] = {}
+        for m in p.nums:
+            groups.setdefault((p.summary[m], _unit_of(m, getattr(p, "column_meta", None))), []).append(m)
+        (kind, _unit), same = max(groups.items(), key=lambda kv: len(kv[1]))
+        same = same[:5]
         if len(same) >= 3:
-            add("card", f"{word[kind]} of {len(same)} numbers",
-                f"{len(same)} numbers that are each read as one figure, in one list.",
+            names = [_h(m) for m in same]
+            listed = ", ".join(names[:-1]) + f" and {names[-1]}"
+            add("card", f"{word[kind]} {listed}",
+                f"{len(same)} numbers of one kind, each read as one figure, in one list.",
                 {"measures": same, "aggregation": kind}, 7.7)
     if levels and mid:
         m, c = levels[0], mid[0]
