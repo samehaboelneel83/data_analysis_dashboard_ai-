@@ -4,6 +4,7 @@ import RelativeDateEditor from '../components/report/RelativeDateEditor'
 import AccessExplainer from '../components/report/AccessExplainer'
 import { DEFAULT_SPEC, PRESETS, describeSpec, parseSpec, specProblem, type RelativeSpec } from '../lib/relativeDates'
 import { closeAll, closeOpen, markOpen, readOpen, type OpenReport } from '../lib/openReports'
+import { stackBelow } from '../lib/stackLayouts'
 import OpenReportsMenu from '../components/report/OpenReportsMenu'
 import { useEffect, useState, useCallback, useMemo, useRef, lazy, Suspense, Fragment, type ReactNode } from 'react'
 import LoadError from '../components/ui/LoadError'
@@ -1489,6 +1490,48 @@ export default function ReportBuilder() {
     } finally {
       setSaving(false)
     }
+  }
+
+  /** F-15: the Suggestions pane's "Add all shown". One under another below
+   *  the page (stackBelow), one save of the packed layout, one reload, and ONE
+   *  undo entry that takes them all away. Asks first when there are many. */
+  const addSuggestedWidgets = async (list: Suggestion[]): Promise<boolean> => {
+    if (!activePage) { toast.error(tr('bc.shell.t.selectPage')); return false }
+    if (!list.length) return false
+    if (list.length > 8 && !(await confirm({ title: tr('sug.addAllConfirm', { n: list.length }), body: tr('sug.addAllBody'),
+      confirmLabel: tr('sug.addAll', { n: list.length }), destructive: false }))) return false
+    const ws = activePage.widgets
+    const sizeOf = (t: string) => ({ w: Math.max(6, minSize(t).w), h: Math.max(5, minSize(t).h) })
+    const boxes = stackBelow(ws.map(w => w.layout), list.map(x => sizeOf(x.widget_type)))
+    const pageId = activePage.id
+    const made: Widget[] = []
+    setSaving(true)
+    try {
+      for (let i = 0; i < list.length; i++) {
+        const sug = list[i]
+        made.push(await reportsApi.addWidget(reportId, pageId, {
+          widget_type: sug.widget_type as WidgetType, title: sug.title, config: sug.config, layout: boxes[i],
+        }))
+      }
+    } finally {
+      if (made.length) {
+        const snaps = made.map((w, i) => ({ id: w.id, snap: { widget_type: list[i].widget_type as WidgetType, title: list[i].title,
+          config: list[i].config, layout: w.layout } as Partial<Widget> }))
+        pushUndo({
+          label: tr('sug.addAllDone', { n: made.length }),
+          undo: async () => { for (const m of snaps) await removeWidgetById(pageId, m.id) },
+          redo: async () => { for (const m of snaps) await recreateWidget(pageId, m.id, m.snap) },
+        })
+        if (isPackedMode(activePage.layout_mode) && !needsAutoPack(activePage.layout_mode)) {
+          const nextWidgets = [...ws, ...made]
+          await persistWidgetLayouts({ ...activePage, widgets: nextWidgets }, compact(toLayoutItems(nextWidgets)))
+        }
+        await loadReport()
+        toast.success(tr('sug.addAllDone', { n: made.length }))
+      }
+      setSaving(false)
+    }
+    return made.length === list.length
   }
 
   const applyAlign = async (mode: Parameters<typeof alignWidgets>[1]) => {
@@ -4361,7 +4404,7 @@ export default function ReportBuilder() {
                 reportId={canEdit ? reportId : undefined}
                 onComposed={canEdit ? () => { void loadReport() } : undefined} />}
               suggest={canEdit ? (
-                <SuggestionsPane columns={columns} analysis={analysis} onAdd={addSuggestedWidget} reportId={reportId}
+                <SuggestionsPane columns={columns} analysis={analysis} onAdd={addSuggestedWidget} onAddMany={addSuggestedWidgets} reportId={reportId}
                   datasetId={report.dataset_id} pageWidgets={activePage?.widgets ?? []} columnMeta={columnMeta} />
               ) : undefined} />
           )}
@@ -4475,7 +4518,7 @@ export default function ReportBuilder() {
                   }} />
               )}
               {rightPanelMode === 'suggestions' && (
-                <SuggestionsPane columns={columns} analysis={analysis} onAdd={addSuggestedWidget} reportId={reportId}
+                <SuggestionsPane columns={columns} analysis={analysis} onAdd={addSuggestedWidget} onAddMany={addSuggestedWidgets} reportId={reportId}
                   datasetId={report.dataset_id} pageWidgets={activePage?.widgets ?? []} columnMeta={columnMeta} />
               )}
               {rightPanelMode === 'insights' && (
