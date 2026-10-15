@@ -17,3 +17,11 @@ describe('ScatterChartRenderer (C-07)', () => {
     expect(screen.queryByText(/X must be a number/i)).toBeNull()
   })
 })
+
+describe('ScatterChartRenderer with an X measure (C-07)', () => {
+  it('draws points from {name, x, y} rows without the text-X message', () => {
+    render(<ScatterChartRenderer {...base} cfg={{ measure: 'revenue', measure2: 'units' }}
+      rows={[{ name: 'A', x: 4, y: 40 }, { name: 'B', x: 4, y: 50 }, { name: 'C', x: 10, y: 5 }]} />)
+    expect(screen.queryByText(/X must be a number/i)).toBeNull()
+  })
+})

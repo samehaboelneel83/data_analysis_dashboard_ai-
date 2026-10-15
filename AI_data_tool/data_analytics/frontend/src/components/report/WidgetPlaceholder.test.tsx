@@ -150,3 +150,12 @@ describe('C-23: small multiples needs its split field', () => {
       .toEqual([])
   })
 })
+
+describe('C-07: a scatter offers an X measure', () => {
+  it('has an optional numeric X role beside its Y measure', async () => {
+    const { ROLE_SPECS, roleAccepts } = await import('../../types/report')
+    const x = ROLE_SPECS.scatter.find(r => r.role === 'measure2')
+    expect(x).toMatchObject({ required: false })
+    expect(roleAccepts('measure2')).toBe('numeric')
+  })
+})

@@ -193,7 +193,8 @@ def _large_duck(file_path: str, config: dict, widget_type: str, filter_expr, rls
     this chart is not one of them."""
     from . import duck_agg
     from .sql_expr import ExpressionTranslationError, translate_filter_expr_null_safe
-    if not duck_agg.is_enabled() or SHAPERS.get(widget_type, shape_series) is not shape_series:
+    if not duck_agg.is_enabled() or SHAPERS.get(widget_type, shape_series) is not shape_series \
+            or _scatter_by_measures(widget_type, config):
         return None
     if config.get("dimension2_granularity") or config.get("lattice_rows") or config.get("lattice_columns") \
             or config.get("animate_by"):
@@ -1999,6 +2000,39 @@ def _auto_date_grain(s: pd.Series) -> str | None:
         if days / per <= AUTO_DATE_POINTS:
             return grain
     return "year"
+
+
+def _scatter_by_measures(widget_type: str, config: dict) -> bool:
+    """C-07: a scatter given an X measure (measure2) plots X against Y per
+    category instead of the category itself on the X axis."""
+    return widget_type == "scatter" and bool(resolve_roles(config or {}).get("measure2"))
+
+
+def shape_scatter_measures(df: pd.DataFrame, config: dict) -> dict:
+    """C-07: one point per category at (X measure, Y measure).
+
+    roles: category (one point per value), measure (Y), measure2 (X).
+    `aggregation` summarises Y and `aggregation2` X (blank: same as Y). A
+    scatter whose X was a text dimension drew bare axes -- recharts drops every
+    non-numeric x -- and there was no way to give it a numeric X."""
+    roles = resolve_roles(config)
+    cat, y, x = roles.get("category"), roles.get("measure"), roles.get("measure2")
+    df = _apply_filters(df, config.get("filters", []))
+    if df.empty or not x or not y or x not in df.columns or y not in df.columns:
+        return {"type": "empty", "rows": [], "total": 0}
+    agg = (config.get("aggregation") or "sum").lower()
+    agg2 = (config.get("aggregation2") or agg).lower()
+    if not cat or cat not in df.columns:
+        return shape_xy_numeric(df, {**{k: v for k, v in config.items() if k not in ("roles", "dimension")},
+                                     "measure": x, "measure2": y})
+    sub = df[[cat, x, y]].copy()
+    sub[x] = pd.to_numeric(sub[x], errors="coerce")
+    sub[y] = pd.to_numeric(sub[y], errors="coerce")
+    grouped = sub.groupby(cat, dropna=True).agg(__x=(x, _pandas_agg_fn(agg2)), __y=(y, _pandas_agg_fn(agg))).reset_index()
+    grouped, _truncation = _cut(grouped, int(config.get("limit") or 500), "categories")
+    rows = [{"name": _safe(r[cat]), "x": _safe(r["__x"]), "y": _safe(r["__y"])} for _, r in grouped.iterrows()]
+    return {"type": "xy_series", "x": x, "y": y, "category": cat, "rows": rows,
+            "total": len(df), "truncation": _truncation}
 
 
 def shape_dual_series(df: pd.DataFrame, config: dict) -> dict:
@@ -4680,6 +4714,8 @@ def get_widget_data_from_df(
         return bars_of_measures([(m, headline_value(get_widget_data_from_df(
             df, {**one, "measure": m}, "kpi", measures, flag_partial, check_fields))) for m in bars], config)
     shaper = SHAPERS.get(widget_type, shape_series)
+    if _scatter_by_measures(widget_type, config):
+        shaper = shape_scatter_measures
     if check_fields:
         # A field the widget names that is neither a column here nor a defined
         # measure used to fall through the shaper's no-measure branch and
@@ -5605,6 +5641,8 @@ def _get_widget_data(
             # a histogram or any shaper that reads RAW rows would compute its
             # quartiles or bins over one pre-aggregated value per group (E04).
             and SHAPERS.get(widget_type, shape_series) is shape_series
+            # C-07: an X measure per category is not the grouped series
+            and not _scatter_by_measures(widget_type, config)
             # a KPI's history is computed from the rows themselves
             and not config.get("sparkline_date")
             # a second field cut into date parts is derived from the rows

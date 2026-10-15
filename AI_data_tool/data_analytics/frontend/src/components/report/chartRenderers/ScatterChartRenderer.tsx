@@ -17,7 +17,8 @@ export default function ScatterChartRenderer({ rows, cfg, rtl, broadcasts, onCli
   const { points: scatterData, index: drawnIndex } = thinPoints(allPoints, plotW, plotH)
   const animate = scatterData.length <= ANIMATE_MAX_POINTS
   const hasRuleFills = !!ruleStyles?.rows
-  const xFmt = allFormats?.[cfg.x_axis]
+  // C-07: with an X measure (measure2) each point is a category at (X, Y).
+  const xFmt = allFormats?.[cfg.x_axis] ?? (cfg.measure2 ? allFormats?.[cfg.measure2] : undefined)
   const yFmt = allFormats?.[cfg.y_axis] ?? measureFmt
   const grid = gridProps(cfg)
   const labels = labelListProps(cfg, yFmt, 'y', scatterData.length)

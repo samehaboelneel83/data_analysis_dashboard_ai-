@@ -454,7 +454,7 @@ export const ROLE_AR: Record<string, string> = {
   'Source name': 'اسم المصدر', 'Stage': 'المرحلة', 'Start date': 'تاريخ البداية', 'Target': 'الهدف',
   'Target latitude': 'خط عرض الهدف', 'Target longitude': 'خط طول الهدف', 'Target name': 'اسم الهدف', 'Task': 'المهمة',
   'Value': 'القيمة', 'Values': 'القيم', 'Variables': 'المتغيرات', 'Weight': 'الوزن', 'Word text': 'نص الكلمة',
-  'X axis': 'المحور السيني', 'Y axis': 'المحور الصادي', 'Conclusions about': 'استنتاجات حول',
+  'X axis': 'المحور السيني', 'Y axis': 'المحور الصادي', 'Split into multiples by': 'التقسيم إلى مضاعفات حسب', 'Conclusions about': 'استنتاجات حول',
   // Hints (the part in brackets)
   'Group / X-axis': 'المجموعة / المحور السيني', 'X-axis': 'المحور السيني', 'Y-axis': 'المحور الصادي',
   'Training / Validation': 'تدريب / تحقق', 'at least two': 'اثنان على الأقل',
