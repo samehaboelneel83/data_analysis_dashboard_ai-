@@ -1973,6 +1973,34 @@ def _cut(frame, limit: int, unit: str):
 PARETO_SHARE = 80.0
 
 
+#: At most this many points on an automatically bucketed date axis (C-24).
+AUTO_DATE_POINTS = 120
+
+
+def _auto_date_grain(s: pd.Series) -> str | None:
+    """The coarsest-needed grain (week, month, quarter) that shows a date
+    column's whole range in at most AUTO_DATE_POINTS points, or None when the
+    column is not dates or already has few enough distinct values."""
+    if s.nunique(dropna=True) <= AUTO_DATE_POINTS:
+        return None
+    if _is_date_like(s):
+        dt = pd.to_datetime(s, errors="coerce")
+    elif s.dtype == object:
+        dt = pd.to_datetime(s, errors="coerce", format="mixed") if s.notna().any() else s
+        if dt.notna().sum() < 0.9 * s.notna().sum():
+            return None
+    else:
+        return None
+    lo, hi = dt.min(), dt.max()
+    if pd.isna(lo) or pd.isna(hi):
+        return None
+    days = (hi - lo).days + 1
+    for grain, per in (("week", 7), ("month", 30.44), ("quarter", 91.3)):
+        if days / per <= AUTO_DATE_POINTS:
+            return grain
+    return "year"
+
+
 def shape_dual_series(df: pd.DataFrame, config: dict) -> dict:
     """config roles: category OR start (grouping column), measure, measure2.
     At least one of measure/measure2 must be set. Used by dual-axis and
@@ -1996,6 +2024,15 @@ def shape_dual_series(df: pd.DataFrame, config: dict) -> dict:
     # dual-axis or comparative chart silently plotted one point per raw row. Offered
     # and ignored is the same failure as a control wired to nothing.
     dim_granularity = config.get("dimension_granularity") or None
+    # C-24: a DATE axis with no grain and no limit of the author's own was cut
+    # to its first 50 values ("Showing 50 of 633 date values": one month of
+    # two years). Pick a grain that shows the whole range in <= ~120 points.
+    auto_grain = None
+    if not dim_granularity and not config.get("limit"):
+        auto_grain = _auto_date_grain(df[cat])
+        if auto_grain:
+            dim_granularity = auto_grain
+            limit = FULL_DATA_LIMIT
     if dim_granularity:
         df = df.copy()
         df[cat] = _bucket_dimension(df[cat], dim_granularity)
@@ -2094,6 +2131,8 @@ def shape_dual_series(df: pd.DataFrame, config: dict) -> dict:
         rows.append(r)
     out = {"truncation": _truncation, "type": "dual_series", "category": cat, "measure": meas, "measure2": meas2,
            "rows": rows, "total": len(df)}
+    if auto_grain:
+        out["auto_granularity"] = auto_grain
     if pareto:
         out["pareto"] = pareto
     return out
