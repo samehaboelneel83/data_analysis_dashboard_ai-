@@ -1232,6 +1232,7 @@ export const en = {
   'cr.communityColour': 'community: {c} ← colour',
   'cr.configure': 'Configure widget to see data',
   'cr.wordsTooLong': 'The words are too long to fit — enlarge the tile.',
+  'cr.scatterNeedsNumericX': 'X must be a number — assign a numeric column to the X axis.',
   'cr.pieMap': 'Pie map',
   'cr.rowNoCountry': '{n} row did not match a country',
   'cr.rowsNoCountry': '{n} rows did not match a country',
