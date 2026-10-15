@@ -240,6 +240,13 @@ class TestTheApi:
         tried = (await client.post(f"/api/v1/datasets/{ds.id}/checks/try", headers=h)).json()
         assert tried["rows"] == 10
         assert [x["passed"] for x in tried["results"]] == [True, False]
+        # AD-17: a manual "Run now" leaves a line in Activity (counts only).
+        from sqlalchemy import select as _select
+        from app.models.models import AuditLogEntry
+        entry = (await db_session.execute(_select(AuditLogEntry).where(
+            AuditLogEntry.action == "dataset.checks_run"))).scalars().first()
+        assert entry is not None and entry.entity_id == ds.id
+        assert entry.detail == "Checked 10 rows · 1 pass · 1 warn"
 
         r = await client.patch(f"/api/v1/datasets/{ds.id}/checks/{cid}",
                                json={"kind": "unique", "column": "id", "severity": "warn"}, headers=h)

@@ -2630,6 +2630,18 @@ export interface MonitoringJobRow {
 }
 
 /** One dataset refresh or dataflow run, scheduled or manual. */
+/** AD-17: one automated analysis on the Refresh & jobs page. */
+export interface MonitoringAutomationRunRow {
+  id: number
+  status: 'pending' | 'running' | 'failed' | 'needs_review' | 'done' | 'cancelled'
+  dataset_id: number | null
+  dataset_name: string | null
+  started_at: string | null
+  finished_at: string | null
+  /** The step it is at (or stopped at); null once every step is done. */
+  step: string | null
+  error: string | null
+}
 export interface RefreshRunRow {
   id: number
   kind: 'dataset' | 'dataflow'
@@ -2644,6 +2656,8 @@ export interface RefreshRunRow {
   duration_ms: number | null
   error: string | null
   error_code: string | null
+  /** AD-17: this run's checks as counts; null when none ran. */
+  checks_summary?: { pass: number; warn: number; fail: number } | null
 }
 
 export interface MonitoringDeliveryRow extends DeliveryRow {
@@ -2657,6 +2671,9 @@ export const monitoringApi = {
     api.get<RefreshRunRow[]>('/admin/monitoring/refresh-runs', { params }).then(r => r.data),
   deliveries: (limit = 200) =>
     api.get<MonitoringDeliveryRow[]>('/admin/monitoring/deliveries', { params: { limit } }).then(r => r.data),
+  /** AD-17: the org's automated analyses, newest first. */
+  automationRuns: (limit = 100) =>
+    api.get<MonitoringAutomationRunRow[]>('/admin/monitoring/automation-runs', { params: { limit } }).then(r => r.data),
   activity: (limit = 200) =>
     api.get<ActivityRow[]>('/admin/audit-log', { params: { limit } }).then(r => r.data),
 }

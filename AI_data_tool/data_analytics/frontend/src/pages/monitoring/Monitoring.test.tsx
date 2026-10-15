@@ -14,7 +14,7 @@ import MonitoringActivity from './MonitoringActivity'
  */
 
 vi.mock('../../services/api', () => ({
-  monitoringApi: { jobs: vi.fn(), deliveries: vi.fn(), activity: vi.fn(), refreshRuns: vi.fn() },
+  monitoringApi: { jobs: vi.fn(), deliveries: vi.fn(), activity: vi.fn(), refreshRuns: vi.fn(), automationRuns: vi.fn() },
 }))
 
 import { monitoringApi } from '../../services/api'
@@ -24,6 +24,7 @@ const renderIn = (ui: React.ReactElement) => render(<MemoryRouter>{ui}</MemoryRo
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(monitoringApi.refreshRuns).mockResolvedValue([])
+  vi.mocked(monitoringApi.automationRuns).mockResolvedValue([])
 })
 
 describe('MonitoringJobs', () => {
@@ -72,6 +73,24 @@ describe('MonitoringJobs', () => {
     // Each row links to where the job is configured.
     expect(screen.getByRole('link', { name: 'Weekly digest' })).toHaveAttribute('href', '/reports/9')
     expect(screen.getByRole('link', { name: 'Revenue floor' })).toHaveAttribute('href', '/datasets/4')
+  })
+
+  it('lists automated analyses with a link to each run, and the checks of every refresh (AD-17)', async () => {
+    vi.mocked(monitoringApi.jobs).mockResolvedValue([])
+    vi.mocked(monitoringApi.automationRuns).mockResolvedValue([
+      { id: 12, status: 'failed', dataset_id: 3, dataset_name: 'Sales', started_at: '2026-10-14T10:00:00Z',
+        finished_at: null, step: 'Build the report', error: 'Build the report did not finish in 3 min' },
+    ] as never)
+    vi.mocked(monitoringApi.refreshRuns).mockResolvedValue([
+      { id: 1, kind: 'dataset', item_id: 3, name: 'Sales', trigger: 'schedule', status: 'ok', started_at: '2026-10-14T09:00:00Z',
+        finished_at: null, rows: 10, duration_ms: 100, error: null, error_code: null, checks_summary: { pass: 2, warn: 1, fail: 0 } },
+    ] as never)
+    renderIn(<MonitoringJobs />)
+    const section = await screen.findByTestId('automation-runs')
+    expect(section).toHaveTextContent('Sales')
+    expect(section).toHaveTextContent('Build the report did not finish')
+    expect(screen.getByRole('link', { name: /Run #12/ })).toHaveAttribute('href', '/automation?run=12')
+    expect(await screen.findByText('2 pass · 1 warn')).toBeInTheDocument()
   })
 
   it('says Paused for an unscheduled job and marks a paused calendar (AD-16)', async () => {

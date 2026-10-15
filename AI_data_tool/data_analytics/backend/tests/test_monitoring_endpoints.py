@@ -165,3 +165,37 @@ class TestRefreshRuns:
         runs = (await client.get("/api/v1/admin/monitoring/refresh-runs",
                                  params={"status": "failed"}, headers=auth_headers["a"])).json()
         assert [r["error_code"] for r in runs] == ["refresh_failed"]
+
+
+class TestAutomationRunsAndChecks:
+    """AD-17: "Everything that runs" includes automated analyses, and the
+    refresh history says how each run's checks went."""
+
+    async def test_automation_runs_are_listed_for_their_org_only(self, client, db_session, two_orgs, auth_headers):
+        from app.services import automation_runner as runner
+        seeded = await _seed_world(db_session, two_orgs)
+        mine = await runner.create_run(db_session, org_id=two_orgs["a"]["org"].id,
+                                       created_by=two_orgs["a"]["user"].id, trigger="manual",
+                                       subject_type="dataset", subject_id=seeded["a"]["ds"].id)
+        await runner.create_run(db_session, org_id=two_orgs["b"]["org"].id,
+                                created_by=two_orgs["b"]["user"].id, trigger="manual",
+                                subject_type="dataset", subject_id=seeded["b"]["ds"].id)
+        r = await client.get("/api/v1/admin/monitoring/automation-runs", headers=auth_headers["a"])
+        assert r.status_code == 200, r.text
+        rows = r.json()
+        assert [x["id"] for x in rows] == [mine.id]
+        assert rows[0]["status"] == "pending" and rows[0]["dataset_name"] == "ds-a"
+        assert rows[0]["step"] == "Profile the data"
+        assert "started_at" in rows[0] and "finished_at" in rows[0] and "error" in rows[0]
+
+    async def test_a_refresh_run_carries_a_checks_summary(self, client, db_session, two_orgs, auth_headers):
+        from app.models.models import RefreshRun
+        seeded = await _seed_world(db_session, two_orgs)
+        db_session.add(RefreshRun(org_id=two_orgs["a"]["org"].id, kind="dataset", item_id=seeded["a"]["ds"].id,
+                                  trigger="schedule", status="ok", rows=5, checks=[
+                                      {"id": 1, "severity": "block", "passed": True},
+                                      {"id": 2, "severity": "warn", "passed": True},
+                                      {"id": 3, "severity": "warn", "passed": False}]))
+        await db_session.commit()
+        runs = (await client.get("/api/v1/admin/monitoring/refresh-runs", headers=auth_headers["a"])).json()
+        assert runs[0]["checks_summary"] == {"pass": 2, "warn": 1, "fail": 0}

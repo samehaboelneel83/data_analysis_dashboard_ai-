@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useT, type MessageKey, type TranslateFn } from '../../i18n'
 import { Link } from 'react-router-dom'
 import { monitoringApi } from '../../services/api'
-import type { MonitoringJobRow, RefreshRunRow } from '../../services/api'
+import type { MonitoringAutomationRunRow, MonitoringJobRow, RefreshRunRow } from '../../services/api'
 import { useListFilter } from '../../components/ui/ListFilter'
 import { RefreshCw, GitBranch, Mail, Bell, CalendarClock, type LucideIcon } from 'lucide-react'
 import EmptyState from '../../components/ui/EmptyState'
@@ -93,6 +93,65 @@ function duration(ms: number | null, t: TranslateFn): string {
     : t('pg.dataPages.jobs.minSec', { m: Math.floor(s / 60), s: Math.round(s % 60) })
 }
 
+/** AD-17: "pass 2 · warn 1" for a run's checks; '—' when none ran. */
+function checksText(c: RefreshRunRow['checks_summary'], t: TranslateFn): string {
+  if (!c) return '—'
+  const parts = (['pass', 'warn', 'fail'] as const).filter(k => c[k] > 0)
+    .map(k => t(`jobs.checks.${k}` as MessageKey, { n: c[k] }))
+  return parts.length ? parts.join(' · ') : '—'
+}
+
+/** AD-17: automated analyses run too; "Everything that runs" lists them. */
+function AutomationRuns() {
+  const t = useT()
+  const [runs, setRuns] = useState<MonitoringAutomationRunRow[] | null>(null)
+  useEffect(() => {
+    let live = true
+    Promise.resolve().then(() => monitoringApi.automationRuns())
+      .then(r => { if (live) setRuns(r ?? []) }).catch(() => { if (live) setRuns([]) })
+    return () => { live = false }
+  }, [])
+  if (!runs || runs.length === 0) return null
+  return (
+    <section style={{ marginTop: 28 }} aria-labelledby="automation-runs-title" data-testid="automation-runs">
+      <h2 id="automation-runs-title" style={{ margin: '0 0 8px', fontSize: 16 }}>{t('jobs.auto.title')}</h2>
+      <div className="card dl-table-card"><table className="dl-table">
+        <thead>
+          <tr>
+            <th>{t('jobs.history.started')}</th>
+            <th>{t('col.name')}</th>
+            <th>{t('col.status')}</th>
+            <th>{t('jobs.auto.step')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {runs.map(r => {
+            const tone = r.status === 'failed' ? 'bad' : r.status === 'done' ? 'ok' : 'info'
+            return (
+              <tr key={r.id}>
+                <td style={{ whiteSpace: 'nowrap' }}>{r.started_at ? formatDate(r.started_at) : '—'}</td>
+                <td style={{ fontWeight: 600 }}>
+                  <Link to={`/automation?run=${r.id}`} className="row-name" style={{ color: 'var(--text)' }}>
+                    {t('jobs.auto.run', { id: r.id })}
+                  </Link>
+                  {r.dataset_name && <span style={{ color: 'var(--muted)', fontWeight: 400 }}> · {r.dataset_name}</span>}
+                </td>
+                <td style={{ color: TONE_COLOR[tone] }}>{t(`auto.status.${r.status}` as MessageKey)}</td>
+                <td>
+                  {r.step ?? '—'}
+                  {r.error && (
+                    <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 2, whiteSpace: 'normal' }}>{r.error}</div>
+                  )}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table></div>
+    </section>
+  )
+}
+
 /** Pipeline plan, phase 1: every refresh and dataflow run, newest first, so
  *  "why did Tuesday's refresh fail, and how long do they take?" has an answer
  *  on one page. "Failed only" is the question most visits ask. */
@@ -136,6 +195,7 @@ function RefreshHistory() {
               <th>{t('col.status')}</th>
               <th style={{ textAlign: 'end' }}>{t('jobs.history.rows')}</th>
               <th style={{ textAlign: 'end' }}>{t('jobs.history.duration')}</th>
+              <th>{t('jobs.history.checks')}</th>
             </tr>
           </thead>
           <tbody>
@@ -158,6 +218,8 @@ function RefreshHistory() {
                   </td>
                   <td style={{ textAlign: 'end', fontVariantNumeric: 'tabular-nums' }}>{r.rows != null ? r.rows.toLocaleString() : '—'}</td>
                   <td style={{ textAlign: 'end', whiteSpace: 'nowrap' }}>{duration(r.duration_ms, t)}</td>
+                  <td style={{ whiteSpace: 'nowrap', color: r.checks_summary?.fail ? TONE_COLOR.bad
+                    : r.checks_summary?.warn ? TONE_COLOR.info : undefined }}>{checksText(r.checks_summary, t)}</td>
                 </tr>
               )
             })}
@@ -272,6 +334,7 @@ export default function MonitoringJobs() {
         </table></div>
       )}
 
+      {!loading && loadError == null && <AutomationRuns />}
       {!loading && loadError == null && <RefreshHistory />}
     </div>
   )

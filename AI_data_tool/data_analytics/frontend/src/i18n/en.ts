@@ -4154,6 +4154,13 @@ export const en = {
   'jobs.history.deleted': '(deleted)',
   'jobs.history.manual': 'manual',
   'jobs.history.schedule': 'schedule',
+  'jobs.history.checks': 'Checks',
+  'jobs.checks.pass': '{n} pass',
+  'jobs.checks.warn': '{n} warn',
+  'jobs.checks.fail': '{n} fail',
+  'jobs.auto.title': 'Automated analyses',
+  'jobs.auto.step': 'Step',
+  'jobs.auto.run': 'Run #{id}',
   'jobs.nextRetry': 'next try {when}',
   'jobs.status.running': 'running',
 

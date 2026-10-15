@@ -4153,6 +4153,13 @@ export const ar: Record<MessageKey, string> = {
   'jobs.history.deleted': '(محذوف)',
   'jobs.history.manual': 'يدوي',
   'jobs.history.schedule': 'مجدول',
+  'jobs.history.checks': 'الفحوص',
+  'jobs.checks.pass': '{n} ناجح',
+  'jobs.checks.warn': '{n} تحذير',
+  'jobs.checks.fail': '{n} فاشل',
+  'jobs.auto.title': 'التحليلات المؤتمتة',
+  'jobs.auto.step': 'الخطوة',
+  'jobs.auto.run': 'التشغيل رقم {id}',
   'jobs.nextRetry': 'المحاولة التالية {when}',
   'jobs.status.running': 'قيد التشغيل',
 

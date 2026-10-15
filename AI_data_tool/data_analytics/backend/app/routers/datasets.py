@@ -2060,6 +2060,13 @@ async def try_data_checks(dataset_id: int, db: AsyncSession = Depends(get_db),
     from ..services.data_checks import known_types
     results = evaluate(df, await load_checks(db, ds.id), previous_rows=None,
                        known_types=await known_types(db, ds.id))
+    # AD-17: a manual run leaves a line in Monitoring > Activity -- counts
+    # only, nothing from the rows. The check results themselves are not
+    # stored: this endpoint stays a "would my checks pass?" preview.
+    from ..services.data_checks import summarize, summary_text
+    await audit(db, current_user, "dataset.checks_run", "dataset", ds.id,
+                summary_text(int(len(df)), summarize(results)))
+    await db.commit()
     import json as _json
     return {"rows": int(len(df)), "results": _json.loads(_json.dumps(results, default=str))}
 

@@ -626,6 +626,11 @@ async def list_admin_audit(
 # "what runs in this org, and when did it last work" was previously answerable
 # only by opening every report and every dataset one at a time.
 
+def summarize_checks(checks) -> dict:
+    from ..services.data_checks import summarize
+    return summarize(checks)
+
+
 async def _latest_runs(db: AsyncSession, kind: str, ids: list[int]) -> dict:
     """The newest RefreshRun per item, by item id."""
     from ..services.refresh_runs import latest_runs
@@ -766,7 +771,44 @@ async def list_refresh_runs(
              "trigger": r.trigger, "status": r.status,
              "started_at": r.started_at, "finished_at": r.finished_at,
              "rows": r.rows, "duration_ms": r.duration_ms,
-             "error": r.error, "error_code": r.error_code} for r in runs]
+             "error": r.error, "error_code": r.error_code,
+             # AD-17: how this run's checks went, as counts.
+             "checks_summary": summarize_checks(r.checks) if r.checks else None} for r in runs]
+
+
+@router.get("/monitoring/automation-runs")
+async def list_monitoring_automation_runs(
+    limit: int = 100,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_org_admin),
+):
+    """AD-17: the org's automated analyses, newest first -- they run too, and
+    "Everything that runs" did not list them. Status, the step a running or
+    stopped run is at, and its error; each row links to /automation?run=<id>."""
+    from ..models.models import AutomationRun, AutomationStep
+    from ..services.automation_runner import STEP_LABELS
+    limit = max(1, min(int(limit or 100), 500))
+    runs = (await db.execute(select(AutomationRun).where(AutomationRun.org_id == admin.org_id)
+                             .order_by(AutomationRun.id.desc()).limit(limit))).scalars().all()
+    ids = [r.id for r in runs]
+    steps: dict[int, list] = {}
+    if ids:
+        for st in (await db.execute(select(AutomationStep).where(AutomationStep.run_id.in_(ids))
+                                    .order_by(AutomationStep.run_id, AutomationStep.order))).scalars().all():
+            steps.setdefault(st.run_id, []).append(st)
+    ds_ids = {r.subject_id for r in runs if r.subject_type == "dataset" and r.subject_id}
+    names = dict((await db.execute(select(Dataset.id, Dataset.name).where(
+        Dataset.id.in_(ds_ids), Dataset.org_id == admin.org_id))).all()) if ds_ids else {}
+    out = []
+    for r in runs:
+        current = next((st for st in steps.get(r.id, []) if not st.output_ref), None)
+        out.append({"id": r.id, "status": r.status,
+                    "dataset_id": r.subject_id if r.subject_type == "dataset" else None,
+                    "dataset_name": names.get(r.subject_id),
+                    "started_at": r.created_at, "finished_at": r.finished_at,
+                    "step": STEP_LABELS.get(current.name, current.name) if current is not None else None,
+                    "error": (current.error if current is not None and current.error else None) or r.error})
+    return out
 
 
 @router.get("/monitoring/deliveries")
