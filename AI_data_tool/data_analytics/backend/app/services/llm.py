@@ -202,6 +202,24 @@ def release_meter(token: Token) -> None:
         _meter.set(None)
 
 
+def _describe(exc: BaseException, base: str, connect_s: float | None = None) -> str:
+    """A readable reason for a failed call. httpx's timeouts and connect errors
+    often have an EMPTY str(), which left "ConnectTimeout:" with nothing after
+    the colon on the settings page (QA E-17)."""
+    text = str(exc).strip()
+    name = type(exc).__name__
+    if text:
+        return f"{name}: {text}"
+    if isinstance(exc, httpx.ConnectTimeout):
+        within = f" within {connect_s:g} s" if connect_s else ""
+        return f"{name}: no answer from {base}{within} (is the model server running?)"
+    if isinstance(exc, httpx.ConnectError):
+        return f"connection refused by {base} (is the model server running?)"
+    if isinstance(exc, httpx.TimeoutException):
+        return f"{name}: no answer from {base} in time"
+    return f"{name} talking to {base}"
+
+
 class LLMClient:
     """One configured connection to the model endpoint.
 
@@ -215,7 +233,7 @@ class LLMClient:
         base_url: str,
         model: str,
         enabled: bool = True,
-        timeout: float = 180.0,
+        timeout: "float | httpx.Timeout" = 180.0,
         transport: httpx.BaseTransport | None = None,
         api_key: str = "",
         endpoint_id: str | None = None,
@@ -393,7 +411,8 @@ class LLMClient:
                 # Deliberately broad: connect errors, timeouts, TLS failures, invalid
                 # JSON bodies and DNS problems are all the same event to a caller —
                 # "no description this run" — and none of them may escape.
-                err = f"{type(exc).__name__}: {exc}"
+                connect_s = self.timeout.connect if isinstance(self.timeout, httpx.Timeout) else None
+                err = _describe(exc, base, connect_s)
                 llm_endpoints.mark(eid, False, err)
                 errors.append(err)
                 more = " -- trying the next endpoint" if n + 1 < len(targets) else ""
