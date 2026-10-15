@@ -2597,7 +2597,8 @@ describe('labels name what a figure is', () => {
     const { container } = renderWidget({ widget: barWidget({ id: 62, widget_type: 'kpi',
       config: { measure: 'RATED_AMOUNT', aggregation: 'count' } }) })
     await waitFor(() => expect(container.textContent).toContain('3,576'))
-    expect(container.textContent).toMatch(/count\(RATED_AMOUNT\)|Count of RATED_AMOUNT/i)
+    // B-36 writes the column name in words ("Count of RATED AMOUNT").
+    expect(container.textContent).toMatch(/count\(RATED_AMOUNT\)|Count of RATED[_ ]AMOUNT/i)
   })
 })
 

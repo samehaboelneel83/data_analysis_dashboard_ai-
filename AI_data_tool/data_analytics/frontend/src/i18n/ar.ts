@@ -466,7 +466,7 @@ export const ar: Record<MessageKey, string> = {
   'widget.err.unreachable': 'تعذّر الوصول إلى مصدر البيانات «{name}». قد يكون متوقفاً أو غير متاح من هذا الخادم؛ ستعمل اللوحة مجدداً عندما يستجيب.',
   'widget.err.retry': 'إعادة المحاولة',
   'widget.err.restricted': 'تستخدم هذه البطاقة بيانات لا يسمح دورك برؤيتها.',
-  'widget.kpiCap.count': 'السجلات',
+  'widget.kpiCap.count': 'عدد {m}',
   'widget.kpiCap.countd': 'عدد قيم {m} المختلفة',
   'widget.kpiCap.avg': 'متوسط {m}',
   'widget.kpiCap.median': 'وسيط {m}',

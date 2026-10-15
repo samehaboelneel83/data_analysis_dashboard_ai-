@@ -530,7 +530,7 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
           {withTrend && pill}
         </div>
         <div style={{ fontSize: 12, color: 'var(--muted)', maxWidth: '100%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textAlign: withTrend ? 'start' : 'center' }}>
-          {/* A count or an average is not the column itself: "Records" read
+          {/* A count or an average is not the column itself: "Count of x", "Average x" (not "Records" read
               3,576 over the subtitle RATED_AMOUNT (live QA 2026-09-28). A sum
               keeps the column's name, as it always has. */}
           {/* A caption written for the reader (the guided setup's "why")

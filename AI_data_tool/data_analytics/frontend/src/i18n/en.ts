@@ -466,7 +466,7 @@ export const en = {
   'widget.err.unreachable': "Could not reach the data source '{name}'. It may be down or unreachable from this server; the dashboard will work again once it responds.",
   'widget.err.retry': 'Try again',
   'widget.err.restricted': "This tile uses data your role can't see.",
-  'widget.kpiCap.count': 'Records',
+  'widget.kpiCap.count': 'Count of {m}',
   'widget.kpiCap.countd': 'Distinct {m}',
   'widget.kpiCap.avg': 'Average {m}',
   'widget.kpiCap.median': 'Median {m}',
