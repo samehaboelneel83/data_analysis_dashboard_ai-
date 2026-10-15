@@ -35,6 +35,8 @@ vi.mock('../services/api', () => ({
   dataSourcesApi: { list: vi.fn() },
   agentApi: { listConversations: vi.fn(), rename: vi.fn(), remove: vi.fn() },
   allowAiApi: { get: vi.fn() },
+  // AD-11 step 3: the stored profile (which labels have a value per row); none here.
+  analysisApi: { get: vi.fn().mockResolvedValue(null) },
 }))
 
 import { datasetsApi, dataSourcesApi, agentApi, allowAiApi } from '../services/api'
