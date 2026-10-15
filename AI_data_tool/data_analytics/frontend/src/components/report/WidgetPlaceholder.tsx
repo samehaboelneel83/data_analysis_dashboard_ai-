@@ -42,13 +42,23 @@ export function measuresAsBars(widget: Pick<Widget, 'widget_type' | 'config'>): 
   return ms.length >= 2 ? ms : null
 }
 
+/** A role's value, read the way the server's `resolve_roles` reads it: a
+ *  nested `roles` dict (legacy and seeded configs) first, then the flat key the
+ *  panel writes. Reading only the flat key called a seeded map unfinished (C-03). */
+function roleValue(cfg: Record<string, unknown>, role: string): unknown {
+  const roles = cfg.roles
+  const nested = roles && typeof roles === 'object' && !Array.isArray(roles)
+    ? (roles as Record<string, unknown>)[role] : undefined
+  return nested !== undefined && nested !== null && nested !== '' ? nested : cfg[configKeyFor(role)]
+}
+
 export function missingRequiredRoles(widget: Pick<Widget, 'widget_type' | 'config'>): string[] {
   const cfg = (widget.config ?? {}) as Record<string, unknown>
   if (measuresAsBars(widget)) return []
   return (ROLE_SPECS[widget.widget_type as WidgetType] ?? [])
     .filter(rf => rf.required)
     .filter(rf => {
-      const v = cfg[configKeyFor(rf.role)]
+      const v = roleValue(cfg, rf.role)
       return v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0)
     })
     .map(rf => (rf.label ?? rf.role).replace(/\s*\(.*\)\s*$/, ''))
@@ -70,8 +80,23 @@ export function missingWidgetOptions(widget: Pick<Widget, 'widget_type' | 'confi
   const wt = widget.widget_type
   if (HIERARCHY_TYPES.has(wt)) return has('levels') || (has('id_col') && has('parent_col')) ? [] : ['Hierarchy levels']
   if (wt === 'map_layers') {
-    return has(configKeyFor('category')) || (has(configKeyFor('lat')) && has(configKeyFor('lon')))
+    const hasRole = (r: string) => {
+      const v = roleValue(cfg, r)
+      return !(v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0))
+    }
+    return hasRole('category') || (hasRole('lat') && hasRole('lon'))
       ? [] : ['Country or Latitude/Longitude']
+  }
+  if (wt === 'map_points' || wt === 'map_bubbles') {
+    // C-10: unassigned, the server answers with the raw table and the map
+    // called every row "did not match a country". Half a coordinate pair is
+    // named: the server refuses it rather than guessing country mode.
+    const hasRole = (r: string) => {
+      const v = roleValue(cfg, r)
+      return !(v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0))
+    }
+    if (hasRole('lat') !== hasRole('lon')) return [hasRole('lat') ? 'Longitude' : 'Latitude']
+    return hasRole('category') || hasRole('lat') ? [] : ['Country or Latitude/Longitude']
   }
   if (wt === 'model_score') return has('prediction_model_id') ? [] : ['Saved model']
   if (wt === 'model_compare') return has('compare') ? [] : ['Models to compare']

@@ -1232,6 +1232,77 @@ def _remap_restored_refs(widgets: list, bookmarks: list,
     return {"links_remapped": remapped, "links_dropped": dropped}
 
 
+from pydantic import BaseModel as _DupBase  # noqa: E402
+
+
+class _DuplicateBody(_DupBase):
+    name: str | None = None
+
+
+@router.post("/{report_id}/duplicate", response_model=ReportOut, status_code=201)
+async def duplicate_report(report_id: int, body: _DuplicateBody | None = None,
+                           db: AsyncSession = Depends(get_db),
+                           current_user: User = Depends(get_current_user)):
+    """C-20: a full, independent copy of a dashboard -- "Save as copy".
+
+    Edit access is required: a viewer of a released dashboard is served the
+    release, not the draft, and a copy of the draft would hand them content
+    they were never shown. Only pages the caller can see are copied (a
+    role-restricted page is not leaked into a copy that has no restriction).
+    The copy is the caller's own private draft: unpublished, no grants, no
+    share links, no schedules. Content is cloned with new ids and every
+    internal reference (containers, drill-through / tooltip / action pages,
+    bookmarks) is pointed at the copy."""
+    src = await _get_report(report_id, db, current_user)
+    await require_capability(db, current_user, report_id, "edit")
+    await _require_readable_datasets(db, current_user, [src.dataset_id, *(src.additional_dataset_ids or [])])
+    visible = await _visible_page_ids(db, src, current_user)
+    name = ((body.name if body else None) or "").strip() or f"{src.name} (copy)"
+    copy = Report(name=name[:255], description=src.description, dataset_id=src.dataset_id,
+                  additional_dataset_ids=list(src.additional_dataset_ids or []),
+                  theme=src.theme, display_rules=src.display_rules, style=src.style,
+                  org_id=current_user.org_id, created_by=current_user.id, published=False)
+    db.add(copy)
+    await db.flush()
+    page_map: dict[int, int] = {}
+    new_widgets: list[tuple[int, ReportWidget]] = []
+    for p in sorted(src.pages, key=lambda p: p.position or 0):
+        if p.id not in visible:
+            continue
+        page = ReportPage(report_id=copy.id, name=p.name, title=p.title, page_type=p.page_type,
+                          prompt_column=p.prompt_column, prompt_label=p.prompt_label,
+                          position=p.position, page_size=p.page_size, custom_width=p.custom_width,
+                          custom_height=p.custom_height, mobile_layout=p.mobile_layout,
+                          layout_mode=p.layout_mode, layout_template=p.layout_template)
+        db.add(page)
+        await db.flush()
+        page_map[p.id] = page.id
+        for w in p.widgets:
+            nw = ReportWidget(page_id=page.id, widget_type=w.widget_type, title=w.title,
+                              config=dict(w.config or {}), layout=dict(w.layout or {}))
+            db.add(nw)
+            new_widgets.append((w.id, nw))
+    await db.flush()
+    widget_map = {old: nw.id for old, nw in new_widgets}
+    marks = []
+    for b in (await db.execute(select(Bookmark).where(Bookmark.report_id == report_id)
+                               .order_by(Bookmark.position))).scalars().all():
+        nb = Bookmark(report_id=copy.id, name=b.name, position=b.position, state=dict(b.state or {}))
+        db.add(nb)
+        marks.append(nb)
+    for prm in (await db.execute(select(ReportParameter).where(ReportParameter.report_id == report_id))).scalars().all():
+        db.add(ReportParameter(report_id=copy.id, name=prm.name, param_type=prm.param_type, label=prm.label,
+                               default_value=prm.default_value, options=prm.options, position=prm.position))
+    for cf in (await db.execute(select(CommonFilter).where(CommonFilter.report_id == report_id))).scalars().all():
+        db.add(CommonFilter(report_id=copy.id, column=cf.column, op=cf.op, value=cf.value, position=cf.position))
+    _remap_restored_refs([nw for _, nw in new_widgets], marks, page_map, widget_map)
+    await audit(db, current_user, "report.duplicate", "report", copy.id, f"copy of report {report_id}")
+    await db.commit()
+    created = await _get_report(copy.id, db, current_user)
+    created.is_mine = True
+    return created
+
+
 @router.get("/{report_id}/versions/{version_id}/dependencies")
 async def version_dependencies(report_id: int, version_id: int,
                                db: AsyncSession = Depends(get_db),

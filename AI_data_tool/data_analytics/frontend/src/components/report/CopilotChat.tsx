@@ -185,8 +185,14 @@ export default function CopilotChat({
       if (cached) { setInsight(JSON.parse(cached)); return () => { alive = false } }
     } catch { /* no cache */ }
     const timer = setTimeout(() => {
-      if (typeof insightsApi?.runShared !== 'function') return
-      insightsApi.runShared(datasetId)
+      // Nothing thrown from here may escape the timer: an uncaught error in a
+      // timer callback is a page error, and a missing insight is not one.
+      let scan: ReturnType<typeof insightsApi.runShared>
+      try {
+        if (typeof insightsApi?.runShared !== 'function') return
+        scan = insightsApi.runShared(datasetId)
+      } catch { return }
+      scan
         .then(r => {
           const top = [...(r?.findings ?? [])]
             .filter(f => f.novelty !== 'unchanged')

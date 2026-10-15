@@ -15,6 +15,36 @@ describe('missingRequiredRoles', () => {
   })
 })
 
+describe('C-03: a config whose roles sit in a nested `roles` dict', () => {
+  it('counts the nested roles as assigned, as the server does', () => {
+    expect(missingRequiredRoles({ widget_type: 'map_contour',
+      config: { roles: { lat: 'a', lon: 'b' } } } as never)).toEqual([])
+    expect(missingWidgetOptions({ widget_type: 'map_layers',
+      config: { roles: { lat: 'a', lon: 'b' } } } as never)).toEqual([])
+  })
+  it('a contour result (a grid, no rows) is drawn, not replaced by the placeholder', () => {
+    render(<WidgetBody widget={{ id: 1, page_id: 1, widget_type: 'map_contour', title: 'Contour',
+      config: { lat: 'a', lon: 'b' }, layout: { x: 0, y: 0, w: 6, h: 4 } } as never}
+      data={{ type: 'geo_contour', grid: [[0, 1], [1, 2]] }}
+      localSelected={null} onClickPoint={() => {}} broadcasts={false} />)
+    expect(screen.queryByTestId('widget-placeholder')).toBeNull()
+  })
+})
+
+describe('C-10: an unassigned point or bubble map is unfinished', () => {
+  it('needs a country or a coordinate pair', () => {
+    for (const wt of ['map_points', 'map_bubbles']) {
+      expect(missingWidgetOptions({ widget_type: wt, config: {} } as never)).toEqual(['Country or Latitude/Longitude'])
+      expect(missingWidgetOptions({ widget_type: wt, config: { dimension: 'country' } } as never)).toEqual([])
+      expect(missingWidgetOptions({ widget_type: wt, config: { lat: 'a', lon: 'b' } } as never)).toEqual([])
+    }
+  })
+  it('names the missing half of a coordinate pair', () => {
+    expect(missingWidgetOptions({ widget_type: 'map_points', config: { lat: 'a' } } as never)).toEqual(['Longitude'])
+    expect(missingWidgetOptions({ widget_type: 'map_points', config: { lon: 'b', dimension: 'c' } } as never)).toEqual(['Latitude'])
+  })
+})
+
 describe('familyOf', () => {
   it('maps widget types to a sample shape', () => {
     expect(familyOf('bar')).toBe('bars')
@@ -92,5 +122,40 @@ describe('a bar of several measures and no category (score group items)', () => 
     const one = { widget_type: 'bar', config: { measures: ['q1'], aggregation: 'avg' } } as never
     expect(measuresAsBars(one)).toBeNull()
     expect(missingRequiredRoles(one).length).toBeGreaterThan(0)
+  })
+})
+
+describe('C-14: a category chart given only a measure is unfinished', () => {
+  it('a pie with a measure and a scalar answer shows "Needs Dimension", not one solid disc', () => {
+    render(<WidgetBody widget={{ id: 1, page_id: 1, widget_type: 'pie', title: 'Pie',
+      config: { measure: 'revenue' }, layout: { x: 0, y: 0, w: 6, h: 4 } } as never}
+      data={{ type: 'scalar', rows: [{ name: 'revenue', value: 100 }] }}
+      localSelected={null} onClickPoint={() => {}} broadcasts={false} />)
+    expect(screen.getByTestId('widget-placeholder')).toHaveTextContent(/Needs Dimension/)
+  })
+  it('a KPI with a scalar answer draws its number', () => {
+    render(<WidgetBody widget={{ id: 1, page_id: 1, widget_type: 'kpi', title: 'K',
+      config: { measure: 'revenue' }, layout: { x: 0, y: 0, w: 3, h: 3 } } as never}
+      data={{ type: 'scalar', rows: [{ name: 'revenue', value: 100 }] }}
+      localSelected={null} onClickPoint={() => {}} broadcasts={false} />)
+    expect(screen.queryByTestId('widget-placeholder')).toBeNull()
+  })
+})
+
+describe('C-23: small multiples needs its split field', () => {
+  it('a small multiple without facet_by is unfinished', () => {
+    expect(missingRequiredRoles({ widget_type: 'small_multiples', config: { dimension: 'category' } } as never))
+      .toEqual(['Split into multiples by'])
+    expect(missingRequiredRoles({ widget_type: 'small_multiples', config: { dimension: 'category', facet_by: 'region' } } as never))
+      .toEqual([])
+  })
+})
+
+describe('C-07: a scatter offers an X measure', () => {
+  it('has an optional numeric X role beside its Y measure', async () => {
+    const { ROLE_SPECS, roleAccepts } = await import('../../types/report')
+    const x = ROLE_SPECS.scatter.find(r => r.role === 'measure2')
+    expect(x).toMatchObject({ required: false })
+    expect(roleAccepts('measure2')).toBe('numeric')
   })
 })

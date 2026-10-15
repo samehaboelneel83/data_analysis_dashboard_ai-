@@ -278,6 +278,10 @@ export default function ReportBuilder() {
   // True once the datasets map (calc columns, formats, meta) has resolved --
   // the widget canvas waits on it; see the loading effect below.
   const [datasetsReady, setDatasetsReady] = useState(false)
+  // C-05: the attached dataset could not be loaded (after one retry). Said in
+  // the Fields pane with a Retry, not as "Attach a dataset" -- which made
+  // people think the pick at create time was lost and attach it twice.
+  const [datasetLoadError, setDatasetLoadError] = useState(false)
   const [allDatasets,setAllDatasets]= useState<Dataset[]>([])
   // Primary dataset's connection name, for the header breadcrumb -- fetched only
   // when there is one (source-backed dataset); an upload's dataset has no
@@ -405,6 +409,13 @@ export default function ReportBuilder() {
   const canvasScale = (zoom / 100) * fitScale
   const [multiSelectedIds, setMultiSelectedIds] = useState<Set<number>>(new Set())
   useEffect(() => { setZoom(100); setMultiSelectedIds(new Set()) }, [activePage?.id])
+  // C-04: a page change (add, switch, bookmark, Present) drops a selected
+  // widget that is not on the new page. Kept, the Properties pane went on
+  // editing it and every edit PATCHed /pages/<new page>/widgets/<old widget>: 404.
+  useEffect(() => {
+    setSelectedW(s => s && activePage?.widgets.some(w => w.id === s.id) ? s : null)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePage?.id])
   type RightPanelMode = 'default' | 'mobile' | 'selection' | 'sync' | 'bookmarks' | 'taborder' | 'performance' | 'reportrules' | 'parameters' | 'schedule' | 'review' | 'comments' | 'outline' | 'suggestions' | 'translations' | 'insights' | 'ask' | 'history'
   const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>('default')
   const [pageMenuOpen, setPageMenuOpen] = useState(false)
@@ -749,7 +760,10 @@ export default function ReportBuilder() {
     ]
     if (ids.length === 0) { setDatasetsReady(true); return }
     try {
-      const list = await Promise.all(ids.map(id => datasetsApi.get(id)))
+      const fetchAll = () => Promise.all(ids.map(id => datasetsApi.get(id)))
+      // One retry: the first open of a just-created dashboard is the slowest
+      // moment, and one failed fetch used to stick until a reload.
+      const list = await fetchAll().catch(() => fetchAll())
       const map: Record<number, Dataset> = {}
       list.forEach(ds => { map[ds.id] = ds })
       setDatasets(map)
@@ -761,9 +775,11 @@ export default function ReportBuilder() {
         setColumnMeta(primary.column_meta ?? {})
         setColumnFormats(primary.column_formats ?? {})
       }
+      setDatasetLoadError(false)
       setDatasetsReady(true)
     } catch {
       // A failed dataset fetch must not blank the canvas forever.
+      setDatasetLoadError(true)
       setDatasetsReady(true)
     }
   }, [])
@@ -2060,7 +2076,14 @@ export default function ReportBuilder() {
       setSelectedW(copy)
       setTimeout(() => document.querySelector(`[data-widget-id="${copy.id}"]`)
         ?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }), 60)
-      toast.success(tr('bc.shell.t.duplicated'))
+      // C-12: a copy made by a stray click is one press away from gone.
+      toast.success(tt => (
+        <span className="dl-toast-undo">
+          {tr('bc.shell.t.duplicated')}
+          <button type="button" className="btn btn-ghost btn-sm"
+            onClick={() => { toast.dismiss(tt.id); void runUndoRef.current() }}>{tr('bd.keys.undo')}</button>
+        </span>
+      ), { duration: 8000 })
     } catch {
       toast.error(tr('bc.shell.t.duplicateFailed'))
     } finally {
@@ -2123,7 +2146,12 @@ export default function ReportBuilder() {
 
   const updateWidgetConfig = useCallback(async (config: Record<string, unknown>, title: string, overwrite = false) => {
     if (!selectedW || !activePage) return
-    const before = activePage.widgets.find(x => x.id === selectedW.id) ?? selectedW
+    // C-04: write to the page the widget is really on. A widget no longer in
+    // the report is said, not sent (the request could only 404).
+    const home = activePage.widgets.some(x => x.id === selectedW.id) ? activePage
+      : report?.pages.find(p => p.widgets.some(x => x.id === selectedW.id))
+    if (!home) { setSelectedW(null); toast.error(tr('bc.shell.t.widgetGone')); return }
+    const before = home.widgets.find(x => x.id === selectedW.id) ?? selectedW
     const beforeCfg = (before.config ?? {}) as Record<string, unknown>
     const beforeTitle = before.title
     setSaving(true)
@@ -2133,14 +2161,14 @@ export default function ReportBuilder() {
       // "Save mine anyway" sends it without one.
       const base = overwrite ? undefined : (loadedRevisionRef.current ?? undefined)
       try {
-        await reportsApi.updateWidget(reportId, activePage.id, selectedW.id,
+        await reportsApi.updateWidget(reportId, home.id, selectedW.id,
           { config, title, ...(base != null ? { base_revision: base } : {}) })
       } catch (err) {
         const status = (err as { response?: { status?: number } })?.response?.status
         const detail = structuredDetail<ConflictDetail & { code?: string }>(err)
         if (status === 409 && detail?.code === 'edit_conflict') {
           setEditConflict(conflictFrom(detail,
-            { widget_type: before.widget_type, title, config }, activePage.id, selectedW.id,
+            { widget_type: before.widget_type, title, config }, home.id, selectedW.id,
             () => { setEditConflict(null); updateWidgetConfig(config, title, true) }))
           return
         }
@@ -2149,7 +2177,7 @@ export default function ReportBuilder() {
       setEditConflict(null)
       const keys = changedKeys(beforeCfg, config)
       if (keys.length || beforeTitle !== title) {
-        const pageId = activePage.id
+        const pageId = home.id
         const id = selectedW.id
         const write = (c: Record<string, unknown>, t: string) =>
           reportsApi.updateWidget(reportId, pid(pageId), widgetIds.current.resolve(id), { config: c, title: t }).then(() => {})
@@ -2165,7 +2193,7 @@ export default function ReportBuilder() {
     } finally {
       setSaving(false)
     }
-  }, [selectedW, activePage, reportId, loadReport, pushUndo])
+  }, [selectedW, activePage, report, reportId, loadReport, pushUndo, tr])
 
   /** Save the combination of the editor's change and a colleague's (E09).
    *  Sent against the revision the conflict reported, so a THIRD edit made
@@ -2419,7 +2447,10 @@ export default function ReportBuilder() {
         const sensible = defaultSummary(columnName, columnMeta)
         // Written only when it changes the meaning: an unset aggregation
         // already sums, so an amount on a fresh chart is left as it was.
-        if (!cfg[configKeyFor(target.role)] && (was === 'count' || (was === '' && sensible !== 'sum'))) {
+        // C-11: a blank aggregation2 means "same as the first axis", so the
+        // second measure is compared with THAT, not with Sum.
+        const inherited = target.role === 'measure2' ? String(cfg.aggregation ?? 'sum').toLowerCase() : 'sum'
+        if (!cfg[configKeyFor(target.role)] && (was === 'count' || (was === '' && sensible !== inherited))) {
           next[aggKey] = sensible
         }
       }
@@ -2705,7 +2736,15 @@ export default function ReportBuilder() {
     window.addEventListener('pointercancel', onUp)
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup',   onUp)
+    // C-19: no page text is selected while a widget is moved or resized (the
+    // drag highlighted the AI pane), and the cursor stays the drag's own.
+    const body = document.body.style
+    const was = { userSelect: body.userSelect, cursor: body.cursor }
+    body.userSelect = 'none'
+    body.cursor = resizing ? 'nwse-resize' : 'grabbing'
     return () => {
+      body.userSelect = was.userSelect
+      body.cursor = was.cursor
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
@@ -3516,7 +3555,13 @@ export default function ReportBuilder() {
                   missing). The list above is THE list of fields; the folders
                   are an arrangement tool, folded away until asked for. */}
               {!dataset
-                ? <p style={{ fontSize:12, color:'var(--muted)', textAlign:'center', marginTop:20 }}>{tr('bc.shell.ds.attachToBrowse')}</p>
+                ? (report?.dataset_id && datasetLoadError
+                  ? <p data-testid="dataset-load-error" role="alert" style={{ fontSize:12, color:'var(--muted)', textAlign:'center', marginTop:20 }}>
+                      {tr('bc.shell.ds.loadFailed')}{' '}
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => { if (report) void reloadAttachedDatasets(report) }}>{tr('bc.shell.ds.retry')}</button>
+                    </p>
+                  : <p style={{ fontSize:12, color:'var(--muted)', textAlign:'center', marginTop:20 }}>
+                      {tr(report?.dataset_id ? 'bc.shell.ds.loadingFields' : 'bc.shell.ds.attachToBrowse')}</p>)
                 : (
                   <details className="dl-bd-hier" data-testid="hierarchy-folders">
                     <summary className="dl-bd-gh" style={{ cursor: 'pointer' }}>{tr('bc.shell.hier.organize')}</summary>
@@ -3695,10 +3740,15 @@ export default function ReportBuilder() {
                   const next = e.target.value
                   const updated = await reportsApi.setClassification(reportId, next)
                   setReport(updated)
+                  // C-17: this write bumped the revision; knowing it is ours keeps
+                  // the poll from calling it "changed in another session".
+                  if (typeof updated?.revision === 'number') setLoadedRevision(updated.revision)
+                  else void syncRevisionAfterOwnWrite()
                   pushUndo({ label: next ? tr('bc.shell.u.classify', { label: next }) : tr('bc.shell.u.clearClass'),
-                    undo: () => reportsApi.setClassification(reportId, prev).then(() => {}),
-                    redo: () => reportsApi.setClassification(reportId, next).then(() => {}) })
-                  toast.success(e.target.value ? tr('bc.shell.t.classified', { label: e.target.value }) : tr('bc.shell.t.classCleared'))
+                    undo: () => reportsApi.setClassification(reportId, prev).then(() => syncRevisionAfterOwnWrite()),
+                    redo: () => reportsApi.setClassification(reportId, next).then(() => syncRevisionAfterOwnWrite()) })
+                  // The captured choice, not e.target.value read after an await.
+                  toast.success(next ? tr('bc.shell.t.classified', { label: next }) : tr('bc.shell.t.classCleared'))
                 } catch (err) {
                   toast.error((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? tr('bc.shell.t.classifyFailed'))
                 }

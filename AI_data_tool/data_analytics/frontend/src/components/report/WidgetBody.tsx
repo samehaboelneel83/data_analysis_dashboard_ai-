@@ -10,7 +10,7 @@ import { MapLoading } from './geo/MapDataTable'
 import type { CalcColumnFormat } from '../../services/api'
 import type { Widget, WidgetType } from '../../types/report'
 import type { RuleStyles } from '../../lib/displayRules'
-import { fmtStr, formatValue, EmptyState, seriesColor, formatForAggregation } from './chartUtils'
+import { fmtStr, formatValue, formatMeasure, formatMeasureCell, measureFormat, EmptyState, seriesColor } from './chartUtils'
 import { CHART_RENDERERS } from './chartRenderers'
 import LatticeRenderer from './chartRenderers/LatticeRenderer'
 import AnimatedRenderer from './chartRenderers/AnimatedRenderer'
@@ -153,9 +153,10 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
 
   // Format for the value column: use measure if set, otherwise fall back to dimension
   // (many widgets aggregate the dimension column directly with no separate measure)
-  // F-12: a count is a number of rows, not an amount -- never in the measure's currency.
-  const measureFmt = formatForAggregation(allFormats?.[cfg.measure] ?? allFormats?.[cfg.dimension], cfg.aggregation)
-  const measure2Fmt = formatForAggregation(allFormats?.[cfg.measure2], cfg.aggregation2)
+  // C-02 / F-12: the format of the AGGREGATED value -- a count of a currency
+  // column is a plain count (never in the measure's currency), a share is a percent.
+  const measureFmt = measureFormat(allFormats?.[cfg.measure] ?? allFormats?.[cfg.dimension], cfg.aggregation)
+  const measure2Fmt = measureFormat(allFormats?.[cfg.measure2], cfg.aggregation2)
 
   if (wt === 'text') {
     // Substitute resolved {{agg(column)}} values before link rendering. An unresolved
@@ -332,13 +333,19 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
     const drawable = data?.rows?.length || data?.matrix?.length || data?.cells?.length
       || data?.bars?.length || data?.links?.length || data?.forecast?.length
       || data?.points?.length || data?.series?.length || (data?.value != null ? 1 : 0)
+      // A contour answers with a density `grid`, a tree/network with `nodes` (C-03).
+      || data?.grid?.length || data?.nodes?.length
     const nothingToDraw = !data || !drawable
     // A chart with no dimension is answered by the shaper's raw-table branch
     // (every column, row by row) -- and a line renderer then draws that as a
     // meaningless squiggle. A CHART receiving a raw table is unfinished; a
     // table receiving one is working exactly as designed.
     const rawTableForChart = data?.type === 'table' && familyOf(widget.widget_type) !== 'table'
-    if (missing.length && (nothingToDraw || rawTableForChart)) {
+    // C-14: likewise a measure with no dimension is answered as one scalar
+    // row, which a pie drew as a single solid disc. Only a KPI-like widget
+    // (or a table) is finished with a single number.
+    const scalarForChart = data?.type === 'scalar' && !['table', 'kpi'].includes(familyOf(widget.widget_type))
+    if (missing.length && (nothingToDraw || rawTableForChart || scalarForChart)) {
       return <WidgetPlaceholder widget={widget} missing={missing} onAssignData={onAssignData} />
     }
   }
@@ -581,14 +588,16 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
     const rows: any[] = data.rows ?? []
     return (
       // Focusable: a card with more figures than its tile scrolls (E10).
+      // C-13: a SIZE container, so each figure is capped by the tile's height
+      // too (cqb): three rows at 24px plus labels overflowed a short tile.
       <div dir={rtl ? 'rtl' : undefined} tabIndex={0} role="region" aria-label={tw('wb.values')}
-        style={{ height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 10, padding: 8, containerType: 'inline-size' }}>
+        style={{ height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 10, padding: 8, containerType: 'size' }}>
         {rows.map((row, i) => (
           <div key={i} style={{ textAlign: 'center', minWidth: 0 }}>
-            <div title={fmtStr(row.value, allFormats?.[row.name])}
-              style={{ fontSize: fitFigureSize(fmtStr(row.value, allFormats?.[row.name]), 24), fontWeight: 650, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.02em', color: ruleStyles?.rows?.[i]?.fill ?? 'var(--accent)',
+            <div title={formatMeasure(row.value, allFormats?.[row.name], cfg.aggregation)}
+              style={{ fontSize: `min(${fitFigureSize(formatMeasure(row.value, allFormats?.[row.name], cfg.aggregation), 24)}, calc(100cqb / ${(Math.max(rows.length, 1) * 2.2).toFixed(1)}))`, fontWeight: 650, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.02em', color: ruleStyles?.rows?.[i]?.fill ?? 'var(--accent)',
                 whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: 1.15 }}>
-              {fmtStr(row.value, allFormats?.[row.name])}
+              {formatMeasure(row.value, allFormats?.[row.name], cfg.aggregation)}
             </div>
             <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>{row.name}</div>
           </div>
@@ -653,7 +662,7 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
             {data.rows.map((r: { name: unknown; value: unknown }, i: number) => (
               <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
                 <td style={{ padding: '3px 8px' }}>{String(r.name)}</td>
-                <td style={{ padding: '3px 8px', textAlign: 'end' }}>{formatValue(r.value, measureFmt)}</td>
+                <td style={{ padding: '3px 8px', textAlign: 'end' }}>{formatMeasureCell(r.value, measureFmt)}</td>
               </tr>
             ))}
           </tbody>
@@ -819,6 +828,14 @@ function WindowedTable({ rtl, cfg, data, cols: inCols, rows: inRows, ruleStyles,
     : 'Total'
   const rowNumbers = !!cfg.table_row_numbers
   const rowLines = !!cfg.table_row_lines
+  // C-02: which columns hold the measure. Their keys ("value", or a crosstab's
+  // column-dimension values and `__total__`) are not dataset columns, so a
+  // lookup by column name found no format and printed raw floats.
+  const crosstab = data.type === 'crosstab'
+  const mFmt = measureFormat(allFormats?.[data.measure ?? cfg.measure], cfg.aggregation)
+  const isMeasureCol = (c: string, j: number) => grouped ? c === 'value' : crosstab && j > 0
+  const cellText = (v: unknown, c: string, j: number) =>
+    isMeasureCol(c, j) ? formatMeasureCell(v, mFmt) : formatValue(v, allFormats?.[c])
   const banding = !!cfg.table_banding
   const cellPad = cfg.table_condensed ? '2px 6px' : undefined
   const estRowH = cfg.table_condensed ? 24 : 31
@@ -873,7 +890,7 @@ function WindowedTable({ rtl, cfg, data, cols: inCols, rows: inRows, ruleStyles,
               -number cell when there is one. */}
           {totals[j] == null
             ? (j === 0 ? totalLabel : '')
-            : formatValue(totals[j], allFormats?.[c])}
+            : cellText(totals[j], c, j)}
         </td>
       ))}
       {showSpark && <td style={{ padding: cellPad }} />}
@@ -930,7 +947,7 @@ function WindowedTable({ rtl, cfg, data, cols: inCols, rows: inRows, ruleStyles,
                       )}
                       <span style={{ position: 'relative', zIndex: 1, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                         {painted?.icon && <span aria-hidden="true">{painted.icon}</span>}
-                        {isWebAddress(v) ? <CellLink url={v} /> : formatValue(v, allFormats?.[cols[j]])}
+                        {isWebAddress(v) ? <CellLink url={v} /> : cellText(v, cols[j], j)}
                       </span>
                     </td>
                   )

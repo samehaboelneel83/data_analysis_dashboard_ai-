@@ -107,3 +107,28 @@ class TestAnimatedMaps:
         r = get_widget_data_from_df(df, {"dimension": "c", "measure": "v", "aggregation": "sum",
                                          "animate_by": "d", "animate_granularity": "month"}, "map_choropleth")
         assert r["fit_names"] == ["Egypt", "France"] and r["domain"] == [0.0, 2.0]
+
+
+# C-10: lat/lon mode or country mode is decided explicitly. A half-assigned
+# coordinate pair used to fall back silently to country mode on whatever sat in
+# Country (a city), plotting one dot over Singapore and "9 rows did not match".
+_ROUTES = pd.DataFrame({
+    "from_city": ["Paris", "Singapore", "Lagos"], "origin_lat": [48.85, 1.29, 6.52],
+    "origin_lon": [2.35, 103.85, 3.38], "shipments": [4, 9, 2]})
+
+
+def test_one_coordinate_without_the_other_is_an_error_not_country_mode():
+    r = get_widget_data_from_df(_ROUTES, {"lat": "origin_lat", "dimension": "from_city"}, "map_points")
+    assert r["type"] == "error" and r["code"] == "incomplete_coordinates"
+    assert "longitude" in r["message"].lower()
+
+
+def test_a_text_column_as_a_coordinate_is_an_error():
+    r = get_widget_data_from_df(_ROUTES, {"lat": "origin_lat", "lon": "from_city"}, "map_points")
+    assert r["type"] == "error" and r["code"] == "incomplete_coordinates"
+
+
+def test_with_both_coordinates_the_country_role_only_labels():
+    r = get_widget_data_from_df(_ROUTES, {"lat": "origin_lat", "lon": "origin_lon",
+                                          "dimension": "from_city", "measure": "shipments"}, "map_points")
+    assert r["type"] == "geo_points" and len(r["rows"]) == 3

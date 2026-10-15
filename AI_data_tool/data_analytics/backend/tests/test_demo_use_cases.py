@@ -170,6 +170,43 @@ class TestTheFeaturesThatMakeItAUseCase:
         assert not raw.config.get("prep_steps")
 
     @pytest.mark.asyncio
+    async def test_the_prepared_chart_really_differs_from_the_raw_one(self, org_id, db_session, seeded):
+        """C-03: a widget's `prep_steps` were read by nothing and cost is never
+        missing, so "as loaded" and "prepared" drew the same bars. The prepared
+        tile's step must change the numbers the reader sees."""
+        from app.services.widget_data import get_widget_data
+        widgets = await _widgets(db_session, seeded["reports"]["quality"])
+        by_title = {w.title: w for w in widgets}
+        path = seeded["datasets"]["sales"].filename
+        data = {t: get_widget_data(path, by_title[t].config, widget_type="bar", use_cache=False)
+                for t in ("Revenue by category — prepared", "Revenue by category — as loaded")}
+        prepared = {r["name"]: r["value"] for r in data["Revenue by category — prepared"]["rows"]}
+        raw = {r["name"]: r["value"] for r in data["Revenue by category — as loaded"]["rows"]}
+        assert prepared.keys() == raw.keys()
+        assert prepared != raw
+        assert all(prepared[k] >= raw[k] for k in raw)   # refunds dropped
+
+    @pytest.mark.asyncio
+    async def test_the_trust_kpis_say_what_they_count(self, org_id, db_session, seeded):
+        """C-03: "Missing cost" was count(cost), the NON-missing values; the
+        "Prepared" card set `measure` where a card reads `measures`."""
+        from app.services.widget_data import get_widget_data
+        from app.services.widget_roles import missing_roles
+        widgets = await _widgets(db_session, seeded["reports"]["quality"])
+        by_title = {w.title: w for w in widgets}
+        assert "Missing cost" not in by_title
+        card = by_title["Prepared"]
+        assert card.config.get("measures") == ["revenue"]
+        assert missing_roles("card", card.config) == []
+        refunds = by_title["Refund rows"]
+        path = seeded["datasets"]["sales"].filename
+        n = get_widget_data(path, refunds.config, widget_type="kpi", use_cache=False)
+        rows = get_widget_data(path, by_title["Rows"].config, widget_type="kpi", use_cache=False)
+        count = (n.get("rows") or [{}])[0].get("value", n.get("value"))
+        total = (rows.get("rows") or [{}])[0].get("value", rows.get("value"))
+        assert 0 < count < total
+
+    @pytest.mark.asyncio
     async def test_a_relationship_joins_two_demo_datasets(self, org_id, db_session, seeded):
         rels = (await db_session.execute(
             select(Relationship).where(Relationship.org_id == org_id)

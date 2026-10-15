@@ -15,3 +15,22 @@ describe('box plot value axis (5.12)', () => {
     expect(ticks).not.toContain('38,735.12')
   })
 })
+
+/** C-16: the category names were SVG <text> inside a viewBox stretched with
+ *  preserveAspectRatio="none", so they were squashed to ~4px glyphs. */
+const rows = ['Europe', 'Asia', 'Americas', 'Africa'].map((name, i) => ({
+  name, min: 1 + i, q1: 2 + i, median: 3 + i, q3: 4 + i, max: 5 + i, outliers: [] }))
+const base = { rows: [], cfg: {}, rtl: false, broadcasts: false, localSelected: null, onClickPoint: () => {} } as any
+
+describe('BoxPlotRenderer category labels (C-16)', () => {
+  it('are HTML text at a readable size, not stretched SVG text', () => {
+    const { container, getByText } = render(<BoxPlotRenderer {...base} data={{ rows }} />)
+    expect(container.querySelectorAll('svg text')).toHaveLength(0)
+    for (const r of rows) {
+      const el = getByText(r.name)
+      expect(el.closest('svg')).toBeNull()
+      expect(parseFloat(el.style.fontSize)).toBeGreaterThanOrEqual(10)
+      expect(el.getAttribute('title')).toBe(r.name)
+    }
+  })
+})

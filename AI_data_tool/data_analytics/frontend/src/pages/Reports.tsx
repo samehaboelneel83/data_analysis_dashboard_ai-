@@ -4,7 +4,7 @@ import {
   ArrowDownUp, ArrowRight, ChevronDown, Database, Download, Folder, FolderInput, FolderOpen, FolderPlus, LayoutDashboard,
   LayoutGrid, LayoutTemplate, Link2, List, Pencil, Plus, Search, SearchX, Share2, Sparkles, SquareDashedBottom, Trash2, X,
   Globe, GlobeLock, Users, Clock,
-  PencilRuler,
+  PencilRuler, Copy,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import LoadError from '../components/ui/LoadError'
@@ -44,7 +44,7 @@ export { nextUntitledName }
  * Placement, folder management and "Shared with me" come from the workspace
  * tree; the tree failing fails only them. What the design shows but the
  * backend cannot answer is left out, not stubbed: favourites, owner names,
- * view counts, Duplicate, stored AI proposals, a "Shared" status
+ * view counts, stored AI proposals, a "Shared" status
  * (PLAN.md, Backend follow-ups). Kept from v1: subfolders, folder rename and
  * delete, the move confirmation, Publish / Unpublish, delete confirmation,
  * the dataset chip rule and Suggest dashboards' goal text.
@@ -299,6 +299,14 @@ export default function Reports() {
       toast.error(detail(e, t('dsh.toast.publishFailed')))
     }
   }
+  // C-20: Save as copy -- a private draft that opens in Edit.
+  const duplicate = async (r: ReportSummary) => {
+    try {
+      const copy = await reportsApi.duplicate(r.id)
+      toast.success(t('dsh.toast.duplicated', { name: copy.name }))
+      openReport(`/reports/${copy.id}?edit=1`)
+    } catch (e) { toast.error(detail(e, t('dsh.toast.duplicateFailed'))) }
+  }
   const copyLink = async (r: ReportSummary) => {
     try { await navigator.clipboard.writeText(`${window.location.origin}/reports/${r.id}`); toast.success(t('dsh.toast.copied')) }
     catch { toast.error(t('dsh.toast.copyFailed')) }
@@ -316,6 +324,7 @@ export default function Reports() {
       { key: 'link', label: t('dsh.copyLink'), icon: <Link2 size={14} />, onSelect: () => void copyLink(r) },
       ...(edit && tree ? [{ key: 'move', label: t('dsh.moveDots'), icon: <FolderInput size={14} />, onSelect: () => setMoving([r]) }] : []),
       ...(edit ? [{ key: 'rename', label: t('dsh.rename'), icon: <Pencil size={14} />, onSelect: () => void rename(r) }] : []),
+      ...(edit ? [{ key: 'duplicate', label: t('dsh.duplicate'), icon: <Copy size={14} />, onSelect: () => void duplicate(r) }] : []),
       ...(canAdminister(r) ? [{ key: 'publish', label: t(r.published ? 'dsh.unpublish' : 'dsh.publish'),
         icon: r.published ? <GlobeLock size={14} /> : <Globe size={14} />, onSelect: () => void publish(r) }] : []),
       { key: 'pdf', label: t('dsh.exportPdf'), icon: <Download size={14} />, onSelect: () => void exportPdf(r) },

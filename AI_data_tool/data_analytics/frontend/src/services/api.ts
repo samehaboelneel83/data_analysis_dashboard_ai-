@@ -1545,6 +1545,9 @@ export const reportsApi = {
   update: (id: number, data: Partial<{ name: string; description: string; dataset_id: number; additional_dataset_ids: number[]; theme: string; display_rules: DisplayRule[]; style: import('../lib/dashboardStyle').DashboardStyle }>) =>
     api.patch<Report>(`/reports/${id}`, data).then(r => r.data),
   delete: (id: number) => api.delete(`/reports/${id}`),
+  /** C-20: a private, editable copy of a dashboard (new ids, references rewired). */
+  duplicate: (id: number, name?: string) =>
+    api.post<Report>(`/reports/${id}/duplicate`, name ? { name } : {}).then(r => r.data),
   /** Publish/unpublish an authored dashboard: published = the whole org may
    *  OPEN it, view-only. Author or admin only; legacy unowned reports 400. */
   setPublished: (id: number, published: boolean) =>

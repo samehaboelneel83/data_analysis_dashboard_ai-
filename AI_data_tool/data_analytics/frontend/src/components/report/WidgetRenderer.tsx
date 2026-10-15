@@ -257,6 +257,18 @@ export function binningTitle(b: Binning | undefined | null, t?: TranslateFn): st
     + 'Every row is still counted. Drag the slider under the chart to zoom in and see more detail.'
 }
 
+/** How early (px) a tile below the fold starts fetching. */
+const LAZY_MARGIN_PX = 300
+/** True when the element has a laid-out box within (or LAZY_MARGIN_PX of) the viewport. */
+function inViewport(el: Element): boolean {
+  const r = el.getBoundingClientRect()
+  if (r.width <= 0 || r.height <= 0) return false
+  const vh = window.innerHeight || document.documentElement.clientHeight
+  const vw = window.innerWidth || document.documentElement.clientWidth
+  return r.bottom >= -LAZY_MARGIN_PX && r.top <= vh + LAZY_MARGIN_PX
+    && r.right >= -LAZY_MARGIN_PX && r.left <= vw + LAZY_MARGIN_PX
+}
+
 function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, geography, datasets, selected, isMultiSelected, onSelect, onDelete, onDuplicate, onEditOptions, editMode, promptFilter, onDragStart, onResizeStart, isDragging, onFetchComplete, pages, reportDisplayRules, reportFilters, pageFilters, onDrillthrough, isPreview, hierarchy, bookmarks, onNavigateToPage, onApplyBookmark, reportId, parameters, onSetParameter, dataOverride, relationships, eagerFetch, allowExport = true, refreshNonce }: Props) {
   const { emitFilter, emitMultiFilter, getFiltersFor, canBroadcast, canReceive, activeFilters, clearAllFilters, clearFilter, interactions, getReceiveMode, carryFiltersTo, drillOf, setDrill } = useCrossFilter()
   const [data,    setData]    = useState<any>(null)
@@ -719,10 +731,32 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
     if (!el) { setHasBeenVisible(true); return }  // no root to observe: fetch
     const io = new IntersectionObserver(entries => {
       if (entries.some(e => e.isIntersecting)) setHasBeenVisible(true)
-    }, { rootMargin: '300px' })
+    }, { rootMargin: `${LAZY_MARGIN_PX}px` })
     io.observe(el)
-    return () => io.disconnect()
+    // C-01: the observer's first entry can say "not intersecting" for a tile
+    // that IS on screen, because the canvas has not settled yet (datasets
+    // still loading, the fallback measured width, the canvas scale). No new
+    // intersection follows until the reader scrolls, so the tile sat blank.
+    // Check the position directly now, once more after layout settles, and
+    // whenever the tile's own box changes size.
+    const check = () => { if (inViewport(el)) setHasBeenVisible(true) }
+    check()
+    const timer = setTimeout(check, 1500)
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(check) : null
+    ro?.observe(el)
+    return () => { io.disconnect(); clearTimeout(timer); ro?.disconnect() }
   }, [lazyEligible, hasBeenVisible])
+
+  // C-01 diagnostics (dev only): name a tile that has been "loading" for a
+  // long time, and whether it ever became visible, so the gate is findable.
+  useEffect(() => {
+    if (!import.meta.env.DEV || !loading) return
+    const id = setTimeout(() => {
+      console.warn(`[WidgetRenderer] widget ${widget.id} still loading after 20s `
+        + `(visible: ${!lazyEligible || hasBeenVisible}, request ${inflightRef.current ? 'queued or in flight' : 'not sent'})`)
+    }, 20_000)
+    return () => clearTimeout(id)
+  }, [loading, widget.id, lazyEligible, hasBeenVisible])
 
   // Refetch only when config content actually changes (or first visibility).
   // The first load goes at once. A CHANGE (a filter clicked, a slicer ticked)
@@ -1792,7 +1826,10 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
       {editMode && onResizeStart && (
         <div
           data-testid="widget-resize-handle"
-          onMouseDown={e => { e.stopPropagation(); e.preventDefault(); onResizeStart(e) }}
+          // C-19: pointer events only. Handling mousedown too started the resize
+          // twice (the second start reset the first), and preventDefault on
+          // pointerdown suppresses the compatibility mousedown anyway.
+          onMouseDown={e => e.stopPropagation()}
           onPointerDown={e => {
             e.stopPropagation(); e.preventDefault()
             try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* jsdom */ }
@@ -1800,7 +1837,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
           }}
           style={{
             position: 'absolute', bottom: 0, right: 0, direction: 'ltr',
-            width: 18, height: 18, cursor: 'nwse-resize',
+            width: 24, height: 24, cursor: 'nwse-resize', touchAction: 'none',
             display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end',
             padding: '3px',
           }}

@@ -99,7 +99,7 @@ describe('+ Add offers the fields each role can use, for every object family', (
             const [first, second] = [boxes[1], boxes[0]]
             const order = [first, second].map(b => fieldOf(b.closest('label')!.textContent ?? ''))
             fireEvent.click(first); fireEvent.click(second)
-            fireEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
+            fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }))  // C-26: ticks apply at once
             act(() => { vi.advanceTimersByTime(700) })
             const saved = onUpdate.mock.calls.at(-1)![0]
             if (rf.multi) expect(saved[configKeyFor(rf.role)]).toEqual(order)

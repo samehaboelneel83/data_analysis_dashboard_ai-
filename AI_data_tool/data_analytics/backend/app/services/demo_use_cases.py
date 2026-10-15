@@ -150,11 +150,16 @@ def _quality_specs(sales: Dataset) -> list[tuple[str, str, int, int, dict]]:
         ("kpi", "Distinct products", 3, 3, {
             "measure": "product", "aggregation": "countd",
         }),
-        ("kpi", "Missing cost", 3, 3, {
-            "measure": "cost", "aggregation": "count",
+        # C-03: was "Missing cost" = count(cost), which counts the values that
+        # are NOT missing (and the demo's cost has none). Refunds are real
+        # (about 3% of rows) and are exactly what the prep step removes.
+        ("kpi", "Refund rows", 3, 3, {
+            "measure": "revenue", "aggregation": "count",
+            "filters": [{"column": "revenue", "op": "lt", "value": 0}],
         }),
+        # A card reads `measures` (a list); `measure` left it on "Needs Fields".
         ("card", "Prepared", 3, 3, {
-            "measure": "revenue", "aggregation": "sum",
+            "measures": ["revenue"], "aggregation": "sum",
         }),
         ("bar", "Revenue by category — as loaded", 6, 5, {
             "dimension": "category", "measure": "revenue", "aggregation": "sum",
@@ -440,11 +445,16 @@ async def _apply_quality_features(
 
     prepared = by_title.get("Revenue by category — prepared")
     if prepared is not None:
-        _patch_config(prepared, prep_steps=[
-            # Drop the rows a real feed would arrive with: no cost means no
-            # margin, and averaging over them understates every category.
-            {"kind": "filter", "column": "cost", "op": "gt", "value": 0},
-        ])
+        # C-03: drop the refund rows. The step used to filter `cost > 0`, but
+        # cost is never missing or zero in the demo, and nothing reads a
+        # widget's `prep_steps`, so the two charts were identical. The step is
+        # kept as the record of what was done; the filter beside it applies it.
+        _drop_refunds = {"column": "revenue", "op": "gt", "value": 0}
+        _patch_config(prepared, prep_steps=[{"kind": "filter", **_drop_refunds}],
+                      filters=[_drop_refunds])
+    card = by_title.get("Prepared")
+    if card is not None:
+        _patch_config(card, filters=[{"column": "revenue", "op": "gt", "value": 0}])
 
     changed = by_title.get("Rows the prep steps changed")
     if changed is not None:

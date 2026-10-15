@@ -26,7 +26,7 @@ import { AGGREGATIONS, DUAL_MEASURE_WIDGETS, MULTI_MEASURE_WIDGETS, PIVOT_WIDGET
 import { dtypeShort } from '../../lib/dtypeName'
 import { useT } from '../../i18n'
 import { ASSIGN_DATA_EVENT, ADD_DATASET_EVENT, emptyPickerReason } from './WidgetPlaceholder'
-import { fieldUse, semanticAggregationWarning, nonAdditiveKind, SAFE_AGGREGATION } from '../../lib/semanticGuard'
+import { fieldUse, semanticAggregationWarning, nonAdditiveKind, SAFE_AGGREGATION, defaultSummary } from '../../lib/semanticGuard'
 import { savePending, clearPending } from '../../lib/pendingEdits'
 import type { DatasetColumn, Dataset } from '../../services/api'
 import InteractionSettings from './InteractionSettings'
@@ -389,7 +389,6 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
   const [hierIdCol,     setHierIdCol]     = useState<string>((cfg.id_col as string) ?? '')
   const [hierParentCol, setHierParentCol] = useState<string>((cfg.parent_col as string) ?? '')
   const [hierLabelCol,  setHierLabelCol]  = useState<string>((cfg.label_col as string) ?? '')
-  const [facetBy,       setFacetBy]       = useState<string>((cfg.facet_by as string) ?? '')
   const [facetInner,    setFacetInner]    = useState<string>((cfg.inner_widget_type as string) ?? 'bar')
   const [facetLimit,    setFacetLimit]    = useState<string>(String(cfg.facet_limit ?? FACET_MAX_PANELS))
   const [forecastPeriods, setForecastPeriods] = useState<string>(
@@ -658,7 +657,7 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
         }
       }
       if (wt === 'small_multiples') {
-        if (facetBy) config.facet_by = facetBy
+        // C-23: facet_by is the 'facet' role now, written with the other roles.
         config.inner_widget_type = facetInner
         const lim = Number(facetLimit)
         if (lim > 0) config.facet_limit = Math.min(lim, FACET_MAX_PANELS)
@@ -892,7 +891,7 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
     // panel BUILD the config and never re-emit it -- the controls would
     // appear to work and save nothing.
     hierMode, hierLevels, hierIdCol, hierParentCol, hierLabelCol,
-    facetBy, facetInner, facetLimit, forecastPeriods,
+    facetInner, facetLimit, forecastPeriods,
     // Stringified because it is an array of objects: by identity it changes on
     // every keystroke that rebuilds the list, and by omission it never changes
     // at all -- which is the failure the comment above describes, and the one
@@ -1202,6 +1201,17 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
     if (rf.role === 'category') { pickCategory(values[0] ?? ''); return }
     if (rf.role === 'category2') { pickColumns(values[0] ?? ''); return }
     setRole(rf.role, values[0] ?? '')
+    // C-11: a measure starts on the summary that means something for it -- a
+    // percentage or rate is averaged, never summed (a right axis read 12,000%).
+    // Only over the defaults: an aggregation the author picked is kept.
+    const col = values[0]
+    if (col && rf.role === 'measure') {
+      const s = defaultSummary(col)
+      if ((agg === 'sum' && s !== 'sum') || (!roleValues.measure && agg === 'count')) setAgg(s)
+    } else if (col && rf.role === 'measure2' && !agg2) {
+      const s = defaultSummary(col)
+      if (s !== agg) setAgg2(s)
+    }
   }
   const assignedFields: Record<string, string[]> = Object.fromEntries(roleSpecs.map(rf => [rf.role, fieldsOf(rf)]))
   // QA6 B4: the Fields panel's rule (fieldUse), so "year" is a category here too.
@@ -1214,6 +1224,18 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
   const objectLabel = (w: { title?: string | null; widget_type: string; id: number }) =>
     w.title || `${w.widget_type.charAt(0).toUpperCase()}${w.widget_type.slice(1).replace(/_/g, ' ')} ${w.id}`
   const openAssign = (role: string | null) => { setAssignRole(role); setAssignOpen(true) }
+  // C-27: a field dropped on a role from the Fields panel -- taken only when the
+  // role's own picker would offer it (the same rule, roleChoices), so a text
+  // field dropped on Latitude is refused rather than saved.
+  const dropFieldOnRole = (role: string, column: string): boolean => {
+    const rf = roleSpecs.find(r => r.role === role)
+    if (!rf || addBlocked(role)) return false
+    const current = fieldsOf(rf)
+    if (current.includes(column)) return true
+    if (!roleChoices(rf, current).some(c => c.value === column)) return false
+    setFields(rf, rf.multi ? [...current, column] : [column])
+    return true
+  }
   const removeField = (role: string, f: string) => {
     const rf = roleSpecs.find(r => r.role === role)
     if (!rf) return
@@ -1300,7 +1322,21 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
         <span aria-hidden style={{ fontSize:17, lineHeight:1 }}>+</span> {L("Assign data")}
       </button>
       <DataRolesList specs={roleSpecs} values={assignedFields} kindOf={fieldKind} displayName={displayName}
-        onAdd={role => setAddRole(role)} onRemove={removeField} renderDetails={fieldDetails} addBlocked={addBlocked} />
+        onAdd={role => setAddRole(role)} onRemove={removeField} renderDetails={fieldDetails} addBlocked={addBlocked}
+        onDropField={dropFieldOnRole} />
+      {/* C-10: which of a point/bubble map's two modes is in force. */}
+      {(wt === 'map_points' || wt === 'map_bubbles') && (roleValues.category || roleValues.lat || roleValues.lon) && (
+        <div data-testid="map-mode-hint" style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
+          {tt(roleValues.lat && roleValues.lon ? 'cr.mapModeCoords' : roleValues.lat || roleValues.lon ? 'cr.mapModeHalf' : 'cr.mapModeCountry')}
+        </div>
+      )}
+      {/* C-06: a word cloud sizes WORDS; a numeric column as its text draws
+          numbers as words (and "Word text" accepts any column). Said here. */}
+      {wt === 'word_cloud' && roleValues.category && fieldKind(roleValues.category) === 'measure' && (
+        <div role="note" data-testid="word-text-numeric" style={{ fontSize: 11, color: 'var(--danger, #c0392b)', marginTop: 6 }}>
+          {tt('cr.wordTextNumeric', { field: roleValues.category })}
+        </div>
+      )}
     </div>
   )
   // Which fields a role may be given -- the ONE rule both the dialog's pickers
@@ -1955,7 +1991,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 <label htmlFor="facet-by" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)' }}>
                   {L("Facet by")}
                 </label>
-                <select id="facet-by" value={facetBy} onChange={e => setFacetBy(e.target.value)}
+                <select id="facet-by" value={roleValues.facet ?? ''} onChange={e => setRole('facet', e.target.value)}
                   style={{ width:'100%' }}>
                   <option value="">{L("— choose a column —")}</option>
                   {effectiveCols.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
@@ -2950,7 +2986,8 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
         <AssignDataDialog objectName={objectLabel({ title, widget_type: wt, id: widget.id })}
           focusRole={assignRole} onClose={() => setAssignOpen(false)}>
           <DataRolesList specs={roleSpecs} values={assignedFields} kindOf={fieldKind} displayName={displayName}
-            onAdd={role => setAddRole(role)} onRemove={removeField} addBlocked={addBlocked} />
+            onAdd={role => setAddRole(role)} onRemove={removeField} addBlocked={addBlocked}
+            onDropField={dropFieldOnRole} />
         </AssignDataDialog>
       )}
       {addRole && (() => {

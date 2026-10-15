@@ -1,3 +1,4 @@
+import toast from 'react-hot-toast'
 import { sanitizeErrorDetail } from '../lib/friendlyError'
 import { describe, it, expect, vi, afterEach, beforeEach, beforeAll } from 'vitest'
 import { render, screen, fireEvent, within, waitFor, act } from '@testing-library/react'
@@ -43,6 +44,9 @@ vi.mock('../services/api', () => ({
   translationsApi: { list: vi.fn().mockResolvedValue({}), save: vi.fn() },
   relationshipsApi: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), delete: vi.fn() },
   widgetDataApi: { query: vi.fn().mockResolvedValue({ rows: [], sampled: false }) },
+  // The page copilot starts the dataset's shared insight scan 2.5 s after it
+  // mounts; many tests here run longer than that, so the export must exist.
+  insightsApi: { runShared: vi.fn().mockResolvedValue({ narrative: '', findings: [] }) },
   themesApi: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), delete: vi.fn() },
   parametersApi: { list: vi.fn().mockResolvedValue([]), save: vi.fn() },
   pageTemplatesApi: { builtins: vi.fn().mockResolvedValue([]), list: vi.fn().mockResolvedValue([]), saveFrom: vi.fn(), addFrom: vi.fn(), delete: vi.fn() },
@@ -2354,6 +2358,21 @@ describe('duplicating a widget on the page', () => {
     expect((body as { title: string }).title).toMatch(/copy/i)
   })
 
+  it('C-12: the "Duplicated" toast offers Undo, which removes the copy', async () => {
+    const spy = vi.spyOn(toast, 'success')
+    vi.mocked(reportsApi.deleteWidget).mockClear().mockResolvedValue(undefined as any)
+    try {
+      await builderWithWidget()
+      fireEvent.click(await screen.findByRole('button', { name: /More actions for widget Sales by Region/ }))
+      fireEvent.click(await screen.findByRole('menuitem', { name: /duplicate widget/i }))
+      await waitFor(() => expect(spy.mock.calls.some(c => typeof c[0] === 'function')).toBe(true))
+      const render_ = spy.mock.calls.find(c => typeof c[0] === 'function')![0] as (t: { id: string }) => Parameters<typeof render>[0]
+      const { container } = render(render_({ id: 'x' }))
+      fireEvent.click(within(container).getByRole('button', { name: 'Undo' }))
+      await waitFor(() => expect(reportsApi.deleteWidget).toHaveBeenCalledWith(1, 100, 77))
+    } finally { spy.mockRestore() }
+  })
+
   it('puts the copy below the original rather than on top of it', async () => {
     // Placed at the same x/y it would be invisible — the author would think
     // nothing happened and press it again.
@@ -3103,5 +3122,104 @@ describe('ReportBuilder Suggestions: "Add all shown" (F-15)', () => {
     // Below the existing widget (y 0..5), each below the one before.
     expect(boxes[0].y).toBe(5)
     for (let i = 1; i < boxes.length; i++) expect(boxes[i].y).toBe(boxes[i - 1].y + boxes[i - 1].h)
+  })
+})
+
+describe('C-04: a page change drops a selection that is not on the new page', () => {
+  const datasetWithColumns = () => ({ id: 10, name: 'Sales Data', columns: [
+    { id: 1, name: 'region', dtype: 'text', missing_pct: 0, stats: {} },
+    { id: 2, name: 'sales', dtype: 'numeric', missing_pct: 0, stats: {} }] })
+  it('adding a page while a widget is selected clears the selection; no update goes to the old widget', async () => {
+    const r = reportWithWidget()
+    const withTwo = reportWithWidget()
+    withTwo.pages.push({ id: 101, report_id: 1, name: 'Page 2', page_type: 'normal', position: 1,
+      created_at: '2026-01-01', widgets: [] } as any)
+    vi.mocked(reportsApi.get).mockReset()
+    vi.mocked(reportsApi.get).mockResolvedValue(r as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue(datasetWithColumns() as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    vi.mocked(reportsApi.updateWidget).mockReset().mockResolvedValue({} as any)
+    vi.mocked(reportsApi.addPage).mockResolvedValue({ id: 101, report_id: 1, name: 'Page 2', position: 1, widgets: [] } as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    fireEvent.click(await screen.findByText('Sales by Region'))
+    await screen.findByText('Widget: Sales by Region')
+
+    vi.mocked(reportsApi.get).mockResolvedValue(withTwo as any)
+    fireEvent.click(screen.getByRole('button', { name: 'Add page' }))
+    await waitFor(() => expect(reportsApi.addPage).toHaveBeenCalled())
+    await waitFor(() => expect(screen.queryByText('Widget: Sales by Region')).not.toBeInTheDocument())
+    expect(reportsApi.updateWidget).not.toHaveBeenCalledWith(1, 101, 5, expect.anything())
+  })
+})
+
+describe('C-05: the dataset chosen at create time shows as soon as the builder opens', () => {
+  const ds = () => ({ id: 10, name: 'Demo — Sales', columns: [
+    { id: 1, name: 'region', dtype: 'text', missing_pct: 0, stats: {} },
+    { id: 2, name: 'sales', dtype: 'numeric', missing_pct: 0, stats: {} }] })
+
+  it('a failed first dataset fetch is retried; the fields appear and "Attach a dataset" never shows', async () => {
+    vi.mocked(reportsApi.get).mockReset().mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockReset()
+      .mockRejectedValueOnce(new Error('timeout'))
+      .mockResolvedValue(ds() as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    expect(await screen.findByRole('button', { name: /^[#ƒx Aa]* ?sales$/ })).toBeInTheDocument()
+    expect(screen.queryByText('Attach a dataset to this report to browse columns.')).toBeNull()
+  })
+
+  it('a dataset that keeps failing says so and offers Retry, not "Attach a dataset"', async () => {
+    vi.mocked(reportsApi.get).mockReset().mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockReset().mockRejectedValue(new Error('down'))
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    expect(await screen.findByTestId('dataset-load-error')).toHaveTextContent(/couldn.t load/i)
+    expect(screen.queryByText('Attach a dataset to this report to browse columns.')).toBeNull()
+    vi.mocked(datasetsApi.get).mockResolvedValue(ds() as any)
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(await screen.findByRole('button', { name: /^[#ƒx Aa]* ?sales$/ })).toBeInTheDocument()
+  })
+})
+
+describe('C-17: my own classification is not "changed in another session"', () => {
+  it('classifying syncs the known revision; the next poll raises no banner', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      vi.mocked(reportsApi.get).mockReset().mockResolvedValue({ ...baseReport(), revision: 3 } as any)
+      vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+      vi.mocked(reportsApi.getRevision).mockReset().mockResolvedValue(3)
+      vi.mocked(reportsApi.setClassification).mockReset().mockImplementation(async () => {
+        // The server bumps the revision for this write.
+        vi.mocked(reportsApi.getRevision).mockResolvedValue(4)
+        return { ...baseReport(), classification: 'Confidential', revision: 4 } as any
+      })
+      renderBuilder()
+      await screen.findByTestId('view-strip')
+      await waitFor(() => expect(reportsApi.getRevision).toHaveBeenCalled())
+      fireEvent.change(screen.getByLabelText('Sensitivity label'), { target: { value: 'Confidential' } })
+      await waitFor(() => expect(reportsApi.setClassification).toHaveBeenCalledWith(1, 'Confidential'))
+      await act(async () => { await vi.advanceTimersByTimeAsync(21_000) })
+      expect(screen.queryByText(/changed in another session/i)).not.toBeInTheDocument()
+    } finally { vi.useRealTimers() }
+  })
+})
+
+describe('C-19: resizing a widget', () => {
+  it('selects no page text while the handle is dragged, and restores it after', async () => {
+    vi.mocked(reportsApi.get).mockReset().mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    const handle = await screen.findByTestId('widget-resize-handle')
+    expect(parseFloat(handle.style.width)).toBeGreaterThanOrEqual(24)
+    fireEvent.pointerDown(handle, { clientX: 100, clientY: 100, pointerId: 1 })
+    await waitFor(() => expect(document.body.style.userSelect).toBe('none'))
+    fireEvent.pointerMove(window, { clientX: 300, clientY: 100, pointerId: 1 })
+    fireEvent.pointerUp(window, { clientX: 300, clientY: 100, pointerId: 1 })
+    await waitFor(() => expect(document.body.style.userSelect).toBe(''))
   })
 })

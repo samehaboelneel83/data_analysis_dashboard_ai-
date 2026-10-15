@@ -229,13 +229,16 @@ function arc(cx: number, cy: number, r0: number, r1: number,
          `L${x2},${y2}A${r0},${r0} 0 ${large} 0 ${x3},${y3}Z`
 }
 
-function Sunburst({ node, fmt, onZoomInto, onZoomOut }: {
+function Sunburst({ node, fmt, onZoomInto, onZoomOut, plotW, plotH }: {
   node: Node; fmt?: CalcColumnFormat | null
   onZoomInto?: (path: string[]) => void; onZoomOut?: () => void
+  plotW?: number; plotH?: number
 }) {
   const t9 = useT()
   const t = useT()
-  const size = 260, cx = size / 2, cy = size / 2
+  // C-15: as big as the tile allows (it was a fixed 260px).
+  const fit = plotW && plotH ? Math.floor(Math.min(plotW, plotH) - 8) : 0
+  const size = fit > 120 ? fit : 260, cx = size / 2, cy = size / 2
   const maxDepth = useMemo(() => {
     let d = 0
     const walk = (n: Node, depth: number) => {
@@ -248,15 +251,32 @@ function Sunburst({ node, fmt, onZoomInto, onZoomOut }: {
   const ring = (cx - 10) / (maxDepth + 1)
 
   const segments: JSX.Element[] = []
-  const walk = (n: Node, depth: number, a0: number, a1: number, p: string[] = []) => {
+  const labels: JSX.Element[] = []
+  // C-15: each top-level branch has its own colour, carried down to its
+  // descendants (lighter per ring), and a segment wide enough for its name
+  // says it -- every ring was one blue with the names only in tooltips.
+  const walk = (n: Node, depth: number, a0: number, a1: number, p: string[] = [], branch = 0) => {
     if (depth > 0) {
+      const mid = (a0 + a1) / 2, r = (depth + 0.5) * ring
+      const name = String(n.name ?? '')
+      if ((a1 - a0) * r >= name.length * 6 + 6 && ring >= 13) {
+        const deg = (mid * 180) / Math.PI
+        const flip = deg > 90 && deg < 270 ? 180 : 0
+        labels.push(
+          <text key={`l-${name}-${depth}-${a0.toFixed(3)}`} aria-hidden="true"
+            x={cx + r * Math.cos(mid - Math.PI / 2)} y={cy + r * Math.sin(mid - Math.PI / 2)}
+            transform={`rotate(${deg + flip} ${cx + r * Math.cos(mid - Math.PI / 2)} ${cy + r * Math.sin(mid - Math.PI / 2)})`}
+            textAnchor="middle" dominantBaseline="central" fontSize={10}
+            style={{ fill: '#fff', pointerEvents: 'none' }}>{name}</text>)
+      }
       // A ring segment with children zooms in on click (hierarchy plan, step 4).
       const zoomable = !!onZoomInto && !!n.children?.length && !n.is_other
       const zoom = () => onZoomInto?.(p)
       segments.push(
         <path key={`${n.name}-${depth}-${a0.toFixed(3)}`}
           d={arc(cx, cy, depth * ring, (depth + 1) * ring, a0, a1)}
-          fill={seriesColor(0)} opacity={1 - depth * 0.15}
+          fill={seriesColor(branch)} opacity={1 - (depth - 1) * 0.18}
+          data-depth={depth} data-branch={branch}
           stroke="var(--surface)" strokeWidth={1}
           role={zoomable ? 'button' : undefined} tabIndex={zoomable ? 0 : undefined}
           aria-label={zoomable ? t('hz.zoom', { name: n.name }) : undefined}
@@ -268,13 +288,13 @@ function Sunburst({ node, fmt, onZoomInto, onZoomOut }: {
     }
     const total = (n.children ?? []).reduce((s, c) => s + (c.value ?? 0), 0)
     let a = a0
-    for (const c of n.children ?? []) {
+    ;(n.children ?? []).forEach((c, i) => {
       // The parent's angle is divided among its children by value -- which is
       // exactly why the shaper refuses non-additive aggregations here.
       const span = total > 0 ? ((c.value ?? 0) / total) * (a1 - a0) : 0
-      walk(c, depth + 1, a, a + span, [...p, c.name])
+      walk(c, depth + 1, a, a + span, [...p, c.name], depth === 0 ? i : branch)
       a += span
-    }
+    })
   }
   walk(node, 0, 0, Math.PI * 2)
 
@@ -283,6 +303,7 @@ function Sunburst({ node, fmt, onZoomInto, onZoomOut }: {
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}
         role="group" aria-label={t('i2c.hz.sunburst')}>
         {segments}
+        {labels}
         {/* The centre zooms back out one level. */}
         {onZoomOut && (
           <circle cx={cx} cy={cy} r={ring * 0.9} fill="transparent" role="button" tabIndex={0}
@@ -436,7 +457,7 @@ function LinkTree({ node, fmt, compact }: {
 // ── Entry point ─────────────────────────────────────────────────────────────
 
 export default function HierarchyRenderer(
-  { data, rtl, measureFmt, treePaths, onTreeChange }: ChartRendererProps,
+  { data, rtl, measureFmt, treePaths, onTreeChange, plotW, plotH }: ChartRendererProps,
 ) {
   const t = useT()
   const fullRoot: Node | undefined = data?.root
@@ -460,7 +481,7 @@ export default function HierarchyRenderer(
   const count = nodeCount(fullRoot!)
 
   const body = (() => {
-    if (kind === 'sunburst') return <Sunburst key={shownPath.join('\u0000')} node={root} fmt={measureFmt}
+    if (kind === 'sunburst') return <Sunburst key={shownPath.join('\u0000')} node={root} fmt={measureFmt} plotW={plotW} plotH={plotH}
       onZoomInto={zoomInto} onZoomOut={shownPath.length ? () => setZoomPath(shownPath.slice(0, -1)) : undefined} />
     if (kind === 'icicle') return <Icicle node={root} fmt={measureFmt} onZoomInto={zoomInto} />
     if (kind === 'circle_pack') return <CirclePack node={root} fmt={measureFmt} />

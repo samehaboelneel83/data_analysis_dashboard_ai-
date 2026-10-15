@@ -78,7 +78,10 @@ export function NewDashboardDialog({ datasets, folders, initialMode, initialFold
   }, [mode, templates])
 
   // With AI proposes from a dataset; the others can choose data later.
-  const blocked = busy || (mode === 'ai' && datasetId == null) || (mode === 'tpl' && !template)
+  // C-30 (QA DASH-04): a dashboard is created with a name the author gave it;
+  // an empty name used to create "Untitled dashboard N" silently.
+  const needsName = mode !== 'ai' && !name.trim()
+  const blocked = busy || needsName || (mode === 'ai' && datasetId == null) || (mode === 'tpl' && !template)
   const submit = () => { if (!blocked) onCreate({ mode, name: name.trim(), datasetId, folderId, template, goal: goal.trim() }) }
 
   return (
@@ -124,7 +127,9 @@ export function NewDashboardDialog({ datasets, folders, initialMode, initialFold
               <div>
                 <label htmlFor="dsh-name">{t('dsh.new.name')}</label>
                 <input id="dsh-name" className="dsh-in" value={name} onChange={e => setName(e.target.value)} placeholder={placeholderName} dir="auto"
+                  aria-required="true" aria-invalid={needsName || undefined} aria-describedby={needsName ? 'dsh-name-req' : undefined}
                   onKeyDown={e => { if (e.key === 'Enter') submit() }} />
+                {needsName && <p id="dsh-name-req" className="dsh-note" style={{ margin: '4px 0 0' }}>{t('dsh.new.nameRequired')}</p>}
               </div>
             )}
             <div>

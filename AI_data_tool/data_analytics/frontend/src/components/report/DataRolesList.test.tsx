@@ -3,6 +3,7 @@ import { render, screen, fireEvent, act, within } from '@testing-library/react'
 import WidgetConfigPanel from './WidgetConfigPanel'
 import { CrossFilterProvider } from './CrossFilterContext'
 import { ASSIGN_DATA_EVENT } from './WidgetPlaceholder'
+import { AddFieldDialog } from './DataRolesList'
 import type { Widget, ReportPage } from '../../types/report'
 import type { DatasetColumn } from '../../services/api'
 
@@ -105,7 +106,7 @@ describe('+ Add', () => {
     expect(box('sales').checked).toBe(true)
     expect(within(dialog).queryByRole('checkbox', { name: /region/ })).toBeNull()   // numbers only
     fireEvent.click(box('cost'))
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }))  // C-26: ticks apply at once
     act(() => { vi.advanceTimersByTime(700) })
     expect(lastConfig(onUpdate)).toMatchObject({ measure: 'sales', extra_measures: ['cost'] })
     expect(screen.getByRole('button', { name: 'cost, Measure' })).toBeTruthy()
@@ -137,7 +138,7 @@ describe('+ Add', () => {
     expect(within(dialog).queryByRole('checkbox', { name: /region/ })).toBeNull()
     fireEvent.click(box('units'))
     fireEvent.click(box('cost'))
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }))  // C-26: ticks apply at once
     act(() => { vi.advanceTimersByTime(700) })
     expect(lastConfig(onUpdate).measures).toEqual(['sales', 'units', 'cost'])
   })
@@ -173,6 +174,27 @@ describe('Assign data', () => {
   })
 
 
+  it('C-04: a press on the backdrop alone does not close it; a full click on the backdrop does', () => {
+    renderPanel(bar())
+    fireEvent.click(screen.getByRole('button', { name: /^Assign data$/ }))
+    const backdrop = screen.getByRole('dialog', { name: /^Assign data/ }).parentElement!
+    // Closing on mousedown let the release land on whatever was under the
+    // backdrop (the page-tab "+" created a page).
+    fireEvent.mouseDown(backdrop)
+    expect(screen.getByRole('dialog', { name: /^Assign data/ })).toBeTruthy()
+    fireEvent.click(backdrop)
+    expect(screen.queryByRole('dialog', { name: /^Assign data/ })).toBeNull()
+  })
+
+  it('C-04: a press that starts inside the dialog and ends on the backdrop does not close it', () => {
+    renderPanel(bar())
+    fireEvent.click(screen.getByRole('button', { name: /^Assign data$/ }))
+    const dialog = screen.getByRole('dialog', { name: /^Assign data/ })
+    fireEvent.mouseDown(dialog)
+    fireEvent.click(dialog.parentElement!)
+    expect(screen.getByRole('dialog', { name: /^Assign data/ })).toBeTruthy()
+  })
+
   it('opens by itself when a chart is inserted', () => {
     renderPanel(bar())
     expect(screen.queryByRole('dialog')).toBeNull()
@@ -190,5 +212,94 @@ describe('Assign data', () => {
     window.removeEventListener(ASSIGN_DATA_EVENT, spy)
     expect(seen).toEqual([{ widgetId: 2, open: false }])
     expect(screen.queryByRole('dialog')).toBeNull()
+  })
+})
+
+describe('C-26: a several-field role applies each tick at once', () => {
+  it('ticking a field calls onApply without a footer button, and the dialog stays open', () => {
+    const onApply = vi.fn(), onClose = vi.fn()
+    render(<AddFieldDialog heading="Rows" multi selected={[]} onApply={onApply} onClose={onClose}
+      choices={[{ value: 'region', label: 'region' }, { value: 'product', label: 'product' }]} />)
+    const dialog = screen.getByRole('dialog', { name: 'Add Rows' })
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: /^region/ }))
+    expect(onApply).toHaveBeenLastCalledWith(['region'])
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: /^product/ }))
+    expect(onApply).toHaveBeenLastCalledWith(['region', 'product'])
+    expect(onClose).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }))
+    expect(onClose).toHaveBeenCalled()
+  })
+})
+
+describe('C-27: a field dropped onto a role in the Properties pane', () => {
+  const dt = (field: string) => ({ types: ['application/x-field'], getData: (k: string) => (k === 'application/x-field' ? field : ''),
+    dropEffect: 'none', effectAllowed: 'all' })
+  it('a numeric field dropped on the Measure role fills it', () => {
+    const onUpdate = renderPanel(bar({ dimension: 'region' }))
+    const section = document.querySelector('[data-roles-section="measure"]') as HTMLElement
+    fireEvent.dragOver(section, { dataTransfer: dt('sales') })
+    fireEvent.drop(section, { dataTransfer: dt('sales') })
+    act(() => { vi.advanceTimersByTime(700) })
+    expect(lastConfig(onUpdate)).toMatchObject({ dimension: 'region', measure: 'sales' })
+  })
+  it('a text field dropped on the Measure role is refused', () => {
+    const onUpdate = renderPanel(bar({ dimension: 'ordered_at' }))
+    const section = document.querySelector('[data-roles-section="measure"]') as HTMLElement
+    fireEvent.drop(section, { dataTransfer: dt('region') })
+    act(() => { vi.advanceTimersByTime(700) })
+    expect(onUpdate.mock.calls.every(c => c[0].measure !== 'region')).toBe(true)
+  })
+})
+
+describe('C-28: the field picker from the keyboard', () => {
+  const choices = [{ value: 'origin_lat', label: 'origin_lat' }, { value: 'origin_lon', label: 'origin_lon' },
+                   { value: 'dest_lat', label: 'dest_lat' }]
+  it('Enter takes the single match', () => {
+    const onApply = vi.fn(), onClose = vi.fn()
+    render(<AddFieldDialog heading="Latitude" multi={false} selected={[]} choices={choices} onApply={onApply} onClose={onClose} />)
+    const search = screen.getByRole('searchbox')
+    fireEvent.change(search, { target: { value: 'origin_la' } })
+    fireEvent.keyDown(search, { key: 'Enter' })
+    expect(onApply).toHaveBeenCalledWith(['origin_lat'])
+  })
+  it('Enter with several matches does nothing', () => {
+    const onApply = vi.fn()
+    render(<AddFieldDialog heading="Latitude" multi={false} selected={[]} choices={choices} onApply={onApply} onClose={vi.fn()} />)
+    const search = screen.getByRole('searchbox')
+    fireEvent.change(search, { target: { value: 'lat' } })
+    fireEvent.keyDown(search, { key: 'Enter' })
+    expect(onApply).not.toHaveBeenCalled()
+  })
+  it('each option is named with its role, unlike the field-list button of the same field', () => {
+    render(<AddFieldDialog heading="Latitude" multi={false} selected={[]} choices={choices} onApply={vi.fn()} onClose={vi.fn()} />)
+    expect(screen.getByRole('option', { name: 'Use origin_lat for Latitude' })).toBeTruthy()
+  })
+})
+
+describe('C-06: a number chosen as Word text', () => {
+  it('is flagged in the Data roles pane', () => {
+    const w = { ...bar({ dimension: 'sales' }), widget_type: 'word_cloud' } as Widget
+    render(<CrossFilterProvider><WidgetConfigPanel widget={w} columns={COLUMNS}
+      onUpdate={vi.fn()} pages={page([w])} /></CrossFilterProvider>)
+    expect(screen.getByTestId('word-text-numeric')).toHaveTextContent(/number/i)
+  })
+  it('a text column raises no flag', () => {
+    const w = { ...bar({ dimension: 'region' }), widget_type: 'word_cloud' } as Widget
+    render(<CrossFilterProvider><WidgetConfigPanel widget={w} columns={COLUMNS}
+      onUpdate={vi.fn()} pages={page([w])} /></CrossFilterProvider>)
+    expect(screen.queryByTestId('word-text-numeric')).toBeNull()
+  })
+})
+
+describe('C-10: a point map says how it places its markers', () => {
+  const map = (config: Record<string, unknown>) => ({ ...bar(config), widget_type: 'map_points' } as Widget)
+  it('by coordinates when both are set, by country otherwise', () => {
+    const { unmount } = render(<CrossFilterProvider><WidgetConfigPanel widget={map({ lat: 'a', lon: 'b', dimension: 'region' })}
+      columns={COLUMNS} onUpdate={vi.fn()} pages={page([map({})])} /></CrossFilterProvider>)
+    expect(screen.getByTestId('map-mode-hint')).toHaveTextContent(/coordinates/i)
+    unmount()
+    render(<CrossFilterProvider><WidgetConfigPanel widget={map({ dimension: 'region' })}
+      columns={COLUMNS} onUpdate={vi.fn()} pages={page([map({})])} /></CrossFilterProvider>)
+    expect(screen.getByTestId('map-mode-hint')).toHaveTextContent(/country/i)
   })
 })

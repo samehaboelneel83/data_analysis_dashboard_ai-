@@ -109,7 +109,8 @@ REQUIRED_ROLES: dict[str, tuple[str, ...]] = {
     "script": (),
     "shape": (),
     "slicer": ("category",),
-    "small_multiples": ("category",),
+    # C-23: the split field defines a small multiple (without it: one "All" panel).
+    "small_multiples": ("category", "facet"),
     "step": ("category",),
     "sunburst": (),
     "table": ("category",),
@@ -125,7 +126,7 @@ REQUIRED_ROLES: dict[str, tuple[str, ...]] = {
 #: role -> the config key that carries it. Two roles are spelled differently in a
 #: config than in a spec, for historical reasons; every other role uses its own
 #: name. This is the server-side twin of the frontend's `configKeyFor`.
-_ROLE_CONFIG_KEY = {"category": "dimension", "category2": "dimension2"}
+_ROLE_CONFIG_KEY = {"category": "dimension", "category2": "dimension2", "facet": "facet_by"}
 
 
 def config_key_for_role(role: str) -> str:

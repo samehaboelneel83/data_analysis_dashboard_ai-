@@ -1,17 +1,24 @@
 import { ScatterChart, Scatter, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList } from 'recharts'
-import { TT, fmtStr, seriesColor } from '../chartUtils'
+import { TT, fmtStr, seriesColor, EmptyState } from '../chartUtils'
+import { useT } from '../../../i18n'
 import type { ChartRendererProps } from './types'
 import { xAxisProps, yAxisProps, gridProps, labelListProps, chartMargin, valueTick } from './axisOptions'
 import { thinPoints, ANIMATE_MAX_POINTS } from '../../../lib/pointThinning'
 
 export default function ScatterChartRenderer({ rows, cfg, rtl, broadcasts, onClickPoint, measureFmt, allFormats, ruleStyles, plotW, plotH }: ChartRendererProps) {
+  const t = useT()
   const allPoints = rows.map((r: any) => ({ x: r.x ?? r.name, y: r.y ?? r.value }))
+  // C-07: recharts drops every point whose x is not a number, so a text
+  // dimension on X drew bare axes and said nothing.
+  const numericX = allPoints.some(p => p.x !== null && p.x !== '' && Number.isFinite(Number(p.x)))
+  if (allPoints.length > 0 && !numericX) return <EmptyState msg={t('cr.scatterNeedsNumericX')} />
   // Every row is data; only points that would overlap on screen are skipped
   // when DRAWING (lib/pointThinning). Axis ranges use every point.
   const { points: scatterData, index: drawnIndex } = thinPoints(allPoints, plotW, plotH)
   const animate = scatterData.length <= ANIMATE_MAX_POINTS
   const hasRuleFills = !!ruleStyles?.rows
-  const xFmt = allFormats?.[cfg.x_axis]
+  // C-07: with an X measure (measure2) each point is a category at (X, Y).
+  const xFmt = allFormats?.[cfg.x_axis] ?? (cfg.measure2 ? allFormats?.[cfg.measure2] : undefined)
   const yFmt = allFormats?.[cfg.y_axis] ?? measureFmt
   const grid = gridProps(cfg)
   const labels = labelListProps(cfg, yFmt, 'y', scatterData.length)

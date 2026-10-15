@@ -80,6 +80,36 @@ export function GeoLinesRenderer({ rows, measureFmt, broadcasts, localSelected,
   )
 }
 
+type ClusterMarker = { x: number; y: number; count: number; value?: number }
+
+/**
+ * C-29: merge markers whose circles overlap ON SCREEN (greedy, largest
+ * first), so a city split across two grid cells draws one bubble with one
+ * count -- not "34" over "37". Counts add; the position is the count-weighted
+ * centre; the value combines by the widget's aggregation (weighted mean for
+ * an average, min/max for those, otherwise a sum).
+ */
+export function mergeOverlapping(markers: ClusterMarker[], aggregation = 'sum'): ClusterMarker[] {
+  const maxC = Math.max(1, ...markers.map(m => m.count))
+  const r = (c: number) => 8 + 22 * Math.sqrt(c / maxC)
+  const merged: ClusterMarker[] = []
+  for (const m of [...markers].sort((a, b) => b.count - a.count)) {
+    const into = merged.find(o => Math.hypot(o.x - m.x, o.y - m.y) < r(o.count) + r(m.count))
+    if (!into) { merged.push({ ...m }); continue }
+    const n = into.count + m.count
+    if (into.value != null || m.value != null) {
+      const a = into.value ?? 0, b = m.value ?? 0
+      into.value = aggregation === 'avg' || aggregation === 'mean' || aggregation === 'average'
+        ? (a * into.count + b * m.count) / n
+        : aggregation === 'min' ? Math.min(a, b) : aggregation === 'max' ? Math.max(a, b) : a + b
+    }
+    into.x = (into.x * into.count + m.x * m.count) / n
+    into.y = (into.y * into.count + m.y * m.count) / n
+    into.count = n
+  }
+  return merged
+}
+
 /**
  * Grid-cluster map: each marker is one occupied grid cell from
  * shape_geo_clusters ({lat, lon, count, value?}). Radius is sqrt-scaled by the
@@ -91,7 +121,7 @@ export function GeoLinesRenderer({ rows, measureFmt, broadcasts, localSelected,
    behind a cluster, so a click has nothing truthful to filter by. Filtering by
    a grid cell the data never names would be a wrong answer dressed as a
    feature; pinned by a test in geoRenderers.test.tsx. */
-export function GeoClustersRenderer({ rows, measureFmt, plotW, plotH }: ChartRendererProps) {
+export function GeoClustersRenderer({ rows, cfg, measureFmt, plotW, plotH }: ChartRendererProps) {
   const t9 = useT()
   const [hover, setHover] = useState<string | null>(null)
   const { ref, w, h, tiles, view } = useMapBox(plotW, plotH)
@@ -111,8 +141,8 @@ export function GeoClustersRenderer({ rows, measureFmt, plotW, plotH }: ChartRen
       if (pt) out.push({ x: pt[0], y: pt[1], count: Number(r.count ?? 1),
         value: typeof r.value === 'number' ? r.value : undefined })
     }
-    return out
-  }, [rows, projection])
+    return mergeOverlapping(out, String(cfg?.aggregation ?? 'sum').toLowerCase())
+  }, [rows, projection, cfg?.aggregation])
 
   const maxC = Math.max(1, ...markers.map(m => m.count))
   const radius = (c: number) => 8 + 22 * Math.sqrt(c / maxC)

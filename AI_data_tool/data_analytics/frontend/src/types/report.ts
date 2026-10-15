@@ -237,7 +237,7 @@ export const WIDGET_CATALOG = [
   { type: 'analysis_result' as WidgetType, label: 'Analysis Result',  category: 'Models', icon: '∑', defaultW: 7, defaultH: 7 },
 ]
 
-export const ROLE_TO_CONFIG_KEY: Record<string, string> = { category: 'dimension', category2: 'dimension2', measure: 'measure' }
+export const ROLE_TO_CONFIG_KEY: Record<string, string> = { category: 'dimension', category2: 'dimension2', measure: 'measure', facet: 'facet_by' }
 export const configKeyFor = (role: string) => ROLE_TO_CONFIG_KEY[role] ?? role
 
 export interface RoleField {
@@ -344,7 +344,8 @@ export const ROLE_SPECS: Record<WidgetType, RoleField[]> = {
   donut:    [{ role: 'category', label: 'Dimension (Group / X-axis)', required: true },
              { role: 'measure',  label: 'Measure (numeric column)',   required: false }],
   scatter:  [{ role: 'category', label: 'Dimension (Group / X-axis)', required: true },
-             { role: 'measure',  label: 'Measure (numeric column)',   required: false }],
+             { role: 'measure',  label: 'Measure (numeric column)',   required: false },
+             { role: 'measure2', label: 'X axis (numeric, optional)', required: false }],
   treemap:  [{ role: 'category', label: 'Dimension (Group / X-axis)', required: true },
              { role: 'measure',  label: 'Measure (numeric column)',   required: false }],
   step: [{ role: 'category', label: 'Dimension (X-axis)',       required: true },
@@ -510,9 +511,12 @@ export const ROLE_SPECS: Record<WidgetType, RoleField[]> = {
   custom_graph: [{ role: 'category', label: 'Category', required: true }],
   dendrogram: [{ role: 'levels', label: 'Levels (outer first)', multi: true, required: false }, { role: 'measure', label: 'Value (optional)', required: false }],
   org: [{ role: 'levels', label: 'Levels (outer first)', multi: true, required: false }, { role: 'measure', label: 'Value (optional)', required: false }],
+  // C-23: `facet` is the field that DEFINES the chart -- one panel per value.
+  // Saved as `facet_by` (ROLE_TO_CONFIG_KEY); without it the widget drew one "All".
   small_multiples: [
     { role: 'category', label: 'Category', required: true },
     { role: 'measure',  label: 'Measure', required: false },
+    { role: 'facet',    label: 'Split into multiples by', required: true },
   ],
   map_pie: [
     { role: 'category',  label: 'Country',   required: true },
