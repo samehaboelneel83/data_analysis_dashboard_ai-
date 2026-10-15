@@ -188,6 +188,7 @@ export const en = {
   'auto.nextTry': '(next try {when})',
   'auto.openReport': 'Open report',
   'auto.retry': 'Retry now',
+  'auto.delete': 'Delete',
   'auto.cancel': 'Cancel',
   'auto.slow': 'Taking longer than usual',
   'auto.details': 'Details',

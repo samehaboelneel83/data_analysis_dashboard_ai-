@@ -249,6 +249,7 @@ export const en = {
   'pg.dataPages.act.api_key.revoke': 'api_key.revoke',
   'pg.dataPages.act.automation.approve': 'automation.approve',
   'pg.dataPages.act.automation.cancel': 'automation.cancel',
+  'pg.dataPages.act.automation.delete': 'automation.delete',
   'pg.dataPages.act.automation.reject': 'automation.reject',
   'pg.dataPages.act.automation.retry': 'automation.retry',
   'pg.dataPages.act.automation.start': 'automation.start',
@@ -598,6 +599,7 @@ export const ar: Record<keyof typeof en, string> = {
   'pg.dataPages.act.api_key.revoke': 'إلغاء مفتاح API',
   'pg.dataPages.act.automation.approve': 'الموافقة على أتمتة',
   'pg.dataPages.act.automation.cancel': 'إلغاء أتمتة',
+  'pg.dataPages.act.automation.delete': 'حذف تشغيل أتمتة',
   'pg.dataPages.act.automation.reject': 'رفض أتمتة',
   'pg.dataPages.act.automation.retry': 'إعادة محاولة أتمتة',
   'pg.dataPages.act.automation.start': 'بدء أتمتة',
@@ -719,7 +721,7 @@ export function activityActionName(t: TranslateFn, code: string): string {
  *  `record(...)` calls, plus `services/source_import.py`'s computed ones). The
  *  Activity page translates these; any other code is shown as written. */
 export const ACTIVITY_CODES: ReadonlySet<string> = new Set([
-  'agent.ask', 'api_key.create', 'api_key.revoke', 'automation.approve', 'automation.cancel',
+  'agent.ask', 'api_key.create', 'api_key.revoke', 'automation.approve', 'automation.cancel', 'automation.delete',
   'automation.reject', 'automation.retry', 'automation.start', 'boundary_pack.accept_terms',
   'calendar.fiscal_year', 'column_security_rule.create', 'column_security_rule.delete',
   'dataflow.capabilities', 'dataflow.create', 'dataflow.delete', 'dataflow.run', 'dataflow.update',

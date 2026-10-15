@@ -3237,6 +3237,8 @@ export const automationApi = {
     api.post<AutomationRunRow>(`/automation/runs/${id}/reject`, { reason: reason || null }).then(r => r.data),
   cancel: (id: number) => api.post<AutomationRunRow>(`/automation/runs/${id}/cancel`).then(r => r.data),
   retry: (id: number) => api.post<AutomationRunRow>(`/automation/runs/${id}/retry`).then(r => r.data),
+  /** AD-22: a stopped (failed or cancelled) run only. */
+  remove: (id: number) => api.delete(`/automation/runs/${id}`).then(() => undefined),
 }
 
 export const jobsApi = {

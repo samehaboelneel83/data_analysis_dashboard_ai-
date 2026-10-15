@@ -188,6 +188,7 @@ export const ar: Record<MessageKey, string> = {
   'auto.nextTry': '(المحاولة التالية {when})',
   'auto.openReport': 'افتح التقرير',
   'auto.retry': 'أعد المحاولة الآن',
+  'auto.delete': 'حذف',
   'auto.cancel': 'إلغاء',
   'auto.slow': 'يستغرق وقتًا أطول من المعتاد',
   'auto.details': 'التفاصيل',

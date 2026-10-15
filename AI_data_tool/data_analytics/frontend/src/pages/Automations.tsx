@@ -141,9 +141,17 @@ export default function Automations() {
     }
   }
 
-  const act = async (run: AutomationRunRow, what: 'approve' | 'reject' | 'cancel' | 'retry') => {
+  const act = async (run: AutomationRunRow, what: 'approve' | 'reject' | 'cancel' | 'retry' | 'remove') => {
     setBusy(run.id)
     try {
+      if (what === 'remove') {
+        // AD-22: a stopped run can be removed; the list reloads without it.
+        await automationApi.remove(run.id)
+        setRuns(rs => rs?.filter(r => r.id !== run.id) ?? rs)
+        if (open === run.id) setOpen(null)
+        await load()
+        return
+      }
       const next = what === 'reject' ? await automationApi.reject(run.id, reason.trim() || undefined)
         : await automationApi[what](run.id)
       setDetail(d => ({ ...d, [run.id]: next }))
@@ -219,8 +227,11 @@ export default function Automations() {
                   {run.result_report && (
                     <Link className="btn btn-sm" to={`/reports/${run.result_report.id}`}>{t('auto.openReport')}</Link>
                   )}
-                  {run.status === 'failed' && (
+                  {(run.status === 'failed' || run.status === 'cancelled') && (
                     <button className="btn btn-ghost btn-sm" disabled={busy === run.id} onClick={() => void act(run, 'retry')}>{t('auto.retry')}</button>
+                  )}
+                  {(run.status === 'failed' || run.status === 'cancelled') && (
+                    <button className="btn btn-ghost btn-sm" disabled={busy === run.id} onClick={() => void act(run, 'remove')}>{t('auto.delete')}</button>
                   )}
                   {isRunSlow(run, datasets.find(x => x.id === run.dataset?.id)?.row_count) && (
                     <span data-testid="run-slow" role="status" style={{ fontSize: 12, color: 'var(--warning, #b45309)', alignSelf: 'center' }}>

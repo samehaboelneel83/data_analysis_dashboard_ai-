@@ -8,7 +8,7 @@ import { automationApi, datasetsApi } from '../services/api'
 
 vi.mock('../services/api', async (orig) => ({
   ...(await orig<Record<string, unknown>>()),
-  automationApi: { list: vi.fn(), get: vi.fn(), start: vi.fn(), approve: vi.fn(), reject: vi.fn(), cancel: vi.fn(), retry: vi.fn() },
+  automationApi: { list: vi.fn(), get: vi.fn(), start: vi.fn(), approve: vi.fn(), reject: vi.fn(), cancel: vi.fn(), retry: vi.fn(), remove: vi.fn() },
   datasetsApi: { list: vi.fn() },
 }))
 
@@ -137,6 +137,27 @@ describe('Automations polish (5.15, 5.21)', () => {
     expect(estimateMinutes(240_124)).toBe(2)
     expect(estimateMinutes(2_844_047)).toBe(13)
     expect(estimateMinutes(0)).toBe(1)
+  })
+})
+
+describe('a stopped run (AD-22)', () => {
+  it('a cancelled run offers Retry and Delete, and Delete removes it', async () => {
+    vi.mocked(automationApi.list).mockResolvedValueOnce([run({ status: 'cancelled', steps: steps(['ok']) })] as never)
+      .mockResolvedValue([])
+    vi.mocked(automationApi.remove).mockResolvedValue(undefined as never)
+    page()
+    const row = await screen.findByTestId('run-5')
+    expect(within(row).getByRole('button', { name: 'Retry now' })).toBeInTheDocument()
+    fireEvent.click(within(row).getByRole('button', { name: 'Delete' }))
+    await waitFor(() => expect(automationApi.remove).toHaveBeenCalledWith(5))
+    await waitFor(() => expect(screen.queryByTestId('run-5')).toBeNull())
+  })
+
+  it('a running or finished run offers no Delete', async () => {
+    vi.mocked(automationApi.list).mockResolvedValue([run(), run({ id: 6, status: 'done', steps: steps(['ok', 'ok', 'ok', 'ok', 'ok', 'ok', 'ok']) })] as never)
+    page()
+    await screen.findByTestId('run-6')
+    expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull()
   })
 })
 
