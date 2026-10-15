@@ -399,6 +399,23 @@ describe('DatasetDetail DirectQuery gating', () => {
     expect(await screen.findByText('north')).toBeInTheDocument()
   })
 
+  it('never says "filtered from <total>" to a reader under a row rule (QA E-14)', async () => {
+    vi.mocked(datasetsApi.get).mockResolvedValue({ ...importDataset(), columns: [{ id: 1, name: 'region', dtype: 'categorical', missing_pct: 0, stats: {} }], row_count: 2, row_count_restricted: true } as Dataset)
+    vi.mocked(dataPreviewApi.query).mockResolvedValue({ columns: ['region'], rows: [['north']], total: 1 })
+    vi.mocked(analysisApi.get).mockRejectedValue(new Error('none'))
+    renderDetail(29, 'data')
+    expect(await screen.findByText('north')).toBeInTheDocument()
+    expect(screen.queryByText(/filtered from/)).not.toBeInTheDocument()
+  })
+
+  it('still says "filtered from <total>" to an unrestricted reader', async () => {
+    vi.mocked(datasetsApi.get).mockResolvedValue({ ...importDataset(), columns: [{ id: 1, name: 'region', dtype: 'categorical', missing_pct: 0, stats: {} }] } as Dataset)
+    vi.mocked(dataPreviewApi.query).mockResolvedValue({ columns: ['region'], rows: [['north']], total: 1 })
+    vi.mocked(analysisApi.get).mockRejectedValue(new Error('none'))
+    renderDetail(29, 'data')
+    expect(await screen.findByText(/filtered from 10/)).toBeInTheDocument()
+  })
+
   it('shows a shared empty state instead of a bare table with no rows when the preview matches nothing', async () => {
     vi.mocked(datasetsApi.get).mockResolvedValue(directQueryDataset())
     vi.mocked(dataPreviewApi.query).mockResolvedValue({ columns: ['region'], rows: [], total: 0 })

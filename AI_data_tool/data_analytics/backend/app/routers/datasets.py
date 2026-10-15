@@ -54,6 +54,37 @@ class _SizeBudget:
                      f"for a single batch")
 
 
+_VISIBLE_ROWS_CACHE: dict[tuple, int] = {}
+
+
+async def _visible_row_count(filename: str, rls_expr: str) -> int:
+    """Rows of an uploaded file a row rule leaves, cached per file version and
+    expression (the dataset list asks for every dataset at once). Fails closed:
+    a rule that cannot be evaluated leaves 0 rows, as it does everywhere else."""
+    import os
+    try:
+        st = os.stat(filename)
+        key = (filename, st.st_mtime, st.st_size, rls_expr)
+    except OSError:
+        return 0
+    if key in _VISIBLE_ROWS_CACHE:
+        return _VISIBLE_ROWS_CACHE[key]
+
+    def _count() -> int:
+        from ..services.ingest import load_file
+        from ..services.widget_data import apply_rls_filter
+        return int(len(apply_rls_filter(load_file(filename), rls_expr)))
+    try:
+        n = await asyncio.to_thread(_count)
+    except Exception:                                        # noqa: BLE001
+        logger.warning("visible row count failed for %s", filename, exc_info=True)
+        return 0
+    if len(_VISIBLE_ROWS_CACHE) > 512:
+        _VISIBLE_ROWS_CACHE.clear()
+    _VISIBLE_ROWS_CACHE[key] = n
+    return n
+
+
 async def _without_denied_columns(db: AsyncSession, current_user: User, ds: Dataset,
                                   *, with_knowledge: bool = False) -> DatasetOut:
     """Serialize a Dataset with any column this role is denied on it removed
@@ -74,6 +105,16 @@ async def _without_denied_columns(db: AsyncSession, current_user: User, ds: Data
         hidden_calc, _ = author_items_over_denied(item.calculated_columns, [], denied)
         item.calculated_columns = [c for c in item.calculated_columns
                                    if not (isinstance(c, dict) and c.get("name") in hidden_calc)]
+        # The stored count includes the hidden columns: "13 columns" next to a
+        # list of 12 says one is hidden (QA E-14).
+        item.col_count = max(0, (item.col_count or 0) - len({c.name for c in ds.columns} & denied))
+    # Same for rows: the stored count is everyone's. A reader under a row rule
+    # gets the rows that rule leaves them, never the total (QA E-14).
+    rls_expr = await resolve_rls_expr(db, current_user, ds.id)
+    if rls_expr is not None:
+        item.row_count_restricted = True
+        if ds.mode != "directquery" and ds.filename:
+            item.row_count = await _visible_row_count(ds.filename, rls_expr)
     # Columns the prep pipeline creates (a partition, a split) are real to
     # every widget but absent from the uploaded file's column list; list them
     # so the pickers can offer them. Negative ids: they have no stored row.
