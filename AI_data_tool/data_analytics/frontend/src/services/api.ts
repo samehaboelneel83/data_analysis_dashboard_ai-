@@ -3972,6 +3972,19 @@ export const metadataApi = {
     api.patch<GlossaryTerm>(`/datasets/${datasetId}/glossary/${termId}`, body).then(r => r.data),
   deleteDatasetTerm: (datasetId: number, termId: number) =>
     api.delete(`/datasets/${datasetId}/glossary/${termId}`),
+  /** B-21: ORG-WIDE terms (no connection, no dataset) -- they apply to every
+   *  connection and dataset. Writes are org-admin only, like every term's. */
+  orgGlossary: () =>
+    api.get<GlossaryTerm[]>('/glossary').then(r => r.data),
+  addOrgTerm: (body: { term: string; definition?: string
+                       synonyms?: string[]; maps_to_object?: string
+                       maps_to_column?: string; rule?: string; always?: boolean }) =>
+    api.post<GlossaryTerm>('/glossary', body).then(r => r.data),
+  updateOrgTerm: (termId: number, body: { definition?: string | null
+                       synonyms?: string[]; rule?: string | null; always?: boolean }) =>
+    api.patch<GlossaryTerm>(`/glossary/${termId}`, body).then(r => r.data),
+  deleteOrgTerm: (termId: number) =>
+    api.delete(`/glossary/${termId}`),
 }
 
 /** A business term and its aliases. `data_source_id` null means the term is
