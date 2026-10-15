@@ -71,7 +71,7 @@ import { countLabel } from '../lib/fieldHints'
 import { boundarySetsApi, type BoundaryPack } from '../services/api'
 import PackTermsConfirm from '../components/report/PackTermsConfirm'
 import { describeFilter } from '../components/report/ViewerKit'
-import { fieldHints, hintTitle } from '../lib/fieldHints'
+import { fieldHints, hintTitle, numericRanges } from '../lib/fieldHints'
 import { PRE_AGGREGATED_HINT } from '../lib/aggregateDisclosure'
 import { CrossFilterProvider, useCrossFilter } from '../components/report/CrossFilterContext'
 import CollapsibleSide from '../components/report/CollapsibleSide'
@@ -2865,6 +2865,8 @@ export default function ReportBuilder() {
       : `${f.column} ${(() => { const k = `bc.shell.rf.op.${f.op}` as MessageKey; const v = tr(k); return v !== k ? v : f.op })()} ${Array.isArray(f.value) ? (f.value as unknown[]).join(', ') : String(f.value)}`,
   }))
   const hints = fieldHints(analysis)
+  // (after the early returns: a plain value, not a hook; the panel compares it by value)
+  const valueRanges = numericRanges(analysis)
   const pageWidgets = activePage?.widgets ?? []
   // A report being READ always uses the Modern look (the old "Default"
   // reading look was removed: same data, one look to maintain). Never while
@@ -2977,6 +2979,7 @@ export default function ReportBuilder() {
 
                   {selectedW
                     ? <WidgetConfigPanel key={`${selectedW.id}:${panelEpoch}`} section={propSection} onSection={setPropSection} geography={geography} widget={selectedW} columns={columns} datasets={datasets} primaryDatasetId={report.dataset_id} pages={report.pages} hierarchy={hierarchy} onHierarchyRefresh={refreshHierarchy} bookmarks={bookmarks} onUpdate={updateWidgetConfig} ruleErrors={perfStats[selectedW.id]?.ruleErrors}
+                      valueRanges={valueRanges}
                       distinctCounts={Object.fromEntries(Object.entries(hints).flatMap(([k, h]) => typeof (h as { distinct?: unknown })?.distinct === 'number' ? [[k, (h as { distinct: number }).distinct]] : []))} />
                     : activePage && <PagePropertiesPanel reportId={reportId} page={activePage} columns={columns} onUpdate={updatePageProps}
                         pages={report.pages} bookmarks={bookmarks} onSelectWidget={setSelectedW}

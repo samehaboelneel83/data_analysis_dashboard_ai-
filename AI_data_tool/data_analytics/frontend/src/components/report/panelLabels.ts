@@ -406,6 +406,7 @@ export const PANEL_AR: Record<string, string> = {
   'A series split and several measures cannot be drawn together. Keep one measure to split it by a series.': 'لا يمكن رسم التقسيم إلى سلاسل مع عدة مقاييس معًا. أبقِ مقياسًا واحدًا لتقسيمه إلى سلاسل.',
   '{name} (hierarchy)': '{name} (تسلسل هرمي)',
   '{name} (current)': '{name} (الحالي)',
+  '{name} (values out of range)': '{name} (قيم خارج النطاق)',
   'pre-aggregated': 'مجمّعة مسبقًا',
   'Checking {column} against the map…': 'جارٍ مطابقة «{column}» مع الخريطة…',
   'This role is full: remove a field to add another': 'هذا الدور ممتلئ: أزل حقلًا لإضافة آخر',
@@ -472,7 +473,7 @@ export const ROLE_AR: Record<string, string> = {
   'Hierarchy levels': 'مستويات التسلسل الهرمي', 'Country or Latitude/Longitude': 'الدولة أو خط العرض/خط الطول',
   'Saved model': 'نموذج محفوظ', 'Models to compare': 'نماذج للمقارنة',
   // Field groups in the Add dialog and the column pickers
-  'Categories': 'الفئات', 'Dates': 'التواريخ', 'Numbers': 'الأرقام', 'Calculated': 'محسوبة', 'Hierarchies': 'التسلسلات الهرمية',
+  'Categories': 'الفئات', 'Dates': 'التواريخ', 'Numbers': 'الأرقام', 'Calculated': 'محسوبة', 'Hierarchies': 'التسلسلات الهرمية', 'Geography': 'الجغرافيا',
 }
 
 /** A data-role label (or one half of it) in the current language: "Dimension

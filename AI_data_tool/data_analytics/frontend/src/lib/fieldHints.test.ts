@@ -170,3 +170,12 @@ describe('countLabel', () => {
     expect(countLabel(999)).toBe('999')
   })
 })
+
+describe('C-09: numericRanges', () => {
+  it('reads min/max from the numeric profile', async () => {
+    const { numericRanges } = await import('./fieldHints')
+    expect(numericRanges({ numeric: { columns: { lon: { min: 29, max: 35 }, x: { min: null, max: 3 } } } }))
+      .toEqual({ lon: { min: 29, max: 35 } })
+    expect(numericRanges(null)).toEqual({})
+  })
+})

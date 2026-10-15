@@ -303,3 +303,50 @@ describe('C-10: a point map says how it places its markers', () => {
     expect(screen.getByTestId('map-mode-hint')).toHaveTextContent(/country/i)
   })
 })
+
+describe('C-09 step 3: the Latitude / Longitude pickers', () => {
+  const cols: DatasetColumn[] = [
+    { id: 1, name: 'from_city',  dtype: 'text',    missing_pct: 0, stats: {} },
+    { id: 2, name: 'revenue',    dtype: 'numeric', missing_pct: 0, stats: {} },
+    { id: 3, name: 'shipments',  dtype: 'numeric', missing_pct: 0, stats: {} },
+    { id: 4, name: 'origin_lat', dtype: 'numeric', missing_pct: 0, stats: {} },
+    { id: 5, name: 'origin_lon', dtype: 'numeric', missing_pct: 0, stats: {} },
+  ]
+  const ranges = { revenue: { min: 0, max: 98000 }, shipments: { min: 2, max: 40 },
+                   origin_lat: { min: 24, max: 31 }, origin_lon: { min: 29, max: 35 } }
+  const map = (config: Record<string, unknown>) => ({ ...bar(config), widget_type: 'map_points' } as Widget)
+  const open = (config: Record<string, unknown>, role: string) => {
+    const w = map(config)
+    render(<CrossFilterProvider><WidgetConfigPanel widget={w} columns={cols} valueRanges={ranges}
+      onUpdate={vi.fn()} pages={page([w])} /></CrossFilterProvider>)
+    fireEvent.click(screen.getByRole('button', { name: `Add ${role}` }))
+    return screen.getByRole('dialog', { name: `Add ${role}` })
+  }
+  it('lists coordinate fields first, under Geography, the matching axis on top', () => {
+    const dialog = open({}, 'Longitude')
+    const names = within(dialog).getAllByRole('option').map(o => o.textContent ?? '')
+    expect(names[0]).toMatch(/^origin_lon/)
+    expect(names[1]).toMatch(/^origin_lat/)
+    expect(within(dialog).getByText('Geography')).toBeTruthy()
+    expect(names.some(n => /from_city/.test(n))).toBe(false)     // text never offered
+  })
+  it('flags a number whose values cannot be a longitude', () => {
+    const dialog = open({}, 'Longitude')
+    const revenue = within(dialog).getAllByRole('option').find(o => /revenue/.test(o.textContent ?? ''))!
+    expect(revenue.textContent).toMatch(/out of range/i)
+    const shipments = within(dialog).getAllByRole('option').find(o => /shipments/.test(o.textContent ?? ''))!
+    expect(shipments.textContent).not.toMatch(/out of range/i)
+  })
+  it('warns in the pane when an out-of-range field is chosen', () => {
+    const w = map({ lat: 'origin_lat', lon: 'revenue' })
+    render(<CrossFilterProvider><WidgetConfigPanel widget={w} columns={cols} valueRanges={ranges}
+      onUpdate={vi.fn()} pages={page([w])} /></CrossFilterProvider>)
+    expect(screen.getByTestId('coord-range-warning')).toHaveTextContent(/revenue/)
+  })
+  it('no warning for real coordinates', () => {
+    const w = map({ lat: 'origin_lat', lon: 'origin_lon' })
+    render(<CrossFilterProvider><WidgetConfigPanel widget={w} columns={cols} valueRanges={ranges}
+      onUpdate={vi.fn()} pages={page([w])} /></CrossFilterProvider>)
+    expect(screen.queryByTestId('coord-range-warning')).toBeNull()
+  })
+})
