@@ -61,6 +61,19 @@ export const en = {
   'pg.adminSecurity.roles.emptyTitle': 'No roles yet',
   'pg.adminSecurity.roles.emptyBody': 'Create a role to control what users in your organization can do.',
   'pg.adminSecurity.roles.orgAdmin': 'Org admin',
+  /** QA E-08: the roles x permissions matrix on the Roles page. */
+  'pg.adminSecurity.roles.matrixTitle': 'What each role may do',
+  'pg.adminSecurity.roles.matrixHint': 'Turning a permission off hides the action and the server refuses it. Org admin roles always have every permission. Data access (row and column security, shares) is set separately.',
+  'pg.adminSecurity.roles.matrixRole': 'Role',
+  'pg.adminSecurity.roles.matrixAdminAll': 'Org admin: always allowed',
+  'pg.adminSecurity.roles.permChangeAria': '{perm} for {role}',
+  'pg.adminSecurity.roles.perm.upload_data': 'Upload data',
+  'pg.adminSecurity.roles.perm.create_connection': 'Add connections',
+  'pg.adminSecurity.roles.perm.create_dashboard': 'Create dashboards',
+  'pg.adminSecurity.roles.perm.use_ai': 'Use AI',
+  'pg.adminSecurity.roles.perm.export': 'Download and export',
+  /** Shown where an action is hidden or disabled because of the role. */
+  'pg.adminSecurity.roles.notAllowed': 'Your role does not allow this. Ask an organization admin.',
 
   // ── Users ────────────────────────────────────────────────────────────────
   'pg.adminSecurity.users.emailRequired': 'Email is required',
@@ -258,6 +271,17 @@ export const ar: Record<keyof typeof en, string> = {
   'pg.adminSecurity.roles.emptyTitle': 'لا توجد أدوار بعد',
   'pg.adminSecurity.roles.emptyBody': 'أنشئ دورًا لتحدد ما يستطيع مستخدمو مؤسستك فعله.',
   'pg.adminSecurity.roles.orgAdmin': 'مسؤول المؤسسة',
+  'pg.adminSecurity.roles.matrixTitle': 'ما يستطيع كل دور فعله',
+  'pg.adminSecurity.roles.matrixHint': 'إيقاف صلاحية يُخفي الإجراء ويرفضه الخادم. أدوار مسؤول المؤسسة لها كل الصلاحيات دائمًا. الوصول إلى البيانات (أمان الصفوف والأعمدة والمشاركة) يُضبط بشكل منفصل.',
+  'pg.adminSecurity.roles.matrixRole': 'الدور',
+  'pg.adminSecurity.roles.matrixAdminAll': 'مسؤول المؤسسة: مسموح دائمًا',
+  'pg.adminSecurity.roles.permChangeAria': '{perm} للدور {role}',
+  'pg.adminSecurity.roles.perm.upload_data': 'رفع البيانات',
+  'pg.adminSecurity.roles.perm.create_connection': 'إضافة اتصالات',
+  'pg.adminSecurity.roles.perm.create_dashboard': 'إنشاء لوحات المعلومات',
+  'pg.adminSecurity.roles.perm.use_ai': 'استخدام الذكاء الاصطناعي',
+  'pg.adminSecurity.roles.perm.export': 'التنزيل والتصدير',
+  'pg.adminSecurity.roles.notAllowed': 'دورك لا يسمح بهذا. اطلب ذلك من مسؤول المؤسسة.',
 
   'pg.adminSecurity.users.emailRequired': 'البريد الإلكتروني مطلوب',
   'pg.adminSecurity.users.search': 'ابحث عن المستخدمين بالبريد الإلكتروني',

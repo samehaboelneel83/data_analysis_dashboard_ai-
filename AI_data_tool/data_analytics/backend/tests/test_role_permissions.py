@@ -238,3 +238,18 @@ async def test_migration_adds_column_existing_roles_keep_every_right(scratch_url
     assert "permissions" not in cols
     await asyncio.to_thread(command.upgrade, cfg, "0072_role_capabilities")
     await engine.dispose()
+
+
+async def test_download_decision_says_no_for_a_role_without_export(client, db_session, two_orgs):
+    """The UI greys export from /authz/decisions; it must give the same answer."""
+    org = two_orgs["a"]["org"]
+    user, denied = await _member(db_session, org, perms={"export": False}, email="d@example.com")
+    rep = Report(name="mine", org_id=org.id, created_by=user.id)
+    db_session.add(rep)
+    await db_session.commit()
+    r = await client.post("/api/v1/authz/decisions", headers=denied,
+                          json={"checks": [{"resource": "report", "id": rep.id, "action": "download"}]})
+    assert r.status_code == 200
+    d = r.json()["decisions"][0] if isinstance(r.json(), dict) else r.json()[0]
+    assert d["allowed"] is False
+    assert "download or export" in d["reason"]

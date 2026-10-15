@@ -3386,10 +3386,16 @@ export interface Organization {
   name: string
 }
 
+/** QA E-08: what a role may do (backend core/role_permissions.py). */
+export type RolePermission = 'upload_data' | 'create_connection' | 'create_dashboard' | 'use_ai' | 'export'
+
 export interface Role {
   id: number
   name: string
   is_org_admin: boolean
+  /** Effective permissions (defaults applied, all true for an org admin).
+   *  Absent from an older server: treat every one as allowed. */
+  permissions?: Partial<Record<RolePermission, boolean>>
 }
 
 export interface User {
@@ -3519,9 +3525,9 @@ export const platformApi = {
 
 export const adminRolesApi = {
   list:   () => api.get<Role[]>('/admin/roles').then(r => r.data),
-  create: (body: { name: string; is_org_admin: boolean }) =>
+  create: (body: { name: string; is_org_admin: boolean; permissions?: Partial<Record<RolePermission, boolean>> }) =>
     api.post<Role>('/admin/roles', body).then(r => r.data),
-  update: (id: number, body: Partial<{ name: string; is_org_admin: boolean }>) =>
+  update: (id: number, body: Partial<{ name: string; is_org_admin: boolean; permissions: Partial<Record<RolePermission, boolean>> }>) =>
     api.patch<Role>(`/admin/roles/${id}`, body).then(r => r.data),
   delete: (id: number) => api.delete(`/admin/roles/${id}`),
 }

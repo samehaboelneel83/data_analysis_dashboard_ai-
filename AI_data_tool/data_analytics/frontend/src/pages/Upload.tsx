@@ -11,6 +11,7 @@ import { formatTimeAgo, useT } from '../i18n'
 import { localDigits } from '../lib/arabicFormats'
 import { structuredDetail } from '../lib/friendlyError'
 import { kindOf, nameFromFile, readPreview, readable, type ColType, type Kind, type Preview } from './upload/readFile'
+import { useRoleAllows } from '../lib/rolePermissions'
 import './upload/upload.css'
 
 /**
@@ -78,6 +79,7 @@ type Stage = 'choose' | 'review' | 'importing' | 'done' | 'failed'
 
 export default function Upload() {
   const t = useT()
+  const canUpload = useRoleAllows('upload_data')
   const [stage, setStage] = useState<Stage>('choose')
   const [files, setFiles] = useState<Picked[]>([])
   const [name, setName] = useState('')
@@ -190,6 +192,16 @@ export default function Upload() {
   const first = made[0]
   const shown = files[active]
   const pv = shown?.preview
+
+  // QA E-08: the role may not upload (the server refuses it too).
+  if (!canUpload) return (
+    <div className="dl-up">
+      <header className="dl-up__head">
+        <div><h1 className="dl-page-title">{t('up2.title')}</h1></div>
+      </header>
+      <p role="status" data-testid="upload-not-allowed">{t('pg.adminSecurity.roles.notAllowed')}</p>
+    </div>
+  )
 
   return (
     <div className="dl-up">

@@ -20,6 +20,7 @@ import Composer from './Composer'
 import AnswerText from './AnswerText'
 import { columnsMentioned } from './clarifyColumns'
 import { useAiOffline } from '../../pages/ask/useAiOffline'
+import { aiOffKey } from '../../pages/ask/aiOffKey'
 import AddToDashboard from './AddToDashboard'
 import RobotHead, { type HeadState } from './RobotHead'
 import CardSection from './CardSection'
@@ -515,7 +516,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
         {loading && <p className="dl-chat__note">{t('common.loading')}</p>}
         {loadError && <p role="alert" className="dl-chat__note dl-chat__note--error">{loadError}</p>}
         {!loading && !loadError && messages.length === 0 && (
-          startView ? (pending === null ? startView(q => void send(q), busy || offline, offline ? t('off.composer') : undefined) : null) : suggestions && suggestions.length > 0 ? (
+          startView ? (pending === null ? startView(q => void send(q), busy || offline, offline ? t(aiOffKey(ai, 'composer')) : undefined) : null) : suggestions && suggestions.length > 0 ? (
             <div className="dl-chat__start">
               <p className="dl-chat__start-title">{t('ask.tryOne')}</p>
               <div className="dl-chips" role="group" aria-label={t('ask.suggested')}>
@@ -597,7 +598,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                               <RotateCcw size={14} aria-hidden /> {t('ask.retry')}
                             </button>
                             <button type="button" className="dl-act" disabled={offline}
-                              title={offline ? t('off.composer') : undefined} onClick={() => setInput(turn.question!.text)}>
+                              title={offline ? t(aiOffKey(ai, 'composer')) : undefined} onClick={() => setInput(turn.question!.text)}>
                               <Pencil size={14} aria-hidden /> {t('err3.edit')}
                             </button>
                           </div>
@@ -673,9 +674,9 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
         {card && <p className="dl-sr-only" role="status" aria-live="polite" data-testid="ask-live">{announce}</p>}
       </div>
       <div className="dl-chat__composer" onFocus={() => setComposerFocused(true)} onBlur={() => setComposerFocused(false)}>
-        {offline && <p role="status" className="dl-chat__note dl-chat__note--error dl-chat__offline" data-testid="ai-offline">{t(ai.off ? 'off.titleMine' : 'off.title')}</p>}
+        {offline && <p role="status" className="dl-chat__note dl-chat__note--error dl-chat__offline" data-testid="ai-offline">{t(aiOffKey(ai, 'title'))}</p>}
         <Composer value={input} onChange={v => { setInput(v); onActivity?.('key') }} onSend={() => void send()} busy={busy}
-          locked={offline} lockedHint={offline ? t(ai.off ? 'off.composerMine' : 'off.composer') : undefined}
+          locked={offline} lockedHint={offline ? t(aiOffKey(ai, 'composer')) : undefined}
           page={card ? { name: card.scopeName } : undefined} />
         {card && <p className="dl-ask__disc">{t('ask2.disclaimer')}</p>}
       </div>
@@ -875,7 +876,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
         {question && (
           <div className="dl-ac__acts">
             <button type="button" className="dl-act dl-act--primary" disabled={offline}
-              title={offline ? t('off.composer') : undefined} onClick={() => setInput(question)}>
+              title={offline ? t(aiOffKey(ai, 'composer')) : undefined} onClick={() => setInput(question)}>
               <Pencil size={14} aria-hidden /> {t('err3.edit')}
             </button>
             <button type="button" className="dl-act" disabled={busy || offline} onClick={() => void send(question)}>
@@ -969,7 +970,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
           )}
           {question && (
             <>
-              <button type="button" className="dl-act" title={offline ? t('off.composer') : t('err3.edit')} disabled={offline}
+              <button type="button" className="dl-act" title={offline ? t(aiOffKey(ai, 'composer')) : t('err3.edit')} disabled={offline}
                 onClick={() => setInput(question)}>
                 <Pencil size={14} aria-hidden /> <span className="dl-act__text">{t('err3.edit')}</span>
               </button>

@@ -32,6 +32,7 @@ import { DashCard, DashRow } from './reports/DashCard'
 import { MoveDialog, NewDashboardDialog, type NewChoice, type NewMode } from './reports/dialogs'
 import Thumb from './home/Thumb'
 import { nextUntitledName } from '../lib/untitledName'
+import { useRoleAllows } from '../lib/rolePermissions'
 import './home/home.css'
 import './reports/dashboards.css'
 export { nextUntitledName }
@@ -66,6 +67,8 @@ export default function Reports() {
   const confirm = useConfirm()
   const prompt = usePrompt()
   const isAdmin = !!useContext(AuthContext)?.user?.role?.is_org_admin
+  // QA E-08: the role may not create dashboards (the server refuses it too).
+  const canCreate = useRoleAllows('create_dashboard')
 
   const [reports, setReports] = useState<ReportSummary[]>([])
   const [datasets, setDatasets] = useState<DatasetSummary[] | null>(null)
@@ -504,7 +507,7 @@ export default function Reports() {
             <p>{t('dsh.nomatch.text')}</p>
             <div className="dsh-acts">
               <button type="button" className="btn btn-ghost dsh-btn-line" onClick={clearFilters}><X size={14} aria-hidden />{t('dsh.clearSearch')}</button>
-              <button type="button" className="btn btn-primary" onClick={() => openNew('ai')}><Sparkles size={14} aria-hidden />{t('dsh.nomatch.ai')}</button>
+              {canCreate && <button type="button" className="btn btn-primary" onClick={() => openNew('ai')}><Sparkles size={14} aria-hidden />{t('dsh.nomatch.ai')}</button>}
             </div>
             {near.length > 0 && (
               <div className="dsh-near">
@@ -539,7 +542,7 @@ export default function Reports() {
           <div className="dsh-empty" data-testid="dash-folder-empty">
             <span className="ic" aria-hidden><FolderOpen size={26} /></span>
             <h2>{t('dsh.folderEmpty')}</h2><p>{t('dsh.folderEmptyText')}</p>
-            <div className="dsh-acts"><button type="button" className="btn btn-primary" onClick={() => openNew('blank', id)}><Plus size={14} aria-hidden />{t('dsh.newHere')}</button></div>
+            {canCreate && <div className="dsh-acts"><button type="button" className="btn btn-primary" onClick={() => openNew('blank', id)}><Plus size={14} aria-hidden />{t('dsh.newHere')}</button></div>}
           </div>
         )
       }
@@ -637,9 +640,11 @@ export default function Reports() {
                   <FolderPlus size={15} aria-hidden />{t('folders.newTop')}
                 </button>
               )}
-              <button type="button" className="btn btn-primary" onClick={() => openNew()} disabled={creating}>
-                <Plus size={15} aria-hidden />{t('dashboards.new')}
-              </button>
+              {canCreate && (
+                <button type="button" className="btn btn-primary" onClick={() => openNew()} disabled={creating}>
+                  <Plus size={15} aria-hidden />{t('dashboards.new')}
+                </button>
+              )}
             </div>
           </div>
 

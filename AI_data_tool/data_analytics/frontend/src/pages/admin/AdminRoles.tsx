@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import { fieldStyle } from '../../components/ui/fieldStyle'
 import { useT } from '../../i18n'
+import type { MessageKey } from '../../i18n'
 import { Plus, Shield } from 'lucide-react'
 import { adminRolesApi } from '../../services/api'
-import type { Role } from '../../services/api'
+import type { Role, RolePermission } from '../../services/api'
+import { ROLE_PERMISSIONS } from '../../lib/rolePermissions'
 import toast from 'react-hot-toast'
 import { Z_OVERLAY } from '../../lib/zIndex'
 import { useConfirm } from '../../components/ui/ConfirmDialog'
@@ -73,6 +75,71 @@ function RoleModal({ initial, onSave, onClose }: {
   )
 }
 
+/**
+ * QA E-08: roles x permissions. Each box saves at once; an org-admin role has
+ * every permission and its boxes are locked on. The server enforces each
+ * permission itself -- this only sets them.
+ */
+const PERM_LABEL: Record<RolePermission, MessageKey> = {
+  upload_data: 'pg.adminSecurity.roles.perm.upload_data',
+  create_connection: 'pg.adminSecurity.roles.perm.create_connection',
+  create_dashboard: 'pg.adminSecurity.roles.perm.create_dashboard',
+  use_ai: 'pg.adminSecurity.roles.perm.use_ai',
+  export: 'pg.adminSecurity.roles.perm.export',
+}
+
+function PermissionMatrix({ roles, onChanged }: { roles: Role[]; onChanged: (r: Role) => void }) {
+  const t = useT()
+  const [busy, setBusy] = useState<string | null>(null)
+  const toggle = async (r: Role, perm: RolePermission, value: boolean) => {
+    setBusy(`${r.id}:${perm}`)
+    try {
+      onChanged(await adminRolesApi.update(r.id, { permissions: { [perm]: value } }))
+      toast.success(t('pg.adminSecurity.c.updated'))
+    } catch (e: any) {
+      toast.error(e?.response?.data?.detail ?? t('pg.adminSecurity.c.saveFailed'))
+    } finally { setBusy(null) }
+  }
+  const cell = { padding: '8px 10px', borderBottom: '1px solid var(--border)', fontSize: 12 } as const
+  return (
+    <section aria-labelledby="role-perm-title" style={{ marginTop: 28 }}>
+      <h2 id="role-perm-title" style={{ fontSize: 15, fontWeight: 700, margin: '0 0 4px' }}>{t('pg.adminSecurity.roles.matrixTitle')}</h2>
+      <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 12px' }}>{t('pg.adminSecurity.roles.matrixHint')}</p>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 560 }}>
+          <thead>
+            <tr>
+              <th scope="col" style={{ ...cell, textAlign: 'start' }}>{t('pg.adminSecurity.roles.matrixRole')}</th>
+              {ROLE_PERMISSIONS.map(p => (
+                <th key={p} scope="col" style={{ ...cell, textAlign: 'center', fontWeight: 600 }}>{t(PERM_LABEL[p])}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {roles.map(r => (
+              <tr key={r.id}>
+                <th scope="row" style={{ ...cell, textAlign: 'start', fontWeight: 500 }}>
+                  <bdi>{r.name}</bdi>
+                  {r.is_org_admin && <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 400 }}>{t('pg.adminSecurity.roles.matrixAdminAll')}</div>}
+                </th>
+                {ROLE_PERMISSIONS.map(p => (
+                  <td key={p} style={{ ...cell, textAlign: 'center' }}>
+                    <input type="checkbox"
+                      aria-label={t('pg.adminSecurity.roles.permChangeAria', { perm: t(PERM_LABEL[p]), role: r.name })}
+                      checked={r.is_org_admin || r.permissions?.[p] !== false}
+                      disabled={r.is_org_admin || busy === `${r.id}:${p}`}
+                      onChange={e => void toggle(r, p, e.target.checked)} />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
 export default function AdminRoles() {
   const t = useT()
   const [roles, setRoles] = useState<Role[]>([])
@@ -139,6 +206,10 @@ export default function AdminRoles() {
           </div>
         ))}
       </div>
+
+      {roles.length > 0 && (
+        <PermissionMatrix roles={roles} onChanged={r => setRoles(prev => prev.map(x => x.id === r.id ? r : x))} />
+      )}
 
       {modal && (
         <RoleModal initial={modal === 'add' ? null : modal} onSave={handleSaved} onClose={() => setModal(null)} />

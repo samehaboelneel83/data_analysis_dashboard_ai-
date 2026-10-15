@@ -105,6 +105,7 @@ import PageTakeaways from './reportBuilder/PageTakeaways'
 import FocusView from './reportBuilder/FocusView'
 import PresentControls from './reportBuilder/PresentControls'
 import { useAiOffline } from './ask/useAiOffline'
+import { aiOffKey } from './ask/aiOffKey'
 import { datasetSuggestions, type ColumnClasses } from './ask/suggestions'
 import './reportBuilder/viewMode.css'
 import './reportBuilder/builder.css'
@@ -432,7 +433,8 @@ export default function ReportBuilder() {
   const [aiTab, setAiTab] = useState<AssistTab>('ask')
   const [askSeed, setAskSeed] = useState<{ q: string; n: number } | null>(null)
   const [focusW, setFocusW] = useState<Widget | null>(null)
-  const { offline: aiOffline, off: aiOff } = useAiOffline()
+  const aiState = useAiOffline()
+  const aiOffline = aiState.offline
   // Refresh in the Modern header remounts the canvas, so every widget asks again.
   const [refreshNonce, setRefreshNonce] = useState(0)
 
@@ -4317,7 +4319,7 @@ export default function ReportBuilder() {
                         <div className="dl-vw-wt" role="toolbar" aria-label={tr('vw.wt.aria', { title: widget.title || widget.widget_type })}>
                           <button type="button" onClick={() => askAbout(widget)} disabled={aiOffline}
                             aria-label={tr('vw.wt.ask', { title: widget.title || widget.widget_type })}
-                            title={aiOffline ? tr(aiOff ? 'off.composerMine' : 'off.composer') : tr('vw.wt.askShort')}>
+                            title={aiOffline ? tr(aiOffKey(aiState, 'composer')) : tr('vw.wt.askShort')}>
                             <span className="dl-vw-av" aria-hidden><AiMascot size={15} /></span>
                           </button>
                           <button type="button" onClick={() => setFocusW(widget)}
