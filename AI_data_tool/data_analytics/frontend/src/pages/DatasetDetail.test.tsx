@@ -137,6 +137,19 @@ describe('DatasetDetail insights engine', () => {
     expect(screen.getByTestId('insight-data_quality')).toHaveTextContent('52% missing')
   })
 
+  it('offers no "Pin finding": pins were shown nowhere (AD-05)', async () => {
+    const { insightsApi } = await import('../services/api')
+    vi.mocked(datasetsApi.get).mockResolvedValue(importDataset())
+    vi.mocked(analysisApi.get).mockRejectedValue(new Error('none'))
+    vi.mocked(insightsApi.run).mockResolvedValue({
+      narrative: 'n', findings: [{ kind: 'standout', score: 0.8, title: 'Software leads', detail: 'd', columns: ['category', 'revenue'] }],
+    })
+    renderDetail(29, 'analysis#insights')
+    fireEvent.click(await screen.findByRole('button', { name: /Generate insights/ }))
+    await screen.findByTestId('insight-standout')
+    expect(screen.queryByRole('button', { name: /Pin finding/ })).toBeNull()
+  })
+
   it('charts a finding inline once its column pairing is known', async () => {
     const { insightsApi, widgetDataApi } = await import('../services/api')
     const ds = importDataset()

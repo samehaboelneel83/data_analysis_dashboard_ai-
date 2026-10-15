@@ -18,7 +18,7 @@ import NotebookSnippet from '../components/NotebookSnippet'
 import LoadError from '../components/ui/LoadError'
 import LoadingState from '../components/ui/LoadingState'
 import EmptyState from '../components/ui/EmptyState'
-import { findingKey, pinsApi, reportsApi } from '../services/api'
+import { reportsApi } from '../services/api'
 import { navArrows, useDirection } from '../contexts/DirectionContext'
 import { useParams, Link, useLocation, useSearchParams, useNavigate } from 'react-router-dom'
 import { useCrumbTitle } from '../lib/crumb'
@@ -37,7 +37,7 @@ import './datasetDetail/data.css'
 import OutlierDetailsDialog from '../components/report/OutlierDetailsDialog'
 import IconLabel from '../components/ui/IconLabel'
 import {
-  Bot, Plug, FolderOpen, RefreshCw, Sparkles, Pin, Link2, TriangleAlert, Search, ShieldCheck,
+  Bot, Plug, FolderOpen, RefreshCw, Sparkles, Link2, TriangleAlert, Search, ShieldCheck,
   Database, FileText, Pencil, Filter, X,
 } from 'lucide-react'
 import { insightsApi, datasetsApi, analysisApi, dataPreviewApi, filterExprApi, dataSourcesApi, prepApi, alertsApi } from '../services/api'
@@ -1307,16 +1307,6 @@ export default function DatasetDetail() {
                                     {f.novelty === 'new' ? tr('i2d.dd.new') : tr('i2d.dd.changed')}
                                   </span>
                                 )}
-                                <button aria-label={tr('i2d.dd.pinFinding', { title: f.title })}
-                                  title={tr('i2d.dd.pinTitle')}
-                                  onClick={() => void pinsApi
-                                    .create({ dataset_id: ds.id,
-                                              finding_key: findingKey(f) })
-                                    .then(r => toast.success(r.already_pinned
-                                      ? tr('i2d.dd.pinAlready') : tr('i2d.dd.pinned')))
-                                    .catch(() => toast.error(tr('i2d.dd.pinFailed')))}
-                                  style={{ background: 'none', border: 'none', cursor: 'pointer',
-                                    fontSize: 11, padding: 0, marginInlineStart: 'auto' }}><Pin size={12} /></button>
                                 <span style={{ fontSize: 10.5, color: 'var(--muted)', marginInlineStart: 'auto' }}>{Math.round(f.score * 100)}</span>
                               </div>
                               {/* QA3 D5: own direction; numbers and ranges keep their order */}
