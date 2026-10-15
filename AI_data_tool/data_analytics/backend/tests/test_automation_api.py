@@ -160,6 +160,24 @@ class TestStopping:
         again = await c.post(f"/api/v1/automation/runs/{run['id']}/cancel", headers=world["ana"])
         assert again.json()["status"] == "cancelled"
 
+    async def test_cancelling_someone_elses_run_tells_its_creator(self, world, db_session):
+        from app.models.models import Notification
+        run = (await _start(world)).json()
+        r = await world["c"].post(f"/api/v1/automation/runs/{run['id']}/cancel", headers=world["admin"])
+        assert r.status_code == 200 and r.json()["status"] == "cancelled"
+        ana = (await db_session.execute(select(User).where(User.email == "ana@example.com"))).scalar_one()
+        notes = (await db_session.execute(select(Notification).where(
+            Notification.user_id == ana.id, Notification.kind == "automation"))).scalars().all()
+        assert len(notes) == 1 and "cancelled" in notes[0].text
+        assert notes[0].link == f"/automation?run={run['id']}"
+
+    async def test_cancelling_your_own_run_does_not_notify_you(self, world, db_session):
+        from app.models.models import Notification
+        run = (await _start(world)).json()
+        await world["c"].post(f"/api/v1/automation/runs/{run['id']}/cancel", headers=world["ana"])
+        assert (await db_session.execute(select(Notification).where(
+            Notification.kind == "automation"))).scalars().first() is None
+
     async def test_a_step_finishing_after_a_cancel_does_not_revive_the_run(self, world, db_session):
         """The worker's copy of the run says running; the cancel is a write
         from another request."""

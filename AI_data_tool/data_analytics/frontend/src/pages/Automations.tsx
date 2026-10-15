@@ -59,6 +59,16 @@ export function estimateMinutes(rows: number | null | undefined): number {
   return Math.max(1, Math.round((40 + 25 * (r / 100_000)) / 60))
 }
 
+/** AD-03: the step in progress has run for more than twice the whole run's
+ *  estimate -- say so, instead of a promise of "about 1 min" for 12 minutes. */
+export function isRunSlow(run: Pick<AutomationRunRow, 'status' | 'steps'>, rows: number | null | undefined, now = Date.now()): boolean {
+  if (run.status !== 'running' && run.status !== 'pending') return false
+  const step = run.steps.find(s => s.status === 'running')
+  if (!step?.started_at) return false
+  const started = Date.parse(step.started_at)
+  return Number.isFinite(started) && now - started > 2 * estimateMinutes(rows) * 60_000
+}
+
 /** The run's one line in the reader's language, from its fields (the server's
  *  sentence is English; it stays the fallback for shapes not covered here). */
 export function runSummary(run: AutomationRunRow, t: (k: MessageKey, v?: Record<string, string | number>) => string): string | null {
@@ -211,6 +221,11 @@ export default function Automations() {
                   )}
                   {run.status === 'failed' && (
                     <button className="btn btn-ghost btn-sm" disabled={busy === run.id} onClick={() => void act(run, 'retry')}>{t('auto.retry')}</button>
+                  )}
+                  {isRunSlow(run, datasets.find(x => x.id === run.dataset?.id)?.row_count) && (
+                    <span data-testid="run-slow" role="status" style={{ fontSize: 12, color: 'var(--warning, #b45309)', alignSelf: 'center' }}>
+                      {t('auto.slow')}
+                    </span>
                   )}
                   {(isAutomationActive(run) || run.status === 'needs_review') && (
                     <button className="btn btn-ghost btn-sm" disabled={busy === run.id} onClick={() => void act(run, 'cancel')}>{t('auto.cancel')}</button>

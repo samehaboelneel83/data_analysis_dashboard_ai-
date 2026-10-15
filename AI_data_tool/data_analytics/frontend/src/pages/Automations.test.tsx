@@ -138,6 +138,25 @@ describe('Automations polish (5.15, 5.21)', () => {
   })
 })
 
+describe('a step taking far longer than estimated (AD-03)', () => {
+  it('says so next to Cancel', async () => {
+    const old = new Date(Date.now() - 30 * 60_000).toISOString()
+    const st = steps(['ok', 'ok', 'running']).map(s => s.status === 'running' ? { ...s, started_at: old } : s)
+    vi.mocked(automationApi.list).mockResolvedValue([run({ steps: st })] as never)
+    page()
+    const row = await screen.findByTestId('run-5')
+    expect(await within(row).findByTestId('run-slow')).toHaveTextContent(/longer than usual/i)
+  })
+
+  it('stays quiet for a step that has only just started', async () => {
+    const st = steps(['ok', 'ok', 'running']).map(s => s.status === 'running' ? { ...s, started_at: new Date().toISOString() } : s)
+    vi.mocked(automationApi.list).mockResolvedValue([run({ steps: st })] as never)
+    page()
+    const row = await screen.findByTestId('run-5')
+    expect(within(row).queryByTestId('run-slow')).toBeNull()
+  })
+})
+
 describe('run summary in the reader\'s language', () => {
   it('builds the sentence from the counts', async () => {
     const { runSummary } = await import('./Automations')

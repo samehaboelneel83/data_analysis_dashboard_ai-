@@ -33,16 +33,12 @@ from ..dependencies import get_current_user
 from ..models.models import AutomationRun, AutomationStep, Dataset, User
 from ..services import automation_runner as runner
 from ..services.audit import record as audit
+from ..services.notifications import notify
 
 router = APIRouter(prefix="/automation", tags=["automation"])
 
 #: Plain words for the seven steps, for the run page.
-STEP_LABELS = {
-    "profile": "Profile the data", "describe": "Describe the columns",
-    "scan": "Scan for findings", "propose": "Propose a dashboard",
-    "review": "Review the proposal", "compose": "Build the report",
-    "notify": "Tell you",
-}
+STEP_LABELS = runner.STEP_LABELS
 
 
 class StartRun(BaseModel):
@@ -192,6 +188,11 @@ async def cancel_run(run_id: int, db: AsyncSession = Depends(get_db),
     if res.rowcount:
         runner.discard_run_artifacts(run.org_id, run.id)
         await audit(db, user, "automation.cancel", "automation_run", run.id, None)
+        if run.created_by is not None and run.created_by != user.id:
+            # AD-03: someone else stopped this person's run; they should know.
+            await db.refresh(run)
+            text, link = runner.describe_run(run)
+            await notify(db, run.org_id, run.created_by, "automation", text, link)
     await db.commit()
     await db.refresh(run)
     return await _out(db, run, detail=True)
