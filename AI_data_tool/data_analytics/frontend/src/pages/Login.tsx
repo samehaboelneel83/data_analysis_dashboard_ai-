@@ -13,6 +13,7 @@ const SSO_KEYS: Record<string, MessageKey> = {
   provider_unreachable: 'login.sso.provider_unreachable',
   denied: 'login.sso.denied',
   no_account: 'login.sso.no_account',
+  platform_admin: 'login.sso.platform_admin',
   no_id_token: 'login.sso.no_id_token',
   email_unverified: 'login.sso.email_unverified',
   validation_failed: 'login.sso.validation_failed',

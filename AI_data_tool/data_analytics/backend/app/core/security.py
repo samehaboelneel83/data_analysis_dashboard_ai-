@@ -26,6 +26,15 @@ def verify_password(password: str, password_hash: str) -> bool:
     return pwd_context.verify(password, password_hash)
 
 
+def normalize_email(email: str | None) -> str:
+    """One spelling per address: trimmed and lower-case. Accounts are created
+    and renamed through this, so `Admin@X.com` and `admin@x.com` can never be
+    two different people -- the super-admin allowlist already treated them as
+    one, and the gap between the two let an org admin register an upper-case
+    copy of a platform admin's address and inherit the platform (QA E-02)."""
+    return (email or "").strip().lower()
+
+
 ALGORITHM = "HS256"
 
 

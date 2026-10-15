@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useContext, useEffect, useState } from 'react'
+import { AuthContext } from '../../contexts/AuthContext'
 import { fieldStyle } from '../../components/ui/fieldStyle'
 import { useT } from '../../i18n'
 import { nodesT } from '../../i18n/pages/adminSecurity'
@@ -178,6 +179,7 @@ function BulkImportModal({ onDone, onClose }: { onDone: () => void; onClose: () 
 
 export default function AdminUsers() {
   const t = useT()
+  const viewerIsPlatformAdmin = !!useContext(AuthContext)?.user?.is_super_admin
   const [users, setUsers] = useState<User[]>([])
   const [roles, setRoles] = useState<Role[]>([])
   const [loading, setLoading] = useState(true)
@@ -260,8 +262,16 @@ export default function AdminUsers() {
               </div>
               <div className="dl-rows__meta"><bdi>{u.role.name}</bdi>{u.role.is_org_admin && <>{' '}{t('pg.adminSecurity.c.adminTag')}</>}</div>
             </div>
-            <button className="btn btn-ghost btn-sm" onClick={() => setModal(u)}>{t('admin.edit')}</button>
-            <button className="btn btn-ghost btn-sm dl-danger-item" onClick={() => handleDelete(u)}>{t('admin.delete')}</button>
+            {u.is_super_admin && !viewerIsPlatformAdmin ? (
+              // Only a platform admin may change a platform admin (the server
+              // refuses it too); say why instead of offering dead buttons.
+              <span className="dl-rows__meta" title={t('pg.adminSecurity.users.platformAdminHint')}>
+                {t('pg.adminSecurity.users.platformAdminTag')}
+              </span>
+            ) : (<>
+              <button className="btn btn-ghost btn-sm" onClick={() => setModal(u)}>{t('admin.edit')}</button>
+              <button className="btn btn-ghost btn-sm dl-danger-item" onClick={() => handleDelete(u)}>{t('admin.delete')}</button>
+            </>)}
           </div>
         ))}
       </div>

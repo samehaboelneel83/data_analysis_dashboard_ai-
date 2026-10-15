@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import AdminUsers from './AdminUsers'
 import { ConfirmProvider } from '../../components/ui/ConfirmDialog'
+import { AuthContext } from '../../contexts/AuthContext'
 
 vi.mock('../../services/api', () => ({
   adminUsersApi: {
@@ -71,5 +72,43 @@ describe('AdminUsers accessibility', () => {
     const { container } = renderPage()
     await screen.findByRole('heading', { name: 'Users' })
     expect(await axeViolations(container)).toEqual([])
+  })
+})
+
+describe('AdminUsers — platform admin rows (QA E-01)', () => {
+  // The server refuses an org admin's edit/delete of a platform admin; the row
+  // says so instead of offering buttons that can only fail.
+  const org = { id: 1, name: 'Default' }
+  const rows = [
+    { id: 1, email: 'platform@example.com', is_active: true, organization: org,
+      role: { id: 2, name: 'Admin', is_org_admin: true }, is_super_admin: true },
+    { id: 2, email: 'analyst@example.com', is_active: true, organization: org,
+      role: { id: 1, name: 'Analyst', is_org_admin: false }, is_super_admin: false },
+  ]
+  const viewer = (isPlatformAdmin: boolean) => ({
+    user: { id: 9, email: 'me@example.com', is_active: true, organization: org,
+      role: { id: 2, name: 'Admin', is_org_admin: true }, is_super_admin: isPlatformAdmin },
+    loading: false, login: vi.fn(), logout: vi.fn(),
+  }) as never
+  const renderAs = (isPlatformAdmin: boolean) => render(
+    <AuthContext.Provider value={viewer(isPlatformAdmin)}>
+      <ConfirmProvider><AdminUsers /></ConfirmProvider>
+    </AuthContext.Provider>)
+
+  it('an org admin sees no Edit or Delete on a platform admin, only on everyone else', async () => {
+    vi.mocked(adminUsersApi.list).mockResolvedValueOnce(rows as never)
+    renderAs(false)
+    expect(await screen.findByText('platform@example.com')).toBeInTheDocument()
+    expect(screen.getByText('Platform admin')).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Edit' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Delete' })).toHaveLength(1)
+  })
+
+  it('a platform admin keeps both buttons on every row', async () => {
+    vi.mocked(adminUsersApi.list).mockResolvedValueOnce(rows as never)
+    renderAs(true)
+    expect(await screen.findByText('platform@example.com')).toBeInTheDocument()
+    expect(screen.queryByText('Platform admin')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Edit' })).toHaveLength(2)
   })
 })

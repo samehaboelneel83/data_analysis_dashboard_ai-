@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timedelta
 
 from ..core.database import get_db
+from ..core.security import normalize_email
 from ..dependencies import require_super_admin
 from ..models.models import AgentRun, AiUsage, Dataset, Organization, OrgParent, QueryRun, Quota, User
 from ..services.audit import record as audit
@@ -32,10 +33,10 @@ class OrgCreate(BaseModel):
 async def create_org(body: OrgCreate, db: AsyncSession = Depends(get_db),
                      current_user: User = Depends(require_super_admin)):
     """Provision a whole organization plus its first admin user in one call."""
-    email = body.admin_email.strip()
+    email = normalize_email(body.admin_email)
     if "@" not in email:
         raise HTTPException(400, "admin_email must be an email address")
-    if (await db.execute(select(User).where(User.email == email))).scalar_one_or_none() is not None:
+    if (await db.execute(select(User.id).where(func.lower(User.email) == email).limit(1))).first() is not None:
         raise HTTPException(400, "That admin email is already in use")
     org, role, admin = await create_organization_with_admin(db, body.name.strip(), email, body.admin_password)
     await audit(db, current_user, "platform.create_org", "organization", None, body.name.strip())

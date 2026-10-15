@@ -8,8 +8,8 @@ from sqlalchemy.orm import selectinload
 
 from ..core.database import get_db
 from ..core.org_scope import check_org
-from ..core.security import hash_password
-from ..dependencies import get_current_user, require_org_admin
+from ..core.security import hash_password, normalize_email
+from ..dependencies import get_current_user, is_allowlisted_email, is_super_admin, require_org_admin
 from ..models.models import AuditLogEntry, ColumnSecurityRule, Dataset, Role, RowSecurityRule, User
 from ..schemas.schemas import (
     RoleCreate, RoleUpdate, RoleOut,
@@ -86,28 +86,59 @@ async def _load_user_out(db: AsyncSession, user_id: int) -> User:
     return result.scalar_one()
 
 
+def _refuse_if_platform_admin(target: User, current_user: User) -> None:
+    """A platform super-admin's account can only be changed by a platform
+    super-admin. An org admin of the org it happens to live in could otherwise
+    reset its password, rename it or demote it -- a takeover of every org
+    (QA E-01). Called before any change is made."""
+    if is_super_admin(target) and not is_super_admin(current_user):
+        raise HTTPException(403, "Platform administrators can only be changed by a platform administrator")
+
+
+def _refuse_allowlisted_email(email: str, current_user: User) -> None:
+    """Whoever holds an allowlisted address holds the platform, so only a
+    platform super-admin may give one to an account (QA E-02)."""
+    if is_allowlisted_email(email) and not is_super_admin(current_user):
+        raise HTTPException(403, "This address is reserved for platform administrators")
+
+
+async def _email_taken(db: AsyncSession, email: str, *, except_id: int | None = None) -> bool:
+    """Is this address in use, in ANY letter case (accounts made before
+    emails were normalised may still hold capitals)."""
+    q = select(User.id).where(func.lower(User.email) == normalize_email(email))
+    if except_id is not None:
+        q = q.where(User.id != except_id)
+    return (await db.execute(q.limit(1))).first() is not None
+
+
 @router.get("/users", response_model=list[UserOut])
 async def list_users(db: AsyncSession = Depends(get_db), current_user: User = Depends(require_org_admin)):
     result = await db.execute(
         select(User).options(selectinload(User.role), selectinload(User.organization))
         .where(User.org_id == current_user.org_id)
     )
-    return result.scalars().all()
+    users = result.scalars().all()
+    # Transient, as on /auth/me: lets the UI hide Edit/Delete on a platform
+    # admin's row for an org admin, who may not change it (E-01).
+    for u in users:
+        u.is_super_admin = is_super_admin(u)
+    return users
 
 
 @router.post("/users", response_model=UserOut)
 async def create_user(body: UserCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_org_admin)):
     role = await db.get(Role, body.role_id)
     check_org(role, current_user, "Role not found")
-    existing = await db.execute(select(User).where(User.email == body.email))
-    if existing.scalar_one_or_none() is not None:
+    email = normalize_email(body.email)
+    _refuse_allowlisted_email(email, current_user)
+    if await _email_taken(db, email):
         raise HTTPException(400, "Email already in use")
     user = User(
         org_id=current_user.org_id, role_id=body.role_id,
-        email=body.email, password_hash=hash_password(body.password),
+        email=email, password_hash=hash_password(body.password),
     )
     db.add(user)
-    await admin_audit.record(db, current_user, "user.create", f"user:{body.email}", f"role:{role.name}")
+    await admin_audit.record(db, current_user, "user.create", f"user:{email}", f"role:{role.name}")
     await db.commit()
     return await _load_user_out(db, user.id)
 
@@ -125,19 +156,24 @@ async def bulk_create_users(body: BulkUserCreate, db: AsyncSession = Depends(get
     for r in roles:
         role_by_name.setdefault((r.name or "").strip().lower(), r)   # first wins on a name clash
 
-    wanted = [(u.email or "").strip() for u in body.users if (u.email or "").strip()]
+    wanted = [normalize_email(u.email) for u in body.users if normalize_email(u.email)]
     taken = set()
     if wanted:
-        taken = set((await db.execute(select(User.email).where(User.email.in_(wanted)))).scalars().all())
+        taken = set((await db.execute(
+            select(func.lower(User.email)).where(func.lower(User.email).in_(wanted)))).scalars().all())
+    may_grant_platform = is_super_admin(current_user)
 
     errors: list[dict] = []
     valid: list[tuple[str, int, str]] = []   # (email, role_id, password)
     seen: set[str] = set()
     for i, u in enumerate(body.users):
         row = i + 1                           # 1-based, matches a spreadsheet
-        email = (u.email or "").strip()
+        email = normalize_email(u.email)
         if not email or "@" not in email:
             errors.append({"row": row, "email": email, "error": "invalid email"}); continue
+        if is_allowlisted_email(email) and not may_grant_platform:
+            errors.append({"row": row, "email": email,
+                           "error": "reserved for platform administrators"}); continue
         if email in seen:
             errors.append({"row": row, "email": email, "error": "duplicate email in this upload"}); continue
         if email in taken:
@@ -166,15 +202,17 @@ async def bulk_create_users(body: BulkUserCreate, db: AsyncSession = Depends(get
 async def update_user(user_id: int, body: UserUpdate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_org_admin)):
     user = await db.get(User, user_id)
     check_org(user, current_user, "User not found")
+    _refuse_if_platform_admin(user, current_user)
     changes: list[str] = []
     was_email = user.email
     if body.email is not None:
-        existing = await db.execute(select(User).where(User.email == body.email, User.id != user_id))
-        if existing.scalar_one_or_none() is not None:
+        email = normalize_email(body.email)
+        _refuse_allowlisted_email(email, current_user)
+        if await _email_taken(db, email, except_id=user_id):
             raise HTTPException(400, "Email already in use")
-        if body.email != user.email:
+        if email != user.email:
             changes.append(f"email from {user.email}")
-        user.email = body.email
+        user.email = email
     if body.password is not None:
         changes.append("password reset")
         user.password_hash = hash_password(body.password)
@@ -203,6 +241,7 @@ async def update_user(user_id: int, body: UserUpdate, db: AsyncSession = Depends
 async def delete_user(user_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_org_admin)):
     user = await db.get(User, user_id)
     check_org(user, current_user, "User not found")
+    _refuse_if_platform_admin(user, current_user)
     if user.id == current_user.id:
         raise HTTPException(400, "Cannot delete your own account")
     await admin_audit.record(db, current_user, "user.delete", f"user:{user.email}", None)
@@ -909,6 +948,7 @@ async def set_user_org_units(user_id: int, body: dict, db: AsyncSession = Depend
     from ..models.models import OrgUnit, UserOrgUnit
     target = await db.get(User, user_id)
     check_org(target, admin, "User not found")
+    _refuse_if_platform_admin(target, admin)
     ids = [int(i) for i in (body.get("org_unit_ids") or [])]
     if ids:
         valid = (await db.execute(

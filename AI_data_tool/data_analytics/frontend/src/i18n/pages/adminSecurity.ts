@@ -39,6 +39,8 @@ export const en = {
   'pg.adminSecurity.c.ruleTitle': '{role} {on} {dataset}',
   'pg.adminSecurity.c.on': 'on',
   'pg.adminSecurity.c.adminTag': '(admin)',
+  'pg.adminSecurity.users.platformAdminTag': 'Platform admin',
+  'pg.adminSecurity.users.platformAdminHint': 'Only a platform administrator can change this account.',
   /** A role in a <select> option, where no <bdi> can go. */
   'pg.adminSecurity.c.roleOptionAdmin': '{name} (admin)',
 
@@ -217,6 +219,8 @@ export const ar: Record<keyof typeof en, string> = {
   'pg.adminSecurity.c.ruleTitle': '{role} {on} {dataset}',
   'pg.adminSecurity.c.on': 'على',
   'pg.adminSecurity.c.adminTag': '(مسؤول)',
+  'pg.adminSecurity.users.platformAdminTag': 'مسؤول المنصّة',
+  'pg.adminSecurity.users.platformAdminHint': 'لا يمكن تعديل هذا الحساب إلا من قِبل مسؤول المنصّة.',
   'pg.adminSecurity.c.roleOptionAdmin': '⁨{name}⁩ (مسؤول)',
 
   'pg.adminSecurity.roles.nameRequired': 'الاسم مطلوب',

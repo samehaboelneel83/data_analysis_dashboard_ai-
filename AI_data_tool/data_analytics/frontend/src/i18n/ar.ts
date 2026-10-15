@@ -2364,6 +2364,7 @@ export const ar: Record<MessageKey, string> = {
   'login.sso.provider_unreachable': 'تعذر الوصول إلى مزوّد الهوية. حاول مرة أخرى.',
   'login.sso.denied': 'تم إلغاء تسجيل الدخول الموحّد.',
   'login.sso.no_account': 'هذا الحساب غير مسجّل هنا. اطلب من المسؤول إضافتك أولاً.',
+  'login.sso.platform_admin': 'يسجّل مسؤولو المنصّة الدخول بالبريد الإلكتروني وكلمة المرور، وليس بتسجيل الدخول الموحّد.',
   'login.sso.no_id_token': 'لم يُرجع مزوّد الهوية رمز تسجيل الدخول.',
   'login.sso.email_unverified': 'بريدك الإلكتروني غير موثّق لدى مزوّد الهوية.',
   'login.sso.validation_failed': 'تعذر التحقق من تسجيل الدخول الموحّد. حاول مرة أخرى.',

@@ -2364,6 +2364,7 @@ export const en = {
   'login.sso.provider_unreachable': 'The identity provider could not be reached. Please try again.',
   'login.sso.denied': 'Single sign-on was cancelled.',
   'login.sso.no_account': 'That account is not registered here. Ask an admin to add you first.',
+  'login.sso.platform_admin': 'Platform administrators sign in with their email and password, not single sign-on.',
   'login.sso.no_id_token': 'The identity provider did not return a sign-in token.',
   'login.sso.email_unverified': 'Your email is not verified with the identity provider.',
   'login.sso.validation_failed': 'Single sign-on could not be verified. Please try again.',

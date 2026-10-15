@@ -136,12 +136,19 @@ async def require_org_admin(current_user: User = Depends(get_current_user)) -> U
     return current_user
 
 
-def is_super_admin(user: User | None) -> bool:
-    """A platform super-admin, from the config email allowlist. Read dynamically so the
-    allowlist can change (and tests can set it) without a restart."""
+def is_allowlisted_email(email: str | None) -> bool:
+    """Whether this address is on the platform super-admin allowlist, in ANY
+    letter case. Read dynamically so the allowlist can change (and tests can
+    set it) without a restart. Every place that creates or renames an account
+    must check this: whoever holds an allowlisted address holds the platform."""
     from .core.config import settings
     allow = {e.strip().lower() for e in (settings.super_admin_emails or "").split(",") if e.strip()}
-    return bool(user and user.email and user.email.lower() in allow)
+    return bool(email) and email.strip().lower() in allow
+
+
+def is_super_admin(user: User | None) -> bool:
+    """A platform super-admin, from the config email allowlist."""
+    return bool(user and is_allowlisted_email(user.email))
 
 
 async def require_super_admin(current_user: User = Depends(get_current_user)) -> User:

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -21,10 +21,24 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 _DUMMY_HASH = hash_password("timing-attack-mitigation")
 
 
+async def _user_for_login(db: AsyncSession, email: str) -> User | None:
+    """The account an address signs in to. Exactly as typed first (so every
+    existing account behaves as before), then in any letter case -- new
+    accounts are stored lower-case -- but only when that is unambiguous: two
+    accounts differing only by case (possible before emails were normalised)
+    are never guessed between."""
+    typed = (email or "").strip()
+    exact = (await db.execute(select(User).where(User.email == typed))).scalar_one_or_none()
+    if exact is not None:
+        return exact
+    matches = (await db.execute(
+        select(User).where(func.lower(User.email) == typed.lower()).limit(2))).scalars().all()
+    return matches[0] if len(matches) == 1 else None
+
+
 @router.post("/login", response_model=TokenOut)
 async def login(body: LoginRequest, response: Response, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.email == body.email))
-    user = result.scalar_one_or_none()
+    user = await _user_for_login(db, body.email)
     if not user:
         verify_password(body.password, _DUMMY_HASH)
         raise HTTPException(401, "Invalid email or password")
