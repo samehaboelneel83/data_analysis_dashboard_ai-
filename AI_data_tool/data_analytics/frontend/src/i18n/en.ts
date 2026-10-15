@@ -132,6 +132,7 @@ export const en = {
   'flows.pickSource': 'Choose a dataset…',
   'flows.create': 'Create',
   'flows.createFailed': 'Could not create the dataflow',
+  'flows.governed': 'This dataset has row or column security rules, so it cannot feed a dataflow: the result would freeze one person\'s filtered view as everyone\'s data.',
   'flows.empty': 'No dataflows yet. Create one from a dataset, add steps, then run it into a new dataset.',
   'flows.steps': '{n} steps',
   'flows.schedule': 'Refresh',

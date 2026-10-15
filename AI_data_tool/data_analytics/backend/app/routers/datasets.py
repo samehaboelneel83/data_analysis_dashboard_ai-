@@ -3838,7 +3838,7 @@ async def _validated_join_columns(
     return join_columns
 
 
-async def _refuse_if_ungovernable(db: AsyncSession, source_ids: list[int]) -> dict:
+async def _refuse_if_ungovernable(db: AsyncSession, source_ids: list[int], *, what: str = "snapshot") -> dict:
     """Refuse to snapshot governed data, and honour every source's export policy.
 
     **The security decision this feature turns on.** Every read applies the
@@ -3865,6 +3865,12 @@ async def _refuse_if_ungovernable(db: AsyncSession, source_ids: list[int]) -> di
     strictest: dict | bool | None = None
     for sid in source_ids:
         if await _dataset_has_security(db, sid):
+            if what == "dataflow":
+                raise HTTPException(
+                    403, "A dataflow cannot read a dataset with row- or column-security "
+                         "rules: its output would freeze one person's filtered view as "
+                         "everyone's data. Remove the rules, or build the dataflow on a "
+                         "dataset without them.")
             raise HTTPException(
                 403, "Cannot save a snapshot of a dataset that has row- or "
                      "column-security rules: the result would freeze one "
