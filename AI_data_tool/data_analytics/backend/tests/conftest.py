@@ -9,6 +9,33 @@ from app.core.database import Base, get_db
 from app.main import app
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _own_duckdb_metadata_cache(tmp_path_factory):
+    """B-13: give the suite its own DuckDB metadata cache file.
+
+    The default (`/app/uploads/metadata_cache.duckdb`) is the file a live
+    backend on the same machine holds open; DuckDB locks it per process, so a
+    pytest run that opened it made the live server's syncs fail or hang. The
+    caches are opened lazily (services/metadata/cache.py), so pointing the
+    setting at a temp file before any test runs is enough; they are closed and
+    forgotten at session end."""
+    from app.core.config import settings
+    from app.services.metadata import cache
+
+    original = settings.duckdb_cache_path
+    settings.duckdb_cache_path = str(
+        tmp_path_factory.mktemp("duckdb") / "metadata_cache.duckdb"
+    )
+    yield
+    with cache._default_lock:
+        for c in (cache._default, cache._object_cache):
+            if c is not None:
+                c.close()
+        cache._default = None
+        cache._object_cache = None
+    settings.duckdb_cache_path = original
+
+
 @pytest.fixture(autouse=True)
 def _no_embeddings_backend_by_default(monkeypatch):
     """Task M2: compose enables Backend B by default (`EMBEDDING_BASE_URL`
