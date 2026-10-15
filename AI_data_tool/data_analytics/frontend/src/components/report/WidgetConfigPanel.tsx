@@ -389,7 +389,6 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
   const [hierIdCol,     setHierIdCol]     = useState<string>((cfg.id_col as string) ?? '')
   const [hierParentCol, setHierParentCol] = useState<string>((cfg.parent_col as string) ?? '')
   const [hierLabelCol,  setHierLabelCol]  = useState<string>((cfg.label_col as string) ?? '')
-  const [facetBy,       setFacetBy]       = useState<string>((cfg.facet_by as string) ?? '')
   const [facetInner,    setFacetInner]    = useState<string>((cfg.inner_widget_type as string) ?? 'bar')
   const [facetLimit,    setFacetLimit]    = useState<string>(String(cfg.facet_limit ?? FACET_MAX_PANELS))
   const [forecastPeriods, setForecastPeriods] = useState<string>(
@@ -658,7 +657,7 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
         }
       }
       if (wt === 'small_multiples') {
-        if (facetBy) config.facet_by = facetBy
+        // C-23: facet_by is the 'facet' role now, written with the other roles.
         config.inner_widget_type = facetInner
         const lim = Number(facetLimit)
         if (lim > 0) config.facet_limit = Math.min(lim, FACET_MAX_PANELS)
@@ -892,7 +891,7 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
     // panel BUILD the config and never re-emit it -- the controls would
     // appear to work and save nothing.
     hierMode, hierLevels, hierIdCol, hierParentCol, hierLabelCol,
-    facetBy, facetInner, facetLimit, forecastPeriods,
+    facetInner, facetLimit, forecastPeriods,
     // Stringified because it is an array of objects: by identity it changes on
     // every keystroke that rebuilds the list, and by omission it never changes
     // at all -- which is the failure the comment above describes, and the one
@@ -1967,7 +1966,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 <label htmlFor="facet-by" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)' }}>
                   {L("Facet by")}
                 </label>
-                <select id="facet-by" value={facetBy} onChange={e => setFacetBy(e.target.value)}
+                <select id="facet-by" value={roleValues.facet ?? ''} onChange={e => setRole('facet', e.target.value)}
                   style={{ width:'100%' }}>
                   <option value="">{L("— choose a column —")}</option>
                   {effectiveCols.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}

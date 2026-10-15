@@ -340,3 +340,11 @@ class TestAKpiNeedsOnlyAMeasure:
         kpis = {w["id"]: w["config"] for p in loaded["pages"] for w in p["widgets"]}
         assert kpis[ids[1]]["dimension"] == "region" and kpis[ids[1]]["aggregation"] == "avg"
         assert "dimension" not in kpis[ids[0]]
+
+
+def test_small_multiples_requires_its_split_field():
+    """C-23: the facet DEFINES a small multiple; without it the widget drew a
+    single 'All' panel. It is a required role, carried in `facet_by`."""
+    assert missing_roles("small_multiples", {"dimension": "category", "measure": "revenue"}) == ["facet_by"]
+    assert missing_roles("small_multiples", {"dimension": "category", "facet_by": "region"}) == []
+    assert config_key_for_role("facet") == "facet_by"

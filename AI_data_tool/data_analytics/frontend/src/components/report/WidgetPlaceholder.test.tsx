@@ -141,3 +141,12 @@ describe('C-14: a category chart given only a measure is unfinished', () => {
     expect(screen.queryByTestId('widget-placeholder')).toBeNull()
   })
 })
+
+describe('C-23: small multiples needs its split field', () => {
+  it('a small multiple without facet_by is unfinished', () => {
+    expect(missingRequiredRoles({ widget_type: 'small_multiples', config: { dimension: 'category' } } as never))
+      .toEqual(['Split into multiples by'])
+    expect(missingRequiredRoles({ widget_type: 'small_multiples', config: { dimension: 'category', facet_by: 'region' } } as never))
+      .toEqual([])
+  })
+})
