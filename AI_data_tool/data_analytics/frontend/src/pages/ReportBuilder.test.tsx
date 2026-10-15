@@ -3162,3 +3162,20 @@ describe('C-17: my own classification is not "changed in another session"', () =
     } finally { vi.useRealTimers() }
   })
 })
+
+describe('C-19: resizing a widget', () => {
+  it('selects no page text while the handle is dragged, and restores it after', async () => {
+    vi.mocked(reportsApi.get).mockReset().mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    const handle = await screen.findByTestId('widget-resize-handle')
+    expect(parseFloat(handle.style.width)).toBeGreaterThanOrEqual(24)
+    fireEvent.pointerDown(handle, { clientX: 100, clientY: 100, pointerId: 1 })
+    await waitFor(() => expect(document.body.style.userSelect).toBe('none'))
+    fireEvent.pointerMove(window, { clientX: 300, clientY: 100, pointerId: 1 })
+    fireEvent.pointerUp(window, { clientX: 300, clientY: 100, pointerId: 1 })
+    await waitFor(() => expect(document.body.style.userSelect).toBe(''))
+  })
+})

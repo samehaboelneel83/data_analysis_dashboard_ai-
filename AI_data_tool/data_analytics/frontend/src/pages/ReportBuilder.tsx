@@ -2686,7 +2686,15 @@ export default function ReportBuilder() {
     window.addEventListener('pointercancel', onUp)
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup',   onUp)
+    // C-19: no page text is selected while a widget is moved or resized (the
+    // drag highlighted the AI pane), and the cursor stays the drag's own.
+    const body = document.body.style
+    const was = { userSelect: body.userSelect, cursor: body.cursor }
+    body.userSelect = 'none'
+    body.cursor = resizing ? 'nwse-resize' : 'grabbing'
     return () => {
+      body.userSelect = was.userSelect
+      body.cursor = was.cursor
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)

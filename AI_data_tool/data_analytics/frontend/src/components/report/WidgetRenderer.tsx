@@ -1818,7 +1818,10 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
       {editMode && onResizeStart && (
         <div
           data-testid="widget-resize-handle"
-          onMouseDown={e => { e.stopPropagation(); e.preventDefault(); onResizeStart(e) }}
+          // C-19: pointer events only. Handling mousedown too started the resize
+          // twice (the second start reset the first), and preventDefault on
+          // pointerdown suppresses the compatibility mousedown anyway.
+          onMouseDown={e => e.stopPropagation()}
           onPointerDown={e => {
             e.stopPropagation(); e.preventDefault()
             try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* jsdom */ }
@@ -1826,7 +1829,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
           }}
           style={{
             position: 'absolute', bottom: 0, right: 0, direction: 'ltr',
-            width: 18, height: 18, cursor: 'nwse-resize',
+            width: 24, height: 24, cursor: 'nwse-resize', touchAction: 'none',
             display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end',
             padding: '3px',
           }}
