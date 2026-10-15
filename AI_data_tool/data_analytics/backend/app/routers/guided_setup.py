@@ -1632,14 +1632,40 @@ async def fix_item(source_id: int, dataset_id: int, body: FixIn, lang: str = "en
         if step is None:
             raise HTTPException(400, "This line cannot be fixed automatically")
         await set_prep_steps(ds.id, list(prep_steps_of(ds)) + [step], db, user)
+    shape = await _recount(db, user, ds) if body.how == "fix" else None
     await db.refresh(f)
     state = dict(f.findings or {})
     entry = dict(state.get(str(dataset_id)) or {})
+    if shape is not None:
+        entry["rows"], entry["columns"] = shape
     entry["fixed"] = list(dict.fromkeys((entry.get("fixed") or []) + [f"{body.item_id}|{body.how}"]))
     state[str(dataset_id)] = entry
     f.findings = state
     await db.commit()
     return {"findings": _finding_of(f, dataset_id)}
+
+
+async def _recount(db: AsyncSession, user: User, ds: Dataset) -> tuple[int, int] | None:
+    """B-32: the dataset's shape after its prep steps -- a one-click fix that
+    removes rows or columns changes what the wizard and the dataset's own
+    pages should say. Read as `user`, through the same frame the check reads;
+    a recount that fails leaves the old numbers rather than failing the fix."""
+    from ..services import alerts
+    try:
+        await db.refresh(ds)
+        df = await alerts.alert_frame(db, ds, user)
+        await access.release(db)
+    except Exception:                                       # noqa: BLE001
+        logger.exception("guided setup: could not recount dataset %s after a fix", ds.id)
+        return None
+    rows, cols = int(len(df)), int(len(df.columns))
+    # The dataset's own count only from an unrestricted read: a row or column
+    # rule would write one person's slice in as everyone's size.
+    from ..core.rls import resolve_denied_columns, resolve_rls_expr
+    if ds.mode != "directquery" and not await resolve_rls_expr(db, user, ds.id) \
+            and not await resolve_denied_columns(db, user, ds.id):
+        ds.row_count, ds.col_count = rows, cols
+    return rows, cols
 
 
 class UndoIn(BaseModel):

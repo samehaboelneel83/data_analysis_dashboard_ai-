@@ -215,6 +215,29 @@ class TestRoutes:
         f = done["datasets"][0]["findings"]
         assert f["ai_pending"] is False and not f["pending"]
 
+    async def test_a_fix_recounts_the_rows_and_columns(self, client, auth_headers, setup, db_session, monkeypatch):
+        """B-32: after a one-click fix the wizard and the dataset kept the
+        pre-fix shape (64,420 x 26 when the output was 62,662 x 24)."""
+        from app.models.models import Dataset
+        src, ds = setup
+        f = (await client.get(f"/api/v1/setup/{src.id}/check", headers=auth_headers["a"])).json()["datasets"][0]["findings"]
+        assert f["rows"] == 400
+        item = next(i for i in f["health"] if i["kind"] == "empty")
+
+        async def fake_set(dataset_id, steps, db, user):
+            return steps
+        monkeypatch.setattr("app.routers.datasets.set_prep_steps", fake_set)
+        smaller = cars_frame().iloc[:350].drop(columns=[cars_frame().columns[0]])
+
+        async def after_fix(db, d, user):
+            return smaller
+        monkeypatch.setattr("app.services.alerts.alert_frame", after_fix)
+        r = (await client.post(f"/api/v1/setup/{src.id}/check/{ds.id}/fix", headers=auth_headers["a"],
+                               json={"item_id": item["id"]})).json()
+        assert (r["findings"]["rows"], r["findings"]["columns"]) == (350, smaller.shape[1])
+        await db_session.refresh(ds)
+        assert (ds.row_count, ds.col_count) == (350, smaller.shape[1])
+
     async def test_findings_are_offered_to_the_datasets_own_pages(self, client, auth_headers, setup):
         src, ds = setup
         await client.get(f"/api/v1/setup/{src.id}/check", headers=auth_headers["a"])
