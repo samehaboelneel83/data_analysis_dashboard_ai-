@@ -52,7 +52,7 @@ services:
       ENV:             ${ENV:-development}
       UPLOAD_DIR:      /app/uploads
       MAX_UPLOAD_MB:   ${MAX_UPLOAD_MB:-100}
-      SUPER_ADMIN_EMAILS: ${SUPER_ADMIN_EMAILS:-admin@datalytics.local,admin,admin@admin.com}
+      SUPER_ADMIN_EMAILS: ${SUPER_ADMIN_EMAILS:-admin@datalytics.local}
       # O2: shared result-cache backend (services/cache_backend.py).
       #
       # Now pointed at the valkey service this compose file already runs. It

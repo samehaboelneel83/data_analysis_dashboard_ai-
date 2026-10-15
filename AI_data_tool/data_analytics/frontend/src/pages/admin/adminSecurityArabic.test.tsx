@@ -101,7 +101,7 @@ describe('the security admin pages, in Arabic (8-i18n)', () => {
       created_count: 1, created: ['a@x.com'], errors: [{ row: 2, email: 'bad', error: 'invalid email' }],
     } as never)
     renderAr(<AdminUsers />)
-    expect(await screen.findByText('غير نشط')).toBeInTheDocument()
+    expect(await screen.findByText('غير نشط', { selector: 'span' })).toBeInTheDocument()   // the row's tag, not the status filter's option
     expect(screen.getByText('(مسؤول)')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: ar('admin.delete') }))
@@ -133,6 +133,8 @@ describe('the security admin pages, in Arabic (8-i18n)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: ar('admin.newRule') }))
     const dlg = screen.getByRole('dialog', { name: 'قاعدة أمان صفوف جديدة' })
+    // Nothing is pre-selected (QA E-05): pick the dataset.
+    fireEvent.change(within(dlg).getAllByRole('combobox')[1], { target: { value: '1' } })
     const match = within(dlg).getByLabelText('المطابقة') as HTMLSelectElement
     expect(Array.from(match.options).map(o => o.textContent)).toContain('البريد الإلكتروني للمستخدم الحالي')
     // The generated expression is code, and stays as it is.

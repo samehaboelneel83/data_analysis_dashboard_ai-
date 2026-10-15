@@ -149,6 +149,23 @@ def _config_names(config: dict, name: str) -> bool:
 
 
 
+def _refuse_denied_measures(config: dict, filters, measure_defs: list, calc_cols: list,
+                            denied: list[str]) -> None:
+    """403 `forbidden_column` for a widget whose measure or calculated column is
+    built on a column this reader may not see (QA E-12 / SEC-02: the import path
+    returned "name 'cost' is not defined", naming the hidden column). A
+    calculated column over a denied column is itself denied, so a measure over
+    THAT is refused too. The message names nothing."""
+    if not denied:
+        return
+    from ..core.rls import author_items_over_denied
+    bad_calc, bad_measures = author_items_over_denied(calc_cols, measure_defs, denied)
+    used = lambda name: _config_names(config or {}, name) or _config_names(filters or [], name)  # noqa: E731
+    if any(used(n) for n in bad_calc | bad_measures):
+        raise widget_error(403, "forbidden_column", "This widget references a column your role cannot access")
+
+
+
 class _DirectQueryCalcView:
     """Read-only stand-in for a DirectQuery Dataset whose base query carries
     calculated columns as extra SELECT layers. Everything but `columns` and
@@ -591,12 +608,7 @@ async def _resolve_widget_data(
             # A measure the widget names reads columns its config never
             # mentions: the SQL is built from the measure's formula, so a
             # formula over a denied column is refused the same way (E04).
-            from ..services.measure_sql import referenced_names
-            for m in measure_defs:
-                if (_config_names(req.config, m.get("name"))
-                        and referenced_names(m.get("expression") or "") & set(denied)):
-                    raise widget_error(403, "forbidden_column",
-                                       "This widget references a column your role cannot access")
+            _refuse_denied_measures(req.config, getattr(req, "filters", None), measure_defs, calc_cols, denied)
 
         # Relative dates, after row security and column security are known: a
         # `data_max` anchor is read from the rows this reader may see.
@@ -761,6 +773,10 @@ async def _resolve_widget_data(
     # redacted column ceases to exist for this read exactly like a denied one.
     denied = sorted(set(await resolve_denied_columns(db, current_user, dataset_id) or [])
                     | set(redact_columns or []))
+    # A measure or calculated column built on a denied column is refused up
+    # front, as on the DirectQuery path, instead of failing inside the
+    # evaluator with the hidden column's name (QA E-12 / SEC-02).
+    _refuse_denied_measures(req.config, getattr(req, "filters", None), measure_defs, calc_cols, denied)
     steps = prep_steps_of(ds)
     aux = await resolve_join_frames(db, current_user, steps) if steps else {}
 

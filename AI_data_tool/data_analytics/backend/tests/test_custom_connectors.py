@@ -24,6 +24,21 @@ class TestValidateCustomConnectorDef:
         with pytest.raises(CustomConnectorError, match="no value to lock"):
             validate_custom_connector_def("postgresql", {"host": "h"}, ["port"])
 
+    # QA E-11: Port "abc" and a free-text TLS mode were saved and only failed
+    # when a connection used the preset.
+    @pytest.mark.parametrize("port", ["abc", "54.3", 0, 70000, -1, True])
+    def test_non_numeric_or_out_of_range_port_is_rejected(self, port):
+        with pytest.raises(CustomConnectorError, match="Port"):
+            validate_custom_connector_def("postgresql", {"host": "h", "port": port}, [])
+
+    def test_unknown_tls_mode_is_rejected(self):
+        with pytest.raises(CustomConnectorError, match="TLS"):
+            validate_custom_connector_def("postgresql", {"ssl_mode": "sometimes"}, [])
+
+    @pytest.mark.parametrize("port", [5432, "5432", " 3306 ", None, ""])
+    def test_a_numeric_port_passes_as_number_or_digits(self, port):
+        validate_custom_connector_def("postgresql", {"host": "h", "port": port, "ssl_mode": "require"}, [])
+
     def test_a_valid_definition_passes(self):
         validate_custom_connector_def("postgresql", {"host": "db.acme.internal", "port": 5432},
                                        ["host", "port"])

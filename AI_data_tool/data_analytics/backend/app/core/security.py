@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timedelta, timezone
 import bcrypt as _bcrypt
 
@@ -33,6 +34,30 @@ def normalize_email(email: str | None) -> str:
     one, and the gap between the two let an org admin register an upper-case
     copy of a platform admin's address and inherit the platform (QA E-02)."""
     return (email or "").strip().lower()
+
+
+# local@domain.tld: one @, no spaces, a dot in the domain and a 2+ character
+# last label. Deliberately not EmailStr (see the note in routers/sso.py): it
+# refuses the `.local` / `.invalid` addresses internal installs and the demo use.
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s.]+(\.[^@\s.]+)*\.[^@\s.]{2,}$")
+
+
+def email_problem(email: str | None) -> str | None:
+    """Why this (already normalised) address can't be an account, or None."""
+    if not email or len(email) > 254 or not _EMAIL_RE.match(email):
+        return "Enter a valid email address, like name@company.com"
+    return None
+
+
+def password_problem(password: str | None, email: str | None = None) -> str | None:
+    """Why this password can't be set by an admin (QA E-04: "x" was accepted),
+    or None."""
+    n = settings.password_min_length
+    if password is None or len(password) < n:
+        return f"Password must be at least {n} characters"
+    if email and password.strip().lower() == normalize_email(email):
+        return "Password must not be the same as the email address"
+    return None
 
 
 ALGORITHM = "HS256"

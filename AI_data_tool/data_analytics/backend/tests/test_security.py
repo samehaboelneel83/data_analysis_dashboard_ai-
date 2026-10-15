@@ -119,7 +119,7 @@ class TestAPasswordResetEndsExistingSessions:
         assert (await client.get("/api/v1/auth/me", headers=old)).status_code == 200
 
         r = await client.patch(f"/api/v1/admin/users/{user.id}",
-                               json={"password": "new-pw"}, headers=auth_headers["a"])
+                               json={"password": "new-pw-123"}, headers=auth_headers["a"])
         assert r.status_code == 200, r.text
 
         assert (await client.get("/api/v1/auth/me", headers=old)).status_code == 401

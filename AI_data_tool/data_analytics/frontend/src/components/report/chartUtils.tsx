@@ -298,8 +298,10 @@ export function formatValue(value: unknown, fmt?: CalcColumnFormat | null): Reac
   }
 }
 
-export function EmptyState({ msg, action }: {
+export function EmptyState({ msg, action, icon }: {
   msg: string
+  /** Replaces the neutral square, e.g. a lock for data the reader may not see. */
+  icon?: React.ReactNode
   /** One thing the reader can do about it. Offered only when doing it could
    *  change the answer -- a source that was unreachable may not be now. */
   action?: { label: string; onClick: () => void }
@@ -308,7 +310,7 @@ export function EmptyState({ msg, action }: {
     // Styling untouched from before the action existed: this renders in every
     // widget on every surface, and a restyle here is an app-wide change.
     <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12, flexDirection: 'column', gap: 6 }}>
-      <span style={{ fontSize: 24, opacity: .4 }}>◻</span>
+      <span style={{ fontSize: 24, opacity: .4 }}>{icon ?? '◻'}</span>
       {/* dir="auto": a message takes the direction of its own text, so its
           punctuation lands at the right end in either layout. */}
       <span dir="auto" style={{ textAlign: 'center', maxWidth: '100%' }}>{msg}</span>

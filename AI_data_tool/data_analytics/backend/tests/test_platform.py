@@ -26,11 +26,11 @@ async def test_me_reports_super_admin_status(client, auth_headers, two_orgs, _su
 @pytest.mark.asyncio
 async def test_create_org_provisions_an_org_and_a_working_admin(client, auth_headers, two_orgs, _super):
     r = await client.post("/api/v1/platform/organizations",
-                          json={"name": "Acme", "admin_email": "boss@acme.com", "admin_password": "s3cret"},
+                          json={"name": "Acme", "admin_email": "boss@acme.com", "admin_password": "s3cret-pass"},
                           headers=auth_headers["a"])
     assert r.status_code == 201, r.text
     # the new admin can log in immediately
-    login = await client.post("/api/v1/auth/login", json={"email": "boss@acme.com", "password": "s3cret"})
+    login = await client.post("/api/v1/auth/login", json={"email": "boss@acme.com", "password": "s3cret-pass"})
     assert login.status_code == 200
     # and the org shows up in the cross-org listing
     orgs = (await client.get("/api/v1/platform/organizations", headers=auth_headers["a"])).json()
@@ -41,9 +41,30 @@ async def test_create_org_provisions_an_org_and_a_working_admin(client, auth_hea
 @pytest.mark.asyncio
 async def test_duplicate_admin_email_is_rejected(client, auth_headers, two_orgs, _super):
     r = await client.post("/api/v1/platform/organizations",
-                          json={"name": "Dup", "admin_email": "admin-b@example.com", "admin_password": "pw"},
+                          json={"name": "Dup", "admin_email": "admin-b@example.com", "admin_password": "s3cret-pass"},
                           headers=auth_headers["a"])
     assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("password", ["x", "1234567"])
+async def test_create_org_short_admin_password_is_422(client, auth_headers, two_orgs, _super, password):
+    """E-04: New organization accepted a 1-character admin password."""
+    r = await client.post("/api/v1/platform/organizations",
+                          json={"name": "Weak", "admin_email": "boss@weak.com", "admin_password": password},
+                          headers=auth_headers["a"])
+    assert r.status_code == 422, r.text
+    assert "8 characters" in r.json()["detail"]
+    orgs = (await client.get("/api/v1/platform/organizations", headers=auth_headers["a"])).json()
+    assert "Weak" not in {o["name"] for o in orgs}
+
+
+@pytest.mark.asyncio
+async def test_create_org_invalid_admin_email_is_422(client, auth_headers, two_orgs, _super):
+    r = await client.post("/api/v1/platform/organizations",
+                          json={"name": "Bad", "admin_email": "boss@nowhere", "admin_password": "long-enough-1"},
+                          headers=auth_headers["a"])
+    assert r.status_code == 422, r.text
 
 
 @pytest.mark.asyncio
@@ -113,3 +134,20 @@ async def test_cycles_and_self_parent_are_refused(client, auth_headers, two_orgs
     # A -> B would close the cycle A->B->A
     assert (await client.put(f"/api/v1/platform/organizations/{a}/parent",
                              json={"parent_org_id": b}, headers=auth_headers["a"])).status_code == 400
+
+
+_QUOTA_FIELDS = ["max_queries_per_day", "max_agent_asks_per_day", "max_storage_mb",
+                 "max_concurrent_asks", "max_ai_tokens_per_day", "max_ai_tokens_per_month"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", _QUOTA_FIELDS)
+async def test_negative_quota_is_422(client, auth_headers, two_orgs, _super, field):
+    """E-06: -3 queries/day was saved and blocked every query for the org."""
+    org_b = two_orgs["b"]["org"].id
+    r = await client.put(f"/api/v1/platform/organizations/{org_b}/quota",
+                         json={field: -3}, headers=auth_headers["a"])
+    assert r.status_code == 422, r.text
+    ok = await client.put(f"/api/v1/platform/organizations/{org_b}/quota",
+                          json={field: 0}, headers=auth_headers["a"])
+    assert ok.status_code == 200, ok.text

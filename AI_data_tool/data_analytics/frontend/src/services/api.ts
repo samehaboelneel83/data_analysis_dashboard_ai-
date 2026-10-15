@@ -309,6 +309,10 @@ export interface Dataset {
   // SH1: transient, computed per-viewer -- true when the CURRENT user has an
   // explicit share grant on this dataset (never true for org-wide default read).
   shared?:                   boolean
+  /** Single-dataset read: may this viewer change calculated columns / measures (QA E-13). */
+  can_model?:                boolean
+  /** A row rule narrows this viewer's rows; row_count is then theirs, not the total (QA E-14). */
+  row_count_restricted?:     boolean
   /** E06: on the list only -- what the dataset is and how current. */
   catalog?:                  DatasetCatalog | null
   /** Transient, resolved per read from the SOURCE catalog through each column's

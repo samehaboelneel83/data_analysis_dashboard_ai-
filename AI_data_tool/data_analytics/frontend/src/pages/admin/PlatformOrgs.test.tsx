@@ -40,13 +40,27 @@ describe('PlatformOrgs', () => {
 
     fireEvent.change(screen.getByLabelText('Organization name'), { target: { value: 'Acme' } })
     fireEvent.change(screen.getByLabelText('Admin email'), { target: { value: 'a@acme.com' } })
-    fireEvent.change(screen.getByLabelText('Admin password'), { target: { value: 'pw' } })
+    fireEvent.change(screen.getByLabelText('Admin password'), { target: { value: 'long-enough-1' } })
     expect(screen.getByLabelText('Admin password')).toHaveAttribute('autoComplete', 'new-password')
     expect(screen.getByLabelText('Admin email')).toHaveAttribute('autoComplete', 'off')
     fireEvent.click(screen.getByRole('button', { name: 'Create organization' }))
 
     await waitFor(() => expect(platformApi.createOrg).toHaveBeenCalledWith(
-      { name: 'Acme', admin_email: 'a@acme.com', admin_password: 'pw' }))
+      { name: 'Acme', admin_email: 'a@acme.com', admin_password: 'long-enough-1' }))
+  })
+
+  it('refuses a malformed admin email or a short admin password inline, without calling the API (QA E-04)', async () => {
+    vi.mocked(platformApi.createOrg).mockClear()
+    render(<PlatformOrgs />)
+    expect(await screen.findByText(/3 users/)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Organization name'), { target: { value: 'Weak' } })
+    fireEvent.change(screen.getByLabelText('Admin email'), { target: { value: 'boss@nowhere' } })
+    fireEvent.change(screen.getByLabelText('Admin password'), { target: { value: 'x' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create organization' }))
+    expect(await screen.findByText('Enter a valid email address, like name@company.com')).toBeInTheDocument()
+    expect(screen.getByText('Password must be at least 8 characters')).toBeInTheDocument()
+    expect(screen.getByLabelText('Admin password')).toHaveAttribute('aria-invalid', 'true')
+    expect(platformApi.createOrg).not.toHaveBeenCalled()
   })
 
   it('sets a parent from the per-org dropdown', async () => {
@@ -80,6 +94,23 @@ describe('PlatformOrgs', () => {
       max_queries_per_day: 100, max_agent_asks_per_day: null, max_storage_mb: null, max_concurrent_asks: null,
       max_ai_tokens_per_day: 50000, max_ai_tokens_per_month: null,
     }))
+  })
+
+  it('refuses a negative or fractional quota inline, without calling the API (QA E-06)', async () => {
+    vi.mocked(platformApi.setQuota).mockClear()
+    render(<PlatformOrgs />)
+    const editButtons = await screen.findAllByRole('button', { name: 'Edit quota' })
+    fireEvent.click(editButtons[1])
+    const queries = screen.getByLabelText('Max queries per day for Child Co')
+    expect(queries).toHaveAttribute('type', 'number')
+    expect(queries).toHaveAttribute('min', '0')
+    for (const bad of ['-3', '1.5']) {
+      fireEvent.change(queries, { target: { value: bad } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save quota' }))
+      expect(await screen.findByText('Enter a whole number of 0 or more, or leave it empty for unlimited')).toBeInTheDocument()
+      expect(queries).toHaveAttribute('aria-invalid', 'true')
+    }
+    expect(platformApi.setQuota).not.toHaveBeenCalled()
   })
 
   it('sets an AI token budget (E11)', async () => {

@@ -72,3 +72,18 @@ class TestTheSharedCacheIsWiredUp:
         backend = compose[compose.index("\n  backend:"):compose.index("\n  frontend:")]
         depends = re.search(r"depends_on:\n(?:\s+.*\n)+?(?=\s{4}\w|\s{2}\w)", backend)
         assert depends is None or "valkey" not in depends.group(0)
+
+
+class TestPlatformAdminAllowlist:
+    def test_super_admin_default_is_only_the_documented_platform_admin(self, compose):
+        """E-02: the default allowlisted a bare `admin` and `admin@admin.com`,
+        addresses no account owned -- whoever first got an account with one of
+        them was a platform admin across every organization."""
+        assert _default_for(compose, "SUPER_ADMIN_EMAILS") == "admin@datalytics.local"
+
+    def test_the_variable_is_documented_in_env_example(self):
+        env_example = os.path.join(os.path.dirname(_COMPOSE), ".env.example")
+        if not os.path.exists(env_example):
+            pytest.skip(".env.example not reachable (running inside the image)")
+        with open(env_example, encoding="utf-8") as fh:
+            assert re.search(r"^#?\s*SUPER_ADMIN_EMAILS=", fh.read(), re.M)

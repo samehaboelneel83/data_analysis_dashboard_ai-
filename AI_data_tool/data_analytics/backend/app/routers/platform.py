@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timedelta
 
 from ..core.database import get_db
-from ..core.security import normalize_email
+from ..core.security import email_problem, normalize_email, password_problem
 from ..dependencies import require_super_admin
 from ..models.models import AgentRun, AiUsage, Dataset, Organization, OrgParent, QueryRun, Quota, User
 from ..services.audit import record as audit
@@ -34,8 +34,8 @@ async def create_org(body: OrgCreate, db: AsyncSession = Depends(get_db),
                      current_user: User = Depends(require_super_admin)):
     """Provision a whole organization plus its first admin user in one call."""
     email = normalize_email(body.admin_email)
-    if "@" not in email:
-        raise HTTPException(400, "admin_email must be an email address")
+    if (why := email_problem(email)) or (why := password_problem(body.admin_password, email)):
+        raise HTTPException(422, why)
     if (await db.execute(select(User.id).where(func.lower(User.email) == email).limit(1))).first() is not None:
         raise HTTPException(400, "That admin email is already in use")
     org, role, admin = await create_organization_with_admin(db, body.name.strip(), email, body.admin_password)
@@ -111,10 +111,12 @@ async def list_orgs(db: AsyncSession = Depends(get_db),
 
 
 class OrgQuotaSet(BaseModel):
-    max_queries_per_day: int | None = None
-    max_agent_asks_per_day: int | None = None
-    max_storage_mb: int | None = None
-    max_concurrent_asks: int | None = None
+    # None = unlimited, 0 = none allowed; a negative limit is refused (QA E-06:
+    # -3 queries/day was saved and blocked every query).
+    max_queries_per_day: int | None = Field(default=None, ge=0)
+    max_agent_asks_per_day: int | None = Field(default=None, ge=0)
+    max_storage_mb: int | None = Field(default=None, ge=0)
+    max_concurrent_asks: int | None = Field(default=None, ge=0)
     max_ai_tokens_per_day: int | None = Field(default=None, ge=0)
     max_ai_tokens_per_month: int | None = Field(default=None, ge=0)
 

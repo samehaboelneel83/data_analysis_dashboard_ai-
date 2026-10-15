@@ -1709,6 +1709,7 @@ export default function DatasetDetail() {
                 datasetId={dsId}
                 columns={ds.columns}
                 onChanged={() => {}}
+                canModel={ds.can_model !== false}
               />
             </div>
             </div>
@@ -1853,7 +1854,8 @@ export default function DatasetDetail() {
                       to: localDigits(String(Math.min((page + 1) * PAGE_SIZE, preview.total))),
                       total: localDigits(preview.total.toLocaleString('en-US')) })}
                     {/* B4: the preview's own total against the dataset's rows. */}
-                    {ds.mode !== 'directquery' && preview.total !== ds.row_count
+                    {/* Never to a reader under a row rule: the total is everyone's rows (QA E-14). */}
+                    {ds.mode !== 'directquery' && !ds.row_count_restricted && preview.total !== ds.row_count
                       && ` ${tr('data3.filteredFrom', { n: localDigits(ds.row_count.toLocaleString('en-US')) })}`}
                   </span>
                   <div style={{ display: 'flex', gap: 6 }}>

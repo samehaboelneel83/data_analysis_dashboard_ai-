@@ -113,3 +113,25 @@ describe('ConnectionRowPolicies', () => {
     expect(await screen.findByText(/no rules|unrestricted|sees every row/i)).toBeInTheDocument()
   })
 })
+
+describe('ConnectionRowPolicies — a connection whose tables were never read (QA E-07)', () => {
+  it('explains the empty table list, links to reading the database, and hides the add form', async () => {
+    vi.mocked(metadataApi.review).mockResolvedValue({
+      source: { id: 18, name: 'Nile', sync_status: 'failed', last_synced_at: null }, datasets: [],
+    } as never)
+    vi.mocked(agentPoliciesApi.list).mockResolvedValue([] as never)
+    render(<ConnectionRowPolicies />)
+    expect(await screen.findByText(/hasn.t read this connection.s tables yet/i)).toBeInTheDocument()
+    expect(screen.getByText(/last attempt failed/i)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Read the database now/i })).toHaveAttribute('href', '/connections/18/review')
+    expect(screen.queryByRole('button', { name: 'Add rule' })).not.toBeInTheDocument()
+    // The "no rules" line does not claim anything about tables that are not known yet.
+    expect(screen.getByText(/No rules yet/i)).toBeInTheDocument()
+  })
+
+  it('still offers the add form once tables exist', async () => {
+    render(<ConnectionRowPolicies />)
+    expect(await screen.findByRole('button', { name: 'Add rule' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /Read the database now/i })).not.toBeInTheDocument()
+  })
+})

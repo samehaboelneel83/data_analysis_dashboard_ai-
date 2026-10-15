@@ -21,7 +21,7 @@ from datetime import datetime
 from email.message import EmailMessage
 
 import pandas as pd
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from ..core.config import settings
@@ -389,7 +389,8 @@ async def run_schedule(db, schedule) -> None:
         for email in emails:
             viewer = (await db.execute(
                 select(User).options(selectinload(User.role))
-                .where(User.email == email, User.org_id == report.org_id))).scalar_one_or_none()
+                .where(func.lower(User.email) == email.strip().lower(),
+                       User.org_id == report.org_id))).scalar_one_or_none()
             if viewer is None or not viewer.is_active:
                 skipped.append(email)
                 continue

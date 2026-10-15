@@ -357,3 +357,51 @@ class TestTheRowSecurityPreflight:
                              headers=auth_headers["b"])
         assert r.status_code == 404
 
+
+
+# ── E-12 (QA SEC-02): a measure over a hidden column is refused cleanly ──────
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("expression", [
+    "(SUM(headcount) - SUM(salary)) / SUM(headcount) * 100",
+    "SUM(`salary`)",
+])
+async def test_import_widget_with_measure_over_denied_column_is_403_forbidden_column(
+        client, db_session, two_orgs, salary_ds, expression):
+    ds, headers = await _setup(db_session, two_orgs["a"]["org"], salary_ds)
+    ds.measures = [{"name": "Pay ratio", "expression": expression}]
+    await db_session.commit()
+    r = await client.post(f"/api/v1/datasets/{ds.id}/widget-data",
+                          json={"widget_type": "bar",
+                                "config": {"dimension": "dept", "measure": "Pay ratio"}},
+                          headers=headers)
+    assert r.status_code == 403, r.text
+    body = r.json()
+    assert "forbidden_column" in str(body)
+    assert "salary" not in str(body) and "not defined" not in str(body)
+
+
+@pytest.mark.asyncio
+async def test_import_widget_with_calc_column_over_denied_column_is_403(client, db_session, two_orgs, salary_ds):
+    ds, headers = await _setup(db_session, two_orgs["a"]["org"], salary_ds)
+    ds.calculated_columns = [{"name": "pay_k", "expression": "salary / 1000"}]
+    await db_session.commit()
+    r = await client.post(f"/api/v1/datasets/{ds.id}/widget-data",
+                          json={"widget_type": "bar",
+                                "config": {"dimension": "dept", "measure": "pay_k", "aggregation": "sum"}},
+                          headers=headers)
+    assert r.status_code == 403, r.text
+    assert "salary" not in str(r.json())
+
+
+@pytest.mark.asyncio
+async def test_a_measure_over_allowed_columns_still_works_for_the_role(client, db_session, two_orgs, salary_ds):
+    ds, headers = await _setup(db_session, two_orgs["a"]["org"], salary_ds)
+    ds.measures = [{"name": "Heads", "expression": "SUM(headcount)"},
+                   {"name": "Pay ratio", "expression": "SUM(salary) / SUM(headcount)"}]
+    await db_session.commit()
+    r = await client.post(f"/api/v1/datasets/{ds.id}/widget-data",
+                          json={"widget_type": "bar", "config": {"dimension": "dept", "measure": "Heads"}},
+                          headers=headers)
+    assert r.status_code == 200, r.text
+    assert {row["name"]: row["value"] for row in r.json()["rows"]} == {"Eng": 8, "Ops": 4}

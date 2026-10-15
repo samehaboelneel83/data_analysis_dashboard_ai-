@@ -523,11 +523,25 @@ async def create_row_policy(body: RowPolicyIn,
     check_org(source, user, "Data source not found")
 
     try:
-        sqlglot.parse_one(body.predicate, dialect=_dialect(source.type),
-                          into=exp.Condition)
+        parsed = sqlglot.parse_one(body.predicate, dialect=_dialect(source.type),
+                                   into=exp.Condition)
     except Exception as exc:
         raise HTTPException(
             422, str(exc).splitlines()[0] if str(exc) else "invalid predicate")
+
+    # Every column the rule reads must exist on that table (QA E-10: a typo was
+    # saved and only failed -- or denied every row -- when someone asked).
+    # USERID()/USEREMAIL()/MYSCOPE() are function calls, not columns.
+    from ..models.models import SourceColumn
+    known = {n for n in (await db.execute(select(SourceColumn.name).where(
+        SourceColumn.source_object_id == obj.id))).scalars().all()}
+    known_ci = {n.lower() for n in known}
+    unknown = sorted({c.name for c in parsed.find_all(exp.Column)
+                      if c.name.lower() not in known_ci})
+    if unknown:
+        cols = ", ".join(sorted(known)) if known else "none known yet -- read the database first"
+        raise HTTPException(
+            422, f"Unknown column {', '.join(repr(u) for u in unknown)} in {obj.name}. Columns: {cols}")
 
     existing = (await db.execute(
         select(ObjectRowPolicy).where(
@@ -541,6 +555,9 @@ async def create_row_policy(body: RowPolicyIn,
                              source_object_id=body.source_object_id,
                              role_id=body.role_id, predicate=body.predicate)
     db.add(policy)
+    from ..services import admin_audit
+    await admin_audit.record(db, user, "connection_rule.create", f"table:{obj.name}",
+                             f"role:{role.name} {body.predicate}")
     await db.commit()
     await db.refresh(policy)
     return {"id": policy.id, "source_object_id": policy.source_object_id,
@@ -553,5 +570,11 @@ async def delete_row_policy(policy_id: int, db: AsyncSession = Depends(get_db),
                             user: User = Depends(require_org_admin)):
     policy = await db.get(ObjectRowPolicy, policy_id)
     check_org(policy, user, "Row policy not found")
+    obj = await db.get(SourceObject, policy.source_object_id)
+    role = await db.get(Role, policy.role_id)
+    from ..services import admin_audit
+    await admin_audit.record(db, user, "connection_rule.delete",
+                             f"table:{obj.name if obj else policy.source_object_id}",
+                             f"role:{role.name if role else policy.role_id} {policy.predicate}")
     await db.delete(policy)
     await db.commit()

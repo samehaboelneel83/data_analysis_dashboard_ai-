@@ -270,3 +270,22 @@ describe('a new measure without writing a formula (2026-10-10)', () => {
     expect(await screen.findByText('There is no column or function called "sale". Did you mean "sales"?')).toBeInTheDocument()
   })
 })
+
+describe('MeasuresPanel — a reader who cannot change the model (QA E-13)', () => {
+  it('shows the measures but no add, edit or delete', async () => {
+    vi.mocked(measuresApi.list).mockResolvedValue([{ name: 'Revenue', expression: 'SUM(revenue)' }])
+    render(<MeasuresPanel datasetId={1} columns={columns} onChanged={vi.fn()} canModel={false} />)
+    expect(await screen.findByText('Revenue')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Add measure/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Edit/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Delete/ })).not.toBeInTheDocument()
+  })
+
+  it('keeps them when it can (the default)', async () => {
+    vi.mocked(measuresApi.list).mockResolvedValue([{ name: 'Revenue', expression: 'SUM(revenue)' }])
+    render(<MeasuresPanel datasetId={1} columns={columns} onChanged={vi.fn()} />)
+    expect(await screen.findByText('Revenue')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Add measure/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Edit/ })).toBeInTheDocument()
+  })
+})

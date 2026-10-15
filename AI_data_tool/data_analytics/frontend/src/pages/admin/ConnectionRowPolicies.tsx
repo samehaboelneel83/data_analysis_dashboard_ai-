@@ -25,6 +25,9 @@ export default function ConnectionRowPolicies() {
   const [sources, setSources] = useState<{ id: number; name: string }[]>([])
   const [sourceId, setSourceId] = useState<number | null>(null)
   const [objects, setObjects] = useState<{ id: number; name: string }[]>([])
+  // Why `objects` may be empty: the tables are only known after a sync (QA E-07).
+  const [sync, setSync] = useState<{ status: string; at: string | null } | null>(null)
+  const [loaded, setLoaded] = useState(false)
   const [roles, setRoles] = useState<{ id: number; name: string }[]>([])
   const [policies, setPolicies] = useState<ConnectionRowPolicy[]>([])
   const [objectId, setObjectId] = useState('')
@@ -44,12 +47,19 @@ export default function ConnectionRowPolicies() {
 
   useEffect(() => {
     if (sourceId == null) return
+    setLoaded(false)
     void (async () => {
       const [review, pols] = await Promise.all([
         metadataApi.review(sourceId), agentPoliciesApi.list(sourceId),
       ])
-      setObjects((review as unknown as { datasets: { id: number; name: string }[] }).datasets ?? [])
+      const r = review as unknown as {
+        datasets?: { id: number; name: string }[]
+        source?: { sync_status?: string; last_synced_at?: string | null }
+      }
+      setObjects(r.datasets ?? [])
+      setSync(r.source ? { status: r.source.sync_status ?? '', at: r.source.last_synced_at ?? null } : null)
       setPolicies(pols)
+      setLoaded(true)
     })()
   }, [sourceId])
 
@@ -145,6 +155,20 @@ export default function ConnectionRowPolicies() {
       )}
 
       <h2 style={{ fontSize: 15, fontWeight: 700, marginTop: 28 }}>{t('pg.adminSecurity.crp.addHeading')}</h2>
+      {loaded && objects.length === 0 && sourceId != null ? (
+        // A rule needs a table, and the tables are only known once Datalytics
+        // has read the connection (QA E-07: an empty list with no reason).
+        <div role="status" style={{
+          marginTop: 8, padding: '12px 14px', borderRadius: 6, fontSize: 13,
+          background: 'var(--surface2)', borderInlineStart: '3px solid var(--accent)',
+        }}>
+          <strong>{t('pg.adminSecurity.crp.notSyncedStrong')}</strong>{' '}
+          {sync?.status === 'failed' ? t('pg.adminSecurity.crp.syncFailed')
+            : sync?.status === 'running' ? t('pg.adminSecurity.crp.syncRunning')
+            : t('pg.adminSecurity.crp.syncNever')}{' '}
+          <a href={`/connections/${sourceId}/review`}>{t('pg.adminSecurity.crp.readNow')}</a>
+        </div>
+      ) : (
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 8, alignItems: 'end' }}>
         <div>
           <label htmlFor="crp-table" style={label}>{t('pg.adminSecurity.crp.table')}</label>
@@ -175,6 +199,7 @@ export default function ConnectionRowPolicies() {
           {busy ? t('pg.adminSecurity.c.saving') : t('pg.adminSecurity.crp.addRule')}
         </button>
       </div>
+      )}
       {error && (
         <p style={{ marginTop: 10, fontSize: 13, color: 'var(--danger, #b4232a)' }}>{error}</p>
       )}
