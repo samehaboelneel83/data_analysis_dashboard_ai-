@@ -329,3 +329,15 @@ describe('suggestions that remember (server side)', () => {
     expect(typeBias('treemap', fb)).toBeLessThan(0)
   })
 })
+
+describe('C-18: a year is not an identifier to head-count', () => {
+  it('never suggests a distinct count of year', () => {
+    const withYear = [...cols, { id: 5, name: 'year', dtype: 'numeric', missing_pct: 0, stats: {} }] as unknown as DatasetColumn[]
+    const s = suggestWidgets(withYear, analysis, 0, { year: { number: 'code' } } as never)
+    expect(s.length).toBeGreaterThan(0)
+    for (const x of s) {
+      const c = x.config as Record<string, unknown>
+      expect(c.measure === 'year' && c.aggregation === 'countd').toBe(false)
+    }
+  })
+})
