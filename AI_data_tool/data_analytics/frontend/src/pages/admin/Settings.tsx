@@ -8,6 +8,7 @@ import { useDirection } from '../../contexts/DirectionContext'
 import { isolate } from '../../i18n/pages/adminPlatform'
 import { platformSettingsApi, type PlatformSetting, type PlatformSettingsOut } from '../../services/api'
 import BasemapSettings from '../../components/admin/BasemapSettings'
+import OrgApprovalSetting from '../../components/admin/OrgApprovalSetting'
 import LlmEndpointsPanel from '../../components/admin/LlmEndpointsPanel'
 import LoadError from '../../components/ui/LoadError'
 import LoadingState from '../../components/ui/LoadingState'
@@ -283,6 +284,8 @@ export default function Settings({ scope = 'all' }: { scope?: 'all' | 'platform'
         <section aria-labelledby="settings-org" style={{ marginTop: 20 }}>
           <h2 id="settings-org" style={{ fontSize: 17, marginBottom: 4 }}>{t('settings.org.title')}</h2>
           <BasemapSettings headingLevel={3} />
+          {/* F-09: organisation-wide, so it lives here, not in one dashboard's Share dialog. */}
+          <OrgApprovalSetting headingLevel={3} />
           <div className="card" style={{ padding: 16, marginTop: 12 }}>
             <h3 style={{ fontSize: 14, marginTop: 0 }}>{t('settings.org.more')}</h3>
             <ul className="dl-settings__links">

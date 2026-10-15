@@ -51,6 +51,11 @@ async def _report_decision(db, user, report_id: int, action: str) -> dict:
     if action == "download":
         if cap_rank(level) < cap_rank("view"):
             return {"allowed": False, "level": level, "reason": why}
+        # QA E-08: the role's own export permission, as download_gate applies it.
+        from ..core.role_permissions import refusal as role_refusal
+        role_why = role_refusal(user.role, "export")
+        if role_why:
+            return {"allowed": False, "level": level, "reason": role_why}
         if s_rank(label) >= s_rank("Restricted") and cap_rank(level) < cap_rank("data"):
             return {"allowed": False, "level": level, "sensitivity": label,
                     "reason": f"The report is Restricted{because}; only data-level access may download it."}

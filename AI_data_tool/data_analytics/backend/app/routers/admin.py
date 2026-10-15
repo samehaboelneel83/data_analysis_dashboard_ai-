@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..core.database import get_db
+from ..core import role_permissions
 from ..core.org_scope import check_org
 from ..core.security import email_problem, hash_password, normalize_email, password_problem
 from ..dependencies import get_current_user, is_allowlisted_email, is_super_admin, require_org_admin
@@ -54,12 +55,16 @@ async def _checked_role_name(db: AsyncSession, org_id: int, name: str | None,
 @router.post("/roles", response_model=RoleOut)
 async def create_role(body: RoleCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_org_admin)):
     name = await _checked_role_name(db, current_user.org_id, body.name)
-    role = Role(org_id=current_user.org_id, name=name, is_org_admin=body.is_org_admin)
+    perms = role_permissions.normalise(body.permissions) if body.permissions is not None else None
+    role = Role(org_id=current_user.org_id, name=name, is_org_admin=body.is_org_admin,
+                permissions_raw=perms)
     db.add(role)
     # Who can do what is the first thing an audit is asked (governance tour,
     # 2026-10-10): role and user changes were not recorded at all.
-    await admin_audit.record(db, current_user, "role.create", f"role:{name}",
-                             "org admin" if body.is_org_admin else None)
+    denied = [c for c, ok in (perms or {}).items() if not ok]
+    detail = "; ".join(x for x in ("org admin" if body.is_org_admin else None,
+                                   f"denied: {', '.join(denied)}" if denied else None) if x)
+    await admin_audit.record(db, current_user, "role.create", f"role:{name}", detail or None)
     await db.commit()
     await db.refresh(role)
     return role
@@ -78,6 +83,14 @@ async def update_role(role_id: int, body: RoleUpdate, db: AsyncSession = Depends
     if body.is_org_admin is not None and bool(body.is_org_admin) != bool(role.is_org_admin):
         changes.append("now org admin" if body.is_org_admin else "no longer org admin")
         role.is_org_admin = body.is_org_admin
+    if body.permissions is not None:
+        before = role_permissions.normalise(None, role.permissions_raw)
+        after = role_permissions.normalise(body.permissions, role.permissions_raw)
+        flipped = [f"{c} {'allowed' if after[c] else 'denied'}" for c in role_permissions.CAPABILITIES
+                   if before[c] != after[c]]
+        if flipped:
+            changes.append("permissions: " + ", ".join(flipped))
+            role.permissions_raw = after
     if changes:
         await admin_audit.record(db, current_user, "role.update", f"role:{role.name}", "; ".join(changes))
     await db.commit()

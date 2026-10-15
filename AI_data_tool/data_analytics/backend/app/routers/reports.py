@@ -10,7 +10,7 @@ from ..core.said_errors import refused
 from ..core.org_scope import check_org
 from ..core.capability import (_config_dataset_ids, can_read_dataset, effective_capabilities,
                                effective_capability, require_capability, require_dataset_read)
-from ..dependencies import get_current_user
+from ..dependencies import get_current_user, require_role_capability
 from ..services.audit import record as audit
 from ..models.models import CommonFilter, DataAlert, OrgTheme, PageRoleVisibility, PageTemplate, Report, ReportClassification, ReportParameter, ReportRelease, ReportSchedule, ReportPage, ReportUserGrant, ReportVersion, ReportWidget, Bookmark, RecentView, Role, User
 from ..schemas.schemas import (
@@ -286,7 +286,8 @@ async def _require_readable_datasets(db: AsyncSession, user: User, ids, *, alrea
 
 
 @router.post("", response_model=ReportOut, status_code=201)
-async def create_report(body: ReportCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def create_report(body: ReportCreate, db: AsyncSession = Depends(get_db),
+                        current_user: User = Depends(require_role_capability("create_dashboard"))):
     await _require_readable_datasets(
         db, current_user, [body.dataset_id, *(getattr(body, "additional_dataset_ids", None) or [])])
     obj = Report(**body.model_dump(), org_id=current_user.org_id,
@@ -1242,7 +1243,7 @@ class _DuplicateBody(_DupBase):
 @router.post("/{report_id}/duplicate", response_model=ReportOut, status_code=201)
 async def duplicate_report(report_id: int, body: _DuplicateBody | None = None,
                            db: AsyncSession = Depends(get_db),
-                           current_user: User = Depends(get_current_user)):
+                           current_user: User = Depends(require_role_capability("create_dashboard"))):
     """C-20: a full, independent copy of a dashboard -- "Save as copy".
 
     Edit access is required: a viewer of a released dashboard is served the

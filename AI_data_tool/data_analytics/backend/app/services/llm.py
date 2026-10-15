@@ -106,6 +106,10 @@ class UsageMeter:
     refused: int = 0
     tokens_in: int = 0
     tokens_out: int = 0
+    #: QA E-08: why the person this work is for may not use AI (their role
+    #: lacks `use_ai`), or None. Every call is then refused like a spent
+    #: budget, and a model-first endpoint answers 403 (quotas.enforce_ai_budget).
+    denied: str | None = None
 
     @property
     def spent(self) -> bool:
@@ -133,6 +137,11 @@ AI_NOT_ALLOWED = "AI is switched off for this data"
 #: caller's no-model path runs at once instead of after a connect timeout.
 MODEL_UNREACHABLE = "the AI model is unreachable"
 _ai_denied: ContextVar[str | None] = ContextVar("llm_ai_denied", default=None)
+#: QA E-08: why the signed-in person's ROLE may not use AI, or None. Set for
+#: every request by `dependencies.get_current_user` (core/role_permissions.py),
+#: kept apart from `_ai_denied` so the data's own switch (`allow_ai`) can never
+#: lift it. Background tasks a request starts inherit it.
+_role_ai_denied: ContextVar[str | None] = ContextVar("llm_role_ai_denied", default=None)
 
 
 # ── untrusted text in prompts ───────────────────────────────────────────────
@@ -184,6 +193,15 @@ def deny_ai(reason: str = AI_NOT_ALLOWED) -> None:
 
 def allow_ai() -> None:
     _ai_denied.set(None)
+
+
+def set_role_ai_denied(reason: str | None) -> None:
+    """QA E-08: the requester's role allows AI (None) or not (the reason)."""
+    _role_ai_denied.set(reason)
+
+
+def role_ai_denied() -> str | None:
+    return _role_ai_denied.get()
 
 
 def ai_denied() -> str | None:
@@ -304,7 +322,9 @@ class LLMClient:
         if not self.enabled:
             # Not an error worth recording — the operator turned it off.
             return None
-        denied = _ai_denied.get()
+        meter = _meter.get()
+        denied = _role_ai_denied.get() or (meter.denied if meter is not None else None) \
+            or _ai_denied.get()
         if denied:
             # The owner of this data said no (services/ai_policy.py). Nothing
             # leaves the process; the caller's no-model path takes over.

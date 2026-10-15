@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent } from 'react'
 import { useAiOffline } from '../../pages/ask/useAiOffline'
+import { aiOffKey } from '../../pages/ask/aiOffKey'
 import { ArrowUp, ArrowUpRight, BookOpen, Check, Lightbulb, Minus, MoreHorizontal, PencilLine,
   RotateCcw, Sparkles, TrendingUp, X } from 'lucide-react'
 import { insightsApi, reportsApi } from '../../services/api'
@@ -107,7 +108,8 @@ export default function CopilotChat({
   const [open, setOpen] = useState(false)
   // 7e5: the top bar's model light, as Ask AI reads it (4b). While it is
   // down, new requests are paused and the panel says why in one line.
-  const { offline, off: aiOff } = useAiOffline()
+  const aiState = useAiOffline()
+  const { offline } = aiState
   const [turns, setTurns] = useState<Turn[]>([])
   // The number of a reply whose source the reader asked to see (E11).
   const [evidenceFocus, setEvidenceFocus] = useState<{ turn: number; at: EvidenceFocus } | null>(null)
@@ -518,10 +520,10 @@ export default function CopilotChat({
           </div>
 
           <div className="dl-askai__composer">
-            {offline && <p role="status" className="dl-chat__note dl-chat__note--error dl-chat__offline" data-testid="copilot-offline">{t(aiOff ? 'off.titleMine' : 'off.title')}</p>}
+            {offline && <p role="status" className="dl-chat__note dl-chat__note--error dl-chat__offline" data-testid="copilot-offline">{t(aiOffKey(aiState, 'title'))}</p>}
             <div className="dl-askai__box">
               <textarea ref={inputRef} rows={1} value={input} disabled={busy || offline}
-                placeholder={offline ? t(aiOff ? 'off.composerMine' : 'off.composer') : t('copilot.placeholder')}
+                placeholder={offline ? t(aiOffKey(aiState, 'composer')) : t('copilot.placeholder')}
                 aria-label={t('copilot.inputLabel')}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={e => {

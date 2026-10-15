@@ -588,7 +588,17 @@ class Role(Base):
     org_id       = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
     name         = Column(String(255), nullable=False)
     is_org_admin = Column(Boolean, nullable=False, default=False)
+    #: QA E-08: what the role may do, {capability: bool} (core/role_permissions.py).
+    #: NULL, or a capability missing from it, means allowed -- every role that
+    #: predates the column keeps every right. Read `permissions`, which applies
+    #: the defaults and gives an org-admin role everything.
+    permissions_raw = Column("permissions", JSON, nullable=True)
     created_at   = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+    @property
+    def permissions(self) -> dict:
+        from ..core.role_permissions import effective
+        return effective(self)
 
     organization = relationship("Organization", back_populates="roles")
     users        = relationship("User", back_populates="role")

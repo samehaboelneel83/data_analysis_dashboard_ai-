@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { fieldStyle } from '../../components/ui/fieldStyle'
 import { useT, type MessageKey } from '../../i18n'
 import { nodesT } from '../../i18n/pages/adminSecurity'
-import { adminRlsRulesApi, adminRolesApi, datasetsApi } from '../../services/api'
+import { adminRlsRulesApi, adminRolesApi, datasetsApi, orgUnitsApi } from '../../services/api'
 import type { RowSecurityRule, RlsRuleProposal, Role, Dataset, DatasetColumn } from '../../services/api'
 import toast from 'react-hot-toast'
 import { Z_OVERLAY } from '../../lib/zIndex'
@@ -86,6 +86,22 @@ function RuleModal({ initial, roles, datasets, onSave, onClose }: {
   const otherColumns = dsColumns.filter(c => !isUserishColumn(c))
   const [pickedColumn, setPickedColumn] = useState(suggestedColumns[0]?.name ?? dsColumns[0]?.name ?? '')
   const [matchTarget, setMatchTarget] = useState<MatchTarget>('useremail')
+  // QA E-18 step 4: the values MYSCOPE() can produce in this org today (the
+  // org chart's match values), read once when the admin picks MYSCOPE().
+  const [scopeValues, setScopeValues] = useState<string[] | null>(null)
+  useEffect(() => {
+    if (matchTarget !== 'myscope' || scopeValues !== null) return
+    let live = true
+    ;(async () => {
+      try {
+        const units = await orgUnitsApi.list()
+        if (live) setScopeValues([...new Set(units.map(u => (u.match_value ?? '').trim()).filter(Boolean))])
+      } catch {
+        // Unknown is not "no units": say nothing rather than something wrong.
+      }
+    })()
+    return () => { live = false }
+  }, [matchTarget, scopeValues])
   const [literalValue, setLiteralValue] = useState('')
 
   // Re-derive the picked column whenever the dataset changes — otherwise a column
@@ -190,6 +206,17 @@ function RuleModal({ initial, roles, datasets, onSave, onClose }: {
                   link: <a href="/admin/org-units">{t('pg.adminSecurity.rls.orgChart')}</a>,
                   code: <code dir="ltr">Sales</code>, // i18n-ok: an example match value
                 })}
+                {scopeValues !== null && (
+                  <div data-testid="myscope-examples" style={{ marginTop: 4 }}>
+                    {scopeValues.length === 0
+                      ? t('pg.adminSecurity.rls.myscopeNoUnits')
+                      : nodesT(t, 'pg.adminSecurity.rls.myscopeExamples', {
+                          values: <>{scopeValues.slice(0, 5).map((v, i) => (
+                            <span key={v}>{i > 0 && t('pg.adminSecurity.rls.myscopeSep')}<code dir="ltr">{v}</code></span>
+                          ))}{scopeValues.length > 5 && <> {t('pg.adminSecurity.rls.myscopeMore', { n: scopeValues.length - 5 })}</>}</>,
+                        })}
+                  </div>
+                )}
               </div>
             )}
 

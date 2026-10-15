@@ -295,3 +295,26 @@ describe('batchBaseName', () => {
   it('falls back to the first stem when the files share nothing', () => expect(batchBaseName([f('alpha.csv'), f('beta.csv')])).toBe('alpha'))
   it("keeps a single file's own stem", () => expect(batchBaseName([f('report.final.csv')])).toBe('report.final'))
 })
+
+describe('role permissions (QA E-08)', () => {
+  it('a role without "Upload data" sees why, and no drop zone or import', async () => {
+    const { AuthContext } = await import('../contexts/AuthContext')
+    const user = { id: 1, email: 'v@x.io', is_active: true, organization: { id: 1, name: 'O' },
+      role: { id: 2, name: 'Viewer', is_org_admin: false, permissions: { upload_data: false } } }
+    render(<AuthContext.Provider value={{ user, loading: false, login: vi.fn(), logout: vi.fn() } as never}>
+      <MemoryRouter><Upload /></MemoryRouter></AuthContext.Provider>)
+    expect(screen.getByTestId('upload-not-allowed')).toHaveTextContent('Your role does not allow this')
+    expect(screen.queryByTestId('upload-input')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Browse files' })).not.toBeInTheDocument()
+  })
+
+  it('an org admin uploads whatever is stored', async () => {
+    const { AuthContext } = await import('../contexts/AuthContext')
+    const user = { id: 1, email: 'a@x.io', is_active: true, organization: { id: 1, name: 'O' },
+      role: { id: 1, name: 'Admin', is_org_admin: true, permissions: { upload_data: false } } }
+    render(<AuthContext.Provider value={{ user, loading: false, login: vi.fn(), logout: vi.fn() } as never}>
+      <MemoryRouter><Upload /></MemoryRouter></AuthContext.Provider>)
+    expect(screen.getByRole('button', { name: 'Browse files' })).toBeInTheDocument()
+    await settle()
+  })
+})

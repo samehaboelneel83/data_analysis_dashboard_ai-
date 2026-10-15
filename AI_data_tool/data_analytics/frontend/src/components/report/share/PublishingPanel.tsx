@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Archive, ArchiveRestore, History, Send, UserRoundCog } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { publishingApi, reviewApi, type Publication, type ReleaseSummary } from '../../../services/api'
+import { publishingApi, type Publication, type ReleaseSummary } from '../../../services/api'
 import { useConfirm } from '../../ui/ConfirmDialog'
 import { useT, type MessageKey } from '../../../i18n'
 import { formatDate } from '../../../lib/dateFormat'
@@ -83,12 +83,6 @@ export default function PublishingPanel({ report, isAdmin, onStateChange, onRele
       if (await releaseReport(report.id, t)) { onReleased?.(); load() }
     } finally { setBusy(false) }
   }
-  // F-09: this switch is the ORGANISATION's, not this dashboard's -- asked first, saying so.
-  const setApproval = async (on: boolean) => {
-    if (!(await confirm({ title: t(on ? 'pub.review.confirmOn' : 'pub.review.confirmOff'), body: t('pub.review.confirmBody'),
-      confirmLabel: t(on ? 'pub.review.turnOn' : 'pub.review.turnOff'), destructive: false, focusCancel: true }))) return
-    await run(() => reviewApi.setApproval(on), t('pub.saved'))
-  }
   const restore = async () => {
     // F-04: the server restores as a draft; tell the builder what it answered.
     const out: { state?: Publication['state'] } = {}
@@ -137,12 +131,13 @@ export default function PublishingPanel({ report, isAdmin, onStateChange, onRele
       </div>
 
       {(review.required || isAdmin) && !archived && <div className="shx-sec">{t('pub.review')}</div>}
+      {/* F-09: the switch is the ORGANISATION's, so it lives on Admin -> Settings
+          (asked about there first); here an admin only sees what it is set to. */}
       {isAdmin && !archived && (
-        <label className="shx-ck" data-testid="approval-switch">
-          <input type="checkbox" checked={review.required} disabled={busy}
-            onChange={e => void setApproval(e.target.checked)} />
-          <span>{t('pub.review.switch')}<br /><small style={{ color: 'var(--muted)' }}>{t('pub.review.switchHelp')}</small></span>
-        </label>
+        <p className="shx-note" data-testid="approval-org-setting">
+          {t(review.required ? 'pub.review.orgOn' : 'pub.review.orgOff')}{' '}
+          <a href="/admin/settings">{t('pub.review.changeInSettings')}</a>
+        </p>
       )}
       {review.required && !archived && (<>
         <div className="shx-st" style={{ marginTop: isAdmin ? 10 : 0 }}>

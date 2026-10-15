@@ -775,6 +775,9 @@ class RoleOut(BaseModel):
     id: int
     name: str
     is_org_admin: bool
+    #: QA E-08: what the role may do, defaults applied (core/role_permissions.py).
+    #: Also how /auth/me tells the browser which actions to hide.
+    permissions: dict[str, bool] = {}
 
 
 class UserOut(BaseModel):
@@ -804,11 +807,15 @@ class TokenOut(BaseModel):
 class RoleCreate(BaseModel):
     name: str
     is_org_admin: bool = False
+    #: QA E-08: {capability: bool}; an omitted capability is allowed.
+    permissions: Optional[dict[str, Any]] = None
 
 
 class RoleUpdate(BaseModel):
     name: Optional[str] = None
     is_org_admin: Optional[bool] = None
+    #: QA E-08: only the capabilities named change.
+    permissions: Optional[dict[str, Any]] = None
 
 
 class UserCreate(BaseModel):

@@ -3484,6 +3484,9 @@ export const en = {
   'off.composer': 'New questions are paused while the model server is unreachable',
   'off.titleMine': 'AI is off for you (top-bar model picker), so new questions are paused.',
   'off.composerMine': 'AI is off — turn it back on in the top-bar model picker',
+  /** QA E-08: the person's role does not include AI. */
+  'off.titleRole': 'Your role does not include AI features, so questions are turned off. Ask an organization admin.',
+  'off.composerRole': 'Your role does not include AI features',
   'chat.loadFailed': 'Could not load this conversation.',
   'chat.unreachable': 'Could not reach the agent. Try again.',
   'chat.downloadFailed': 'Could not download the file',

@@ -300,7 +300,12 @@ async def download_gate(db, user, *, report=None, dataset_id: int | None = None)
     why. Returns the label so the caller can redact personal data from what
     it hands out (Confidential and above)."""
     from ..core.capability import effective_capability, max_dataset_capability, rank as cap_rank
+    from ..core.role_permissions import check as role_check
     from ..services.sensitivity import dataset_effective, rank, report_effective
+    # QA E-08: a role that may not export takes nothing away, whatever the
+    # dashboard or the grant would allow.
+    if user is not None:
+        role_check(user, "export")
     if report is not None:
         # Seeing is not taking: the dashboard's own switch and the grant that
         # let this person in decide first (core.capability.export_refusal).

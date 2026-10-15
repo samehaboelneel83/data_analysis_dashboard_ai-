@@ -64,7 +64,7 @@ export default function Home() {
   const t = useT()
   const user = useOptionalAuth()?.user ?? null
   const isAdmin = !!user?.role?.is_org_admin
-  const { offline, off: aiOff } = useAiOffline()
+  const { offline, off: aiOff, role: aiRole } = useAiOffline()
   // Guided setup: unfinished setups to continue (plan 1c). Optional; silent on failure.
   const setups = useSlot(() => setupApi.journeys())
   const askRef = useRef<HTMLInputElement>(null)
@@ -191,7 +191,7 @@ export default function Home() {
   return (
     <div className="dl-hm" aria-busy={loading || undefined}>
       <div className="hm-toprow">
-        <Hero ref={askRef} name={name} firstRun={firstRun} noData={noData} offline={offline} aiOff={aiOff} loading={loading} chips={chips} />
+        <Hero ref={askRef} name={name} firstRun={firstRun} noData={noData} offline={offline} aiOff={aiOff} aiRole={aiRole} loading={loading} chips={chips} />
         <Stats tiles={tiles} loading={loading} />
       </div>
       {setUp

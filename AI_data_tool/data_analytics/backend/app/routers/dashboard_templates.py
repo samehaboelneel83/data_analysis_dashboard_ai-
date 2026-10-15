@@ -20,7 +20,7 @@ from ..core.capability import max_dataset_capability, rank, require_capability, 
 from ..core.database import get_db
 from ..core.org_scope import check_org
 from ..core.said_errors import refused
-from ..dependencies import get_current_user
+from ..dependencies import get_current_user, require_role_capability
 from ..models.models import (DashboardTemplate, DashboardTemplateVersion, Dataset, DatasetColumn, Report,
                              ReportPage, ReportWidget, TemplateFavorite, User)
 from ..services.audit import record as audit
@@ -342,7 +342,8 @@ async def _write(db: AsyncSession, user: User, ds: Dataset, got: dict, name: str
 
 
 @router.post("/{ref}/use", status_code=201)
-async def use(ref: str, body: UseIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+async def use(ref: str, body: UseIn, db: AsyncSession = Depends(get_db),
+              user: User = Depends(require_role_capability("create_dashboard"))):
     """A new dashboard from a template, on one dataset. The template itself is
     not touched: what is made is the person's own dashboard to change."""
     spec, row = await _load(db, ref, user)
