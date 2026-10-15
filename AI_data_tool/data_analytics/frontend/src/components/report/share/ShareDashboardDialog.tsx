@@ -179,6 +179,13 @@ export default function ShareDashboardDialog({ report, canEdit, isAdmin, pageId,
   }
   const setAccess = async (next: boolean) => {
     if (next === published) return
+    // F-08: the whole organisation at once, either way -- asked first, like a
+    // role or a team share. Cancel leaves the choice as it was.
+    if (!(await confirm(next
+      ? { title: t('pub.sh.confirmPublish', { name: report.name }), body: t('pub.sh.confirmPublishBody'),
+          confirmLabel: t('pub.sh.publish'), destructive: false }
+      : { title: t('pub.sh.confirmUnpublish', { name: report.name }), body: t('pub.sh.confirmUnpublishBody'),
+          confirmLabel: t('pub.sh.unpublish') }))) return
     try {
       await reportsApi.setPublished(report.id, next)
       setPublished(next)
