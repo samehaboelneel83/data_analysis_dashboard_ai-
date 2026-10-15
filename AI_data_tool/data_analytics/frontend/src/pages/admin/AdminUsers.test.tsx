@@ -112,3 +112,22 @@ describe('AdminUsers — platform admin rows (QA E-01)', () => {
     expect(screen.getAllByRole('button', { name: 'Edit' })).toHaveLength(2)
   })
 })
+
+describe('AdminUsers new user role (F-07)', () => {
+  it('starts with no role chosen, and will not create a user until one is', async () => {
+    const toast = (await import('react-hot-toast')).default
+    const err = vi.spyOn(toast, 'error')
+    vi.mocked(adminUsersApi.create).mockClear()
+    renderPage()
+    await waitFor(() => expect(screen.getByRole('button', { name: /New User/i })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('button', { name: /New User/i }))
+    const dialog = await screen.findByRole('dialog', { name: 'New user' })
+    const select = dialog.querySelector('select') as HTMLSelectElement
+    expect(select.value).toBe('')
+    fireEvent.change(dialog.querySelector('input[type="email"]')!, { target: { value: 'n@x.com' } })
+    fireEvent.change(dialog.querySelector('input[type="password"]')!, { target: { value: 'pw-123456' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+    expect(err).toHaveBeenCalledWith('Role is required')
+    expect(adminUsersApi.create).not.toHaveBeenCalled()
+  })
+})
