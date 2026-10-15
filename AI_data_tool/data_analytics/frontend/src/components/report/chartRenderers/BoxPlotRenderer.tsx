@@ -52,7 +52,8 @@ export default function BoxPlotRenderer({ data, rtl, measureFmt, cfg }: ChartRen
           )
         })}
       </div>
-      <svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display: 'block', flex: 1, minWidth: 0 }}>
+      <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+      <svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display: 'block' }}>
         {TICKS.map(t => {
           const v = yMin + t * yRange
           const y = yToPx(v)
@@ -76,12 +77,23 @@ export default function BoxPlotRenderer({ data, rtl, measureFmt, cfg }: ChartRen
               {(r.outliers ?? []).map((o, oi) => (
                 <circle key={oi} cx={cx} cy={yToPx(o)} r={2.5} fill="var(--muted)" fillOpacity={0.7} />
               ))}
-              <text x={cx} y={H - MARGIN_BOTTOM + 16} textAnchor="middle" fontSize={10} fill="var(--muted)">{r.name}</text>
               <title>{t9('cr.boxTitle', { name: String(r.name), min: fmtStr(r.min, measureFmt), q1: fmtStr(r.q1, measureFmt), median: fmtStr(r.median, measureFmt), q3: fmtStr(r.q3, measureFmt), max: fmtStr(r.max, measureFmt) })}</title>
             </g>
           )
         })}
       </svg>
+      {/* C-16: the category names in HTML under the drawing, like the value
+          gutter: as SVG text they stretched with the viewBox to ~4px glyphs. */}
+      <div data-testid="boxplot-categories" style={{ position: 'absolute', left: 0, right: 0,
+        top: `${((H - MARGIN_BOTTOM) / H) * 100}%`, bottom: 0 }}>
+        {orderedRows.map((r, i) => (
+          <span key={r.name} title={String(r.name)} style={{ position: 'absolute', top: 4,
+            left: `${((MARGIN_LEFT + slotW * (i + 0.5)) / W) * 100}%`, transform: 'translateX(-50%)',
+            maxWidth: `${(slotW / W) * 100}%`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            fontSize: 11, color: 'var(--muted)' }}>{r.name}</span>
+        ))}
+      </div>
+      </div>
     </div>
   )
 }
