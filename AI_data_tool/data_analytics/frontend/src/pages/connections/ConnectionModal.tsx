@@ -161,7 +161,12 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
   const inp = { style: fieldStyle }
 
   const tq = typeQuery.trim().toLowerCase()
+  // B-23: a type whose driver is not installed is marked and listed after the
+  // ones that work (still choosable, for an admin about to install it).
   const cards = catalog.filter(c => !tq || c.label.toLowerCase().includes(tq) || c.key.includes(tq))
+    .map((c, i) => [c, i] as const)
+    .sort(([a, i], [b, j]) => (Number(!a.driver_installed) - Number(!b.driver_installed)) || i - j)
+    .map(([c]) => c)
   const title = isEdit ? tr('cn2.drawer.edit', { name: initial!.name }) : tr('cn2.drawer.new')
 
   return (
@@ -194,6 +199,7 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
                     <span className={`dl-cn-logo dl-cn-logo--${c.base_type ?? c.key}`} aria-hidden><Database size={18} /></span>
                     <b dir="auto">{c.label}</b>
                     {c.default_port != null && <small dir="ltr">:{c.default_port}</small>}
+                    {!c.driver_installed && <small className="dl-cn-type__nodriver">{tr('cn2.noDriver')}</small>}
                   </button>
                 ))}
               </div>
@@ -316,7 +322,7 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
 
         {/* Buttons: pinned to the drawer's foot like step 1's (QAF 23). */}
         <footer className="dl-cn-drawer__f dl-cn-drawer__f--form">
-          <button className="btn btn-primary" onClick={handleSave} disabled={saving} style={{ flex: 1 }}>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving || (!isEdit && !!spec && !spec.driver_installed)} style={{ flex: 1 }}>
             {saving ? tr('pg.dataPages.saving') : isEdit ? tr('pg.dataPages.saveChanges') : tr('pg.dataPages.conn.create')}
           </button>
           <button type="button" className="btn" onClick={handleTest} disabled={testing}>
