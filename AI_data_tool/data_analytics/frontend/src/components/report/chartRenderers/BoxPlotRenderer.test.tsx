@@ -34,3 +34,25 @@ describe('BoxPlotRenderer category labels (C-16)', () => {
     }
   })
 })
+
+describe('BoxPlotRenderer crowded category labels (C-16 round 2)', () => {
+  const many = (n: number, prefix = 'Department ') => Array.from({ length: n }, (_, i) => ({
+    name: `${prefix}${i + 1}`, min: 1, q1: 2, median: 3, q3: 4, max: 5, outliers: [] }))
+  it('labels that fit their slot stay level', () => {
+    const { getByTestId } = render(<BoxPlotRenderer {...base} data={{ rows }} plotW={800} plotH={300} />)
+    expect(getByTestId('boxplot-categories').getAttribute('data-layout')).toBe('level')
+  })
+  it('labels wider than their slot are rotated, with room made under the plot', () => {
+    const { getByTestId, getByText } = render(<BoxPlotRenderer {...base} data={{ rows: many(8) }} plotW={600} plotH={300} />)
+    const strip = getByTestId('boxplot-categories')
+    expect(strip.getAttribute('data-layout')).toBe('rotated')
+    expect(getByText('Department 1').style.transform).toMatch(/rotate\(-\d+deg\)/)
+  })
+  it('too many to show even rotated: every k-th is shown, the rest keep their name on the box tooltip', () => {
+    const { getByTestId } = render(<BoxPlotRenderer {...base} data={{ rows: many(60, 'D') }} plotW={400} plotH={300} />)
+    const shown = getByTestId('boxplot-categories').querySelectorAll('span')
+    expect(shown.length).toBeGreaterThan(0)
+    expect(shown.length).toBeLessThan(60)
+    expect(shown[0].textContent).toBe('D1')
+  })
+})
