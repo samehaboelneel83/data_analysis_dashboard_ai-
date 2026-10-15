@@ -3629,6 +3629,7 @@ export const en = {
   'an3.s.text': 'Topics · sentiment',
   'data3.tools': 'Data tools',
   'data3.filter': 'Filter',
+  'data3.notLive': 'Not available for live data yet',
   'data3.removeFilter': 'Remove filter {what}',
   'data3.sortFlip': 'Reverse the order',
   'data3.sort': 'Sort: {col}',

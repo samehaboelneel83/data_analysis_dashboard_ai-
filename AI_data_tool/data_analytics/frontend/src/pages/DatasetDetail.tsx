@@ -184,6 +184,10 @@ export default function DatasetDetail() {
   const [editCells,  setEditCells]  = useState(false)
   const [keyColumn,  setKeyColumn]  = useState<string>('')
   const confirm = useConfirm()
+  // B-19: a live (DirectQuery) dataset's preview is one page read from the
+  // source; filter, row filter, ƒx column, group & bin, search and header sort
+  // are not pushed down yet, so they are shown disabled rather than inert.
+  const liveData = ds?.mode === 'directquery'
   const [editingAt,  setEditingAt]  = useState<{ row: number; column: string } | null>(null)
   const [prepSteps,  setPrepSteps]  = useState<PrepStep[]>([])
 
@@ -335,8 +339,9 @@ export default function DatasetDetail() {
         // DirectQuery previews yet -- local filter/sort/search state is ignored
         // rather than silently sent and dropped server-side (see the note
         // rendered above the table for this same reason).
-        const result = await dataPreviewApi.query(dsId, [], [], PAGE_SIZE, 0)
-        // QAF M5: the server ignores the limit here; draw one page only.
+        // B-19: the server now reads one stable page (offset, size) with the
+        // exact total, so the real offset is sent; the slice is a safety net.
+        const result = await dataPreviewApi.query(dsId, [], [], PAGE_SIZE, pg * PAGE_SIZE)
         if (latest()) setPreview({ ...result, rows: result.rows.slice(0, PAGE_SIZE) })
         return
       }
@@ -1540,6 +1545,7 @@ export default function DatasetDetail() {
 
           <div className="dl-data3__toolbar" role="toolbar" aria-label={tr('data3.tools')}>
             <button type="button" className="dl-data3__tool" aria-pressed={dataPanel === 'filters'}
+              disabled={liveData} title={liveData ? tr('data3.notLive') : undefined}
               onClick={() => { if (!filterRows.length) addFilter(); setDataPanel(v => (v === 'filters' ? null : 'filters')) }}>
               <Filter size={14} aria-hidden /> {tr('data3.filter')}
             </button>
@@ -1557,14 +1563,17 @@ export default function DatasetDetail() {
               </button>
             )}
             <button type="button" className={`dl-data3__tool${savedFilter ? ' dl-data3__tool--on' : ''}`} aria-pressed={dataPanel === 'global'}
+              disabled={liveData} title={liveData ? tr('data3.notLive') : undefined}
               onClick={() => setDataPanel(v => (v === 'global' ? null : 'global'))}>
               {tr('data3.rowFilter')}{savedFilter ? ` · ${tr('data3.active')}` : ''}
             </button>
             <button type="button" className="dl-data3__tool" aria-pressed={dataPanel === 'calc'}
+              disabled={liveData} title={liveData ? tr('data3.notLive') : undefined}
               onClick={() => setDataPanel(v => (v === 'calc' ? null : 'calc'))}>
               <span className="dl-data3__fx">ƒx</span> {tr('data3.column')}
             </button>
             <button type="button" className="dl-data3__tool" aria-pressed={dataPanel === 'bin'}
+              disabled={liveData} title={liveData ? tr('data3.notLive') : undefined}
               onClick={() => setDataPanel(v => (v === 'bin' ? null : 'bin'))}>{tr('data3.groupBin')}</button>
             <button type="button" className="dl-data3__tool" aria-pressed={dataPanel === 'measures'}
               onClick={() => setDataPanel(v => (v === 'measures' ? null : 'measures'))}>{tr('data3.measures')}</button>
@@ -1577,6 +1586,7 @@ export default function DatasetDetail() {
             <label className="dl-data3__search">
               <Search size={14} aria-hidden />
               <input type="search" value={search} onChange={e => handleSearch(e.target.value)}
+                disabled={liveData} title={liveData ? tr('data3.notLive') : undefined}
                 placeholder={tr('data3.search')} aria-label={tr('data3.search')} />
             </label>
           </div>
@@ -1822,6 +1832,7 @@ export default function DatasetDetail() {
                               // people who can see it.
                               aria-sort={isSorted ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
                               <button type="button" onClick={() => handleSort(c)}
+                                disabled={liveData} title={liveData ? tr('data3.notLive') : undefined}
                                 // A real button, so the header is reachable by
                                 // Tab and operable by Enter/Space -- a th with
                                 // onClick is neither.

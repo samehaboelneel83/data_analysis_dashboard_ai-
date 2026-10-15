@@ -3628,6 +3628,7 @@ export const ar: Record<MessageKey, string> = {
   'an3.s.text': 'الموضوعات · المشاعر',
   'data3.tools': 'أدوات البيانات',
   'data3.filter': 'تصفية',
+  'data3.notLive': 'غير متاح للبيانات الحية بعد',
   'data3.removeFilter': 'إزالة المرشح {what}',
   'data3.sortFlip': 'اعكس الترتيب',
   'data3.sort': 'الترتيب: {col}',

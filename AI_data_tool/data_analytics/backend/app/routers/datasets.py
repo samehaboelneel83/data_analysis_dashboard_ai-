@@ -4488,9 +4488,16 @@ async def data_preview(dataset_id: int, req: DataPreviewRequest, db: AsyncSessio
         check_org(source, current_user, "Data source not found")
         source_cfg = dict(source.config or {})
         source_cfg["type"] = source.type
+        # B-19: one PAGE, read in a stable order with the exact total
+        # (direct_query._run_table_page). Without `page` a table over the row
+        # cap was a random sample, reshuffled on every Next/Prev, and the
+        # offset was ignored.
+        dq_config: dict = {"page": {"offset": max(0, req.offset), "size": max(1, min(req.limit, 500))}}
+        if req.sort_by:
+            dq_config.update(sort_col=req.sort_by, sort=req.sort_dir)
         try:
             result = run_direct_query(
-                source_cfg, ds, {}, widget_type="table", rls_filter_expr=rls_expr,
+                source_cfg, ds, dq_config, widget_type="table", rls_filter_expr=rls_expr,
                 cache_ttl_seconds=source.cache_ttl_seconds, cache_epoch=source.cache_epoch,
                 org_id=current_user.org_id,
             )

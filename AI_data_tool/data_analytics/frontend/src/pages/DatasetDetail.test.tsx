@@ -399,6 +399,22 @@ describe('DatasetDetail DirectQuery gating', () => {
     expect(await screen.findByText('north')).toBeInTheDocument()
   })
 
+  it('pages a DirectQuery preview by its real offset and shows the tools it cannot apply disabled (B-19)', async () => {
+    vi.mocked(datasetsApi.get).mockResolvedValue({ ...directQueryDataset(), columns: [{ name: 'region', dtype: 'string' }] as never })
+    vi.mocked(dataPreviewApi.query).mockResolvedValue({ columns: ['region'], rows: [['north']], total: 250 })
+    renderDetail(28)
+    await screen.findByRole('heading', { name: 'Live Sales' })
+    fireEvent.click(screen.getByRole('tab', { name: /^Data/ }))
+    expect(await screen.findByText('north')).toBeInTheDocument()
+    for (const name of [/^Filter$/, /^Row filter/, /Column$/, /^Group & bin$/]) {
+      expect(screen.getByRole('button', { name })).toBeDisabled()
+    }
+    expect(screen.getByRole('searchbox')).toBeDisabled()
+    expect(screen.getByRole('button', { name: /region/ })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: /Next/ }))
+    await waitFor(() => expect(dataPreviewApi.query).toHaveBeenLastCalledWith(28, [], [], 100, 100))
+  })
+
   it('shows a shared empty state instead of a bare table with no rows when the preview matches nothing', async () => {
     vi.mocked(datasetsApi.get).mockResolvedValue(directQueryDataset())
     vi.mocked(dataPreviewApi.query).mockResolvedValue({ columns: ['region'], rows: [], total: 0 })
