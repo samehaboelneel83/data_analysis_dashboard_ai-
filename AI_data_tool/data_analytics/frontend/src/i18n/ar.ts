@@ -306,6 +306,8 @@ export const ar: Record<MessageKey, string> = {
   'sb.import': 'استيراد',
   'sb.dq': 'استعلام مباشر',
   'sb.namePh': 'اسم مجموعة البيانات…',
+  'sb.nameLabel': 'اسم مجموعة البيانات',
+  'sb.nameTaken': 'لديك بالفعل مجموعة بيانات باسم "{name}". سيضيف الاستيراد مجموعة ثانية بالاسم نفسه.',
   'sb.connecting': 'جارٍ الاتصال…',
   'sb.importing': 'جارٍ الاستيراد…',
   'sb.createDq': 'إنشاء مجموعة بيانات مباشرة',

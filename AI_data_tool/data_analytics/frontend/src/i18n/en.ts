@@ -306,6 +306,8 @@ export const en = {
   'sb.import': 'Import',
   'sb.dq': 'DirectQuery',
   'sb.namePh': 'Dataset name…',
+  'sb.nameLabel': 'Dataset name',
+  'sb.nameTaken': 'You already have a dataset named "{name}". Importing adds a second one with the same name.',
   'sb.connecting': 'Connecting…',
   'sb.importing': 'Importing…',
   'sb.createDq': 'Create DirectQuery Dataset',
