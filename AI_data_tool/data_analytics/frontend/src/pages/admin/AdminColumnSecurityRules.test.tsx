@@ -25,7 +25,8 @@ vi.mock('../../services/api', () => ({
     create: vi.fn().mockResolvedValue({ id: 7 }),
     remove: vi.fn().mockResolvedValue(undefined),
   },
-  adminRolesApi: { list: vi.fn().mockResolvedValue([{ id: 1, name: 'Analyst', is_org_admin: false }]) },
+  adminRolesApi: { list: vi.fn().mockResolvedValue([
+    { id: 1, name: 'Analyst', is_org_admin: false }, { id: 3, name: 'Admin', is_org_admin: true }]) },
   datasetsApi: { list: vi.fn().mockResolvedValue([dataset]) },
 }))
 
@@ -44,6 +45,9 @@ describe('AdminColumnSecurityRules', () => {
     renderPage()
     await waitFor(() => expect(screen.getByRole('button', { name: 'New rule' })).not.toBeDisabled())
     fireEvent.click(screen.getByRole('button', { name: 'New rule' }))
+    // Nothing is pre-selected (QA E-05).
+    fireEvent.change(screen.getByLabelText('Role *'), { target: { value: '1' } })
+    fireEvent.change(screen.getByLabelText('Dataset *'), { target: { value: '1' } })
 
     // Both columns checked -> exactly those names go to the API.
     fireEvent.click(screen.getByRole('checkbox', { name: /salary/ }))
@@ -128,10 +132,22 @@ describe('the column list in Arabic (QA5 L3)', () => {
       await waitFor(() => expect(screen.getByRole('button', { name: ar['admin.newRule'] })).not.toBeDisabled())
       fireEvent.click(screen.getByRole('button', { name: ar['admin.newRule'] }))
       const dialog = await screen.findByRole('dialog')
+      fireEvent.change(within(dialog).getAllByRole('combobox')[1], { target: { value: '1' } })   // the dataset
       const salary = screen.getByRole('checkbox', { name: /salary/ }).closest('label')!
       expect(salary.textContent).toContain('رقم')
       expect(within(dialog).getAllByText('نص')).toHaveLength(2)
       expect(dialog.textContent).not.toMatch(/\b(numeric|text)\b/)
     } finally { localStorage.removeItem('datalytics.language') }
+  })
+})
+
+describe('AdminColumnSecurityRules — nothing pre-selected (QA E-05)', () => {
+  it('New rule starts with no role and no dataset, and admin roles cannot be picked', async () => {
+    renderPage()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'New rule' })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('button', { name: 'New rule' }))
+    expect(screen.getByLabelText('Role *')).toHaveValue('')
+    expect(screen.getByLabelText('Dataset *')).toHaveValue('')
+    expect((screen.getByRole('option', { name: /Admin \(admin, rules don.t apply\)/ }) as HTMLOptionElement).disabled).toBe(true)
   })
 })

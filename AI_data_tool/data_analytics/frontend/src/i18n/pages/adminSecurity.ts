@@ -43,6 +43,7 @@ export const en = {
   'pg.adminSecurity.users.platformAdminHint': 'Only a platform administrator can change this account.',
   /** A role in a <select> option, where no <bdi> can go. */
   'pg.adminSecurity.c.roleOptionAdmin': '{name} (admin)',
+  'pg.adminSecurity.c.roleOptionAdminBypass': "{name} (admin, rules don't apply)",
 
   // ── Roles ────────────────────────────────────────────────────────────────
   'pg.adminSecurity.roles.nameRequired': 'Name is required',
@@ -63,6 +64,8 @@ export const en = {
 
   // ── Users ────────────────────────────────────────────────────────────────
   'pg.adminSecurity.users.emailRequired': 'Email is required',
+  'pg.adminSecurity.users.emailInvalid': 'Enter a valid email address, like name@company.com',
+  'pg.adminSecurity.users.passwordTooShort': 'Password must be at least {n} characters',
   'pg.adminSecurity.users.passwordRequired': 'Password is required for a new user',
   'pg.adminSecurity.users.roleRequired': 'Role is required',
   'pg.adminSecurity.users.created': 'User created',
@@ -222,6 +225,7 @@ export const ar: Record<keyof typeof en, string> = {
   'pg.adminSecurity.users.platformAdminTag': 'مسؤول المنصّة',
   'pg.adminSecurity.users.platformAdminHint': 'لا يمكن تعديل هذا الحساب إلا من قِبل مسؤول المنصّة.',
   'pg.adminSecurity.c.roleOptionAdmin': '⁨{name}⁩ (مسؤول)',
+  'pg.adminSecurity.c.roleOptionAdminBypass': '⁨{name}⁩ (مسؤول، لا تنطبق عليه القواعد)',
 
   'pg.adminSecurity.roles.nameRequired': 'الاسم مطلوب',
   'pg.adminSecurity.roles.created': 'أُنشئ الدور',
@@ -240,6 +244,8 @@ export const ar: Record<keyof typeof en, string> = {
   'pg.adminSecurity.roles.orgAdmin': 'مسؤول المؤسسة',
 
   'pg.adminSecurity.users.emailRequired': 'البريد الإلكتروني مطلوب',
+  'pg.adminSecurity.users.emailInvalid': 'أدخل بريدًا إلكترونيًا صحيحًا، مثل name@company.com',
+  'pg.adminSecurity.users.passwordTooShort': 'يجب ألا تقل كلمة المرور عن {n} أحرف',
   'pg.adminSecurity.users.passwordRequired': 'كلمة المرور مطلوبة للمستخدم الجديد',
   'pg.adminSecurity.users.roleRequired': 'الدور مطلوب',
   'pg.adminSecurity.users.created': 'أُنشئ المستخدم',

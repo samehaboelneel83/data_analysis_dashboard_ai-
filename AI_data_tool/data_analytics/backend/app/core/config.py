@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     # there is no chicken-and-egg grant problem; empty means no super-admin exists.
     super_admin_emails: str = ""
 
+    # Shortest password an admin may set for a user or a new org admin (E-04).
+    password_min_length: int = Field(default=8, ge=1)
+
     # At-rest encryption of connection secrets in DataSource.config (services/
     # secrets.py). A Fernet key (urlsafe base64, 44 chars); empty derives a stable
     # key from secret_key, so encryption is always on without extra config. Rotating

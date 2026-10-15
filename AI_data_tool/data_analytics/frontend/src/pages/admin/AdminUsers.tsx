@@ -13,6 +13,7 @@ import LoadError from '../../components/ui/LoadError'
 import LoadingState from '../../components/ui/LoadingState'
 import EmptyState from '../../components/ui/EmptyState'
 import { Plus, Users as UsersIcon } from 'lucide-react'
+import { isLongEnoughPassword, isValidEmail, PASSWORD_MIN_LENGTH } from '../../lib/credentials'
 
 function UserModal({ initial, roles, onSave, onClose }: {
   initial?: User | null
@@ -25,15 +26,25 @@ function UserModal({ initial, roles, onSave, onClose }: {
   const isEdit = !!initial
   const [email, setEmail] = useState(initial?.email ?? '')
   const [password, setPassword] = useState('')
-  const [roleId, setRoleId] = useState<number | ''>(initial?.role.id ?? roles[0]?.id ?? '')
+  const [roleId, setRoleId] = useState<number | ''>(initial?.role.id ?? '')   // never pre-pick a role (QA E-05: Admin was the default)
   const [isActive, setIsActive] = useState(initial?.is_active ?? true)
   const [saving, setSaving] = useState(false)
+  // Shown under the field (QA E-04), not as a toast that fades away.
+  const [emailErr, setEmailErr] = useState<string | null>(null)
+  const [passwordErr, setPasswordErr] = useState<string | null>(null)
 
   const inp = { style: fieldStyle }
 
   const handleSave = async () => {
     if (!email.trim()) { toast.error(t('pg.adminSecurity.users.emailRequired')); return }
     if (!isEdit && !password) { toast.error(t('pg.adminSecurity.users.passwordRequired')); return }
+    // An unchanged address is not re-checked: an older account may predate the rule.
+    const eErr = (!isEdit || email.trim() !== initial!.email) && !isValidEmail(email)
+      ? t('pg.adminSecurity.users.emailInvalid') : null
+    const pErr = password && !isLongEnoughPassword(password)
+      ? t('pg.adminSecurity.users.passwordTooShort', { n: PASSWORD_MIN_LENGTH }) : null
+    setEmailErr(eErr); setPasswordErr(pErr)
+    if (eErr || pErr) return
     if (roleId === '') { toast.error(t('pg.adminSecurity.users.roleRequired')); return }
     setSaving(true)
     try {
@@ -64,17 +75,21 @@ function UserModal({ initial, roles, onSave, onClose }: {
 
         <label style={{ display: 'block', marginBottom: 12 }}>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{t('pg.adminSecurity.users.emailLabel')}</div>
-          <input type="email" value={email} onChange={e => setEmail(e.target.value)} {...inp}
-            id="managed-user-email" name="managed-user-email" autoComplete="off" />
+          <input type="email" value={email} onChange={e => { setEmail(e.target.value); setEmailErr(null) }} {...inp}
+            id="managed-user-email" name="managed-user-email" autoComplete="off"
+            aria-invalid={emailErr ? true : undefined} aria-describedby={emailErr ? 'managed-user-email-err' : undefined} />
         </label>
+        {emailErr && <div id="managed-user-email-err" role="alert" style={{ fontSize: 11, color: 'var(--danger)', marginTop: -8, marginBottom: 12 }}>{emailErr}</div>}
 
         <label style={{ display: 'block', marginBottom: 12 }}>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>
             {isEdit ? t('pg.adminSecurity.users.newPasswordLabel') : t('pg.adminSecurity.users.passwordLabel')}
           </div>
-          <input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="new-password" {...inp}
-            id="managed-user-password" name="managed-user-password" />
+          <input type="password" value={password} onChange={e => { setPassword(e.target.value); setPasswordErr(null) }} autoComplete="new-password" {...inp}
+            id="managed-user-password" name="managed-user-password" minLength={PASSWORD_MIN_LENGTH}
+            aria-invalid={passwordErr ? true : undefined} aria-describedby={passwordErr ? 'managed-user-password-err' : undefined} />
         </label>
+        {passwordErr && <div id="managed-user-password-err" role="alert" style={{ fontSize: 11, color: 'var(--danger)', marginTop: -8, marginBottom: 12 }}>{passwordErr}</div>}
 
         <label style={{ display: 'block', marginBottom: 12 }}>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{t('pg.adminSecurity.c.roleReq')}</div>

@@ -8,6 +8,7 @@ import toast from 'react-hot-toast'
 import EmptyState from '../../components/ui/EmptyState'
 import LoadError from '../../components/ui/LoadError'
 import LoadingState from '../../components/ui/LoadingState'
+import { isLongEnoughPassword, isValidEmail, PASSWORD_MIN_LENGTH } from '../../lib/credentials'
 
 const fmtMb = (bytes: number) => (bytes / (1024 * 1024)).toFixed(1)
 /** What each metered feature is, in the words an administrator uses. */
@@ -27,6 +28,8 @@ export default function PlatformOrgs() {
   const [name, setName] = useState('')
   const [adminEmail, setAdminEmail] = useState('')
   const [adminPassword, setAdminPassword] = useState('')
+  const [emailErr, setEmailErr] = useState<string | null>(null)
+  const [passwordErr, setPasswordErr] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
 
   // A load failure gets the persistent inline banner below, not a toast: this is
@@ -43,6 +46,12 @@ export default function PlatformOrgs() {
 
   const createOrg = async () => {
     if (!name.trim() || !adminEmail.trim() || !adminPassword) { toast.error(t('pg.adminPlatform.orgs.required')); return }
+    // Inline, under the field (QA E-04: a 1-character admin password was accepted).
+    const eErr = isValidEmail(adminEmail) ? null : t('pg.adminPlatform.orgs.emailInvalid')
+    const pErr = isLongEnoughPassword(adminPassword) ? null
+      : t('pg.adminPlatform.orgs.passwordTooShort', { n: PASSWORD_MIN_LENGTH })
+    setEmailErr(eErr); setPasswordErr(pErr)
+    if (eErr || pErr) return
     setCreating(true)
     try {
       await platformApi.createOrg({ name: name.trim(), admin_email: adminEmail.trim(), admin_password: adminPassword })
@@ -131,10 +140,19 @@ export default function PlatformOrgs() {
         <div className="dl-rows__title" style={{ marginBottom: 10 }}>{t('pg.adminPlatform.orgs.new')}</div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <input aria-label={t('pg.adminPlatform.orgs.name')} placeholder={t('pg.adminPlatform.orgs.name')} value={name} onChange={e => setName(e.target.value)} {...inp} />
-          <input aria-label={t('pg.adminPlatform.orgs.adminEmail')} placeholder={t('pg.adminPlatform.orgs.adminEmail')} value={adminEmail}
-            onChange={e => setAdminEmail(e.target.value)} autoComplete="off" id="new-org-admin-email" name="new-org-admin-email" {...inp} />
-          <input aria-label={t('pg.adminPlatform.orgs.adminPassword')} type="password" placeholder={t('pg.adminPlatform.orgs.adminPassword')} value={adminPassword}
-            onChange={e => setAdminPassword(e.target.value)} autoComplete="new-password" id="new-org-admin-password" name="new-org-admin-password" {...inp} />
+          <span style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <input aria-label={t('pg.adminPlatform.orgs.adminEmail')} placeholder={t('pg.adminPlatform.orgs.adminEmail')} value={adminEmail}
+              onChange={e => { setAdminEmail(e.target.value); setEmailErr(null) }} autoComplete="off" id="new-org-admin-email" name="new-org-admin-email"
+              aria-invalid={emailErr ? true : undefined} aria-describedby={emailErr ? 'new-org-admin-email-err' : undefined} {...inp} />
+            {emailErr && <span id="new-org-admin-email-err" role="alert" style={{ fontSize: 11, color: 'var(--danger)' }}>{emailErr}</span>}
+          </span>
+          <span style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <input aria-label={t('pg.adminPlatform.orgs.adminPassword')} type="password" placeholder={t('pg.adminPlatform.orgs.adminPassword')} value={adminPassword}
+              onChange={e => { setAdminPassword(e.target.value); setPasswordErr(null) }} autoComplete="new-password" id="new-org-admin-password" name="new-org-admin-password"
+              minLength={PASSWORD_MIN_LENGTH}
+              aria-invalid={passwordErr ? true : undefined} aria-describedby={passwordErr ? 'new-org-admin-password-err' : undefined} {...inp} />
+            {passwordErr && <span id="new-org-admin-password-err" role="alert" style={{ fontSize: 11, color: 'var(--danger)' }}>{passwordErr}</span>}
+          </span>
           <button className="btn btn-primary btn-sm" onClick={createOrg} disabled={creating}>
             {creating ? t('pg.adminPlatform.creating') : t('pg.adminPlatform.orgs.create')}
           </button>

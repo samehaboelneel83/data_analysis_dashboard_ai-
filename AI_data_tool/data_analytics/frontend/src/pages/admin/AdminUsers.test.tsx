@@ -15,6 +15,7 @@ vi.mock('../../services/api', () => ({
 
 import { adminUsersApi } from '../../services/api'
 import { axeViolations } from '../../test/axe'
+import toast from 'react-hot-toast'
 
 const renderPage = () => render(<ConfirmProvider><AdminUsers /></ConfirmProvider>)
 
@@ -110,5 +111,66 @@ describe('AdminUsers — platform admin rows (QA E-01)', () => {
     expect(await screen.findByText('platform@example.com')).toBeInTheDocument()
     expect(screen.queryByText('Platform admin')).not.toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: 'Edit' })).toHaveLength(2)
+  })
+})
+
+describe('AdminUsers — new user checks email and password before submitting (QA E-04)', () => {
+  const openNewUser = async () => {
+    renderPage()
+    const add = await screen.findByRole('button', { name: /New user/i })
+    await waitFor(() => expect(add).not.toBeDisabled())
+    fireEvent.click(add)
+    fireEvent.change(screen.getByLabelText('Role *'), { target: { value: '1' } })
+  }
+
+  it('an invalid email shows an inline error and the API is not called', async () => {
+    vi.mocked(adminUsersApi.create).mockClear()
+    await openNewUser()
+    fireEvent.change(screen.getByLabelText('Email *'), { target: { value: 'not-an-email' } })
+    fireEvent.change(screen.getByLabelText('Password *'), { target: { value: 'long-enough-1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+    expect(await screen.findByText('Enter a valid email address, like name@company.com')).toBeInTheDocument()
+    expect(screen.getByLabelText('Email *')).toHaveAttribute('aria-invalid', 'true')
+    expect(adminUsersApi.create).not.toHaveBeenCalled()
+  })
+
+  it('a password shorter than 8 characters shows an inline error and the API is not called', async () => {
+    vi.mocked(adminUsersApi.create).mockClear()
+    await openNewUser()
+    fireEvent.change(screen.getByLabelText('Email *'), { target: { value: 'new@example.com' } })
+    fireEvent.change(screen.getByLabelText('Password *'), { target: { value: 'x' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+    expect(await screen.findByText('Password must be at least 8 characters')).toBeInTheDocument()
+    expect(adminUsersApi.create).not.toHaveBeenCalled()
+  })
+
+  it('valid values are submitted', async () => {
+    vi.mocked(adminUsersApi.create).mockClear()
+    vi.mocked(adminUsersApi.create).mockResolvedValueOnce({ id: 5, email: 'new@example.com', is_active: true,
+      role: { id: 1, name: 'Analyst', is_org_admin: false }, organization: { id: 1, name: 'Default' } } as never)
+    await openNewUser()
+    fireEvent.change(screen.getByLabelText('Email *'), { target: { value: 'qa@corp.local' } })
+    fireEvent.change(screen.getByLabelText('Password *'), { target: { value: 'long-enough-1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+    await waitFor(() => expect(adminUsersApi.create).toHaveBeenCalledWith(
+      { email: 'qa@corp.local', password: 'long-enough-1', role_id: 1 }))
+  })
+})
+
+describe('AdminUsers — nothing is pre-selected in a new user (QA E-05)', () => {
+  it('the role starts empty, and Create without a role says a role is required', async () => {
+    vi.mocked(adminUsersApi.create).mockClear()
+    const toastError = vi.spyOn(toast, 'error')
+    renderPage()
+    const add = await screen.findByRole('button', { name: /New user/i })
+    await waitFor(() => expect(add).not.toBeDisabled())
+    fireEvent.click(add)
+    expect(screen.getByLabelText('Role *')).toHaveValue('')
+    fireEvent.change(screen.getByLabelText('Email *'), { target: { value: 'new@example.com' } })
+    fireEvent.change(screen.getByLabelText('Password *'), { target: { value: 'long-enough-1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith('Role is required'))
+    expect(adminUsersApi.create).not.toHaveBeenCalled()
+    toastError.mockRestore()
   })
 })

@@ -8,7 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from ..core.database import get_db
 from ..core.org_scope import check_org
-from ..core.security import hash_password, normalize_email
+from ..core.security import email_problem, hash_password, normalize_email, password_problem
 from ..dependencies import get_current_user, is_allowlisted_email, is_super_admin, require_org_admin
 from ..models.models import AuditLogEntry, ColumnSecurityRule, Dataset, Role, RowSecurityRule, User
 from ..schemas.schemas import (
@@ -102,6 +102,16 @@ def _refuse_allowlisted_email(email: str, current_user: User) -> None:
         raise HTTPException(403, "This address is reserved for platform administrators")
 
 
+def _refuse_invalid_credentials(email: str, password: str | None) -> None:
+    """422 with a readable reason for a malformed address or a weak password
+    (QA E-04: "not-an-email" / "x" were accepted). `password=None` checks the
+    email only (a PATCH that doesn't change the password)."""
+    if (why := email_problem(email)):
+        raise HTTPException(422, why)
+    if password is not None and (why := password_problem(password, email)):
+        raise HTTPException(422, why)
+
+
 async def _email_taken(db: AsyncSession, email: str, *, except_id: int | None = None) -> bool:
     """Is this address in use, in ANY letter case (accounts made before
     emails were normalised may still hold capitals)."""
@@ -130,6 +140,7 @@ async def create_user(body: UserCreate, db: AsyncSession = Depends(get_db), curr
     role = await db.get(Role, body.role_id)
     check_org(role, current_user, "Role not found")
     email = normalize_email(body.email)
+    _refuse_invalid_credentials(email, body.password)
     _refuse_allowlisted_email(email, current_user)
     if await _email_taken(db, email):
         raise HTTPException(400, "Email already in use")
@@ -169,7 +180,7 @@ async def bulk_create_users(body: BulkUserCreate, db: AsyncSession = Depends(get
     for i, u in enumerate(body.users):
         row = i + 1                           # 1-based, matches a spreadsheet
         email = normalize_email(u.email)
-        if not email or "@" not in email:
+        if email_problem(email):
             errors.append({"row": row, "email": email, "error": "invalid email"}); continue
         if is_allowlisted_email(email) and not may_grant_platform:
             errors.append({"row": row, "email": email,
@@ -180,6 +191,8 @@ async def bulk_create_users(body: BulkUserCreate, db: AsyncSession = Depends(get
             errors.append({"row": row, "email": email, "error": "email already in use"}); continue
         if not (u.password or "").strip():
             errors.append({"row": row, "email": email, "error": "password required"}); continue
+        if (why := password_problem(u.password, email)):
+            errors.append({"row": row, "email": email, "error": why}); continue
         role = role_by_name.get((u.role or "").strip().lower())
         if role is None:
             errors.append({"row": row, "email": email, "error": f"unknown role '{u.role}'"}); continue
@@ -207,6 +220,8 @@ async def update_user(user_id: int, body: UserUpdate, db: AsyncSession = Depends
     was_email = user.email
     if body.email is not None:
         email = normalize_email(body.email)
+        if email != user.email:      # an unchanged legacy address still saves
+            _refuse_invalid_credentials(email, None)
         _refuse_allowlisted_email(email, current_user)
         if await _email_taken(db, email, except_id=user_id):
             raise HTTPException(400, "Email already in use")
@@ -214,6 +229,8 @@ async def update_user(user_id: int, body: UserUpdate, db: AsyncSession = Depends
             changes.append(f"email from {user.email}")
         user.email = email
     if body.password is not None:
+        if (why := password_problem(body.password, user.email)):
+            raise HTTPException(422, why)
         changes.append("password reset")
         user.password_hash = hash_password(body.password)
         # A reset is the moment a revocation is certainly wanted (a leaked or

@@ -56,8 +56,8 @@ function RuleModal({ initial, roles, datasets, onSave, onClose }: {
   const t = useT()
   const dialogRef = useModalDialog<HTMLDivElement>(onClose)
   const isEdit = !!initial
-  const [roleId, setRoleId] = useState<number | ''>(initial?.role_id ?? roles[0]?.id ?? '')
-  const [datasetId, setDatasetId] = useState<number | ''>(initial?.dataset_id ?? datasets[0]?.id ?? '')
+  const [roleId, setRoleId] = useState<number | ''>(initial?.role_id ?? '')
+  const [datasetId, setDatasetId] = useState<number | ''>(initial?.dataset_id ?? '')
   const [filterExpr, setFilterExpr] = useState(initial?.filter_expr ?? '')
   const [saving, setSaving] = useState(false)
   const [overlap, setOverlap] = useState<string[]>([])
@@ -136,7 +136,8 @@ function RuleModal({ initial, roles, datasets, onSave, onClose }: {
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{t('pg.adminSecurity.c.roleReq')}</div>
           <select value={roleId} onChange={e => setRoleId(e.target.value ? Number(e.target.value) : '')} disabled={isEdit} title={isEdit ? t('pg.adminSecurity.rls.fixed') : undefined} {...inp}>
             <option value="">{t('pg.adminSecurity.c.selectRole')}</option>
-            {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            {roles.map(r => <option key={r.id} value={r.id} disabled={r.is_org_admin}>
+              {r.is_org_admin ? t('pg.adminSecurity.c.roleOptionAdminBypass', { name: r.name }) : r.name}</option>)}
           </select>
         </label>
 
@@ -262,8 +263,8 @@ function AutoGenerateModal({ roles, datasets, onApplied, onClose }: {
 }) {
   const t = useT()
   const dialogRef = useModalDialog<HTMLDivElement>(onClose)
-  const [roleId, setRoleId] = useState<number | ''>(roles[0]?.id ?? '')
-  const [datasetId, setDatasetId] = useState<number | ''>(datasets[0]?.id ?? '')
+  const [roleId, setRoleId] = useState<number | ''>('')
+  const [datasetId, setDatasetId] = useState<number | ''>('')
   const [proposals, setProposals] = useState<RlsRuleProposal[]>([])
   const [checked, setChecked] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(false)
@@ -331,7 +332,8 @@ function AutoGenerateModal({ roles, datasets, onApplied, onClose }: {
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{t('pg.adminSecurity.c.roleReq')}</div>
           <select aria-label={t('pg.adminSecurity.c.roleReq')} value={roleId} onChange={e => setRoleId(e.target.value ? Number(e.target.value) : '')} {...inp}>
             <option value="">{t('pg.adminSecurity.c.selectRole')}</option>
-            {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            {roles.map(r => <option key={r.id} value={r.id} disabled={r.is_org_admin}>
+              {r.is_org_admin ? t('pg.adminSecurity.c.roleOptionAdminBypass', { name: r.name }) : r.name}</option>)}
           </select>
         </label>
 
