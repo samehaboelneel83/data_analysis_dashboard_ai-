@@ -204,7 +204,7 @@ async def test_admin_role_always_allowed_whatever_is_stored(client, db_session, 
 
 # ── migration ───────────────────────────────────────────────────────────────
 
-PREV = "0070_roles_org_name_unique"
+PREV = "0071_glossary_dataset_scope"  # the revision before 0072
 
 
 @pytest.fixture
