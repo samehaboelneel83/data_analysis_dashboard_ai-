@@ -364,3 +364,41 @@ describe('C-23 round 2: the Split into multiples by picker', () => {
     expect(names.some(n => /sales/.test(n))).toBe(false)
   })
 })
+
+describe('C-28 round 2: arrow keys move through the field picker', () => {
+  const choices = [{ value: 'origin_lat', label: 'origin_lat' }, { value: 'origin_lon', label: 'origin_lon' },
+                   { value: 'dest_lat', label: 'dest_lat' }]
+  it('Down from the search box reaches the first field, Down/Up step, Up from the first returns to search', () => {
+    render(<AddFieldDialog heading="Latitude" multi={false} selected={[]} choices={choices} onApply={vi.fn()} onClose={vi.fn()} />)
+    const search = screen.getByRole('searchbox')
+    const opts = screen.getAllByRole('option')
+    search.focus()
+    fireEvent.keyDown(search, { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(opts[0])
+    fireEvent.keyDown(opts[0], { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(opts[1])
+    fireEvent.keyDown(opts[1], { key: 'End' })
+    expect(document.activeElement).toBe(opts[2])
+    fireEvent.keyDown(opts[2], { key: 'Home' })
+    expect(document.activeElement).toBe(opts[0])
+    fireEvent.keyDown(opts[0], { key: 'ArrowUp' })
+    expect(document.activeElement).toBe(search)
+  })
+  it('only one field is in the Tab order (roving), and it follows focus', () => {
+    render(<AddFieldDialog heading="Latitude" multi={false} selected={[]} choices={choices} onApply={vi.fn()} onClose={vi.fn()} />)
+    const opts = screen.getAllByRole('option')
+    expect(opts.filter(o => o.tabIndex === 0)).toHaveLength(1)
+    fireEvent.keyDown(screen.getByRole('searchbox'), { key: 'ArrowDown' })
+    fireEvent.keyDown(opts[0], { key: 'ArrowDown' })
+    expect(opts[1].tabIndex).toBe(0)
+    expect(opts[0].tabIndex).toBe(-1)
+  })
+  it('works over the checkboxes of a several-field role too', () => {
+    render(<AddFieldDialog heading="Measures" multi selected={[]} choices={choices} onApply={vi.fn()} onClose={vi.fn()} />)
+    const boxes = screen.getAllByRole('checkbox')
+    fireEvent.keyDown(screen.getByRole('searchbox'), { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(boxes[0])
+    fireEvent.keyDown(boxes[0], { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(boxes[1])
+  })
+})
