@@ -114,7 +114,7 @@ describe('AI offline', () => {
     await act(async () => { await llmApi.endpoints() })
     expect(await screen.findByTestId('ai-offline')).toHaveTextContent('The model server isn’t reachable, so new questions are paused.')
     const box = screen.getByRole('textbox', { name: 'Your question' })
-    expect(box).toBeDisabled()
+    expect(box).toHaveAttribute('aria-disabled', 'true')
     expect(box).toHaveAttribute('placeholder', 'New questions are paused while the model server is unreachable')
     vi.mocked(api.get).mockResolvedValue(endpoints(true) as any)
     await act(async () => { await llmApi.endpoints() })

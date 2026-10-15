@@ -102,7 +102,7 @@ describe('AskAI', () => {
     expect(await screen.findByRole('heading', { name: 'Ask your data anything' })).toBeInTheDocument()
     expect(screen.getByText('Choose your data')).toBeInTheDocument()
     expect(screen.getByText('Step 1')).toBeInTheDocument()
-    expect(screen.getByRole('textbox', { name: 'Your question' })).toBeDisabled()
+    expect(screen.getByRole('textbox', { name: 'Your question' })).toHaveAttribute('aria-disabled', 'true')
   })
 
   it('a failed dataset list is an error, never "no data yet"', async () => {
