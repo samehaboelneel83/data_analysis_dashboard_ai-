@@ -279,9 +279,17 @@ async def test_archiving_closes_everything_and_restoring_brings_it_back(client, 
         assert (await client.get(f"{API}/reports/{rid}", headers=hdr(u))).status_code == 200
     assert (await client.get(f"{API}/portal/catalog?section=archived", headers=hdr(a))).json()["total"] == 1
     assert (await client.post(f"{API}/reports/{rid}/publish", json={"published": True}, headers=hdr(a))).status_code in (200, 409)
-    assert (await client.post(f"{API}/reports/{rid}/restore", headers=hdr(a))).json()["state"] == "published"
+    # F-04: it comes back as a DRAFT -- readers do not get it again until it is published again.
+    assert (await client.post(f"{API}/reports/{rid}/restore", headers=hdr(a))).json()["state"] == "draft"
+    assert (await client.get(f"{API}/reports/{rid}/publication", headers=hdr(a))).json()["state"] == "draft"
+    assert (await client.get(f"{API}/reports/{rid}", headers=hdr(people["stranger"]))).status_code == 404  # reached it only by publication
     assert (await client.get(f"{API}/reports/{rid}", headers=hdr(r))).status_code == 200       # shares and links came back as they were
     assert (await client.get(f"{API}/shared/{token}")).status_code == 200
+    restored = (await db_session.execute(select(AuditLogEntry).where(
+        AuditLogEntry.action == "report.restore", AuditLogEntry.entity_id == rid))).scalars().all()
+    assert restored and "draft" in (restored[-1].detail or "")
+    await publish(client, a, rid)
+    assert (await client.get(f"{API}/reports/{rid}", headers=hdr(people["stranger"]))).status_code == 200
     # Unpublishing leaves the named share and takes the rest of the organisation out.
     await publish(client, a, rid, on=False)
     assert (await client.get(f"{API}/reports/{rid}", headers=hdr(r))).status_code == 200

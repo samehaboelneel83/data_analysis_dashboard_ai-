@@ -70,6 +70,28 @@ describe('PublishingPanel', () => {
     expect(screen.queryByRole('button', { name: 'Archive' })).not.toBeInTheDocument()
   })
 
+  it('a restored dashboard comes back as a draft: the pill and the builder hear the server\'s state (F-04)', async () => {
+    vi.mocked(publishingApi.get)
+      .mockResolvedValueOnce(publication({ state: 'archived' }) as never)
+      .mockResolvedValue(publication({ state: 'draft' }) as never)
+    vi.mocked(publishingApi.restore).mockResolvedValue({ state: 'draft' } as never)
+    const onStateChange = vi.fn()
+    open(false, onStateChange)
+    fireEvent.click(await screen.findByRole('button', { name: 'Restore' }))
+    await waitFor(() => expect(onStateChange).toHaveBeenCalledWith('draft'))
+    await waitFor(() => expect(screen.getByTestId('publishing-panel').querySelector('.shx-pill')).toHaveTextContent('Draft'))
+    expect(toast.success).toHaveBeenCalledWith(expect.stringMatching(/draft/i))
+  })
+
+  it('the builder is told the state the server answered, not an assumed one (F-04)', async () => {
+    vi.mocked(publishingApi.get).mockResolvedValue(publication({ state: 'archived' }) as never)
+    vi.mocked(publishingApi.restore).mockResolvedValue({ state: 'published' } as never)
+    const onStateChange = vi.fn()
+    open(false, onStateChange)
+    fireEvent.click(await screen.findByRole('button', { name: 'Restore' }))
+    await waitFor(() => expect(onStateChange).toHaveBeenCalledWith('published'))
+  })
+
   it('goes back to an earlier version after being asked; the current one has no button', async () => {
     vi.mocked(publishingApi.rollback).mockResolvedValue({ release: {}, unreleased_changes: true } as never)
     open()

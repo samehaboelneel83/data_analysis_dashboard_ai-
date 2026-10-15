@@ -75,8 +75,10 @@ export default function PublishingPanel({ report, isAdmin, onStateChange }: {
     onStateChange?.('archived')
   }
   const restore = async () => {
-    await run(() => publishingApi.restore(report.id), t('pub.restore.done'))
-    onStateChange?.('draft')
+    // F-04: the server restores as a draft; tell the builder what it answered.
+    const out: { state?: Publication['state'] } = {}
+    await run(async () => { out.state = (await publishingApi.restore(report.id))?.state as Publication['state'] }, t('pub.restore.done'))
+    if (out.state) onStateChange?.(out.state)
   }
   const goBack = async (r: ReleaseSummary) => {
     if (!(await confirm({ title: t('pub.versions.confirm', { n: n(r.revision) }), body: t('pub.versions.confirmBody'),

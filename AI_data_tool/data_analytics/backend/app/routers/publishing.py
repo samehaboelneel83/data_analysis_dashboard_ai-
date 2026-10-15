@@ -378,7 +378,14 @@ async def restore(report_id: int, db: AsyncSession = Depends(get_db),
         raise HTTPException(403, "Only the dashboard's owner or an administrator can restore it")
     if report.archived_at is not None:
         report.archived_at = None
-        await audit(db, current_user, "report.restore", "report", report.id, report.name)
+        # F-04: back as a DRAFT. Readers who reached it only by publication do
+        # not get it back until someone publishes it again (through the same
+        # approval gate); named shares, links and schedules are kept as they
+        # were. `published_at` stays, as history.
+        was_published = bool(report.published)
+        report.published = False
+        await audit(db, current_user, "report.restore", "report", report.id,
+                    f"{report.name} (restored as draft{'; was published' if was_published else ''})")
         await db.commit()
     return {"state": publication_state(report)}
 
