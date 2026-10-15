@@ -8,6 +8,8 @@ import FilterBar from '../components/report/FilterBar'
 import FloatingFilterWindow from '../components/report/FloatingFilterWindow'
 import { postToHost } from '../lib/embedProtocol'
 import { applyTheme } from '../components/report/chartUtils'
+import { setTileSettings } from '../components/report/geo/tiles'
+import { setRegionSetLoader } from '../components/report/geo/boundarySource'
 
 /** Cross-source mappings the server publishes with a report (Phase 6.1): the
  *  relationships among its datasets and, per dataset, only the column names
@@ -81,6 +83,10 @@ export default function EmbeddedReport() {
       // the response when it is an org palette this viewer cannot list).
       applyTheme(r.theme ?? 'default', r.theme && r.theme_colors ? { [r.theme]: r.theme_colors } : undefined)
       const sTok = r.embed_session_token as string
+      // Maps: basemap from the payload, shapes on the embed session. The
+      // signed-in routes 401 inside an iframe and sent it to /login (QA F2-55).
+      setTileSettings(r.map_settings ?? null)
+      setRegionSetLoader(id => embedApi.boundarySet(sTok, id))
       const widgets: Widget[] = r.pages.flatMap((p: ReportPage) => p.widgets ?? [])
       const STATIC = new Set(['text', 'button', 'image', 'shape', 'container', 'web_content'])
       const results = await Promise.all(widgets.map(w =>
@@ -90,6 +96,8 @@ export default function EmbeddedReport() {
       setData(Object.fromEntries(widgets.map((w, i) => [w.id, results[i]])))
     }).catch(() => setError('This embed link is invalid, expired, or not allowed from this origin.'))
   }, [token])
+
+  useEffect(() => () => setRegionSetLoader(null), [])
 
   function retryWidget(w: Widget) {
     if (!sessionToken) return

@@ -31,6 +31,8 @@ from ..models.models import (
     CommonFilter, Dataset, PageRoleVisibility, Report, ReportClassification, ReportPage, ShareLink, User,
 )
 from ..schemas.schemas import WidgetDataRequest
+from .boundary_sets import published_boundary_set, referenced_boundary_set_ids
+from .map_settings import org_map_settings
 
 router = APIRouter(prefix="/shared", tags=["shared"])
 
@@ -409,8 +411,28 @@ async def shared_report(token: str, request: Request, db: AsyncSession = Depends
         "calculated_columns": (ds.calculated_columns or []) if ds else [],
         "pages": pages,
         "pinned": link.pinned,
+        # A guest has no session, so a map cannot ask /map-settings for its
+        # basemap: that 401 bounced every guest of a map dashboard to /login.
+        "map_settings": await org_map_settings(db, report.org_id),
         **(await published_relationships(db, report, pages, _resolve_identity(link, creator, viewer))),
     }
+
+
+@router.get("/{token}/boundary-sets/{set_id}")
+async def shared_boundary_set(token: str, set_id: int, db: AsyncSession = Depends(get_db),
+                              viewer: User | None = Depends(get_current_user_optional)):
+    """The shapes a map on this shared report draws with -- the guest-link
+    counterpart of the signed-in `GET /boundary-sets/{id}`. Same gates as the
+    report route (live, unrevoked link; sensitivity), and only a set one of
+    the pages this guest can see actually references."""
+    link, report, creator = await _resolve_link(db, token)
+    await sensitivity_gate(db, report, viewer)
+    pages = await _visible_pages(db, link, report, creator)
+    fields = await distributed_fields(db, report) if link.snapshot is None else {"dataset_id": report.dataset_id}
+    ds = await db.get(Dataset, fields["dataset_id"]) if fields["dataset_id"] else None
+    geography = _published_geography(ds) if ds else {}
+    return await published_boundary_set(db, set_id, report.org_id,
+                                        referenced_boundary_set_ids(pages, geography))
 
 
 @router.post("/{token}/widget-data/{widget_id}")

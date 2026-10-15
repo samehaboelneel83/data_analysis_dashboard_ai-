@@ -6,6 +6,8 @@ import { CrossFilterProvider } from '../components/report/CrossFilterContext'
 import FilterBar from '../components/report/FilterBar'
 import FloatingFilterWindow from '../components/report/FloatingFilterWindow'
 import { applyTheme } from '../components/report/chartUtils'
+import { setTileSettings } from '../components/report/geo/tiles'
+import { setRegionSetLoader } from '../components/report/geo/boundarySource'
 import { useT } from '../i18n'
 
 /** Cross-source mappings the server publishes with a report (Phase 6.1): the
@@ -73,6 +75,11 @@ export default function SharedReport() {
       // The report's palette, before any widget draws (its colours travel with
       // the response when it is an org palette this viewer cannot list).
       applyTheme(r.theme ?? 'default', r.theme && r.theme_colors ? { [r.theme]: r.theme_colors } : undefined)
+      // Maps too: the basemap comes with the report and the boundary shapes
+      // through this link, never the signed-in routes -- their 401 sent every
+      // guest of a map dashboard to /login (QA F2-55).
+      setTileSettings(r.map_settings ?? null)
+      setRegionSetLoader(id => sharedApi.boundarySet(token, id))
       // Widgets render only after every override is resolved: a WidgetRenderer
       // mounted without its override would fetch through the authed API, and
       // the anonymous 401 would bounce this whole page to /login -- exactly
@@ -85,6 +92,10 @@ export default function SharedReport() {
       setData(Object.fromEntries(widgets.map((w, i) => [w.id, results[i]])))
     }).catch(() => setError(t('i2c.sr.expired')))
   }, [token])
+
+  // Leaving the guest page (into the app, in the same tab) hands maps back to
+  // the signed-in routes.
+  useEffect(() => () => setRegionSetLoader(null), [])
 
   function retryWidget(w: Widget) {
     if (!token) return

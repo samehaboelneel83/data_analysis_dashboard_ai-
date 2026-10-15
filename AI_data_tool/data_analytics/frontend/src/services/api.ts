@@ -102,10 +102,19 @@ export function handleResponseError(error: any) {
   // now -- the session is a cookie script cannot see -- and a 401 there just
   // means "not logged in"; redirecting would bounce a share-link or embed
   // viewer to the login page.
-  if (error?.response?.status === 401 && !error?.config?.quiet401) {
+  if (error?.response?.status === 401 && !error?.config?.quiet401 && !onPublicSurface()) {
     onUnauthorized?.()
   }
   return Promise.reject(error)
+}
+
+/** A guest share link or an embed: pages a viewer opens with NO session, by
+ *  design. A 401 there means "this call needs a login" -- never "your session
+ *  expired" -- so it must fail that one call, not send the whole page to the
+ *  login screen (a map's basemap request did exactly that, QA F2-55). */
+function onPublicSurface(): boolean {
+  const path = typeof window === 'undefined' ? '' : window.location.pathname
+  return path.startsWith('/shared/') || path === '/embed' || path.startsWith('/embed/')
 }
 
 api.interceptors.response.use(r => { sayJobErrors(r.data); return r }, handleResponseError)
@@ -2050,6 +2059,10 @@ export const sharedApi = {
     api.get(`/shared/${token}`).then(r => r.data),
   widgetData: (token: string, widgetId: number) =>
     api.post(`/shared/${token}/widget-data/${widgetId}`).then(r => r.data),
+  /** A boundary set this shared report's maps draw with (the guest
+   *  counterpart of boundarySetsApi.get, which needs a login). */
+  boundarySet: (token: string, setId: number) =>
+    api.get<BoundarySetDetail>(`/shared/${token}/boundary-sets/${setId}`).then(r => r.data),
 }
 
 export const embedConfigsApi = {
@@ -2078,6 +2091,11 @@ export const embedApi = {
     api.get(`/embed/report`, { params: { token } }).then(r => r.data),
   widgetData: (sessionToken: string, widgetId: number) =>
     api.post(`/embed/widget-data/${widgetId}`, undefined,
+      { headers: { Authorization: `Bearer ${sessionToken}` } }).then(r => r.data),
+  /** A boundary set this embedded report's maps draw with, on the embed
+   *  session (an iframe has no login for boundarySetsApi.get). */
+  boundarySet: (sessionToken: string, setId: number) =>
+    api.get<BoundarySetDetail>(`/embed/boundary-sets/${setId}`,
       { headers: { Authorization: `Bearer ${sessionToken}` } }).then(r => r.data),
 }
 

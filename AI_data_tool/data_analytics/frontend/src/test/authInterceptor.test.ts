@@ -1,5 +1,5 @@
 import { AxiosHeaders } from 'axios'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   setUnauthorizedHandler, handleResponseError, takeLegacyToken, api, LLM_USED_EVENT,
 } from '../services/api'
@@ -61,6 +61,32 @@ describe('auth-aware API client', () => {
     setUnauthorizedHandler(handler)
     await expect(handleResponseError({ response: { status: 401 }, config: { quiet401: true } })).rejects.toBeTruthy()
     expect(handler).not.toHaveBeenCalled()
+  })
+
+  describe('on the public surfaces (guest links, embeds)', () => {
+    // A guest or an embed has no session by design, so ANY 401 there is "this
+    // call needs a login", never "your session expired". Redirecting threw the
+    // whole guest page away for one map's basemap request (QA F2-55).
+    const at = (path: string) => window.history.pushState({}, '', path)
+    afterEach(() => at('/'))
+
+    it.each(['/shared/abc123', '/shared/abc123/', '/embed', '/embed?token=x'])(
+      'a 401 while on %s does not redirect to the login page', async path => {
+        at(path)
+        const handler = vi.fn()
+        setUnauthorizedHandler(handler)
+        await expect(handleResponseError({ response: { status: 401 } })).rejects.toBeTruthy()
+        expect(handler).not.toHaveBeenCalled()
+      })
+
+    it.each(['/', '/reports/3', '/sharedstuff', '/embedded', '/datasets'])(
+      'a 401 on an app page (%s) still redirects', async path => {
+        at(path)
+        const handler = vi.fn()
+        setUnauthorizedHandler(handler)
+        await expect(handleResponseError({ response: { status: 401 } })).rejects.toBeTruthy()
+        expect(handler).toHaveBeenCalledTimes(1)
+      })
   })
 
   it('a non-401 error does not invoke the handler', async () => {
