@@ -11,7 +11,11 @@ import { localDigits } from '../../lib/arabicFormats'
 import { setupApi, type SetupSummary } from '../../services/api'
 import PlainSummary from '../ui/PlainSummary'
 
-export default function SourceSummary({ sourceId }: { sourceId: number }) {
+export default function SourceSummary({ sourceId, refreshKey = 0 }: {
+  sourceId: number
+  /** B-29: bumped by the page when a sync finishes, so the summary is read again. */
+  refreshKey?: number
+}) {
   const t = useT()
   const { language } = useDirection()
   const [data, setData] = useState<SetupSummary | null>(null)
@@ -19,7 +23,7 @@ export default function SourceSummary({ sourceId }: { sourceId: number }) {
     let alive = true
     Promise.resolve().then(() => setupApi.summary(sourceId, language)).then(d => { if (alive) setData(d) }).catch(() => {})
     return () => { alive = false }
-  }, [sourceId, language])
+  }, [sourceId, language, refreshKey])
   if (!data || data.status !== 'ready') return null
   const totals = data.totals!
   const main = (data.tables ?? []).filter(x => x.group === 'main').slice(0, 3)

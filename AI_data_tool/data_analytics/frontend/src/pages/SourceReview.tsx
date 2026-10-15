@@ -102,6 +102,8 @@ export default function SourceReview() {
       .catch(() => setDriftError(tr('pg.dataPages.sr.driftError')))
   }, [tab, drift, sourceId])
   const [pollTimer, setPollTimer] = useState<number | null>(null)
+  // B-29: bumped when a sync ends, so the plain summary above is read again.
+  const [syncedAt, setSyncedAt] = useState(0)
   // B-04: a ticking clock for "Running for mm:ss" while a sync runs.
   const [now, setNow] = useState(() => Date.now())
   const runningRun = run?.status === 'running' && run.id != null
@@ -207,6 +209,7 @@ export default function SourceReview() {
           window.clearInterval(timer)
           setSyncing(false)
           await load()
+          setSyncedAt(n => n + 1)
           const failed = latest.stages.filter(st => st.status === 'failed').length
           if (latest.status === 'ok') toast.success(tr('pg.dataPages.sr.syncFinished'))
           else if (failed) toast.error(tr('pg.dataPages.sr.syncFailedStages', { n: failed }))
@@ -274,6 +277,7 @@ export default function SourceReview() {
       setRun(ended)
       toast.success(tr('pg.dataPages.sr.cancelled'))
       await load()
+      setSyncedAt(n => n + 1)
     } catch {
       toast.error(tr('pg.dataPages.sr.cancelFailed'))
     }
@@ -384,7 +388,7 @@ export default function SourceReview() {
       </header>
 
       {/* Guided setup phase 5c: plain first; the full review is below. */}
-      <SourceSummary sourceId={sourceId} />
+      <SourceSummary sourceId={sourceId} refreshKey={syncedAt} />
 
       <div className="dl-srv__cards">
         <div className="dl-srv__about">

@@ -2,7 +2,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import SourceReview from './SourceReview'
-import { dataSourcesApi, metadataApi, type ReviewEntity, type ReviewQueue, type SyncRun } from '../services/api'
+import { dataSourcesApi, metadataApi, setupApi, type ReviewEntity, type ReviewQueue, type SyncRun } from '../services/api'
 
 /**
  * Stage 7 — human confirmation.
@@ -266,6 +266,19 @@ describe('SourceReview', () => {
                   { timeout: 4000 })
     // Button returns to its resting state rather than spinning forever.
     await waitFor(() => expect(screen.getByText('Run sync')).toBeEnabled())
+  })
+
+  it('refetches the review and the plain summary when a sync finishes (B-29)', async () => {
+    const summary = vi.spyOn(setupApi, 'summary').mockResolvedValue({ status: 'syncing' } as never)
+    vi.spyOn(metadataApi, 'sync').mockResolvedValue({ sync_run_id: 9, status: 'running', stages: [] })
+    vi.spyOn(metadataApi, 'syncStatus').mockResolvedValue({ ...RUN, id: 9 })
+    renderPage()
+    await waitFor(() => screen.getByText('Run sync'))
+    await waitFor(() => expect(summary).toHaveBeenCalledTimes(1))
+    const reviews = vi.mocked(metadataApi.review).mock.calls.length
+    fireEvent.click(screen.getByText('Run sync'))
+    await waitFor(() => expect(summary).toHaveBeenCalledTimes(2), { timeout: 4000 })
+    expect(vi.mocked(metadataApi.review).mock.calls.length).toBeGreaterThan(reviews)
   })
 
   it('reports a partial run as a failure with the stage count', async () => {
