@@ -43,6 +43,9 @@ vi.mock('../services/api', () => ({
   translationsApi: { list: vi.fn().mockResolvedValue({}), save: vi.fn() },
   relationshipsApi: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), delete: vi.fn() },
   widgetDataApi: { query: vi.fn().mockResolvedValue({ rows: [], sampled: false }) },
+  // The page copilot starts the dataset's shared insight scan 2.5 s after it
+  // mounts; many tests here run longer than that, so the export must exist.
+  insightsApi: { runShared: vi.fn().mockResolvedValue({ narrative: '', findings: [] }) },
   themesApi: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), delete: vi.fn() },
   parametersApi: { list: vi.fn().mockResolvedValue([]), save: vi.fn() },
   pageTemplatesApi: { builtins: vi.fn().mockResolvedValue([]), list: vi.fn().mockResolvedValue([]), saveFrom: vi.fn(), addFrom: vi.fn(), delete: vi.fn() },

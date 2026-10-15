@@ -256,6 +256,28 @@ describe('CopilotChat', () => {
     expect(screen.queryByText('Ask AI has a new insight')).not.toBeInTheDocument()
   })
 
+  it('leaving before the insight scan starts never runs it (timer cleared on unmount)', async () => {
+    vi.useFakeTimers()
+    try {
+      const run = vi.spyOn(insightsApi, 'runShared').mockResolvedValue({ narrative: '', findings: [] } as never)
+      const { unmount } = render(<CopilotChat reportId={9} pageId={4} onApplied={vi.fn()} datasetId={32} />)
+      unmount()
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(run).not.toHaveBeenCalled()
+      expect(vi.getTimerCount()).toBe(0)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('an insight scan that cannot even start is ignored, not thrown from the timer', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.spyOn(insightsApi, 'runShared').mockImplementation(() => { throw new Error('no scan here') })
+      render(<CopilotChat reportId={9} pageId={4} onApplied={vi.fn()} datasetId={32} />)
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(screen.queryByText('Ask AI has a new insight')).not.toBeInTheDocument()
+    } finally { vi.useRealTimers() }
+  })
+
   it('no insight, no dot', async () => {
     vi.spyOn(insightsApi, 'runShared').mockResolvedValue({ narrative: '', findings: [] } as never)
     mount()
