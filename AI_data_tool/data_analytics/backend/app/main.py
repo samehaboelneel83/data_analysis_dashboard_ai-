@@ -892,6 +892,8 @@ app.include_router(automation_router.router, prefix="/api/v1")
 app.include_router(metadata.router,      prefix="/api/v1")
 from .routers import dataset_glossary  # noqa: E402
 app.include_router(dataset_glossary.router, prefix="/api/v1")
+from .routers import org_glossary  # noqa: E402
+app.include_router(org_glossary.router, prefix="/api/v1")
 app.include_router(metadata.stats_router, prefix="/api/v1")
 # Guided setup (docs/guided-setup/PLAN.md): one journey per person and connection.
 app.include_router(guided_setup.router, prefix="/api/v1")

@@ -16,9 +16,12 @@ import { useT } from '../i18n'
  *
  * B-21: a dataset is a scope too -- an uploaded file has no connection to hang
  * its terms on. `?dataset=<id>` opens one (the Columns tab links here), with
- * `&column=<name>` opening the add form linked to that column.
+ * `&column=<name>` opening the add form linked to that column. "All data
+ * (org-wide)" (first in the list) holds the terms that apply everywhere.
  */
-type Scope = { key: string; kind: 's' | 'd'; id: number; name: string; columns?: string[] }
+const ORG_WIDE = 'o'
+
+type Scope = { key: string; kind: 's' | 'd' | 'o'; id: number; name: string; columns?: string[] }
 
 export default function Glossary() {
   const t = useT()
@@ -51,7 +54,9 @@ export default function Glossary() {
                                         columns: (d.columns ?? []).map(c => c.name) })),
       ]
       setScopes(rows)
-      setKey(cur => (cur && rows.some(r => r.key === cur)) ? cur : (rows[0]?.key ?? null))
+      // The org-wide choice is offered once there is data to apply it to, and
+      // is opened when picked (or remembered) -- otherwise the first data scope.
+      setKey(cur => (cur && (cur === ORG_WIDE || rows.some(r => r.key === cur))) ? cur : (rows[0]?.key ?? null))
     })
     return () => { live = false }
   }, [])
@@ -67,7 +72,9 @@ export default function Glossary() {
     setKey(k)
     try { localStorage.setItem('datalytics:glossary-scope', k) } catch { /* a convenience */ }
   }
-  const current = scopes?.find(s => s.key === key) ?? null
+  const current: Scope | null = key === ORG_WIDE && scopes?.length
+    ? { key: ORG_WIDE, kind: 'o', id: 0, name: t('pg.dataPages.gl.orgWideScope') }
+    : scopes?.find(s => s.key === key) ?? null
   const sources = (scopes ?? []).filter(s => s.kind === 's')
   const datasets = (scopes ?? []).filter(s => s.kind === 'd')
   const selectStyle = { fontSize: 13, padding: '4px 8px', background: 'var(--surface2)', color: 'var(--text)',
@@ -88,6 +95,7 @@ export default function Glossary() {
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 16 }}>
             {t('glossary.scope')}
             <select aria-label={t('glossary.scope')} value={key ?? ''} onChange={e => pick(e.target.value)} style={selectStyle}>
+              <option value={ORG_WIDE}>{t('pg.dataPages.gl.orgWideScope')}</option>
               {sources.length > 0 && (
                 <optgroup label={t('pg.dataPages.gl.connectionsGroup')}>
                   {sources.map(s => <option key={s.key} value={s.key}>{s.name}</option>)}
@@ -102,7 +110,9 @@ export default function Glossary() {
           </label>
           {current && (
             <div className="card" style={{ padding: 16 }}>
-              {current.kind === 's'
+              {current.kind === 'o'
+                ? <GlossaryPanel key={current.key} orgWide canEdit={canEdit} />
+                : current.kind === 's'
                 ? <GlossaryPanel key={current.key} sourceId={current.id} canEdit={canEdit} />
                 : <GlossaryPanel key={current.key} datasetId={current.id} canEdit={canEdit}
                     columnNames={current.columns}

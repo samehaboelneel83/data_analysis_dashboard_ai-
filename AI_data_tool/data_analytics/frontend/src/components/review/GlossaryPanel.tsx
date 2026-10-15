@@ -23,7 +23,8 @@ import { useT } from '../../i18n'
  *
  * Terms created here are scoped to THIS connection -- that is what the endpoint
  * does. Org-wide terms (`data_source_id: null`) still appear in the list,
- * marked, because they apply here too; they are not created from this screen.
+ * marked, because they apply here too; they are written with `orgWide` (the
+ * Glossary page's "All data (org-wide)" choice), never from a connection.
  *
  * B-21: given `datasetId` instead, the panel is ONE dataset's glossary (an
  * uploaded file has no connection): the terms that apply to it, and terms
@@ -31,6 +32,9 @@ import { useT } from '../../i18n'
  */
 export interface GlossaryPanelProps {
   sourceId?: number
+  /** The ORG-WIDE terms instead (no connection, no dataset): they apply to
+   *  every connection and dataset (B-21). */
+  orgWide?: boolean
   /** One dataset's glossary instead of a connection's (B-21). */
   datasetId?: number
   /** The dataset's columns, offered as the term's column (dataset mode). */
@@ -50,7 +54,7 @@ const input: React.CSSProperties = {
   boxSizing: 'border-box', width: '100%',
 }
 
-export default function GlossaryPanel({ sourceId, datasetId, canEdit, objectNames, columnNames, initialColumn }: GlossaryPanelProps) {
+export default function GlossaryPanel({ sourceId, datasetId, orgWide, canEdit, objectNames, columnNames, initialColumn }: GlossaryPanelProps) {
   const tr = useT()
   const onDataset = datasetId != null
   const [terms, setTerms] = useState<GlossaryTerm[] | null>(null)
@@ -61,28 +65,31 @@ export default function GlossaryPanel({ sourceId, datasetId, canEdit, objectName
     term: '', definition: '', synonyms: '', maps_to_object: '', maps_to_column: onDataset ? (initialColumn ?? '') : '',
     rule: '', always: false,
   })
-  /** A term this screen may change: the connection's own here, or the dataset's own. */
-  const own = (t: GlossaryTerm) => onDataset ? t.dataset_id === datasetId : (t.data_source_id !== null && t.dataset_id == null)
+  /** A term this screen may change: the org-wide ones, the connection's own, or the dataset's own. */
+  const own = (t: GlossaryTerm) => orgWide ? (t.data_source_id === null && t.dataset_id == null)
+    : onDataset ? t.dataset_id === datasetId : (t.data_source_id !== null && t.dataset_id == null)
   const api = {
-    add: (body: Parameters<typeof metadataApi.addTerm>[1]) => onDataset
+    add: (body: Parameters<typeof metadataApi.addTerm>[1]) => orgWide ? metadataApi.addOrgTerm(body) : onDataset
       ? metadataApi.addDatasetTerm(datasetId!, { ...body, maps_to_object: undefined } as Parameters<typeof metadataApi.addDatasetTerm>[1])
       : metadataApi.addTerm(sourceId!, body),
-    update: (id: number, body: Parameters<typeof metadataApi.updateTerm>[2]) => onDataset
-      ? metadataApi.updateDatasetTerm(datasetId!, id, body) : metadataApi.updateTerm(sourceId!, id, body),
-    remove: (id: number) => onDataset ? metadataApi.deleteDatasetTerm(datasetId!, id) : metadataApi.deleteTerm(sourceId!, id),
+    update: (id: number, body: Parameters<typeof metadataApi.updateTerm>[2]) => orgWide ? metadataApi.updateOrgTerm(id, body)
+      : onDataset ? metadataApi.updateDatasetTerm(datasetId!, id, body) : metadataApi.updateTerm(sourceId!, id, body),
+    remove: (id: number) => orgWide ? metadataApi.deleteOrgTerm(id)
+      : onDataset ? metadataApi.deleteDatasetTerm(datasetId!, id) : metadataApi.deleteTerm(sourceId!, id),
   }
 
   const load = useCallback(async () => {
     setLoadError(null)
     try {
-      setTerms(onDataset ? await metadataApi.datasetGlossary(datasetId!) : await metadataApi.glossary(sourceId!))
+      setTerms(orgWide ? await metadataApi.orgGlossary()
+        : onDataset ? await metadataApi.datasetGlossary(datasetId!) : await metadataApi.glossary(sourceId!))
     } catch (e) {
       // A persistent banner, not a toast: a failed load leaves nothing else on
       // the panel, and a message that fades leaves the reader with a blank box
       // and no way to retry.
       setLoadError(e)
     }
-  }, [sourceId, datasetId, onDataset])
+  }, [sourceId, datasetId, onDataset, orgWide])
 
   useEffect(() => { void load() }, [load])
 
@@ -271,7 +278,7 @@ export default function GlossaryPanel({ sourceId, datasetId, canEdit, objectName
                       {tr('pg.dataPages.gl.datasetOnly')}
                     </span>
                   )}
-                  {t.data_source_id === null && t.dataset_id == null && (
+                  {t.data_source_id === null && t.dataset_id == null && !orgWide && (
                     <span style={{ marginInlineStart: 6, fontSize: 11, fontWeight: 400,
                       color: 'var(--muted)' }}>
                       {tr('pg.dataPages.gl.orgWide')}
