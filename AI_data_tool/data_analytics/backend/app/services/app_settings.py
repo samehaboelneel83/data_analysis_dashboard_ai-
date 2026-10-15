@@ -203,6 +203,8 @@ SPECS: list[Spec] = [
        "On: someone who can edit a dashboard may make a link that shows it to anyone who holds the link, as the "
        "maker sees it, until it expires. Off: no such link can be made, and none that exists opens."),
     _S("access_token_expire_hours", "security", "Sign-in lasts (hours)", "Applies to new sign-ins."),
+    _S("password_min_length", "security", "Shortest password (characters)",
+       "For passwords an admin sets for a user or a new organization's admin."),
     # -- Rate limits ----------------------------------------------------------
     _S("rate_limit_enabled", "rate_limits", "Rate limiting on"),
     _S("rate_limit_window_seconds", "rate_limits", "Window (seconds)"),
