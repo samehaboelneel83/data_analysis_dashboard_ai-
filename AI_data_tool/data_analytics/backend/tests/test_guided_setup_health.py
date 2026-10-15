@@ -69,6 +69,37 @@ class TestPlainLines:
         assert rules[0]["rows"] == 5
 
 
+class TestTheTwoMissedChecks:
+    """B-34: numbers kept as text in the source, and an end date before the start."""
+
+    def test_end_before_start_is_one_line_with_a_fix(self):
+        n = 200
+        created = pd.date_range("2025-01-01", periods=n, freq="D")
+        delivered = created + pd.Timedelta(days=3)
+        delivered = delivered.where(pd.RangeIndex(n) >= 5, created - pd.Timedelta(days=2))
+        df = pd.DataFrame({"created_at": created, "delivered_at": delivered, "fee": range(n)})
+        items = [i for i in health.generic_rules(df, "en") if i["kind"] == "dateorder"]
+        assert len(items) == 1
+        item = items[0]
+        assert item["rows"] == 5 and item["column"] == "delivered_at"
+        assert "“delivered_at” before “created_at”" in item["what"]
+        assert item["action"]["kind"] == "exclude" and item["action"]["rule"] == "`delivered_at` >= `created_at`"
+
+    def test_dates_in_order_say_nothing(self):
+        created = pd.date_range("2025-01-01", periods=50, freq="D")
+        df = pd.DataFrame({"created_at": created, "delivered_at": created + pd.Timedelta(days=1)})
+        assert not [i for i in health.generic_rules(df, "en") if i["kind"] == "dateorder"]
+
+    def test_a_text_column_in_the_source_read_as_numbers_is_reported(self):
+        df = pd.DataFrame({"declared_value": [10.5, 20.0, 31.25, 7.0] * 10, "city": ["a", "b", "c", "d"] * 10})
+        items = health.column_items(quality_report(df), df, "en", stored_types={"declared_value": "text", "city": "text"})
+        textnum = [i for i in items if i["kind"] == "textnum"]
+        assert [i["column"] for i in textnum] == ["declared_value"]
+        assert textnum[0]["action"]["kind"] == "retype"
+        # Without the stored type nothing changes.
+        assert not [i for i in health.column_items(quality_report(df), df, "en") if i["kind"] == "textnum"]
+
+
 class TestModelRules:
     def test_implies_and_bare_names_are_normalised(self):
         expr = health.normalise_rule("car_age >= 5 implies mileage >= 10000", ["car_age", "mileage"])

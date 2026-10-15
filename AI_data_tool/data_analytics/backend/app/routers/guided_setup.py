@@ -1408,7 +1408,12 @@ async def _check_one(db: AsyncSession, user: User, ds: Dataset, f: SetupFlow, la
     from ..services import column_classes
     classes = await column_classes.ensure(db, ds, df)
     await access.release(db)
-    items = health.column_items(report, df, lang, classes)
+    # B-34: the dataset's own column types, so a column the source keeps as
+    # text but the loader read as numbers is still reported.
+    from ..models.models import DatasetColumn
+    stored = dict((await db.execute(select(DatasetColumn.name, DatasetColumn.dtype)
+                                    .where(DatasetColumn.dataset_id == ds.id))).all())
+    items = health.column_items(report, df, lang, classes, stored_types=stored)
     items += health.generic_rules(df, lang, skip={i["column"] for i in items if i["kind"] == "placeholder"},
                                   column_meta=classes)
     if on_plain is not None:

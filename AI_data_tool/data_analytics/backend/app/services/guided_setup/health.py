@@ -96,6 +96,9 @@ T = {
         "negative.what": "{n} rows have a negative “{col}”.",
         "negative.why": "An amount like this cannot be below zero, so these are most likely entry mistakes.",
         "negative.todo": "Leave those rows out.",
+        "dateorder.what": "{n} rows have “{end}” before “{start}”.",
+        "dateorder.why": "A record cannot end before it starts, so one of the two dates is wrong on these rows.",
+        "dateorder.todo": "Leave those rows out, or correct the dates at the source.",
         "future.what": "{n} rows of “{col}” are dates in the future.",
         "future.why": "Records cannot be dated later than today, so the dates are probably wrong.",
         "future.todo": "Check where these dates come from before charting by date.",
@@ -152,6 +155,9 @@ T = {
         "negative.what": "{n} صفًا بها «{col}» سالب.",
         "negative.why": "قيمة كهذه لا تكون أقل من الصفر، فهي على الأرجح أخطاء إدخال.",
         "negative.todo": "استبعد هذه الصفوف.",
+        "dateorder.what": "{n} صفًا فيها «{end}» قبل «{start}».",
+        "dateorder.why": "لا يمكن أن ينتهي سجل قبل أن يبدأ، فأحد التاريخين خاطئ في هذه الصفوف.",
+        "dateorder.todo": "استبعد هذه الصفوف، أو صحّح التواريخ في المصدر.",
         "future.what": "{n} صفًا من «{col}» تواريخ في المستقبل.",
         "future.why": "لا يمكن أن تكون السجلات بتاريخ بعد اليوم، فالتواريخ غالبًا خاطئة.",
         "future.todo": "تحقق من مصدر هذه التواريخ قبل الرسم حسب التاريخ.",
@@ -284,8 +290,13 @@ def has_row_key(df: pd.DataFrame) -> bool:
     return False
 
 
-def column_items(report: dict, df: pd.DataFrame, lang: str, column_meta: dict | None = None) -> list[dict]:
-    """Plain lines from the quality report, worst first."""
+def column_items(report: dict, df: pd.DataFrame, lang: str, column_meta: dict | None = None,
+                 stored_types: dict[str, str] | None = None) -> list[dict]:
+    """Plain lines from the quality report, worst first.
+
+    `stored_types`: the dataset's own column types (DatasetColumn.dtype). B-34:
+    a column the source keeps as TEXT is re-read as numbers by the loader, so
+    the frame alone never shows "numbers stored as text"; the stored type does."""
     rows = int(report.get("rows") or len(df))
     out: list[dict] = []
     if report.get("duplicate_rows"):
@@ -359,7 +370,10 @@ def column_items(report: dict, df: pd.DataFrame, lang: str, column_meta: dict | 
                                          n=f"{int(n_out):,}"),
                                  why=_t(lang, "outliers.why", median=_num(s.median())),
                                  todo=_t(lang, "outliers.todo"), rows=int(n_out)))
-        if "numbers stored as text" in issues:
+        stored = str((stored_types or {}).get(str(col)) or "").lower()
+        text_in_source = stored in ("text", "string") and pd.api.types.is_numeric_dtype(df[col]) \
+            and df[col].dtype != bool
+        if "numbers stored as text" in issues or text_in_source:
             out.append(_item(len(out), "warning", "textnum", lang, column=col,
                              what=_t(lang, "textnum.what", col=col), why=_t(lang, "textnum.why"),
                              todo=_t(lang, "textnum.todo"),
@@ -443,6 +457,10 @@ def generic_rules(df: pd.DataFrame, lang: str, skip: set[str] | None = None,
                                  action={"kind": "exclude", "expression": _keep_rows(rule, [col]), "rule": rule,
                                          "label": _t(lang, "fix.exclude")}))
     try:
+        out += date_order_items(df, lang, skip)
+    except Exception:                                               # noqa: BLE001 -- a finding, never a gate
+        pass
+    try:
         out += subtotal_items(df, lang)
     except Exception:                                               # noqa: BLE001 -- a finding, never a gate
         pass
@@ -450,6 +468,33 @@ def generic_rules(df: pd.DataFrame, lang: str, skip: set[str] | None = None,
         out += odd_items(df, lang)
     except Exception:                                               # noqa: BLE001
         pass
+    return out
+
+
+def date_order_items(df: pd.DataFrame, lang: str, skip: set[str] | None = None) -> list[dict]:
+    """B-34: rows where a later event date falls before the date the record
+    starts on (delivered before created). The start is the date column
+    insights.order_event_dates puts first; each later one is compared to it."""
+    from ..insights import order_event_dates
+    dates = [c for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c]) and not (skip and c in skip)]
+    if len(dates) < 2:
+        return []
+    ordered = order_event_dates([str(c) for c in dates], df)
+    start = ordered[0]
+    s0 = pd.to_datetime(df[start], errors="coerce")
+    out: list[dict] = []
+    for end in ordered[1:]:
+        s1 = pd.to_datetime(df[end], errors="coerce")
+        both = s0.notna() & s1.notna()
+        n = int((s1[both] < s0[both]).sum())
+        if n < 1 or n / max(1, int(both.sum())) > RULE_MAX_SHARE:
+            continue
+        rule = f"{_q(end)} >= {_q(start)}"
+        out.append(_item(len(out), "warning", "dateorder", lang, column=end,
+                         what=_t(lang, "dateorder.what", n=f"{n:,}", end=end, start=start),
+                         why=_t(lang, "dateorder.why"), todo=_t(lang, "dateorder.todo"), rows=n,
+                         action={"kind": "exclude", "expression": _keep_rows(rule, [start, end]), "rule": rule,
+                                 "label": _t(lang, "fix.exclude")}))
     return out
 
 
