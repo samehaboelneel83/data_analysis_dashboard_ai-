@@ -9,13 +9,13 @@ every capability whatever is stored.
 databases stamped at head without running revisions.
 
 Revision ID: 0072_role_capabilities
-Revises: 0070_roles_org_name_unique
+Revises: 0071_glossary_dataset_scope
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = "0072_role_capabilities"
-down_revision = "0070_roles_org_name_unique"
+down_revision = "0071_glossary_dataset_scope"
 branch_labels = None
 depends_on = None
 
