@@ -2976,6 +2976,33 @@ def shape_geo_lines(df: pd.DataFrame, config: dict) -> dict:
     return {"type": "geo_lines", "rows": rows, "dropped": dropped, "total": len(df)}
 
 
+def _merge_split_clusters(grouped: pd.DataFrame, cell: float) -> pd.DataFrame:
+    """C-29: one place, one cluster. A grid splits a city whose points straddle
+    a cell edge into two cells whose centres both sit on the city (two
+    concentric bubbles, "34" over "37"). Clusters whose centres lie within a
+    quarter of a cell of each other are merged, largest first: counts and
+    values add, the position is the count-weighted centre. Real places in
+    neighbouring cells are further apart than that and stay separate."""
+    if len(grouped) < 2:
+        return grouped
+    near = cell / 4
+    recs = grouped.sort_values("count", ascending=False).to_dict("records")
+    out: list[dict] = []
+    for r in recs:
+        for m in out:
+            if abs(m["lat"] - r["lat"]) <= near and abs(m["lon"] - r["lon"]) <= near:
+                n = m["count"] + r["count"]
+                m["lat"] = (m["lat"] * m["count"] + r["lat"] * r["count"]) / n
+                m["lon"] = (m["lon"] * m["count"] + r["lon"] * r["count"]) / n
+                if "value" in m:
+                    m["value"] = (0 if pd.isna(m["value"]) else m["value"]) + (0 if pd.isna(r["value"]) else r["value"])
+                m["count"] = n
+                break
+        else:
+            out.append(dict(r))
+    return pd.DataFrame(out, columns=grouped.columns)
+
+
 def shape_geo_clusters(df: pd.DataFrame, config: dict) -> dict:
     """Grid clustering for dense point data: points snap to a lat/lon grid and
     each occupied cell becomes one marker carrying its point count (and summed
@@ -3015,6 +3042,7 @@ def shape_geo_clusters(df: pd.DataFrame, config: dict) -> dict:
     if "value" in sub.columns:
         agg["value"] = ("value", "sum")
     grouped = sub.groupby(["cell_lat", "cell_lon"], dropna=False).agg(**agg).reset_index(drop=True)
+    grouped = _merge_split_clusters(grouped, cell)
     grouped = grouped.sort_values("count", ascending=False).head(int(config.get("limit") or 500))
     rows = [{k: _safe(v) for k, v in row.items()} for row in grouped.to_dict("records")]
     return {"type": "geo_clusters", "rows": rows, "dropped": dropped,
