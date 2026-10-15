@@ -78,6 +78,8 @@ def _gates() -> tuple[asyncio.Semaphore, asyncio.Semaphore]:
 #: What `last_error` says when a call was refused by the budget; callers
 #: already treat any None as "no model this time" and fall back.
 BUDGET_SPENT = "the organization's AI budget is used up"
+#: B-11: every endpoint was found down moments ago; the call was not attempted.
+MODEL_UNREACHABLE = "model unreachable"
 
 
 @dataclass
@@ -348,6 +350,16 @@ class LLMClient:
             out.append((ep.id or None, ep.base_url.rstrip("/"), ep.model, ep.api_key, max_tokens))
         return out
 
+    def available(self) -> bool:
+        """B-11: False when the client is off, or every endpoint it would try
+        was found down moments ago (llm_endpoints.recently_down) -- so a caller
+        can say "AI unavailable" at once instead of waiting on timeouts."""
+        if not self.enabled:
+            return False
+        from . import llm_endpoints
+        ids = [self.endpoint_id] + [getattr(f, "id", None) for f in self.fallbacks]
+        return not all(llm_endpoints.recently_down(i) for i in ids)
+
     async def _post(self, payload: dict[str, Any], weight: str = "normal") -> str | None:
         meter = _meter.get()
         if meter is not None and meter.spent:
@@ -359,6 +371,14 @@ class LLMClient:
         from . import llm_endpoints
 
         targets = self._targets(payload, weight)
+        # B-11: an endpoint found down moments ago is skipped rather than
+        # waited on for the whole timeout; if that is every one, say so now.
+        live = [t for t in targets if not llm_endpoints.recently_down(t[0])]
+        if targets and not live:
+            self.last_error = MODEL_UNREACHABLE
+            logger.info("LLM call skipped: every endpoint was found down moments ago")
+            return None
+        targets = live
         data = None
         errors: list[str] = []
         for n, (eid, base, model, key, max_tokens) in enumerate(targets):
@@ -368,8 +388,11 @@ class LLMClient:
                 headers["Authorization"] = f"Bearer {key}"
             llm_endpoints.begin_call(eid)
             try:
+                # A short connect timeout: an unreachable host is known in
+                # seconds, while a slow answer still gets the full budget.
                 async with httpx.AsyncClient(
-                    timeout=self.timeout, transport=self._transport
+                    timeout=httpx.Timeout(self.timeout, connect=min(5.0, float(self.timeout))),
+                    transport=self._transport,
                 ) as http:
                     response = await http.post(f"{base}/chat/completions", json=body, headers=headers)
                     if response.status_code >= 400:

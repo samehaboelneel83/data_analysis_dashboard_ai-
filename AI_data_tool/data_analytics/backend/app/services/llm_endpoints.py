@@ -241,6 +241,22 @@ def is_up(endpoint_id: str) -> bool | None:
     return None if h is None else bool(h["ok"])
 
 
+def recently_down(endpoint_id: str | None, within_s: float = PROBE_SECONDS * 2) -> bool:
+    """B-11: down at the last probe or call, and that was recent enough to
+    trust -- so a call skips it instead of waiting out the full timeout. A red
+    light older than `within_s` is not trusted (the endpoint may be back)."""
+    if not endpoint_id:
+        return False
+    h = _health.get(endpoint_id)
+    if h is None or h.get("ok"):
+        return False
+    try:
+        at = datetime.fromisoformat(str(h.get("checked_at")))
+    except (TypeError, ValueError):
+        return False
+    return (datetime.now(timezone.utc) - at).total_seconds() < within_s
+
+
 def mark(endpoint_id: str | None, ok: bool, error: str | None = None,
          latency_ms: int | None = None) -> None:
     """Record what a probe or a real call just learned about an endpoint."""

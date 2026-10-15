@@ -195,3 +195,53 @@ class TestFactory:
         client = llm_module.get_client()
         assert client.model
         assert client.base_url
+
+
+_ANY = {"type": "object"}
+
+
+class TestFailFastWhenTheModelIsKnownDown:
+    """B-11: an endpoint the prober (or the last call) just found down is not
+    tried again with the full timeout; the call answers None at once."""
+
+    @pytest.fixture(autouse=True)
+    def _clean_health(self, monkeypatch):
+        from app.services import llm_endpoints
+        monkeypatch.setattr(llm_endpoints, "_health", {})
+
+    async def test_a_freshly_down_endpoint_is_not_called(self):
+        from app.services import llm_endpoints
+        seen = []
+
+        def handler(request):
+            seen.append(request)
+            return _reply('{"a": 1}')
+        llm_endpoints.mark("gpu", False, "ConnectError")
+        client = _client(handler, endpoint_id="gpu")
+        assert client.available() is False
+        assert await client.complete_json([{"role": "user", "content": "x"}], _ANY) is None
+        assert seen == []
+        assert client.last_error == llm_module.MODEL_UNREACHABLE
+
+    async def test_an_up_or_unknown_endpoint_is_still_called(self):
+        from app.services import llm_endpoints
+        seen = []
+
+        def handler(request):
+            seen.append(request)
+            return _reply('{"a": 1}')
+        client = _client(handler, endpoint_id="gpu")
+        assert client.available() is True
+        assert await client.complete_json([{"role": "user", "content": "x"}], _ANY) == {"a": 1}
+        llm_endpoints.mark("gpu", True)
+        assert await client.complete_json([{"role": "user", "content": "x"}], _ANY) == {"a": 1}
+        assert len(seen) == 2
+
+    async def test_a_stale_red_light_does_not_stop_a_call(self, monkeypatch):
+        from datetime import datetime, timedelta, timezone
+        from app.services import llm_endpoints
+        llm_endpoints.mark("gpu", False, "old")
+        llm_endpoints._health["gpu"]["checked_at"] = (
+            datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+        client = _client(lambda r: _reply('{"a": 1}'), endpoint_id="gpu")
+        assert await client.complete_json([{"role": "user", "content": "x"}], _ANY) == {"a": 1}

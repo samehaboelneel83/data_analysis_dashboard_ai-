@@ -905,6 +905,37 @@ class TestRunStageRollsBackOnFailure:
         assert rows == []
 
 
+class TestAiUnavailableIsSaid:
+    """B-11: with the model down, describe/entities are recorded "skipped --
+    AI unavailable", not "ok" with nothing produced, and nothing waits on it."""
+
+    async def test_a_model_known_down_is_not_called(self, db_session, source, cache):
+        llm = FakeLlm()
+        llm.available = lambda: False
+        run = await _run(db_session, source, cache, llm=llm, allow=True)
+        stages = {s["name"]: s for s in run.stages}
+        assert stages["describe"]["status"] == "skipped"
+        assert stages["describe"]["detail"]["reason"] == "AI unavailable"
+        assert "semantic_types" in stages["describe"]["detail"]
+        assert stages["entities"]["status"] == "skipped"
+        assert llm.calls == []
+        assert run.status == "ok"
+
+    async def test_every_call_failing_is_reported_as_skipped(self, db_session, source, cache):
+        class Down(FakeLlm):
+            tokens_out = 0
+
+            async def complete_json(self, messages, schema, **kw):
+                self.calls.append(messages)
+                self.last_error = "ConnectError: unreachable"
+                return None
+        run = await _run(db_session, source, cache, llm=Down(), allow=True)
+        stages = {s["name"]: s for s in run.stages}
+        assert stages["describe"]["status"] == "skipped"
+        assert stages["describe"]["detail"]["reason"].startswith("AI unavailable: ConnectError")
+        assert stages["entities"]["status"] == "skipped"
+
+
 class TestStuckSyncIsBounded:
     """B-04: a stage waiting on an unreachable model, or a whole run that
     stalls, must end on its own -- recorded, not "running" forever."""

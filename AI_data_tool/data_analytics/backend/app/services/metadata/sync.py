@@ -98,6 +98,17 @@ class SyncContext:
         self.stages: list[StageResult] = []
 
 
+class StageSkipped(Exception):
+    """Raised by a stage that could not do its work for a known reason (B-11:
+    the model is unavailable). Recorded as "skipped" with the reason -- not
+    "ok" with nothing produced -- and the stage's other writes are kept."""
+
+    def __init__(self, reason: str, detail: dict | None = None):
+        super().__init__(reason)
+        self.reason = reason
+        self.detail = detail or {}
+
+
 async def _run_stage(context: SyncContext, name: str, fn,
                      timeout_s: float | None = None) -> StageResult:
     """Execute one stage, recording its outcome either way.
@@ -120,6 +131,9 @@ async def _run_stage(context: SyncContext, name: str, fn,
             async with budget:
                 detail = await fn(context) or {}
         result = StageResult(name, "ok", int((time.monotonic() - started) * 1000), detail)
+    except StageSkipped as skip:
+        result = StageResult(name, "skipped", int((time.monotonic() - started) * 1000),
+                             detail={**skip.detail, "reason": skip.reason})
     except TimeoutError as exc:
         if budget is None or not budget.expired():
             result = await _stage_failed(context, name, started, exc)

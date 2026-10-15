@@ -37,6 +37,15 @@ def _own_duckdb_metadata_cache(tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def _fresh_llm_endpoint_health(monkeypatch):
+    """B-11: a call skips an endpoint found down moments ago. Health is
+    process-wide state; one test's failed call must not make the next test's
+    model look unreachable."""
+    from app.services import llm_endpoints
+    monkeypatch.setattr(llm_endpoints, "_health", {})
+
+
+@pytest.fixture(autouse=True)
 def _no_embeddings_backend_by_default(monkeypatch):
     """Task M2: compose enables Backend B by default (`EMBEDDING_BASE_URL`
     etc. on the `backend` service), so `docker compose exec backend pytest`
