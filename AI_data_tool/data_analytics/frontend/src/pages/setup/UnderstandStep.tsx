@@ -247,7 +247,8 @@ function Overview({ data, sourceId, slow, onChanged, onAskAgain, onCheckAgain }:
   const totals = data.totals!
   const ai = data.ai!
   const when = period(t, language, totals.date_from, totals.date_to, totals.dates_exact)
-  const fallback = t('setup.u.factsSentence', {
+  // B-30: a database that keeps no row counts (SQLite) is not said to hold "0 rows".
+  const fallback = t(totals.rows_known === false ? 'setup.u.factsSentenceNoRows' : 'setup.u.factsSentence', {
     name: data.source.name, tables: num(totals.tables), rows: num(totals.rows),
   })
 

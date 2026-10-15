@@ -27,7 +27,8 @@ export default function SourceSummary({ sourceId, refreshKey = 0 }: {
   if (!data || data.status !== 'ready') return null
   const totals = data.totals!
   const main = (data.tables ?? []).filter(x => x.group === 'main').slice(0, 3)
-  const lead = data.overview ?? t('setup.u.factsSentence', {
+  // B-30: a database that keeps no row counts (SQLite) is not said to hold "0 rows".
+  const lead = data.overview ?? t(totals.rows_known === false ? 'setup.u.factsSentenceNoRows' : 'setup.u.factsSentence', {
     name: data.source.name, tables: localDigits(totals.tables.toLocaleString()), rows: localDigits(totals.rows.toLocaleString()) })
   return (
     <div style={{ marginBottom: 16 }}>
