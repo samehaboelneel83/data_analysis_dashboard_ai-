@@ -148,6 +148,18 @@ describe('DatasetDetail insights engine', () => {
     expect(insightsApi.run).not.toHaveBeenCalled()
   })
 
+  it('marks a finding whose test did not hold as not significant (AD-07)', async () => {
+    const { insightsApi } = await import('../services/api')
+    vi.mocked(datasetsApi.get).mockResolvedValue(importDataset())
+    vi.mocked(analysisApi.get).mockResolvedValue(null)
+    vi.mocked(insightsApi.runShared).mockResolvedValue({ narrative: 'n', findings: [
+      { kind: 'pattern', score: 0.3, title: 'Sao Paulo has the highest shipments per row', detail: 'd',
+        columns: ['category', 'revenue'], significant: false, p_value: 0.2216 }] } as never)
+    renderDetail(29, 'analysis#insights')
+    const card = await screen.findByTestId('insight-pattern')
+    expect(card).toHaveTextContent(/not significant \(p = 0\.22\)/i)
+  })
+
   it('offers no "Pin finding": pins were shown nowhere (AD-05)', async () => {
     const { insightsApi } = await import('../services/api')
     vi.mocked(datasetsApi.get).mockResolvedValue(importDataset())

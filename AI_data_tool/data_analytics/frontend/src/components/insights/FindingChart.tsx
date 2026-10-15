@@ -7,6 +7,9 @@ interface Finding {
   kind: string
   title: string
   columns: string[]
+  /** The finding's numbers as data (services/insights.py). `aggregation` /
+   *  `per_row` say how its chart must summarise -- read before the title. */
+  figures?: { aggregation?: string; per_row?: boolean } | null
 }
 
 /**
@@ -44,7 +47,11 @@ export default function FindingChart({ datasetId, finding, columnTypes }: {
       // salary" was drawn as sum(salary) by dept -- the department with the
       // most people, not the best-paid one (Chrome re-test). A salary, price
       // or rate is averaged by the same rule the insight engine uses.
-      const agg = /\baverage\b|\bmean\b/i.test(finding.title) ? 'avg'
+      // AD-07: a per-row finding ("the highest shipments per row") is about
+      // averages though its title no longer says "average"; the server says so.
+      const stated = finding.figures?.aggregation ?? (finding.figures?.per_row ? 'avg' : undefined)
+      const agg = stated === 'avg' || stated === 'sum' ? stated
+        : /\baverage\b|\bmean\b/i.test(finding.title) ? 'avg'
         : defaultSummary(nums[0]) === 'avg' ? 'avg' : 'sum'
       config = { dimension: cats[0], measure: nums[0], aggregation: agg }
       widgetType = 'bar'
@@ -64,7 +71,7 @@ export default function FindingChart({ datasetId, finding, columnTypes }: {
       .catch(() => { /* a chart that failed to load is still a finding worth reading */ })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [datasetId, finding.kind, finding.title, finding.columns.join(',')])
+  }, [datasetId, finding.kind, finding.title, finding.columns.join(','), finding.figures?.aggregation, finding.figures?.per_row])
 
   if (!rows) return null
   return <MiniBarChart rows={rows} ordered={isHistogram} caption={caption} />

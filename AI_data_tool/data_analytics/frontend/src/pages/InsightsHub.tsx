@@ -88,7 +88,7 @@ export default function InsightsHub() {
     /** The dataset this result is about (AD-04): a late answer for another one is never shown. */
     forId: number
     narrative: string
-    findings: { kind: string; title: string; detail: string; score: number; columns: string[] }[]
+    findings: { kind: string; title: string; detail: string; score: number; columns: string[]; significant?: boolean | null }[]
   }
   const [scan, setScan] = useState<ScanResult | null>(null)
   const [scanLoading, setScanLoading] = useState(false)
@@ -191,7 +191,8 @@ export default function InsightsHub() {
             // whenever the scan returned anything, so "View full scan →"
             // survives even when nothing clears the bar -- otherwise a quiet
             // dataset would lose its only route into the full results.
-            const strong = scan.findings.filter(f => (f.score ?? 0) >= MIN_PREVIEW_SCORE)
+            // AD-07: nor one whose test did not hold -- the preview is a claim.
+            const strong = scan.findings.filter(f => (f.score ?? 0) >= MIN_PREVIEW_SCORE && f.significant !== false)
             return (
             <div style={{ marginBottom: 16, padding: 14, background: 'var(--surface)',
               border: '1px solid var(--border)', borderRadius: 'var(--radius, 8px)' }}>

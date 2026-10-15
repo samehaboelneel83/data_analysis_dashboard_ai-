@@ -2475,6 +2475,7 @@ export const ar: Record<MessageKey, string> = {
   'ins.kind.trend': 'اتجاه',
   'ins.kind.standout': 'بارز',
   'ins.kind.laggard': 'متأخر',
+  'ins.kind.pattern': 'نمط',
   'ins.kind.correlation': 'ارتباط',
   'ins.kind.outlier': 'قيمة شاذة',
   'ins.kind.rate': 'نسبة',

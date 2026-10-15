@@ -2475,6 +2475,7 @@ export const en = {
   'ins.kind.trend': 'trend',
   'ins.kind.standout': 'standout',
   'ins.kind.laggard': 'laggard',
+  'ins.kind.pattern': 'pattern',
   'ins.kind.correlation': 'correlation',
   'ins.kind.outlier': 'outlier',
   'ins.kind.rate': 'rate',

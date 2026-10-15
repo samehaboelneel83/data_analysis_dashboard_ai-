@@ -604,7 +604,9 @@ export default function DatasetDetail() {
   const colTypes: Record<string, string> = Object.fromEntries((ds?.columns ?? []).map(c => [c.name, c.dtype]))
 
   // hooks live above the loading return -- a hook below it renders conditionally
-  const [insights, setInsights] = useState<{ findings: { kind: string; score: number; title: string; detail: string; columns: string[]; novelty?: 'new' | 'changed' | 'unchanged' }[]; narrative: string } | null>(null)
+  const [insights, setInsights] = useState<{ findings: { kind: string; score: number; title: string; detail: string; columns: string[]; novelty?: 'new' | 'changed' | 'unchanged'
+    significant?: boolean | null; p_value?: number | null; p_adjusted?: number | null
+    figures?: { aggregation?: string; per_row?: boolean } | null }[]; narrative: string } | null>(null)
   const [insightsBusy, setInsightsBusy] = useState(false)
   const generateInsights = () => {
     if (!ds) return
@@ -1320,6 +1322,13 @@ export default function DatasetDetail() {
                                   <span style={{ background: 'var(--accent)', color: 'var(--surface)',
                                     borderRadius: 3, padding: '0 4px', fontSize: 8, fontWeight: 700 }}>
                                     {f.novelty === 'new' ? tr('i2d.dd.new') : tr('i2d.dd.changed')}
+                                  </span>
+                                )}
+                                {f.significant === false && (f.p_adjusted ?? f.p_value) != null && (
+                                  // AD-07: the test did not hold -- say so where the finding is read.
+                                  <span data-testid="insight-not-significant" style={{ border: '1px solid var(--border)', color: 'var(--muted)',
+                                    borderRadius: 3, padding: '0 4px', fontSize: 9.5 }}>
+                                    {tr('i2d.dd.notSignificant', { p: Number(f.p_adjusted ?? f.p_value).toFixed(2) })}
                                   </span>
                                 )}
                                 <span style={{ fontSize: 10.5, color: 'var(--muted)', marginInlineStart: 'auto' }}>{Math.round(f.score * 100)}</span>
