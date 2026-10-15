@@ -668,9 +668,9 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
         {card && <p className="dl-sr-only" role="status" aria-live="polite" data-testid="ask-live">{announce}</p>}
       </div>
       <div className="dl-chat__composer" onFocus={() => setComposerFocused(true)} onBlur={() => setComposerFocused(false)}>
-        {offline && <p role="status" className="dl-chat__note dl-chat__note--error dl-chat__offline" data-testid="ai-offline">{t('off.title')}</p>}
+        {offline && <p role="status" className="dl-chat__note dl-chat__note--error dl-chat__offline" data-testid="ai-offline">{t(ai.off ? 'off.titleMine' : 'off.title')}</p>}
         <Composer value={input} onChange={v => { setInput(v); onActivity?.('key') }} onSend={() => void send()} busy={busy}
-          locked={offline} lockedHint={offline ? t('off.composer') : undefined}
+          locked={offline} lockedHint={offline ? t(ai.off ? 'off.composerMine' : 'off.composer') : undefined}
           page={card ? { name: card.scopeName } : undefined} />
         {card && <p className="dl-ask__disc">{t('ask2.disclaimer')}</p>}
       </div>

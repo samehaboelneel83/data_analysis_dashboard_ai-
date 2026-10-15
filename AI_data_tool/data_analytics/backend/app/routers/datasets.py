@@ -2435,11 +2435,14 @@ async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
         from ..services import jobs as job_service
         from ..services.suggest_jobs import PANEL_JOB_KIND
         from ..services import ai_context
+        from ..services import llm_endpoints as _llm_endpoints
+        job_off = _llm_endpoints.is_off()           # F-11: "Off -- no AI" travels with the job
         goal = (await ai_context.for_dataset(db, current_user, ds, req.goal)
-                if (req.goal or "").strip() or req.use_profile else "")
+                if not job_off and ((req.goal or "").strip() or req.use_profile) else "")
         job, _ = await job_service.enqueue(
             db, user=current_user, kind=PANEL_JOB_KIND,
-            inputs={"dataset_id": dataset_id, "goal": goal, "size": req.size, "fresh": req.fresh},
+            inputs={"dataset_id": dataset_id, "goal": goal, "size": req.size, "fresh": req.fresh,
+                    **({"ai_off": True} if job_off else {})},
             subject=f"Analyst panel: {ds.name}", max_attempts=2)
         return {"job_id": job.id, "state": job.state, "source": "panel"}
 
@@ -2455,6 +2458,11 @@ async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
     from ..services import ai_context
     goal = (await ai_context.for_dataset(db, current_user, ds, req.goal)
             if (req.goal or "").strip() or req.use_profile else "")
+    # F-11: "Off -- no AI" in the top bar: the statistics engine, said so.
+    from ..services import llm_endpoints as _llm_endpoints
+    ai_off = _llm_endpoints.is_off()
+    if ai_off:
+        goal = ""
     if req.mode == "panel":
         return await sug.panel(inputs, goal, req.size, fresh=req.fresh)
     fields: dict = {"facts": []}
@@ -2518,6 +2526,7 @@ async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
         # five-dataset review 2026-10-02). Same gate, same selection, no model.
         out = await sug.panel(inputs, None, 24, client=None)
         return {**out, "source": "insights", "question": None,
+                **({"reason": "ai_off"} if ai_off else {}),
                 "proposals": [{**p, "source": "insights"} for p in out["proposals"]]}
 
     # Each widget states what it actually drew. The proposal's own `why` (a

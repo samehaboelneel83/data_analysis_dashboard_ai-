@@ -75,6 +75,9 @@ logger = logging.getLogger(__name__)
 
 ROW_KEY = "llm_endpoints"
 AUTO = "auto"
+#: F-11: the person's "Off -- no AI" in the top bar. Not an endpoint: no model
+#: is asked for this request, and every AI feature takes its no-model path.
+OFF = "off"
 ENV_ID = "env"
 #: How often the background loop probes every endpoint.
 PROBE_SECONDS = 30
@@ -221,6 +224,11 @@ def release_choice(token: Token) -> None:
         _choice.set(None)
 
 
+def is_off(choice: str | None = None) -> bool:
+    """Did this request (or `choice`) turn AI off (F-11)?"""
+    return (choice if choice is not None else _choice.get()) == OFF
+
+
 def current_choice() -> str:
     """The request's pick when it names something that exists, else the default."""
     picked = _choice.get()
@@ -261,6 +269,8 @@ def candidates(choice: str | None = None) -> list[Endpoint]:
     are up first, then the never-checked, then the down ones as a last
     resort -- a stale red light must not stop a call that would now succeed.
     """
+    if is_off(choice):
+        return []
     choice = choice or current_choice()
     if choice != AUTO:
         ep = find(choice)

@@ -73,9 +73,11 @@ export const Hero = forwardRef<HTMLInputElement, {
   /** No data to ask about: the box is shown, inert, saying why. */
   noData: boolean
   offline: boolean
+  /** F-11: offline because the person chose "Off — no AI". */
+  aiOff?: boolean
   loading: boolean
   chips: HeroChips | null
-}>(function Hero({ name, firstRun, noData, offline, loading, chips }, ref) {
+}>(function Hero({ name, firstRun, noData, offline, aiOff, loading, chips }, ref) {
   const t = useT()
   const navigate = useNavigate()
   const [q, setQ] = useState('')
@@ -111,7 +113,7 @@ export const Hero = forwardRef<HTMLInputElement, {
           <ArrowUp size={18} strokeWidth={2.2} aria-hidden />
         </button>
       </form>
-      {offline && !noData && <p className="hm-offline" role="status">{t('off.composer')}</p>}
+      {offline && !noData && <p className="hm-offline" role="status">{t(aiOff ? 'off.composerMine' : 'off.composer')}</p>}
       {loading ? (
         <div className="hm-chips">{[190, 160, 230, 210].map(w => <Sk key={w} w={`${w}px`} h={32} r={999} style={{ flex: 'none' }} />)}</div>
       ) : chips && !locked && (

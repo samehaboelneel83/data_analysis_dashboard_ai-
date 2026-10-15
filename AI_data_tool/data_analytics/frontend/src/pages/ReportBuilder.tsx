@@ -420,7 +420,7 @@ export default function ReportBuilder() {
   const [aiTab, setAiTab] = useState<AssistTab>('ask')
   const [askSeed, setAskSeed] = useState<{ q: string; n: number } | null>(null)
   const [focusW, setFocusW] = useState<Widget | null>(null)
-  const aiOffline = useAiOffline().offline
+  const { offline: aiOffline, off: aiOff } = useAiOffline()
   // Refresh in the Modern header remounts the canvas, so every widget asks again.
   const [refreshNonce, setRefreshNonce] = useState(0)
 
@@ -4222,7 +4222,7 @@ export default function ReportBuilder() {
                         <div className="dl-vw-wt" role="toolbar" aria-label={tr('vw.wt.aria', { title: widget.title || widget.widget_type })}>
                           <button type="button" onClick={() => askAbout(widget)} disabled={aiOffline}
                             aria-label={tr('vw.wt.ask', { title: widget.title || widget.widget_type })}
-                            title={aiOffline ? tr('off.composer') : tr('vw.wt.askShort')}>
+                            title={aiOffline ? tr(aiOff ? 'off.composerMine' : 'off.composer') : tr('vw.wt.askShort')}>
                             <span className="dl-vw-av" aria-hidden><AiMascot size={15} /></span>
                           </button>
                           <button type="button" onClick={() => setFocusW(widget)}

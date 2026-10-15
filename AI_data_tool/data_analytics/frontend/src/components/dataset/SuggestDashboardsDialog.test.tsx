@@ -277,6 +277,15 @@ describe('saying which engine answered', () => {
     expect(await screen.findByText(/no AI/i)).toBeInTheDocument()
   })
 
+  it('says AI is off for this person when they chose "Off — no AI" (F-11)', async () => {
+    vi.spyOn(datasetsApi, 'suggestDashboards').mockResolvedValue(
+      { proposals: [{ ...PROPOSAL, source: 'insights' }], reason: 'ai_off',
+        profile: PROFILE, source: 'insights' } as never)
+    open()
+    fireEvent.click(screen.getByRole('button', { name: /suggest/i }))
+    expect(await screen.findByTestId('sdd-ai-off')).toHaveTextContent(/AI is off for you/)
+  })
+
   it('says so when the model was used', async () => {
     vi.spyOn(datasetsApi, 'suggestDashboards').mockResolvedValue(
       { proposals: [{ ...PROPOSAL, source: 'model' }], reason: '',
