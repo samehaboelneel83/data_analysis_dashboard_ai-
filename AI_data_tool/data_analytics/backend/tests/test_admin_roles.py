@@ -74,3 +74,49 @@ async def test_non_admin_cannot_list_roles(client, db_session, two_orgs):
     resp = await client.get("/api/v1/admin/roles", headers=headers)
 
     assert resp.status_code == 403
+
+
+# ── E-15: role names are unique per organization ─────────────────────────────
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("second", ["QA E Role", "qa e role", "  QA E Role  "])
+async def test_duplicate_role_name_is_409(client, db_session, two_orgs, auth_headers, second):
+    first = await client.post("/api/v1/admin/roles", json={"name": "QA E Role"}, headers=auth_headers["a"])
+    assert first.status_code == 200
+    again = await client.post("/api/v1/admin/roles", json={"name": second}, headers=auth_headers["a"])
+    assert again.status_code == 409, again.text
+    assert again.json()["detail"] == "A role with this name already exists"
+    names = [r["name"] for r in (await client.get("/api/v1/admin/roles", headers=auth_headers["a"])).json()]
+    assert sum(n.strip().lower() == "qa e role" for n in names) == 1
+
+
+async def test_rename_to_existing_name_is_409(client, db_session, two_orgs, auth_headers):
+    await client.post("/api/v1/admin/roles", json={"name": "Analyst"}, headers=auth_headers["a"])
+    other = (await client.post("/api/v1/admin/roles", json={"name": "Viewer"}, headers=auth_headers["a"])).json()
+    r = await client.patch(f"/api/v1/admin/roles/{other['id']}", json={"name": "ANALYST"}, headers=auth_headers["a"])
+    assert r.status_code == 409
+    # Renaming a role to its own name in another case is fine.
+    ok = await client.patch(f"/api/v1/admin/roles/{other['id']}", json={"name": "viewer"}, headers=auth_headers["a"])
+    assert ok.status_code == 200 and ok.json()["name"] == "viewer"
+
+
+async def test_same_name_in_other_org_is_ok(client, db_session, two_orgs, auth_headers):
+    a = await client.post("/api/v1/admin/roles", json={"name": "Analyst"}, headers=auth_headers["a"])
+    b = await client.post("/api/v1/admin/roles", json={"name": "Analyst"}, headers=auth_headers["b"])
+    assert a.status_code == 200 and b.status_code == 200
+
+
+@pytest.mark.parametrize("name", ["", "   "])
+async def test_empty_role_name_is_422(client, db_session, two_orgs, auth_headers, name):
+    r = await client.post("/api/v1/admin/roles", json={"name": name}, headers=auth_headers["a"])
+    assert r.status_code == 422
+    created = (await client.post("/api/v1/admin/roles", json={"name": "Keeper"}, headers=auth_headers["a"])).json()
+    p = await client.patch(f"/api/v1/admin/roles/{created['id']}", json={"name": name}, headers=auth_headers["a"])
+    assert p.status_code == 422
+
+
+async def test_role_names_are_stored_trimmed(client, db_session, two_orgs, auth_headers):
+    r = await client.post("/api/v1/admin/roles", json={"name": "  Finance  "}, headers=auth_headers["a"])
+    assert r.json()["name"] == "Finance"

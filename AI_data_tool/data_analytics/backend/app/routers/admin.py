@@ -34,13 +34,30 @@ async def list_roles(db: AsyncSession = Depends(get_db), current_user: User = De
     return result.scalars().all()
 
 
+async def _checked_role_name(db: AsyncSession, org_id: int, name: str | None,
+                             *, except_id: int | None = None) -> str:
+    """A role name, trimmed, that no other role in the org has in any letter
+    case (QA E-15: "QA E Role" was created twice, making role pickers and the
+    bulk import's role-by-name ambiguous)."""
+    name = (name or "").strip()
+    if not name:
+        raise HTTPException(422, "A role needs a name")
+    q = select(Role.id).where(Role.org_id == org_id, func.lower(func.trim(Role.name)) == name.lower())
+    if except_id is not None:
+        q = q.where(Role.id != except_id)
+    if (await db.execute(q.limit(1))).first() is not None:
+        raise HTTPException(409, "A role with this name already exists")
+    return name
+
+
 @router.post("/roles", response_model=RoleOut)
 async def create_role(body: RoleCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_org_admin)):
-    role = Role(org_id=current_user.org_id, name=body.name, is_org_admin=body.is_org_admin)
+    name = await _checked_role_name(db, current_user.org_id, body.name)
+    role = Role(org_id=current_user.org_id, name=name, is_org_admin=body.is_org_admin)
     db.add(role)
     # Who can do what is the first thing an audit is asked (governance tour,
     # 2026-10-10): role and user changes were not recorded at all.
-    await admin_audit.record(db, current_user, "role.create", f"role:{body.name}",
+    await admin_audit.record(db, current_user, "role.create", f"role:{name}",
                              "org admin" if body.is_org_admin else None)
     await db.commit()
     await db.refresh(role)
@@ -52,9 +69,11 @@ async def update_role(role_id: int, body: RoleUpdate, db: AsyncSession = Depends
     role = await db.get(Role, role_id)
     check_org(role, current_user, "Role not found")
     changes = []
-    if body.name is not None and body.name != role.name:
-        changes.append(f"renamed from {role.name}")
-        role.name = body.name
+    if body.name is not None:
+        name = await _checked_role_name(db, current_user.org_id, body.name, except_id=role.id)
+        if name != role.name:
+            changes.append(f"renamed from {role.name}")
+            role.name = name
     if body.is_org_admin is not None and bool(body.is_org_admin) != bool(role.is_org_admin):
         changes.append("now org admin" if body.is_org_admin else "no longer org admin")
         role.is_org_admin = body.is_org_admin

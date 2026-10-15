@@ -337,6 +337,49 @@ async def _ensure_users_email_ci_unique() -> None:
         logger.exception("users.email case-insensitive unique index not ensured")
 
 
+def _rename_duplicate_roles_sync(sync_conn) -> list[tuple[int, str, str]]:
+    """Same as alembic revision 0070_roles_org_name_unique: within an org the
+    oldest role keeps a duplicated name, later ones become "<name> (2)", ...
+    (skipping names already taken). Nothing is merged or deleted."""
+    rows = sync_conn.execute(text("SELECT id, org_id, name FROM roles ORDER BY org_id, id")).fetchall()
+    taken: dict[int, set[str]] = {}
+    for _id, org_id, name in rows:
+        taken.setdefault(org_id, set()).add((name or "").strip().lower())
+    seen: set[tuple[int, str]] = set()
+    renamed = []
+    for role_id, org_id, name in rows:
+        key = (org_id, (name or "").strip().lower())
+        if key not in seen:
+            seen.add(key)
+            continue
+        base, n = (name or "").strip(), 2
+        while f"{base} ({n})".lower() in taken[org_id]:
+            n += 1
+        new = f"{base} ({n})"
+        taken[org_id].add(new.lower())
+        sync_conn.execute(text("UPDATE roles SET name = :n WHERE id = :i"), {"n": new, "i": role_id})
+        renamed.append((role_id, name, new))
+    return renamed
+
+
+async def _ensure_roles_name_unique() -> None:
+    """Revision 0070 for databases stamped at head without running it (see
+    `_ensure_users_email_ci_unique`). Renames are logged; a failure is logged
+    and recorded in `_MIGRATION_ERROR`, never aborts startup."""
+    global _MIGRATION_ERROR
+    try:
+        async with engine.begin() as conn:
+            renamed = await conn.run_sync(_rename_duplicate_roles_sync)
+            for role_id, old, new in renamed:
+                logger.warning("roles: duplicate name %r in its organization -- role id=%s renamed to %r",
+                               old, role_id, new)
+            await conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_roles_org_name_lower ON roles (org_id, lower(name))"))
+    except Exception as exc:
+        _MIGRATION_ERROR = _MIGRATION_ERROR or type(exc).__name__
+        logger.exception("roles: unique (org_id, lower(name)) index not ensured")
+
+
 def _is_duplicate_schema_drift_error(exc: Exception) -> bool:
     """True when `exc` looks like a DuplicateTable/DuplicateColumn class
     error: `upgrade head` tried to (re-)create an object that already
@@ -352,9 +395,10 @@ def _is_duplicate_schema_drift_error(exc: Exception) -> bool:
     DuplicateTable when x pre-exists, pass the all-tables-present check,
     and get stamped -- silently orphaning the INSERT. Before authoring the
     first data-bearing revision, gate or remove this self-heal.
-    (0069_users_email_ci_unique also lower-cases emails, but every step of
-    it is idempotent and `_ensure_users_email_ci_unique` repeats it on each
-    boot, so a stamp over it orphans nothing.)
+    (0069_users_email_ci_unique lower-cases emails and 0070_roles_org_name_unique
+    renames duplicate roles, but every step of both is idempotent and
+    `_ensure_users_email_ci_unique` / `_ensure_roles_name_unique` repeat them
+    on each boot, so a stamp over them orphans nothing.)
 
     Checked two ways: the driver's own exception class name (asyncpg raises
     `DuplicateTableError`/`DuplicateColumnError` for Postgres), and a message
@@ -545,6 +589,7 @@ async def lifespan(app: FastAPI):
                 await conn.run_sync(Base.metadata.create_all)
                 await _migrate(conn)
             await _ensure_users_email_ci_unique()
+            await _ensure_roles_name_unique()
             async with AsyncSessionLocal() as session:
                 await _backfill_default_org(session)
             async with AsyncSessionLocal() as session:
