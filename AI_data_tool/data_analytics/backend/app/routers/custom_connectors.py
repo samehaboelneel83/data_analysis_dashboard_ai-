@@ -7,7 +7,7 @@ from ..core.database import get_db
 from ..dependencies import require_org_admin
 from ..models.models import CustomConnector, DataSource, User
 from ..schemas.schemas import CustomConnectorCreate, CustomConnectorOut, CustomConnectorUpdate
-from ..services import connectors, secrets
+from ..services import admin_audit, connectors, secrets
 from ..services.custom_connectors import CustomConnectorError, validate_custom_connector_def
 
 router = APIRouter(prefix="/custom-connectors", tags=["custom-connectors"])
@@ -17,6 +17,14 @@ def _redacted(cc: CustomConnector) -> CustomConnectorOut:
     out = CustomConnectorOut.model_validate(cc)
     out.base_config = secrets.redact_config(cc.base_config or {}, connectors.secret_field_names(cc.base_type))
     return out
+
+
+async def _audit(db: AsyncSession, user: User, action: str, cc: CustomConnector) -> None:
+    """Security change, so it goes to the admin trail (QA E-09). Field NAMES
+    only: never a config value, which may be a host or a secret."""
+    locked = ", ".join(cc.locked_fields or []) or "none"
+    await admin_audit.record(db, user, action, f"connector:{cc.key}",
+                             f"base_type:{cc.base_type}; locked:{locked}")
 
 
 async def _owned_or_404(db: AsyncSession, cc_id: int, org_id: int) -> CustomConnector:
@@ -54,6 +62,7 @@ async def create_custom_connector(body: CustomConnectorCreate, db: AsyncSession 
     cc = CustomConnector(org_id=current_user.org_id, key=body.key, label=body.label, base_type=body.base_type,
                           base_config=encrypted, locked_fields=body.locked_fields or [], created_by=current_user.id)
     db.add(cc)
+    await _audit(db, current_user, "custom_connector.create", cc)
     await db.commit()
     await db.refresh(cc)
     return _redacted(cc)
@@ -106,6 +115,7 @@ async def update_custom_connector(cc_id: int, body: CustomConnectorUpdate, db: A
     cc.base_config = secrets.encrypt_config(new_base_config, connectors.secret_field_names(new_base_type))
     cc.locked_fields = new_locked
     flag_modified(cc, "base_config")
+    await _audit(db, current_user, "custom_connector.update", cc)
     await db.commit()
     await db.refresh(cc)
     return _redacted(cc)
@@ -122,5 +132,6 @@ async def delete_custom_connector(cc_id: int, db: AsyncSession = Depends(get_db)
         raise HTTPException(
             409, f"{count} connection(s) still use this preset; reassign them to a different preset or delete them first"
         )
+    await _audit(db, current_user, "custom_connector.delete", cc)
     await db.delete(cc)
     await db.commit()

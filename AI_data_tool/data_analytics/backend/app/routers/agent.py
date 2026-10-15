@@ -534,6 +534,9 @@ async def create_row_policy(body: RowPolicyIn,
                              source_object_id=body.source_object_id,
                              role_id=body.role_id, predicate=body.predicate)
     db.add(policy)
+    from ..services import admin_audit
+    await admin_audit.record(db, user, "connection_rule.create", f"table:{obj.name}",
+                             f"role:{role.name} {body.predicate}")
     await db.commit()
     await db.refresh(policy)
     return {"id": policy.id, "source_object_id": policy.source_object_id,
@@ -546,5 +549,11 @@ async def delete_row_policy(policy_id: int, db: AsyncSession = Depends(get_db),
                             user: User = Depends(require_org_admin)):
     policy = await db.get(ObjectRowPolicy, policy_id)
     check_org(policy, user, "Row policy not found")
+    obj = await db.get(SourceObject, policy.source_object_id)
+    role = await db.get(Role, policy.role_id)
+    from ..services import admin_audit
+    await admin_audit.record(db, user, "connection_rule.delete",
+                             f"table:{obj.name if obj else policy.source_object_id}",
+                             f"role:{role.name if role else policy.role_id} {policy.predicate}")
     await db.delete(policy)
     await db.commit()
