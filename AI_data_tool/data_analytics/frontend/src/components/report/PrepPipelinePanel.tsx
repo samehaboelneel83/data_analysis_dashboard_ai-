@@ -126,6 +126,25 @@ export default function PrepPipelinePanel({ datasetId, columns, datasetName, ini
   const [saving, setSaving]   = useState(false)
   const [selected, setSelected] = useState<number | null>(null) // index into steps
   const [addMenuOpen, setAddMenuOpen] = useState(false)
+  // B-16: the menu closes on Escape (focus back on its button) and on a
+  // pointer press anywhere outside it.
+  const addMenuRef = useRef<HTMLDivElement>(null)
+  const addToggleRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (!addMenuOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setAddMenuOpen(false); addToggleRef.current?.focus() }
+    }
+    const onPointer = (e: PointerEvent) => {
+      if (addMenuRef.current && !addMenuRef.current.contains(e.target as Node)) setAddMenuOpen(false)
+    }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('pointerdown', onPointer)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('pointerdown', onPointer)
+    }
+  }, [addMenuOpen])
   const [preview, setPreview] = useState<Awaited<ReturnType<typeof prepApi.preview>> | null>(null)
   const [previewErr, setPreviewErr] = useState<string | null>(null)
   const [otherDatasets, setOtherDatasets] = useState<Dataset[]>([])
@@ -285,22 +304,23 @@ export default function PrepPipelinePanel({ datasetId, columns, datasetName, ini
         <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
           {t('pg.panelsB.pipe.title')}
         </span>
-        <div style={{ position: 'relative' }}>
-          <button className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '2px 7px' }}
-            hidden={readOnly} onClick={() => setAddMenuOpen(o => !o)}>
+        <div style={{ position: 'relative' }} ref={addMenuRef}>
+          <button ref={addToggleRef} className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '2px 7px' }}
+            hidden={readOnly} aria-haspopup="menu" aria-expanded={addMenuOpen} onClick={() => setAddMenuOpen(o => !o)}>
             {t('pg.panelsB.pipe.addStep')}
           </button>
           {addMenuOpen && (
-            <div style={{ position: 'absolute', insetInlineEnd: 0, top: '100%', zIndex: 20, marginTop: 2,
+            <div role="menu" style={{ position: 'absolute', insetInlineEnd: 0, top: '100%', zIndex: 20, marginTop: 2,
               background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6,
               boxShadow: '0 4px 12px rgba(0,0,0,.25)', minWidth: 170, maxHeight: 260, overflowY: 'auto' }}>
               {ADD_MENU_KINDS.map(k => (
-                <div key={k} onClick={() => addStep(k)}
-                  style={{ fontSize: 11, padding: '6px 10px', cursor: 'pointer', display: 'flex', gap: 6, alignItems: 'center' }}
+                <button type="button" role="menuitem" key={k} onClick={() => addStep(k)}
+                  style={{ fontSize: 11, padding: '6px 10px', cursor: 'pointer', display: 'flex', gap: 6, alignItems: 'center',
+                    width: '100%', background: 'transparent', border: 'none', color: 'inherit', font: 'inherit', textAlign: 'start' }}
                   onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface2)')}
                   onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                  <span>{KIND_ICONS[k]}</span>{kindLabel(t, k)}
-                </div>
+                  <span aria-hidden="true">{KIND_ICONS[k]}</span>{kindLabel(t, k)}
+                </button>
               ))}
             </div>
           )}
