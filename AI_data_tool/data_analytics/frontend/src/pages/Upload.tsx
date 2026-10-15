@@ -37,7 +37,7 @@ import './upload/upload.css'
  * and a preview of Excel, Parquet, XML and Access files before import.
  */
 
-const ACCEPT = '.csv,.tsv,.txt,.xlsx,.xls,.json,.xml,.parquet,.mdb,.accdb'
+const ACCEPT = '.csv,.xlsx,.xls,.json,.xml,.parquet,.mdb,.accdb'
 const ALL_SHEETS = '\u0000all'
 
 const stemOf = (f: File) => f.name.replace(/\.[^.]+$/, '')
@@ -109,7 +109,12 @@ export default function Upload() {
   }, [])
   const nameTaken = name.trim() !== '' && taken.has(name.trim().toLowerCase())
 
-  const addFiles = (picked: File[]) => {
+  // B-22: files whose type cannot be imported, turned away when added.
+  const [refused, setRefused] = useState<string[]>([])
+  const addFiles = (all: File[]) => {
+    if (!all.length) return
+    const picked = all.filter(f => kindOf(f.name) !== 'other')
+    setRefused(all.filter(f => kindOf(f.name) === 'other').map(f => f.name))
     if (!picked.length) return
     const next = [...files.map(f => f.file), ...picked.filter(p => !files.some(f => f.file.name === p.name && f.file.size === p.size))]
     setFiles(next.map(file => files.find(f => f.file === file) ?? { file, preview: readable(kindOf(file.name)) ? undefined : null }))
@@ -131,6 +136,7 @@ export default function Upload() {
     if (!nameTyped.current) setName(next.length === 1 ? nameFromFile(next[0].file.name) : batchBaseName(next.map(f => f.file)))
   }
   const reset = () => {
+    setRefused([])
     setStage('choose'); setFiles([]); setName(''); setDesc(''); setCombine(false); setSheets([]); setSheet('')
     setMade([]); setFailures([]); setProblem(null); setSent(0); setActive(0); nameTyped.current = false
   }
@@ -207,6 +213,11 @@ export default function Upload() {
           <input ref={inputRef} type="file" accept={ACCEPT} multiple hidden data-testid="upload-input"
             onChange={e => { addFiles(Array.from(e.target.files ?? [])); e.target.value = '' }} />
 
+          {refused.length > 0 && (stage === 'choose' || stage === 'review') && (
+            <p className="dl-up-note is-warn" role="alert">
+              <AlertTriangle size={15} aria-hidden /> {t('up2.refused', { names: refused.join(', ') })}
+            </p>
+          )}
           {stage === 'choose' && (
             <>
               <div className={`dl-up-drop${drag ? ' is-over' : ''}`}
