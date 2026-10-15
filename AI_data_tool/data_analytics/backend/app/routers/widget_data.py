@@ -149,6 +149,50 @@ def _config_names(config: dict, name: str) -> bool:
 
 
 
+def _reads_denied(expression: str, tainted: set[str]) -> bool:
+    """Whether an author expression (measure or calculated column) reads any of
+    `tainted`. Bare names via the AST, plus a token match so a backtick-quoted
+    name, or a formula the AST can't parse, is caught too -- the fail-closed
+    side: a string literal equal to a denied name is refused as well."""
+    import re
+    from ..services.measure_sql import referenced_names
+    if not expression or not tainted:
+        return False
+    if referenced_names(expression) & tainted:
+        return True
+    return any(re.search(r"(?<![\w])" + re.escape(name) + r"(?![\w])", expression) for name in tainted)
+
+
+def _refuse_denied_measures(config: dict, filters, measure_defs: list, calc_cols: list,
+                            denied: list[str]) -> None:
+    """403 `forbidden_column` for a widget whose measure or calculated column is
+    built on a column this reader may not see (QA E-12 / SEC-02: the import path
+    returned "name 'cost' is not defined", naming the hidden column). A
+    calculated column over a denied column is itself denied, so a measure over
+    THAT is refused too. The message names nothing."""
+    if not denied:
+        return
+    tainted = set(denied)
+    calc_by_name = {c.get("name"): c.get("expression") or "" for c in (calc_cols or [])
+                    if isinstance(c, dict) and c.get("name")}
+    changed = True
+    while changed:                       # calc columns built on calc columns
+        changed = False
+        for name, expr in calc_by_name.items():
+            if name not in tainted and _reads_denied(expr, tainted):
+                tainted.add(name)
+                changed = True
+    used = lambda name: _config_names(config or {}, name) or _config_names(filters or [], name)  # noqa: E731
+    for name in tainted - set(denied):
+        if used(name):
+            raise widget_error(403, "forbidden_column", "This widget references a column your role cannot access")
+    for m in measure_defs or []:
+        if isinstance(m, dict) and m.get("name") and used(m["name"]) \
+                and _reads_denied(m.get("expression") or "", tainted):
+            raise widget_error(403, "forbidden_column", "This widget references a column your role cannot access")
+
+
+
 class _DirectQueryCalcView:
     """Read-only stand-in for a DirectQuery Dataset whose base query carries
     calculated columns as extra SELECT layers. Everything but `columns` and
@@ -591,12 +635,7 @@ async def _resolve_widget_data(
             # A measure the widget names reads columns its config never
             # mentions: the SQL is built from the measure's formula, so a
             # formula over a denied column is refused the same way (E04).
-            from ..services.measure_sql import referenced_names
-            for m in measure_defs:
-                if (_config_names(req.config, m.get("name"))
-                        and referenced_names(m.get("expression") or "") & set(denied)):
-                    raise widget_error(403, "forbidden_column",
-                                       "This widget references a column your role cannot access")
+            _refuse_denied_measures(req.config, getattr(req, "filters", None), measure_defs, calc_cols, denied)
 
         # Relative dates, after row security and column security are known: a
         # `data_max` anchor is read from the rows this reader may see.
@@ -761,6 +800,10 @@ async def _resolve_widget_data(
     # redacted column ceases to exist for this read exactly like a denied one.
     denied = sorted(set(await resolve_denied_columns(db, current_user, dataset_id) or [])
                     | set(redact_columns or []))
+    # A measure or calculated column built on a denied column is refused up
+    # front, as on the DirectQuery path, instead of failing inside the
+    # evaluator with the hidden column's name (QA E-12 / SEC-02).
+    _refuse_denied_measures(req.config, getattr(req, "filters", None), measure_defs, calc_cols, denied)
     steps = prep_steps_of(ds)
     aux = await resolve_join_frames(db, current_user, steps) if steps else {}
 

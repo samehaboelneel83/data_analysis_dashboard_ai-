@@ -2617,9 +2617,15 @@ describe('every widget error has a code the widget can act on', () => {
       type: 'error', code: 'measure_error', rows: [], total: 0,
       message: 'Measure "margin" failed: unknown column cost',
     } as never)
-    renderWidget()
+    // The author, who can fix the formula, gets the evaluator's reason...
+    const { unmount } = renderWidget({ editMode: true })
     expect(await screen.findByText(/Measure "margin" failed/i)).toBeInTheDocument()
     expect(screen.queryByText(/configure widget/i)).not.toBeInTheDocument()
+    unmount()
+    // ...a reader a plain sentence that names no column (QA E-12 / SEC-02).
+    renderWidget()
+    expect(await screen.findByText('This measure could not be calculated.')).toBeInTheDocument()
+    expect(screen.queryByText(/cost/)).not.toBeInTheDocument()
   })
 
   it('offers to try again only when the source was unreachable', async () => {

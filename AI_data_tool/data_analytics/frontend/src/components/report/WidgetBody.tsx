@@ -1,3 +1,4 @@
+import { Lock } from 'lucide-react'
 import { semanticAggregationWarning, nonAdditiveKind, SAFE_AGGREGATION } from '../../lib/semanticGuard'
 import { CellLink, isWebAddress } from '../../lib/cellLink'
 import PivotTable, { type PivotData } from './PivotTable'
@@ -107,6 +108,11 @@ function ImageWidget({ url, alt, fit }: { url: string; alt: string; fit?: string
  *  Arabic layout no longer reads ".Refresh in a moment" (HR re-test). */
 function FetchErrorState({ err, onRetry }: { err: { detail: string; code?: string }; onRetry?: () => void }) {
   const t = useT()
+  // Column security (QA E-12 / SEC-02): say it is restricted, never which
+  // column, and offer no retry -- trying again cannot change a role.
+  if (err.code === 'forbidden_column') {
+    return <EmptyState msg={t('widget.err.restricted')} icon={<Lock size={20} aria-hidden />} />
+  }
   const name = /'([^']+)'/.exec(err.detail ?? '')?.[1] ?? ''
   const msg = err.code === 'source_busy' ? t('widget.err.busy', { name })
     : err.code === 'source_unavailable' ? t('widget.err.unreachable', { name })
@@ -349,7 +355,12 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
   // The second channel: a 200 whose body says it failed. A measure that
   // could not be evaluated arrives this way, and until the widget read it
   // the chart renderer got empty rows and drew nothing -- the message lost.
-  if (data?.type === 'error') return <EmptyState msg={String(data.message || 'This widget could not be computed')} />
+  // A measure that failed to evaluate: the evaluator's reason is for whoever
+  // can fix the formula (edit mode); a reader gets a plain sentence (QA E-12).
+  if (data?.type === 'error') {
+    return <EmptyState msg={data.code === 'measure_error' && !onAssignData
+      ? tw('widget.err.measure') : String(data.message || 'This widget could not be computed')} />
+  }
 
   if (data?.type === 'hier_pivot') {
     return <HierPivot data={data} open={gridOpen ?? { rows: [], cols: [] }} rtl={rtl}
