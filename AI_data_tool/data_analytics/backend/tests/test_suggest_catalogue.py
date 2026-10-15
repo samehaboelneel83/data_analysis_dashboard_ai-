@@ -34,7 +34,10 @@ def test_every_idea_draws_names_real_columns_and_says_why_it_fits():
     df = table()
     got = ideas(df)
     kinds = {(s["widget_type"], s["config"].get("gauge_shape")) for s in got}
-    assert {("gauge", "bullet"), ("gauge", "progress"), ("card", None), ("dot_plot", None), ("dual_axis_bar", None),
+    # ("card", None) is checked on its own below: since B-36 a card only lists
+    # numbers of ONE unit, and this table's sums are two unit-less numbers and
+    # a weight.
+    assert {("gauge", "bullet"), ("gauge", "progress"), ("dot_plot", None), ("dual_axis_bar", None),
             ("butterfly", None), ("area", None), ("step", None), ("dual_axis_time_series", None),
             ("comparative_time_series", None), ("ribbon", None), ("waterfall", None), ("histogram", None),
             ("numeric_series", None), ("correlation_matrix", None), ("parallel_coordinates", None),
@@ -47,6 +50,21 @@ def test_every_idea_draws_names_real_columns_and_says_why_it_fits():
                                                             "target", "facet_by", "color")]
         named += list(s["config"].get("measures") or [])
         assert named and all(c in df.columns for c in named), s
+
+
+def test_a_card_lists_three_numbers_of_one_unit_never_mixed_units():
+    """B-36: "Total of 5 numbers" once put kilograms, money and counts side by
+    side. reached + expected + weight (kg) are not one card; add a third
+    unit-less number and they are -- and the weight stays out."""
+    df = table()
+    assert not [s for s in ideas(df) if s["widget_type"] == "card"]
+    # independent of the others (drop_duplicate_measures drops a scaled copy)
+    more = df.assign(planned=np.random.default_rng(7).uniform(20, 90, len(df)))
+    roles = {**ROLES, "planned": "numeric"}
+    cards = [s for s in ideas(more, roles) if s["widget_type"] == "card"]
+    assert len(cards) == 1
+    assert set(cards[0]["config"]["measures"]) == {"reached", "expected", "planned"}
+    assert sv.draws("card", cards[0]["config"], more)
 
 
 def test_a_shape_the_data_does_not_have_is_not_offered():
