@@ -590,18 +590,26 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
       // Focusable: a card with more figures than its tile scrolls (E10).
       // C-13: a SIZE container, so each figure is capped by the tile's height
       // too (cqb): three rows at 24px plus labels overflowed a short tile.
-      <div dir={rtl ? 'rtl' : undefined} tabIndex={0} role="region" aria-label={tw('wb.values')}
-        style={{ height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 10, padding: 8, containerType: 'size' }}>
+      // C-13 (round 2): the outer box is the size container ("dlcard"); a tile
+      // much wider than tall lays the figures side by side (index.css), and
+      // each figure is its own inline-size container so it fits the width it
+      // gets in either layout. The height cap divides by --dl-card-rows, which
+      // the wide layout resets to 1.
+      <div className="dl-card" style={{ height: '100%', containerType: 'size', containerName: 'dlcard',
+        ['--dl-card-rows' as never]: Math.max(rows.length, 1) }}>
+      <div className="dl-card__rows" dir={rtl ? 'rtl' : undefined} tabIndex={0} role="region" aria-label={tw('wb.values')}
+        style={{ height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 10, padding: 8, boxSizing: 'border-box' }}>
         {rows.map((row, i) => (
-          <div key={i} style={{ textAlign: 'center', minWidth: 0 }}>
+          <div key={i} className="dl-card__item" style={{ textAlign: 'center', minWidth: 0, containerType: 'inline-size' }}>
             <div title={formatMeasure(row.value, allFormats?.[row.name], cfg.aggregation)}
-              style={{ fontSize: `min(${fitFigureSize(formatMeasure(row.value, allFormats?.[row.name], cfg.aggregation), 24)}, calc(100cqb / ${(Math.max(rows.length, 1) * 2.2).toFixed(1)}))`, fontWeight: 650, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.02em', color: ruleStyles?.rows?.[i]?.fill ?? 'var(--accent)',
+              style={{ fontSize: `min(${fitFigureSize(formatMeasure(row.value, allFormats?.[row.name], cfg.aggregation), 24)}, calc(100cqb / (var(--dl-card-rows, 1) * 2.2)))`, fontWeight: 650, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.02em', color: ruleStyles?.rows?.[i]?.fill ?? 'var(--accent)',
                 whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: 1.15 }}>
               {formatMeasure(row.value, allFormats?.[row.name], cfg.aggregation)}
             </div>
             <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>{row.name}</div>
           </div>
         ))}
+      </div>
       </div>
     )
   }

@@ -651,6 +651,25 @@ describe('C-13: card figures fit the tile height too', () => {
     const figure = label.previousElementSibling as HTMLElement
     expect(figure.style.fontSize).toContain('cqb')
   })
+
+  // C-13 round 2: a tile much wider than tall lays its figures side by side.
+  it('a wide tile lays the figures in a row: the card is a named size container the stylesheet turns', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [
+      { name: 'revenue', value: 8632597 }, { name: 'cost', value: 20 }, { name: 'units', value: 5 }], sampled: false })
+    renderWidget({ widget: barWidget({ widget_type: 'card', config: { measures: ['revenue', 'cost', 'units'] } }) })
+    const label = await screen.findByText('units')
+    const figure = label.previousElementSibling as HTMLElement
+    const list = label.closest('.dl-card__rows') as HTMLElement
+    expect(list).toBeTruthy()
+    expect(list.parentElement!.classList.contains('dl-card')).toBe(true)
+    // the height cap reads the row count from a variable the wide layout resets to 1
+    expect(figure.style.fontSize).toContain('var(--dl-card-rows')
+    const fs = await import('node:fs'); const path = await import('node:path')
+    const css = fs.readFileSync(path.join(__dirname, '..', '..', 'index.css'), 'utf8')
+    const m = /@container dlcard \(min-aspect-ratio: [\d.]+ ?\/ ?[\d.]+\)\s*\{([\s\S]*?)\n\}/.exec(css)
+    expect(m?.[1] ?? '').toMatch(/\.dl-card__rows\s*\{[^}]*flex-direction:\s*row/)
+    expect(m?.[1] ?? '').toMatch(/--dl-card-rows:\s*1/)
+  })
 })
 
 describe('WidgetRenderer image', () => {
