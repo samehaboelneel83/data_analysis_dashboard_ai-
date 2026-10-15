@@ -1257,6 +1257,7 @@ export const en = {
   'cr.mapModeCoords': 'Placing markers by coordinates (Latitude / Longitude); Country only labels them.',
   'cr.mapModeCountry': 'Placing markers by country name.',
   'cr.mapModeHalf': 'Assign both Latitude and Longitude to place markers by coordinates.',
+  'cr.coordOutOfRange': '{field} has values outside the range of a {role} — its markers will be misplaced or dropped.',
   'cr.scatterNeedsNumericX': 'X must be a number — assign a numeric column to the X axis.',
   'cr.pieMap': 'Pie map',
   'cr.rowNoCountry': '{n} row did not match a country',

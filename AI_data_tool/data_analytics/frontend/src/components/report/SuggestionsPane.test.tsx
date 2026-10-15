@@ -364,3 +364,20 @@ describe('C-18: a year is not an identifier to head-count', () => {
     }
   })
 })
+
+describe('C-18 round 2: an identifier is head-counted only when it is mostly unique', () => {
+  const withStore = [...cols, { id: 6, name: 'store_id', dtype: 'categorical', missing_pct: 0, stats: {} }] as unknown as DatasetColumn[]
+  const counted = (s: ReturnType<typeof suggestWidgets>) =>
+    s.some(x => (x.config as Record<string, unknown>).measure === 'store_id' && (x.config as Record<string, unknown>).aggregation === 'countd')
+  const profile = (nUnique: number) => ({ ...analysis, overview: { rows: 1000 },
+    categorical: { columns: { ...(analysis as any).categorical?.columns, store_id: { n_unique: nUnique } } } }) as never
+  it('12 stores over 1,000 rows: count rows, not distinct stores', () => {
+    expect(counted(suggestWidgets(withStore, profile(12)))).toBe(false)
+  })
+  it('900 distinct over 1,000 rows: it identifies the rows -- head-count it', () => {
+    expect(counted(suggestWidgets(withStore, profile(900)))).toBe(true)
+  })
+  it('no counts known: the name decides, as before', () => {
+    expect(counted(suggestWidgets(withStore, analysis))).toBe(true)
+  })
+})

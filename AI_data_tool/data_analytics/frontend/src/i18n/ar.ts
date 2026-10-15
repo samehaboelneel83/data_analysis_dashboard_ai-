@@ -1257,6 +1257,7 @@ export const ar: Record<MessageKey, string> = {
   'cr.mapModeCoords': 'توضع العلامات حسب الإحداثيات (خط العرض / خط الطول)؛ والدولة للتسمية فقط.',
   'cr.mapModeCountry': 'توضع العلامات حسب اسم الدولة.',
   'cr.mapModeHalf': 'عيّن خط العرض وخط الطول معًا لوضع العلامات حسب الإحداثيات.',
+  'cr.coordOutOfRange': 'في {field} قيم خارج نطاق {role} — ستوضع علاماتها في غير مكانها أو تُسقط.',
   'cr.scatterNeedsNumericX': 'يجب أن يكون المحور X رقمًا — عيّن عمودًا رقميًا للمحور X.',
   'cr.pieMap': 'خريطة دوائر',
   'cr.rowNoCountry': '{n} صف لم يطابق دولة',

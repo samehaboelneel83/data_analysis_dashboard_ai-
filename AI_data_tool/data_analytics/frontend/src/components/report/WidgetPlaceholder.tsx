@@ -28,6 +28,7 @@ export function emptyPickerReason(hasAnyColumns: boolean, kind: string | undefin
   if (!hasAnyColumns) return 'No dataset is attached to this report yet.'
   if (kind === 'numeric') return 'This dataset has no numeric columns to measure.'
   if (kind === 'datetime') return 'This dataset has no date columns. Set a column\'s type to date in the Data tab, or use a chart that takes a category.'
+  if (kind === 'category') return 'This dataset has no text or date columns to split by.'
   return 'No columns of the right kind for this field.'
 }
 
@@ -52,9 +53,19 @@ function roleValue(cfg: Record<string, unknown>, role: string): unknown {
   return nested !== undefined && nested !== null && nested !== '' ? nested : cfg[configKeyFor(role)]
 }
 
+/** C-07: a scatter of the old shape -- its X axis is the dimension -- as saved
+ *  (no X measure) or as the builder migrates it (X = that dimension). MIRRORS
+ *  `widget_roles.legacy_scatter` on the server. */
+export function legacyScatter(cfg: Record<string, unknown>): boolean {
+  const cat = roleValue(cfg, 'category'), x = roleValue(cfg, 'measure2')
+  return !!cat && (!x || x === cat)
+}
+
 export function missingRequiredRoles(widget: Pick<Widget, 'widget_type' | 'config'>): string[] {
   const cfg = (widget.config ?? {}) as Record<string, unknown>
   if (measuresAsBars(widget)) return []
+  // An old scatter needed only its dimension, which it has.
+  if (widget.widget_type === 'scatter' && legacyScatter(cfg)) return []
   return (ROLE_SPECS[widget.widget_type as WidgetType] ?? [])
     .filter(rf => rf.required)
     .filter(rf => {

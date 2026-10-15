@@ -303,3 +303,102 @@ describe('C-10: a point map says how it places its markers', () => {
     expect(screen.getByTestId('map-mode-hint')).toHaveTextContent(/country/i)
   })
 })
+
+describe('C-09 step 3: the Latitude / Longitude pickers', () => {
+  const cols: DatasetColumn[] = [
+    { id: 1, name: 'from_city',  dtype: 'text',    missing_pct: 0, stats: {} },
+    { id: 2, name: 'revenue',    dtype: 'numeric', missing_pct: 0, stats: {} },
+    { id: 3, name: 'shipments',  dtype: 'numeric', missing_pct: 0, stats: {} },
+    { id: 4, name: 'origin_lat', dtype: 'numeric', missing_pct: 0, stats: {} },
+    { id: 5, name: 'origin_lon', dtype: 'numeric', missing_pct: 0, stats: {} },
+  ]
+  const ranges = { revenue: { min: 0, max: 98000 }, shipments: { min: 2, max: 40 },
+                   origin_lat: { min: 24, max: 31 }, origin_lon: { min: 29, max: 35 } }
+  const map = (config: Record<string, unknown>) => ({ ...bar(config), widget_type: 'map_points' } as Widget)
+  const open = (config: Record<string, unknown>, role: string) => {
+    const w = map(config)
+    render(<CrossFilterProvider><WidgetConfigPanel widget={w} columns={cols} valueRanges={ranges}
+      onUpdate={vi.fn()} pages={page([w])} /></CrossFilterProvider>)
+    fireEvent.click(screen.getByRole('button', { name: `Add ${role}` }))
+    return screen.getByRole('dialog', { name: `Add ${role}` })
+  }
+  it('lists coordinate fields first, under Geography, the matching axis on top', () => {
+    const dialog = open({}, 'Longitude')
+    const names = within(dialog).getAllByRole('option').map(o => o.textContent ?? '')
+    expect(names[0]).toMatch(/^origin_lon/)
+    expect(names[1]).toMatch(/^origin_lat/)
+    expect(within(dialog).getByText('Geography')).toBeTruthy()
+    expect(names.some(n => /from_city/.test(n))).toBe(false)     // text never offered
+  })
+  it('flags a number whose values cannot be a longitude', () => {
+    const dialog = open({}, 'Longitude')
+    const revenue = within(dialog).getAllByRole('option').find(o => /revenue/.test(o.textContent ?? ''))!
+    expect(revenue.textContent).toMatch(/out of range/i)
+    const shipments = within(dialog).getAllByRole('option').find(o => /shipments/.test(o.textContent ?? ''))!
+    expect(shipments.textContent).not.toMatch(/out of range/i)
+  })
+  it('warns in the pane when an out-of-range field is chosen', () => {
+    const w = map({ lat: 'origin_lat', lon: 'revenue' })
+    render(<CrossFilterProvider><WidgetConfigPanel widget={w} columns={cols} valueRanges={ranges}
+      onUpdate={vi.fn()} pages={page([w])} /></CrossFilterProvider>)
+    expect(screen.getByTestId('coord-range-warning')).toHaveTextContent(/revenue/)
+  })
+  it('no warning for real coordinates', () => {
+    const w = map({ lat: 'origin_lat', lon: 'origin_lon' })
+    render(<CrossFilterProvider><WidgetConfigPanel widget={w} columns={cols} valueRanges={ranges}
+      onUpdate={vi.fn()} pages={page([w])} /></CrossFilterProvider>)
+    expect(screen.queryByTestId('coord-range-warning')).toBeNull()
+  })
+})
+
+describe('C-23 round 2: the Split into multiples by picker', () => {
+  it('offers text and date fields only, never a measure', () => {
+    const w = { ...bar({ dimension: 'region', measure: 'sales' }), widget_type: 'small_multiples' } as Widget
+    render(<CrossFilterProvider><WidgetConfigPanel widget={w} columns={COLUMNS}
+      onUpdate={vi.fn()} pages={page([w])} /></CrossFilterProvider>)
+    fireEvent.click(screen.getByRole('button', { name: 'Add Split into multiples by' }))
+    const dialog = screen.getByRole('dialog', { name: 'Add Split into multiples by' })
+    const names = within(dialog).getAllByRole('option').map(o => o.textContent ?? '')
+    expect(names.some(n => /region/.test(n))).toBe(true)
+    expect(names.some(n => /ordered_at/.test(n))).toBe(true)
+    expect(names.some(n => /sales/.test(n))).toBe(false)
+  })
+})
+
+describe('C-28 round 2: arrow keys move through the field picker', () => {
+  const choices = [{ value: 'origin_lat', label: 'origin_lat' }, { value: 'origin_lon', label: 'origin_lon' },
+                   { value: 'dest_lat', label: 'dest_lat' }]
+  it('Down from the search box reaches the first field, Down/Up step, Up from the first returns to search', () => {
+    render(<AddFieldDialog heading="Latitude" multi={false} selected={[]} choices={choices} onApply={vi.fn()} onClose={vi.fn()} />)
+    const search = screen.getByRole('searchbox')
+    const opts = screen.getAllByRole('option')
+    search.focus()
+    fireEvent.keyDown(search, { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(opts[0])
+    fireEvent.keyDown(opts[0], { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(opts[1])
+    fireEvent.keyDown(opts[1], { key: 'End' })
+    expect(document.activeElement).toBe(opts[2])
+    fireEvent.keyDown(opts[2], { key: 'Home' })
+    expect(document.activeElement).toBe(opts[0])
+    fireEvent.keyDown(opts[0], { key: 'ArrowUp' })
+    expect(document.activeElement).toBe(search)
+  })
+  it('only one field is in the Tab order (roving), and it follows focus', () => {
+    render(<AddFieldDialog heading="Latitude" multi={false} selected={[]} choices={choices} onApply={vi.fn()} onClose={vi.fn()} />)
+    const opts = screen.getAllByRole('option')
+    expect(opts.filter(o => o.tabIndex === 0)).toHaveLength(1)
+    fireEvent.keyDown(screen.getByRole('searchbox'), { key: 'ArrowDown' })
+    fireEvent.keyDown(opts[0], { key: 'ArrowDown' })
+    expect(opts[1].tabIndex).toBe(0)
+    expect(opts[0].tabIndex).toBe(-1)
+  })
+  it('works over the checkboxes of a several-field role too', () => {
+    render(<AddFieldDialog heading="Measures" multi selected={[]} choices={choices} onApply={vi.fn()} onClose={vi.fn()} />)
+    const boxes = screen.getAllByRole('checkbox')
+    fireEvent.keyDown(screen.getByRole('searchbox'), { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(boxes[0])
+    fireEvent.keyDown(boxes[0], { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(boxes[1])
+  })
+})

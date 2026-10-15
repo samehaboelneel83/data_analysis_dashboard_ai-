@@ -1058,6 +1058,8 @@ def _run_direct_query_inner(
     org_id: int | None = None, drop_columns: list[str] | None = None,
     measures: list[dict] | None = None,
 ) -> dict:
+    from .widget_roles import scatter_config
+    config = scatter_config(widget_type, config)   # C-07: an old scatter, drawn as before
     # E3: one span per DirectQuery execution. Attributes carry only
     # identifiers/status/timings -- never the built SQL or config values,
     # matching query_runs.sql_hash discipline (this path already logs

@@ -651,6 +651,25 @@ describe('C-13: card figures fit the tile height too', () => {
     const figure = label.previousElementSibling as HTMLElement
     expect(figure.style.fontSize).toContain('cqb')
   })
+
+  // C-13 round 2: a tile much wider than tall lays its figures side by side.
+  it('a wide tile lays the figures in a row: the card is a named size container the stylesheet turns', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [
+      { name: 'revenue', value: 8632597 }, { name: 'cost', value: 20 }, { name: 'units', value: 5 }], sampled: false })
+    renderWidget({ widget: barWidget({ widget_type: 'card', config: { measures: ['revenue', 'cost', 'units'] } }) })
+    const label = await screen.findByText('units')
+    const figure = label.previousElementSibling as HTMLElement
+    const list = label.closest('.dl-card__rows') as HTMLElement
+    expect(list).toBeTruthy()
+    expect(list.parentElement!.classList.contains('dl-card')).toBe(true)
+    // the height cap reads the row count from a variable the wide layout resets to 1
+    expect(figure.style.fontSize).toContain('var(--dl-card-rows')
+    const fs = await import('node:fs'); const path = await import('node:path')
+    const css = fs.readFileSync(path.join(__dirname, '..', '..', 'index.css'), 'utf8')
+    const m = /@container dlcard \(min-aspect-ratio: [\d.]+ ?\/ ?[\d.]+\)\s*\{([\s\S]*?)\n\}/.exec(css)
+    expect(m?.[1] ?? '').toMatch(/\.dl-card__rows\s*\{[^}]*flex-direction:\s*row/)
+    expect(m?.[1] ?? '').toMatch(/--dl-card-rows:\s*1/)
+  })
 })
 
 describe('WidgetRenderer image', () => {
@@ -3192,5 +3211,23 @@ describe('WidgetRenderer chart download (F-02)', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Analyse Sales' }))
     await screen.findAllByRole('menuitem')
     expect(screen.queryByRole('menuitem', { name: 'Export data as CSV' })).toBeNull()
+  })
+})
+
+describe('C-24: an automatically chosen date grain is said', () => {
+  it('a dual-axis time series bucketed by week says "by week (automatic)"', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: '2024-01-01', value: 1, value2: 2 }],
+      auto_granularity: 'week', sampled: false } as never)
+    renderWidget({ widget: barWidget({ widget_type: 'dual_axis_time_series',
+      config: { start: 'date', measure: 'revenue', measure2: 'units' } }) })
+    expect(await screen.findByTestId('auto-grain-chip')).toHaveTextContent('by week (automatic)')
+  })
+  it('no chip when the author chose the grain', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: '2024-01', value: 1, value2: 2 }], sampled: false })
+    renderWidget({ widget: barWidget({ widget_type: 'dual_axis_time_series',
+      config: { start: 'date', measure: 'revenue', measure2: 'units', dimension_granularity: 'month' } }) })
+    await screen.findByText(/./, { selector: '[role="heading"]' })
+    await new Promise(r => setTimeout(r, 50))
+    expect(screen.queryByTestId('auto-grain-chip')).toBeNull()
   })
 })

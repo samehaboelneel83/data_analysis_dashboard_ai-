@@ -102,7 +102,10 @@ REQUIRED_ROLES: dict[str, tuple[str, ...]] = {
     "pie": ("category",),
     "ribbon": ("category", "category2", "measure"),
     "sankey": ("category", "category2"),
-    "scatter": ("category",),
+    # C-07: an X measure (`measure2`) against a Y measure (`measure`), with an
+    # optional Label. An OLD scatter (a dimension on X) is held to its old rule
+    # -- see `legacy_scatter`.
+    "scatter": ("measure2", "measure"),
     "schedule": ("category", "start", "end"),
     # A script picks its own columns out of the frame; a required role here
     # would be a second answer to a question the code already answers.
@@ -179,6 +182,32 @@ def migrate_widget_config(config: dict | None) -> dict:
     return cfg
 
 
+def legacy_scatter(config: dict | None) -> bool:
+    """C-07: a scatter of the old shape -- its X axis is the dimension -- either
+    as saved (no X measure) or as the builder migrates it (X = that dimension)."""
+    from .widget_data import resolve_roles
+    roles = resolve_roles(config or {})
+    cat, x = roles.get("category"), roles.get("measure2")
+    return bool(cat) and (not x or x == cat)
+
+
+def scatter_config(widget_type: str, config: dict | None) -> dict:
+    """C-07: the config a scatter is drawn from. The builder's migrated form of
+    an old scatter (X measure = its own dimension) is drawn exactly as the old
+    chart was: the X key is dropped, so every path (DuckDB, DirectQuery, the
+    grouped-series shaper) sees what it always saw."""
+    cfg = config or {}
+    if widget_type != "scatter" or not legacy_scatter(cfg):
+        return cfg
+    from .widget_data import resolve_roles
+    if not resolve_roles(cfg).get("measure2"):
+        return cfg
+    out = {k: v for k, v in cfg.items() if k not in ("measure2", "aggregation2")}
+    if isinstance(out.get("roles"), dict):
+        out["roles"] = {k: v for k, v in out["roles"].items() if k != "measure2"}
+    return out
+
+
 def missing_roles(widget_type: str, config: dict) -> list[str]:
     """The config keys `widget_type` still needs, in the spec's own order.
 
@@ -193,6 +222,8 @@ def missing_roles(widget_type: str, config: dict) -> list[str]:
     required = REQUIRED_ROLES.get(widget_type)
     if not required:
         return []
+    if widget_type == "scatter" and legacy_scatter(config):
+        required = ("category",)
     from .multi_measure import measures_as_bars
     if measures_as_bars(widget_type, config):
         return []                       # one bar per measure: no category needed

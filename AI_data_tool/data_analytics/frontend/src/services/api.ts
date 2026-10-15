@@ -1,4 +1,5 @@
 ﻿import axios from 'axios'
+import { announceReportWrite } from '../lib/reportWrites'
 import { sanitizeErrorDetail } from '../lib/friendlyError'
 import { canceledRequest } from '../lib/canceledRequest'
 import type { Report, ReportRelease, ReportPage, Widget, HierarchyNode, Bookmark, BookmarkState, WorkspaceTree, WorkspaceNode } from '../types/report'
@@ -164,6 +165,9 @@ function announceLlmUsed(headers: unknown) {
   }
 }
 api.interceptors.response.use(r => { announceLlmUsed(r.headers); return r })
+// C-17: every successful write to a report is announced, so the builder can
+// tell its own edits from another session's (lib/reportWrites).
+api.interceptors.response.use(r => { announceReportWrite(r.config); return r })
 
 /** A calculated column's Test result: sample values, plus (2026-10-10) a
  *  summary of the whole column and, for a broken formula, a problem code the

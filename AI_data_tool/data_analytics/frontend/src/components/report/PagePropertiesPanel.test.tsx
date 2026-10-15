@@ -64,6 +64,67 @@ describe('PagePropertiesPanel page size', () => {
   })
 })
 
+describe('C-21: a Custom page size has width and height', () => {
+  it('a page made before page sizes were applied shows Fit to width', () => {
+    render(<PagePropertiesPanel page={page({ page_size: '16:9' })} columns={[]} onUpdate={vi.fn()} />)
+    expect(screen.getByRole('button', { name: /fit to width/i })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.queryByLabelText(/page width/i)).not.toBeInTheDocument()
+  })
+
+  it('a preset saves its fixed size', () => {
+    vi.useFakeTimers()
+    const onUpdate = vi.fn()
+    render(<PagePropertiesPanel page={page({ page_size: '16:9' })} columns={[]} onUpdate={onUpdate} />)
+    fireEvent.click(screen.getByRole('button', { name: '16:9' }))
+    act(() => { vi.advanceTimersByTime(600) })
+    expect(onUpdate).toHaveBeenLastCalledWith(expect.objectContaining({ page_size: '16:9', custom_width: 1280, custom_height: 720 }))
+    vi.useRealTimers()
+  })
+
+  it('selecting Custom shows the inputs, and saving sends both values', () => {
+    vi.useFakeTimers()
+    const onUpdate = vi.fn()
+    render(<PagePropertiesPanel page={page({ page_size: '16:9' })} columns={[]} onUpdate={onUpdate} />)
+    fireEvent.click(screen.getByRole('button', { name: /custom/i }))
+    fireEvent.change(screen.getByLabelText(/page width/i), { target: { value: '1600' } })
+    fireEvent.change(screen.getByLabelText(/page height/i), { target: { value: '1200' } })
+    act(() => { vi.advanceTimersByTime(600) })
+    expect(onUpdate).toHaveBeenLastCalledWith(expect.objectContaining({ page_size: 'custom', custom_width: 1600, custom_height: 1200 }))
+    vi.useRealTimers()
+  })
+
+  it('an out-of-range value is flagged and not saved', () => {
+    vi.useFakeTimers()
+    const onUpdate = vi.fn()
+    render(<PagePropertiesPanel page={page({ page_size: 'custom', custom_width: 1600, custom_height: 1200 })} columns={[]} onUpdate={onUpdate} />)
+    fireEvent.change(screen.getByLabelText(/page width/i), { target: { value: '50' } })
+    act(() => { vi.advanceTimersByTime(600) })
+    expect(onUpdate).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveTextContent(/320/)
+    vi.useRealTimers()
+  })
+
+  it('Fit to width clears the frame', () => {
+    vi.useFakeTimers()
+    const onUpdate = vi.fn()
+    render(<PagePropertiesPanel page={page({ page_size: '4:3', custom_width: 960, custom_height: 720 })} columns={[]} onUpdate={onUpdate} />)
+    fireEvent.click(screen.getByRole('button', { name: /fit to width/i }))
+    act(() => { vi.advanceTimersByTime(600) })
+    expect(onUpdate).toHaveBeenLastCalledWith(expect.objectContaining({ page_size: 'fit' }))
+    vi.useRealTimers()
+  })
+
+  it('renaming a legacy page does not give it a frame', () => {
+    vi.useFakeTimers()
+    const onUpdate = vi.fn()
+    render(<PagePropertiesPanel page={page({ page_size: '16:9' })} columns={[]} onUpdate={onUpdate} />)
+    fireEvent.change(screen.getByLabelText(/tab name/i), { target: { value: 'Overview' } })
+    act(() => { vi.advanceTimersByTime(600) })
+    expect(onUpdate).toHaveBeenLastCalledWith(expect.objectContaining({ name: 'Overview', page_size: 'fit' }))
+    vi.useRealTimers()
+  })
+})
+
 describe('PagePropertiesPanel section groups (Task B2)', () => {
   it('renders the panel restructured into named ExpandableGroups', () => {
     render(<PagePropertiesPanel page={page()} columns={[]} onUpdate={vi.fn()} />)

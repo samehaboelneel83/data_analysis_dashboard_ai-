@@ -3223,3 +3223,103 @@ describe('C-19: resizing a widget', () => {
     await waitFor(() => expect(document.body.style.userSelect).toBe(''))
   })
 })
+
+describe('C-21: the canvas is drawn at the page size', () => {
+  const load = (page: Record<string, unknown>) => {
+    const r = reportWithWidget()
+    Object.assign(r.pages[0], page)
+    vi.mocked(reportsApi.get).mockReset().mockResolvedValue(r as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+  }
+  it('a page with a fixed size gets a frame of that width and height', async () => {
+    load({ page_size: 'custom', custom_width: 1600, custom_height: 1200 })
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    await screen.findByText('Sales by Region')
+    const canvas = document.querySelector<HTMLElement>('[data-canvas]')!
+    expect(canvas.style.width).toBe('1600px')
+    expect(parseFloat(canvas.style.minHeight)).toBeGreaterThanOrEqual(1200)
+    expect(canvas.getAttribute('data-page-frame')).toBe('1600x1200')
+  })
+  it('a page made before page sizes were applied keeps the flowing canvas', async () => {
+    load({ page_size: '16:9' })
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    await screen.findByText('Sales by Region')
+    const canvas = document.querySelector<HTMLElement>('[data-canvas]')!
+    expect(canvas.style.width).toBe('')
+    expect(canvas.hasAttribute('data-page-frame')).toBe(false)
+  })
+})
+
+describe('C-17 (sweep): any write this session makes is not "changed in another session"', () => {
+  it('a write announced by the API client re-syncs the known revision; the next poll raises no banner', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      vi.mocked(reportsApi.get).mockReset().mockResolvedValue({ ...baseReport(), revision: 3 } as any)
+      vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+      vi.mocked(reportsApi.getRevision).mockReset().mockResolvedValue(3)
+      renderBuilder()
+      await screen.findByTestId('view-strip')
+      await waitFor(() => expect(reportsApi.getRevision).toHaveBeenCalled())
+      // A panel wrote to this report without reloading it (the server bumped it to 4).
+      vi.mocked(reportsApi.getRevision).mockResolvedValue(4)
+      act(() => { window.dispatchEvent(new CustomEvent('datalytics:report-write', { detail: { reportId: 1 } })) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(21_000) })
+      expect(screen.queryByText(/changed in another session/i)).not.toBeInTheDocument()
+    } finally { vi.useRealTimers() }
+  })
+  it("another session's write still raises it", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      vi.mocked(reportsApi.get).mockReset().mockResolvedValue({ ...baseReport(), revision: 3 } as any)
+      vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+      vi.mocked(reportsApi.getRevision).mockReset().mockResolvedValue(3)
+      renderBuilder()
+      await screen.findByTestId('view-strip')
+      await waitFor(() => expect(reportsApi.getRevision).toHaveBeenCalled())
+      vi.mocked(reportsApi.getRevision).mockResolvedValue(4)
+      // a write to ANOTHER report in this session says nothing about this one
+      act(() => { window.dispatchEvent(new CustomEvent('datalytics:report-write', { detail: { reportId: 2 } })) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(21_000) })
+      expect(await screen.findByText(/changed in another session/i)).toBeInTheDocument()
+    } finally { vi.useRealTimers() }
+  })
+})
+
+describe('C-19 round 2: edge handles resize one way', () => {
+  // jsdom has no PointerEvent, so a fired pointerdown carries no coordinates.
+  class PE extends MouseEvent {
+    pointerId: number
+    constructor(type: string, init: PointerEventInit = {}) { super(type, init); this.pointerId = init.pointerId ?? 1 }
+  }
+  beforeEach(() => { vi.stubGlobal('PointerEvent', PE) })
+  afterEach(() => { vi.unstubAllGlobals() })
+  const run = async (testId: string) => {
+    vi.mocked(reportsApi.get).mockReset().mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    vi.mocked(reportsApi.updateWidget).mockReset().mockResolvedValue({} as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    const handle = await screen.findByTestId(testId)
+    fireEvent.pointerDown(handle, { clientX: 100, clientY: 100, pointerId: 1 })
+    await waitFor(() => expect(document.body.style.userSelect).toBe('none'))
+    // jsdom's pointer events carry no coordinates; the builder listens to the mouse too.
+    fireEvent.mouseMove(window, { clientX: 400, clientY: 400 })
+    fireEvent.mouseUp(window, { clientX: 400, clientY: 400 })
+    await waitFor(() => expect(reportsApi.updateWidget).toHaveBeenCalled())
+    return vi.mocked(reportsApi.updateWidget).mock.calls.at(-1)![3] as { layout: { w: number; h: number } }
+  }
+  it('the right edge changes only the width', async () => {
+    const { layout } = await run('widget-resize-edge-x')
+    expect(layout.w).toBeGreaterThan(6)
+    expect(layout.h).toBe(5)
+  })
+  it('the bottom edge changes only the height', async () => {
+    const { layout } = await run('widget-resize-edge-y')
+    expect(layout.w).toBe(6)
+    expect(layout.h).toBeGreaterThan(5)
+  })
+})

@@ -66,6 +66,10 @@ interface Props {
    *  the role pickers -- "region · 4 values" is what tells a bar chart from a
    *  mistake before it is drawn. Optional: absent, the pickers show no counts. */
   distinctCounts?: Record<string, number>
+  /** C-09: each numeric field's observed min/max (the builder's field
+   *  analysis), so the Latitude / Longitude pickers can flag numbers that
+   *  cannot be a coordinate. Optional: absent, nothing is flagged. */
+  valueRanges?: Record<string, { min: number; max: number }>
   onUpdate: (config: Record<string, unknown>, title: string) => void
   /** The builder's Format / Data / Interactions (redesign 7e3): shows only
    *  that section's tabs, and "All" means all of it. Absent, the panel is
@@ -108,7 +112,7 @@ function extraKeyFor(wt: string, role: string, roleValues: Record<string, string
 const seedExtras = (cfg: Record<string, unknown>): Record<string, string[]> =>
   Object.fromEntries(Object.values(EXTRA_KEY_OF).map(k => [k, stringList(cfg[k])]))
 
-function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages, hierarchy, onHierarchyRefresh, bookmarks, ruleErrors, geography, distinctCounts, onUpdate, section, onSection }: Props) {
+function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages, hierarchy, onHierarchyRefresh, bookmarks, ruleErrors, geography, distinctCounts, valueRanges, onUpdate, section, onSection }: Props) {
   // E03: in the shape the panel edits -- a legacy `roles` dict flattened,
   // `agg` renamed (widgetConfigPanel/configShape.ts). Keyed on the stored
   // object, so it is recomputed when the widget or its config changes.
@@ -1330,6 +1334,16 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           {tt(roleValues.lat && roleValues.lon ? 'cr.mapModeCoords' : roleValues.lat || roleValues.lon ? 'cr.mapModeHalf' : 'cr.mapModeCountry')}
         </div>
       )}
+      {/* C-09: a coordinate role holding numbers that cannot be one. */}
+      {(() => {
+        const bad = (['lat', 'lon', 'lat2', 'lon2'] as const).filter(r => roleSpecs.some(s => s.role === r)
+          && roleValues[r] && coordOutOfRange(roleValues[r], coordRoleAxis(r)!, valueRanges))
+        return bad.length > 0 && (
+          <div data-testid="coord-range-warning" role="status" style={{ fontSize: 11, color: 'var(--warning, #b26a00)', marginTop: 6 }}>
+            {bad.map(r => tt('cr.coordOutOfRange', { field: roleValues[r], role: L(roleSpecs.find(s => s.role === r)?.label ?? r) })).join(' ')}
+          </div>
+        )
+      })()}
       {/* C-06: a word cloud sizes WORDS; a numeric column as its text draws
           numbers as words (and "Word text" accepts any column). Said here. */}
       {wt === 'word_cloud' && roleValues.category && fieldKind(roleValues.category) === 'measure' && (
@@ -1355,10 +1369,26 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
     }
     const kind = roleAccepts(rf.role)
     const chosen = selected[0]
+    // C-09: a coordinate role lists coordinate fields first (the matching
+    // axis on top) under Geography, and flags a number whose observed values
+    // cannot be that coordinate.
+    const axis = coordRoleAxis(rf.role)
+    if (axis) {
+      const opts = measureOptions([chosen]).map(o => ({ ...o,
+        label: coordOutOfRange(o.value, axis, valueRanges) ? L('{name} (values out of range)', { name: o.label }) : o.label }))
+      const rank = (v: string) => { const a = coordAxisOf(v); return a === axis ? 0 : a ? 1 : 2 }
+      const ordered = opts.map((o, i) => ({ o, i })).sort((x, y) => rank(x.o.value) - rank(y.o.value) || x.i - y.i)
+        .map(({ o }) => ({ ...o, group: coordAxisOf(o.value) ? 'Geography' : 'Numbers' }))
+      return (chosen && !ordered.some(o => o.value === chosen))
+        ? [...ordered, { value: chosen, label: L('{name} (current)', { name: chosen }) }]
+        : ordered
+    }
     const narrowed =
       kind === 'numeric'  ? measureOptions([chosen])
     : kind === 'datetime' ? colOptions.filter(o =>
         effectiveCols.find(c => c.name === o.value)?.dtype === 'datetime')
+    : kind === 'category' ? colOptions.filter(o =>
+        effectiveCols.find(c => c.name === o.value)?.dtype !== 'numeric')
     : colOptions
     return (chosen && !narrowed.some(o => o.value === chosen))
       ? [...narrowed, { value: chosen, label: L('{name} (current)', { name: chosen }) }]
@@ -3041,13 +3071,30 @@ function panelPropsEqual(a: Props, b: Props): boolean {
     // saver would write to the wrong widget or page.
     if (k === 'onHierarchyRefresh' && typeof va === 'function' && typeof vb === 'function') continue
     if (k === 'columns') { if (sameColumns(va as Props['columns'], vb as Props['columns'])) continue; return false }
-    if (k === 'distinctCounts' || k === 'ruleErrors') {
+    if (k === 'distinctCounts' || k === 'ruleErrors' || k === 'valueRanges') {
       if (JSON.stringify(va ?? null) === JSON.stringify(vb ?? null)) continue
       return false
     }
     return false
   }
   return true
+}
+
+/** C-09: which coordinate a role takes ('lat' / 'lon'), or null. */
+function coordRoleAxis(role: string): 'lat' | 'lon' | null {
+  return role === 'lat' || role === 'lat2' ? 'lat' : role === 'lon' || role === 'lon2' ? 'lon' : null
+}
+/** C-09: which coordinate a field's name says it holds, or null. */
+function coordAxisOf(column: string): 'lat' | 'lon' | null {
+  if (nonAdditiveKind(column) !== 'coordinate') return null
+  return /(^|[^a-z])(lat|latitude)([^a-z]|$)|خط_العرض/i.test(column) ? 'lat' : 'lon'
+}
+/** C-09: the field's observed values fall outside what the coordinate allows. */
+function coordOutOfRange(column: string, axis: 'lat' | 'lon',
+                         ranges: Record<string, { min: number; max: number }> | undefined): boolean {
+  const r = ranges?.[column]
+  const lim = axis === 'lat' ? 90 : 180
+  return !!r && (r.min < -lim || r.max > lim)
 }
 
 export default memo(WidgetConfigPanel, panelPropsEqual)

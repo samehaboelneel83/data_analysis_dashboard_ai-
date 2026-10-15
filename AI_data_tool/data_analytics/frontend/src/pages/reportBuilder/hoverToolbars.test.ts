@@ -27,4 +27,18 @@ describe('hover toolbars stay inside their own tile', () => {
     expect(rule(viewCss, '.dl-vw-wt')).toMatch(/visibility/)
     expect(rule(builderCss, '.dl-bd-wt')).toMatch(/visibility/)
   })
+
+  // C-12 round 2: centred at the top, the toolbar still sat on the tile's own
+  // title. It sits at the header's end, and the header makes room for it
+  // while it shows, so the title truncates instead of being covered.
+  it.each([['View', '.dl-vw-wt'], ['Edit', '.dl-bd-wt']])('%s: the toolbar sits at the header end, not over the centre', (_m, sel) => {
+    const decl = rule(sel === '.dl-vw-wt' ? viewCss : builderCss, sel)
+    expect(decl).toMatch(/inset-inline-end:\s*\d+px/)
+    expect(decl).not.toMatch(/left:\s*50%/)
+  })
+  it.each([['View', '.dl-vw-wt'], ['Edit', '.dl-bd-wt']])('%s: the header reserves the toolbar width while it shows', (_m, sel) => {
+    const css = sel === '.dl-vw-wt' ? viewCss : builderCss
+    const m = new RegExp(`:has\\(> \\${sel}\\):hover \\.dl-whead[^{]*\\{([^}]*)\\}`).exec(css)
+    expect(m?.[1] ?? '').toMatch(/padding-inline-end:\s*\d+px/)
+  })
 })

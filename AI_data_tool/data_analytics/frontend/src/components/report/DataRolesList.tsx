@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { RoleField } from '../../types/report'
 import { useModalDialog } from '../ui/useModalDialog'
 import { useT } from '../../i18n'
@@ -278,6 +278,32 @@ export function AddFieldDialog({ heading, multi, choices, selected, onApply, onC
   const needle = q.trim().toLowerCase()
   const shown = choices.filter(c => !needle || c.label.toLowerCase().includes(needle))
   const groups = [...new Set(shown.map(c => c.group ?? ''))]
+  // C-28: arrow-key roving. The fields in the order drawn (group by group);
+  // only the active one is in the Tab order, and the arrows move focus.
+  const order = groups.flatMap(g => shown.filter(c => (c.group ?? '') === g)).map(c => c.value)
+  const [active, setActive] = useState(0)
+  const activeValue = order[Math.min(active, Math.max(order.length - 1, 0))]
+  const searchRef = useRef<HTMLInputElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+  const focusAt = (i: number) => {
+    const items = [...(listRef.current?.querySelectorAll<HTMLElement>('[data-pick]') ?? [])]
+    if (items.length === 0) return
+    const k = Math.max(0, Math.min(items.length - 1, i))
+    setActive(k)
+    items[k].focus()
+  }
+  const onListKey = (e: ReactKeyboardEvent) => {
+    const items = [...(listRef.current?.querySelectorAll<HTMLElement>('[data-pick]') ?? [])]
+    const i = items.indexOf(document.activeElement as HTMLElement)
+    if (i < 0) return
+    if (e.key === 'ArrowDown') { e.preventDefault(); focusAt(i + 1) }
+    else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      if (i === 0) searchRef.current?.focus(); else focusAt(i - 1)
+    }
+    else if (e.key === 'Home') { e.preventDefault(); focusAt(0) }
+    else if (e.key === 'End') { e.preventDefault(); focusAt(items.length - 1) }
+  }
   // C-26: a several-field role applies each tick at once, like a one-field
   // role applies its click -- ticking used to look like it did nothing until
   // a separate "Add". The dialog stays open for the next field; Done closes.
@@ -300,16 +326,18 @@ export function AddFieldDialog({ heading, multi, choices, selected, onApply, onC
           <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
             {multi ? t('bc.canvas.chooseFields') : t('bc.canvas.chooseField')}
           </div>
-          <input type="search" value={q} onChange={e => setQ(e.target.value)} aria-label={t('bc.canvas.searchFields')}
-            // C-28: Enter takes the single match (ticks it, in a several-field role).
+          <input ref={searchRef} type="search" value={q} onChange={e => { setQ(e.target.value); setActive(0) }} aria-label={t('bc.canvas.searchFields')}
+            // C-28: Enter takes the single match (ticks it, in a several-field role);
+            // Down moves into the list.
             onKeyDown={e => {
+              if (e.key === 'ArrowDown') { e.preventDefault(); focusAt(0); return }
               if (e.key !== 'Enter' || shown.length !== 1) return
               e.preventDefault()
               if (multi) toggle(shown[0].value); else choose(shown[0].value)
             }}
             placeholder={t('bc.canvas.searchFieldsPh')} style={{ width: '100%' }} />
         </div>
-        <div role={multi ? 'group' : 'listbox'} aria-label={t('bc.canvas.roleFields', { role: shownHeading })}
+        <div ref={listRef} onKeyDown={onListKey} role={multi ? 'group' : 'listbox'} aria-label={t('bc.canvas.roleFields', { role: shownHeading })}
           style={{ overflowY: 'auto', padding: '6px 8px', fontSize: 13 }}>
           {shown.length === 0 && (
             <div style={{ padding: '10px 8px', color: 'var(--muted)', fontSize: 12 }}>
@@ -325,12 +353,16 @@ export function AddFieldDialog({ heading, multi, choices, selected, onApply, onC
                 return multi ? (
                   <label key={c.value} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px',
                     borderRadius: 6, cursor: 'pointer' }}>
-                    <input type="checkbox" checked={on} onChange={() => toggle(c.value)} />
+                    <input type="checkbox" data-pick tabIndex={c.value === activeValue ? 0 : -1}
+                      onFocus={() => setActive(order.indexOf(c.value))}
+                      checked={on} onChange={() => toggle(c.value)} />
                     <span style={{ flex: 1 }} dir="auto">{c.label}</span>
                     {on && <span style={{ fontSize: 11, color: 'var(--accent)' }}>#{picked.indexOf(c.value) + 1}</span>}
                   </label>
                 ) : (
                   <button key={c.value} type="button" role="option" aria-selected={on} onClick={() => choose(c.value)}
+                    data-pick tabIndex={c.value === activeValue ? 0 : -1}
+                    onFocus={() => setActive(order.indexOf(c.value))}
                     // C-28: named with the role, so it is not a second "origin_lat" beside the
                     // Fields panel's own button for that field.
                     aria-label={t('bc.canvas.useFieldFor', { field: c.label, role: shownHeading })}

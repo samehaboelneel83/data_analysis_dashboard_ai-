@@ -5,6 +5,8 @@ import AccessExplainer from '../components/report/AccessExplainer'
 import { DEFAULT_SPEC, PRESETS, describeSpec, parseSpec, specProblem, type RelativeSpec } from '../lib/relativeDates'
 import { closeAll, closeOpen, markOpen, readOpen, type OpenReport } from '../lib/openReports'
 import { stackBelow } from '../lib/stackLayouts'
+import { pageFrame } from '../lib/pageSize'
+import { REPORT_WRITE_EVENT, type ReportWriteDetail } from '../lib/reportWrites'
 import OpenReportsMenu from '../components/report/OpenReportsMenu'
 import { useEffect, useState, useCallback, useMemo, useRef, lazy, Suspense, Fragment, type ReactNode } from 'react'
 import LoadError from '../components/ui/LoadError'
@@ -70,7 +72,7 @@ import { countLabel } from '../lib/fieldHints'
 import { boundarySetsApi, type BoundaryPack } from '../services/api'
 import PackTermsConfirm from '../components/report/PackTermsConfirm'
 import { describeFilter } from '../components/report/ViewerKit'
-import { fieldHints, hintTitle } from '../lib/fieldHints'
+import { fieldHints, hintTitle, numericRanges } from '../lib/fieldHints'
 import { PRE_AGGREGATED_HINT } from '../lib/aggregateDisclosure'
 import { CrossFilterProvider, useCrossFilter } from '../components/report/CrossFilterContext'
 import CollapsibleSide from '../components/report/CollapsibleSide'
@@ -381,7 +383,14 @@ export default function ReportBuilder() {
   // beside another panel) scales the page down to fit, instead of cutting
   // widgets off behind a sideways scroll. Drag and resize use the same scale.
   const { width: columnW, attach: attachColumn } = useMeasuredWidth(0)
-  const fitScale = columnW > 0 && columnW < MIN_CANVAS_W ? columnW / MIN_CANVAS_W : 1
+  // C-21: a page with a fixed size (16:9, 4:3, Custom W x H) is drawn in a
+  // frame of exactly that size, in Edit, View and Present alike; a column
+  // narrower than the frame scales it down the same way. A flowing page
+  // ("Fit to width", and every page made before sizes were applied) fills
+  // the column as before.
+  const frame = pageFrame(activePage)
+  const baseCanvasW = frame ? frame.w : MIN_CANVAS_W
+  const fitScale = columnW > 0 && columnW < baseCanvasW ? columnW / baseCanvasW : 1
   // The render in which the CANVAS changed width (a side panel or the rail
   // opened or closed, the window resized). Tiles snap to their new boxes in
   // that render instead of easing there: an eased tile hands its chart a new
@@ -508,7 +517,7 @@ export default function ReportBuilder() {
 
   // Drag / resize state
   const [dragging,  setDragging]  = useState<{ widgetId:number; startX:number; startY:number; layout:Widget['layout']; offsetX:number; offsetY:number; packed:boolean; items:ReturnType<typeof toLayoutItems> } | null>(null)
-  const [resizing,  setResizing]  = useState<{ widgetId:number; startX:number; startY:number; layout:Widget['layout']; packed:boolean; items:ReturnType<typeof toLayoutItems> } | null>(null)
+  const [resizing,  setResizing]  = useState<{ widgetId:number; startX:number; startY:number; layout:Widget['layout']; packed:boolean; items:ReturnType<typeof toLayoutItems>; axis?: 'both' | 'x' | 'y' } | null>(null)
   const [localLayouts, setLocalLayouts] = useState<Record<number, Widget['layout']>>({})
   // Mirrored in a ref so the drag effect's mouseup can read the LATEST layout
   // without listing localLayouts in its deps -- with it listed, every
@@ -544,6 +553,8 @@ export default function ReportBuilder() {
   // our writes mid-drag would be worse than telling us to reload.
   const [loadedRevision, setLoadedRevision] = useState<number | null>(null)
   const loadedRevisionRef = useRef<number | null>(null)
+  /** When this session last wrote to the report (C-17). */
+  const lastOwnWriteRef = useRef(0)
   const [staleRevision, setStaleRevision] = useState<number | null>(null)
   /** E09: a save refused because someone else changed the widget first. */
   const [editConflict, setEditConflict] = useState<EditConflict | null>(null)
@@ -729,11 +740,14 @@ export default function ReportBuilder() {
       // Skip while one of our own writes is in flight: it bumps the counter and then
       // reloads, and reporting that as somebody else's edit would be a false alarm.
       if (savingRef.current) return
+      // C-17: nor just after one this session announced (its re-sync is on the way).
+      const ownWriteRecent = () => Date.now() - lastOwnWriteRef.current < 3000
+      if (ownWriteRecent()) return
       try {
         const remote = await reportsApi.getRevision(reportId)
         // The fetch may have started before our save; ignore if we wrote meanwhile
         // or if loadReport already caught up.
-        if (savingRef.current) return
+        if (savingRef.current || ownWriteRecent()) return
         const known = loadedRevisionRef.current
         if (!cancelled && known != null && remote > known) setStaleRevision(remote)
       } catch {
@@ -1140,6 +1154,27 @@ export default function ReportBuilder() {
   const syncRevisionAfterOwnWrite = async () => {
     try { setLoadedRevision(await reportsApi.getRevision(reportId)) } catch { /* next poll decides */ }
   }
+  // C-17 (sweep): ANY successful write this session makes to this report --
+  // the API client announces each one (lib/reportWrites) -- re-syncs the known
+  // revision, so no write path has to remember to, and none raises "changed in
+  // another session" on the author's own edit. A burst of writes syncs once.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const onWrite = (e: Event) => {
+      if ((e as CustomEvent<ReportWriteDetail>).detail?.reportId !== reportId) return
+      lastOwnWriteRef.current = Date.now()
+      clearTimeout(timer)
+      timer = setTimeout(() => {
+        reportsApi.getRevision(reportId).then(r => {
+          // The ref at once too: the poll reads it, and must not wait a render.
+          if (loadedRevisionRef.current == null || r > loadedRevisionRef.current) loadedRevisionRef.current = r
+          setLoadedRevision(known => known == null || r > known ? r : known)
+        }).catch(() => { /* next poll decides */ })
+      }, 250)
+    }
+    window.addEventListener(REPORT_WRITE_EVENT, onWrite)
+    return () => { window.removeEventListener(REPORT_WRITE_EVENT, onWrite); clearTimeout(timer) }
+  }, [reportId])
 
   /** Change the dashboard's look (fonts, borders, corners...) as one undoable step. */
   const setStyleUndoable = async (next: DashboardStyle) => {
@@ -2655,10 +2690,11 @@ export default function ReportBuilder() {
     })
   }, [containerW, canvasScale, activePage])
 
-  const handleResizeStart = useCallback((widget: Widget) => (e: React.MouseEvent) => {
+  const handleResizeStart = useCallback((widget: Widget) => (e: React.MouseEvent, axis: 'both' | 'x' | 'y' = 'both') => {
     e.preventDefault()
     if (!activePage) return
     setResizing({
+      axis,
       widgetId: widget.id, startX: e.clientX, startY: e.clientY, layout: shownLayout(widget),
       packed: isPackedMode(activePage.layout_mode),
       items: toLayoutItems(activePage.widgets.map(w => ({ ...w, layout: shownLayout(w) }))),
@@ -2673,7 +2709,7 @@ export default function ReportBuilder() {
   const perWidgetHandlers = useMemo(() => {
     const m = new Map<number, { onSelect: (e: React.MouseEvent) => void; onDelete: () => void
       onDuplicate: () => void; onEditOptions: () => void
-      onDragStart: (e: React.MouseEvent) => void; onResizeStart: (e: React.MouseEvent) => void }>()
+      onDragStart: (e: React.MouseEvent) => void; onResizeStart: (e: React.MouseEvent, axis?: 'both' | 'x' | 'y') => void }>()
     for (const w of (activePage?.widgets ?? [])) {
       m.set(w.id, {
         onSelect: (e) => widgetActionsRef.current.selectWidget(w, e),
@@ -2682,7 +2718,7 @@ export default function ReportBuilder() {
         // F-16: the widget menu's "Edit options…" -- its Format options, opened.
         onEditOptions: () => { setSelectedW(w); setRightPanelMode('default'); setPropSection('format'); setRightOpenSignal(n => n + 1) },
         onDragStart: (e) => dragStartRef.current(w)(e),
-        onResizeStart: (e) => resizeStartRef.current(w)(e),
+        onResizeStart: (e, axis) => resizeStartRef.current(w)(e, axis),
       })
     }
     return m
@@ -2709,8 +2745,9 @@ export default function ReportBuilder() {
       if (resizing) {
         const dx = (e.clientX - resizing.startX) / scale
         const dy = (e.clientY - resizing.startY) / scale
-        const rawW = resizing.layout.w + Math.round(dx / (cellW + GAP))
-        const rawH = resizing.layout.h + Math.round(dy / (ROW_H + GAP))
+        // C-19: an edge handle moves one dimension only.
+        const rawW = resizing.axis === 'y' ? resizing.layout.w : resizing.layout.w + Math.round(dx / (cellW + GAP))
+        const rawH = resizing.axis === 'x' ? resizing.layout.h : resizing.layout.h + Math.round(dy / (ROW_H + GAP))
         const next = resizing.packed
           ? resizePacked(resizing.items, resizing.widgetId, rawW, rawH)
           : resizeFree(resizing.items, resizing.widgetId, rawW, rawH)
@@ -2743,7 +2780,7 @@ export default function ReportBuilder() {
     const body = document.body.style
     const was = { userSelect: body.userSelect, cursor: body.cursor }
     body.userSelect = 'none'
-    body.cursor = resizing ? 'nwse-resize' : 'grabbing'
+    body.cursor = resizing ? (resizing.axis === 'x' ? 'ew-resize' : resizing.axis === 'y' ? 'ns-resize' : 'nwse-resize') : 'grabbing'
     return () => {
       body.userSelect = was.userSelect
       body.cursor = was.cursor
@@ -2859,6 +2896,8 @@ export default function ReportBuilder() {
       : `${f.column} ${(() => { const k = `bc.shell.rf.op.${f.op}` as MessageKey; const v = tr(k); return v !== k ? v : f.op })()} ${Array.isArray(f.value) ? (f.value as unknown[]).join(', ') : String(f.value)}`,
   }))
   const hints = fieldHints(analysis)
+  // (after the early returns: a plain value, not a hook; the panel compares it by value)
+  const valueRanges = numericRanges(analysis)
   const pageWidgets = activePage?.widgets ?? []
   // A report being READ always uses the Modern look (the old "Default"
   // reading look was removed: same data, one look to maintain). Never while
@@ -2971,6 +3010,7 @@ export default function ReportBuilder() {
 
                   {selectedW
                     ? <WidgetConfigPanel key={`${selectedW.id}:${panelEpoch}`} section={propSection} onSection={setPropSection} geography={geography} widget={selectedW} columns={columns} datasets={datasets} primaryDatasetId={report.dataset_id} pages={report.pages} hierarchy={hierarchy} onHierarchyRefresh={refreshHierarchy} bookmarks={bookmarks} onUpdate={updateWidgetConfig} ruleErrors={perfStats[selectedW.id]?.ruleErrors}
+                      valueRanges={valueRanges}
                       distinctCounts={Object.fromEntries(Object.entries(hints).flatMap(([k, h]) => typeof (h as { distinct?: unknown })?.distinct === 'number' ? [[k, (h as { distinct: number }).distinct]] : []))} />
                     : activePage && <PagePropertiesPanel reportId={reportId} page={activePage} columns={columns} onUpdate={updatePageProps}
                         pages={report.pages} bookmarks={bookmarks} onSelectWidget={setSelectedW}
@@ -4176,10 +4216,12 @@ export default function ReportBuilder() {
                 })()}
               </div>
             ) : (
-            <div style={{ height: canvasH(pageWidgets.map(w => ({ ...w, layout: localLayouts[w.id] ?? packedPreview[w.id] ?? w.layout }))) * canvasScale,
-              minWidth: MIN_CANVAS_W * fitScale, overflow: fitScale < 1 && zoom <= 100 ? 'hidden' : undefined }}>
+            <div style={{ height: Math.max(canvasH(pageWidgets.map(w => ({ ...w, layout: localLayouts[w.id] ?? packedPreview[w.id] ?? w.layout }))), frame?.h ?? 0) * canvasScale,
+              minWidth: baseCanvasW * fitScale, overflow: fitScale < 1 && zoom <= 100 ? 'hidden' : undefined,
+              ...(frame ? { width: frame.w * canvasScale, margin: '0 auto' } : {}) }}>
               <div ref={attachCanvas}
                 data-canvas
+                data-page-frame={frame ? `${frame.w}x${frame.h}` : undefined}
                 onDragOver={e => { if (e.dataTransfer.types.includes('application/x-fields') || e.dataTransfer.types.includes('application/x-field') || e.dataTransfer.types.includes('application/x-hierarchy')) {
                   e.preventDefault(); e.dataTransfer.dropEffect = 'copy'
                   // A hierarchy is a target too: it fills a hierarchy widget's levels (QA6 B2).
@@ -4232,7 +4274,7 @@ export default function ReportBuilder() {
                     if (!(target && fillHierarchyLevels(target, Number(hier)))) void addWidgetFromHierarchy(Number(hier))
                   }
                 }}
-                style={{ position:'relative', minHeight:canvasH(pageWidgets.map(w => ({ ...w, layout: localLayouts[w.id] ?? packedPreview[w.id] ?? w.layout }))),
+                style={{ position:'relative', minHeight:Math.max(canvasH(pageWidgets.map(w => ({ ...w, layout: localLayouts[w.id] ?? packedPreview[w.id] ?? w.layout }))), frame?.h ?? 0),
                 // The page's own backdrop, with objects that opt into
                 // transparency floating on it. `cover` rather than `contain`:
                 // a page is a fixed aspect box and a letterboxed photograph
@@ -4244,8 +4286,14 @@ export default function ReportBuilder() {
                 // The dashboard's own look: fonts, card borders, corners, light or dark.
                 ...styleVars(report?.style),
                 borderRadius:'var(--radius)', border:'1px solid var(--border)',
-                ...(fitScale < 1 ? { width: MIN_CANVAS_W } : {}),
+                ...(frame ? { width: frame.w } : fitScale < 1 ? { width: MIN_CANVAS_W } : {}),
                 transform: `scale(${canvasScale})`, transformOrigin: 'top left' }}>
+                {/* C-21: where a fixed page ends, when objects run past it. */}
+                {editMode && frame && pageWidgets.some(w => { const l = localLayouts[w.id] ?? packedPreview[w.id] ?? w.layout
+                  return (l.y + l.h) * (ROW_H + GAP) > frame.h }) && (
+                  <div data-testid="page-frame-edge" aria-hidden
+                    style={{ position:'absolute', left:0, right:0, top:frame.h, borderTop:'1px dashed var(--muted)', pointerEvents:'none', zIndex:0 }} />
+                )}
                 {pageWidgets.length === 0 && (
                   // An empty page TEACHES (SAS: "Drag objects or data items onto
                   // the page, or start from a page template"). The drag-a-field

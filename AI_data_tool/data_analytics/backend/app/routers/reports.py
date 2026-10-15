@@ -819,6 +819,17 @@ async def add_page(report_id: int, body: PageCreate, db: AsyncSession = Depends(
 async def update_page(report_id: int, page_id: int, body: PageUpdate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     page = await _get_page(page_id, report_id, db, current_user)
     changes = body.model_dump(exclude_none=True)
+    # C-21: a dimension sent as null clears it (Undo restores "no frame").
+    for dim in ("custom_width", "custom_height"):
+        if dim in body.model_fields_set and getattr(body, dim) is None:
+            changes[dim] = None
+    if changes.get("page_size") == "fit":
+        changes["custom_width"] = changes["custom_height"] = None
+    elif changes.get("page_size") == "custom":
+        w = changes.get("custom_width", page.custom_width)
+        h = changes.get("custom_height", page.custom_height)
+        if not (w and h):
+            raise HTTPException(422, "A custom page size needs both a width and a height")
     if "background_url" in changes:
         # The same rule every author-typed address in this product follows
         # (image widget, web content, custom visual, precision container):
@@ -1240,6 +1251,33 @@ class _DuplicateBody(_DupBase):
     name: str | None = None
 
 
+async def _file_copy_beside(db: AsyncSession, source_id: int, copy_id: int, user: User) -> None:
+    """C-20: file a copy in the original's folder, right after it.
+
+    Only where filing cannot change who sees it: a folder that is published,
+    or shared by a folder grant, on the way up opens everything filed under it
+    -- and the copy is a private draft. Such a copy (and the copy of an
+    unfiled report) stays at the root, as before."""
+    from ..models.models import WorkspaceFolderGrant, WorkspaceNode
+    src = (await db.execute(select(WorkspaceNode).where(WorkspaceNode.report_id == source_id))).scalars().first()
+    if src is None or src.parent_id is None or src.org_id != user.org_id:
+        return
+    seen: set[int] = set()
+    node_id = src.parent_id
+    while node_id is not None and node_id not in seen:
+        seen.add(node_id)
+        folder = await db.get(WorkspaceNode, node_id)
+        if folder is None or folder.published:
+            return
+        granted = (await db.execute(select(WorkspaceFolderGrant.id)
+                                    .where(WorkspaceFolderGrant.node_id == node_id).limit(1))).first()
+        if granted:
+            return
+        node_id = folder.parent_id
+    db.add(WorkspaceNode(org_id=src.org_id, parent_id=src.parent_id, node_type="report",
+                         report_id=copy_id, created_by=user.id, position=(src.position or 0) + 1))
+
+
 @router.post("/{report_id}/duplicate", response_model=ReportOut, status_code=201)
 async def duplicate_report(report_id: int, body: _DuplicateBody | None = None,
                            db: AsyncSession = Depends(get_db),
@@ -1297,6 +1335,7 @@ async def duplicate_report(report_id: int, body: _DuplicateBody | None = None,
     for cf in (await db.execute(select(CommonFilter).where(CommonFilter.report_id == report_id))).scalars().all():
         db.add(CommonFilter(report_id=copy.id, column=cf.column, op=cf.op, value=cf.value, position=cf.position))
     _remap_restored_refs([nw for _, nw in new_widgets], marks, page_map, widget_map)
+    await _file_copy_beside(db, report_id, copy.id, current_user)
     await audit(db, current_user, "report.duplicate", "report", copy.id, f"copy of report {report_id}")
     await db.commit()
     created = await _get_report(copy.id, db, current_user)

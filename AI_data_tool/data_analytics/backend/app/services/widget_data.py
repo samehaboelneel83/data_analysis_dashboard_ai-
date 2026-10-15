@@ -2025,14 +2025,24 @@ def shape_scatter_measures(df: pd.DataFrame, config: dict) -> dict:
     if not cat or cat not in df.columns:
         return shape_xy_numeric(df, {**{k: v for k, v in config.items() if k not in ("roles", "dimension")},
                                      "measure": x, "measure2": y})
-    sub = df[[cat, x, y]].copy()
-    sub[x] = pd.to_numeric(sub[x], errors="coerce")
-    sub[y] = pd.to_numeric(sub[y], errors="coerce")
-    grouped = sub.groupby(cat, dropna=True).agg(__x=(x, _pandas_agg_fn(agg2)), __y=(y, _pandas_agg_fn(agg))).reset_index()
-    grouped, _truncation = _cut(grouped, int(config.get("limit") or 500), "categories")
-    rows = [{"name": _safe(r[cat]), "x": _safe(r["__x"]), "y": _safe(r["__y"])} for _, r in grouped.iterrows()]
-    return {"type": "xy_series", "x": x, "y": y, "category": cat, "rows": rows,
-            "total": len(df), "truncation": _truncation}
+    # C-07 (round 2): Y per label comes from the grouped-series shaper, so every
+    # option a scatter offers (sort, having, Top-N, percentage, quick calcs...)
+    # works on it exactly as it does on the old scatter; X is then read for
+    # each label that survived.
+    y_cfg = {k: v for k, v in config.items() if k not in ("measure2", "aggregation2", "roles")}
+    y_cfg.update({"dimension": cat, "measure": y})
+    ys = shape_series(df, {**y_cfg, "limit": config.get("limit") or 500})
+    xs = pd.to_numeric(df[x], errors="coerce").groupby(df[cat], dropna=True).agg(_pandas_agg_fn(agg2))
+    x_by = {str(k): v for k, v in xs.items()}
+    rows = []
+    for r in ys.get("rows") or []:
+        xv = x_by.get(str(r.get("name")))
+        if xv is None or pd.isna(xv):
+            continue                      # "All Other" and the like have no single X
+        rows.append({"name": r.get("name"), "x": _safe(xv), "y": r.get("value")})
+    out = {k: v for k, v in ys.items() if k not in ("rows", "type")}
+    return {**out, "type": "xy_series", "x": x, "y": y, "category": cat, "rows": rows,
+            "total": ys.get("total", len(df))}
 
 
 def shape_dual_series(df: pd.DataFrame, config: dict) -> dict:
@@ -2192,6 +2202,14 @@ def shape_xy_numeric(df: pd.DataFrame, config: dict) -> dict:
         # same one every time), not the `limit` rows with the smallest x --
         # which on a large table is one sliver at the left edge.
         sub = both.sample(limit, random_state=7).sort_values(x)
+        _truncation = _cut(both, limit, "points")[1]
+    elif not config.get("limit") and len(both) > limit:
+        # C-24 (step 2): as a line, the WHOLE x range, evenly thinned, unless
+        # the author asked for a number of rows. The first `limit` rows by x
+        # drew one sliver at the left edge. The cap is still disclosed.
+        ordered = both.sort_values(x, kind="mergesort")
+        idx = sorted({round(i * (len(ordered) - 1) / (limit - 1)) for i in range(limit)}) if limit > 1 else [0]
+        sub = ordered.iloc[idx]
         _truncation = _cut(both, limit, "points")[1]
     else:
         sub, _truncation = _cut(both.sort_values(x), limit, "points")
@@ -2976,6 +2994,33 @@ def shape_geo_lines(df: pd.DataFrame, config: dict) -> dict:
     return {"type": "geo_lines", "rows": rows, "dropped": dropped, "total": len(df)}
 
 
+def _merge_split_clusters(grouped: pd.DataFrame, cell: float) -> pd.DataFrame:
+    """C-29: one place, one cluster. A grid splits a city whose points straddle
+    a cell edge into two cells whose centres both sit on the city (two
+    concentric bubbles, "34" over "37"). Clusters whose centres lie within a
+    quarter of a cell of each other are merged, largest first: counts and
+    values add, the position is the count-weighted centre. Real places in
+    neighbouring cells are further apart than that and stay separate."""
+    if len(grouped) < 2:
+        return grouped
+    near = cell / 4
+    recs = grouped.sort_values("count", ascending=False).to_dict("records")
+    out: list[dict] = []
+    for r in recs:
+        for m in out:
+            if abs(m["lat"] - r["lat"]) <= near and abs(m["lon"] - r["lon"]) <= near:
+                n = m["count"] + r["count"]
+                m["lat"] = (m["lat"] * m["count"] + r["lat"] * r["count"]) / n
+                m["lon"] = (m["lon"] * m["count"] + r["lon"] * r["count"]) / n
+                if "value" in m:
+                    m["value"] = (0 if pd.isna(m["value"]) else m["value"]) + (0 if pd.isna(r["value"]) else r["value"])
+                m["count"] = n
+                break
+        else:
+            out.append(dict(r))
+    return pd.DataFrame(out, columns=grouped.columns)
+
+
 def shape_geo_clusters(df: pd.DataFrame, config: dict) -> dict:
     """Grid clustering for dense point data: points snap to a lat/lon grid and
     each occupied cell becomes one marker carrying its point count (and summed
@@ -3015,6 +3060,7 @@ def shape_geo_clusters(df: pd.DataFrame, config: dict) -> dict:
     if "value" in sub.columns:
         agg["value"] = ("value", "sum")
     grouped = sub.groupby(["cell_lat", "cell_lon"], dropna=False).agg(**agg).reset_index(drop=True)
+    grouped = _merge_split_clusters(grouped, cell)
     grouped = grouped.sort_values("count", ascending=False).head(int(config.get("limit") or 500))
     rows = [{k: _safe(v) for k, v in row.items()} for row in grouped.to_dict("records")]
     return {"type": "geo_clusters", "rows": rows, "dropped": dropped,
@@ -4701,6 +4747,8 @@ def get_widget_data_from_df(
     `check_fields=False` is for a PRE-AGGREGATED frame (the DuckDB and DirectQuery
     aggregate paths), which holds only the dimension and measure columns and whose
     caller has already validated the config's fields against the dataset."""
+    from .widget_roles import scatter_config
+    config = scatter_config(widget_type, config)   # C-07: an old scatter, drawn as before
     # A bar of several measures and no category: one bar per measure, each
     # measure resolved as its own headline number (multi_measure.py).
     from .period_change import change_over, resolve as resolve_change
@@ -5545,6 +5593,8 @@ def get_widget_data(
     result cache together; now the first computes and the rest take its answer.
     A pipeline that reads other frames handed in by the caller is never shared."""
     from . import single_flight
+    from .widget_roles import scatter_config
+    config = scatter_config(widget_type, config)   # C-07: an old scatter, drawn as before
     key = None
     if prep_aux_frames is None:
         try:

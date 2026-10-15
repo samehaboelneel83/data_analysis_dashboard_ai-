@@ -3215,3 +3215,11 @@ input::placeholder, textarea::placeholder { unicode-bidi: plaintext; }
 
 /* A toast that can be taken back (9-polish). */
 .dl-toast-undo { display: inline-flex; align-items: center; gap: 10px; }
+
+/* C-13: a multi-row card in a tile much wider than tall (a strip across the
+   page) lays its figures side by side; each figure then fits its own share of
+   the width (it is an inline-size container) and the full height. */
+@container dlcard (min-aspect-ratio: 5 / 2) {
+  .dl-card__rows { flex-direction: row; align-items: center; --dl-card-rows: 1; }
+  .dl-card__item { flex: 1 1 0; }
+}

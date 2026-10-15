@@ -152,10 +152,25 @@ describe('C-23: small multiples needs its split field', () => {
 })
 
 describe('C-07: a scatter offers an X measure', () => {
-  it('has an optional numeric X role beside its Y measure', async () => {
+  // Round 2 (full redesign): X is a REQUIRED numeric role now (was optional).
+  it('has a required numeric X role beside its Y measure', async () => {
     const { ROLE_SPECS, roleAccepts } = await import('../../types/report')
     const x = ROLE_SPECS.scatter.find(r => r.role === 'measure2')
-    expect(x).toMatchObject({ required: false })
+    expect(x).toMatchObject({ required: true })
     expect(roleAccepts('measure2')).toBe('numeric')
+  })
+})
+
+describe('C-07 round 2: Scatter needs an X measure and a Y measure', () => {
+  const sc = (config: Record<string, unknown>) => ({ widget_type: 'scatter', config }) as never
+  it('a new scatter is unfinished until both are set', () => {
+    expect(missingRequiredRoles(sc({ measure: 'weight' }))).toEqual(['X axis'])
+    expect(missingRequiredRoles(sc({ measure2: 'units' }))).toEqual(['Y axis'])
+    expect(missingRequiredRoles(sc({ measure2: 'units', measure: 'weight' }))).toEqual([])
+  })
+  it('an old scatter (a dimension on X) is held to its old rule and still draws', () => {
+    expect(missingRequiredRoles(sc({ dimension: 'height', measure: 'weight' }))).toEqual([])
+    expect(missingRequiredRoles(sc({ dimension: 'height' }))).toEqual([])
+    expect(missingRequiredRoles(sc({ dimension: 'height', measure2: 'height', measure: 'weight' }))).toEqual([])
   })
 })

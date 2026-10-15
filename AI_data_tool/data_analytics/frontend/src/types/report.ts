@@ -39,7 +39,8 @@ export interface ReportPage {
   position: number
   widgets: Widget[]
   created_at: string
-  page_size: '16:9' | '4:3' | 'custom'
+  // C-21: 'fit' flows; the rest are a fixed frame of custom_width x custom_height
+  page_size: 'fit' | '16:9' | '4:3' | 'custom'
   custom_width?: number | null
   custom_height?: number | null
   /** A picture the page's objects sit on. Objects set to a transparent
@@ -290,7 +291,7 @@ export const PIVOT_WIDGETS: readonly string[] = ['crosstab', 'matrix']
  *  Unknown roles take anything, so a role added later is usable before it is
  *  classified here rather than presenting an empty dropdown.
  */
-export type RoleColumnKind = 'numeric' | 'datetime' | 'any'
+export type RoleColumnKind = 'numeric' | 'datetime' | 'category' | 'any'
 
 const NUMERIC_ROLES = new Set([
   'measure', 'measure2', 'measures', 'size', 'target', 'color',
@@ -299,10 +300,14 @@ const NUMERIC_ROLES = new Set([
 //: `animation` is deliberately absent: bubble_change animates over a date OR an
 //: ordered category, and narrowing it would remove a legitimate choice.
 const DATE_ROLES = new Set(['start', 'end'])
+//: C-23: roles that split a chart into groups -- a text or date field, never a
+//: measure (one panel per revenue value is a thousand panels of one bar).
+const CATEGORY_ROLES = new Set(['facet'])
 
 export function roleAccepts(role: string): RoleColumnKind {
   if (NUMERIC_ROLES.has(role)) return 'numeric'
   if (DATE_ROLES.has(role)) return 'datetime'
+  if (CATEGORY_ROLES.has(role)) return 'category'
   return 'any'
 }
 
@@ -343,9 +348,13 @@ export const ROLE_SPECS: Record<WidgetType, RoleField[]> = {
              { role: 'measure',  label: 'Measure (numeric column)',   required: false }],
   donut:    [{ role: 'category', label: 'Dimension (Group / X-axis)', required: true },
              { role: 'measure',  label: 'Measure (numeric column)',   required: false }],
-  scatter:  [{ role: 'category', label: 'Dimension (Group / X-axis)', required: true },
-             { role: 'measure',  label: 'Measure (numeric column)',   required: false },
-             { role: 'measure2', label: 'X axis (numeric, optional)', required: false }],
+  // C-07: an X measure against a Y measure, one point per row -- or per Label
+  // value when a Label is set. `measure` stays Y so an old scatter's measure
+  // keeps its meaning; an OLD scatter (a dimension on X, no X measure) is held
+  // to its old rule (WidgetPlaceholder.legacyScatter) and drawn as before.
+  scatter:  [{ role: 'measure2', label: 'X axis (numeric)', required: true },
+             { role: 'measure',  label: 'Y axis (numeric)', required: true },
+             { role: 'category', label: 'Label',            required: false }],
   treemap:  [{ role: 'category', label: 'Dimension (Group / X-axis)', required: true },
              { role: 'measure',  label: 'Measure (numeric column)',   required: false }],
   step: [{ role: 'category', label: 'Dimension (X-axis)',       required: true },

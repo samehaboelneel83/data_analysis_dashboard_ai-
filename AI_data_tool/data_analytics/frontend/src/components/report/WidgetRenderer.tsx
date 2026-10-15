@@ -85,7 +85,8 @@ interface Props {
   editMode?:     boolean
   promptFilter?: { column: string; value: string } | null
   onDragStart?:  (e: React.MouseEvent) => void
-  onResizeStart?:(e: React.MouseEvent) => void
+  /** `axis`: the corner resizes both ways (the default), an edge one way (C-19). */
+  onResizeStart?:(e: React.MouseEvent, axis?: 'both' | 'x' | 'y') => void
   isDragging?:   boolean
   onFetchComplete?: (widgetId: number, info: { durationMs: number; rowCount: number; sampled: boolean; ruleErrors?: { id?: string; message: string }[] }) => void
   pages?:        ReportPage[]
@@ -1477,6 +1478,15 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
             </span>
           )
         })()}
+        {/* C-24: the server chose the date grain (a long daily axis drawn by
+            week, say): said, so a reader knows each point is a week. */}
+        {typeof (data as { auto_granularity?: unknown } | null)?.auto_granularity === 'string' && (
+          <span data-testid="auto-grain-chip" title={t('bc.canvas.autoGrainTitle')}
+            style={{ fontSize: 9, padding: '1px 5px', borderRadius: 99, whiteSpace: 'nowrap',
+              background: 'color-mix(in srgb, var(--accent) 14%, transparent)', color: 'var(--accent)' }}>
+            {t('bc.canvas.autoGrain', { grain: grainWord((data as { auto_granularity: string }).auto_granularity, t) })}
+          </span>
+        )}
         {data?.sampled && (
           <span title={t('bc.canvas.sampleTitle', { n: String(data.sample_size), total: String(data.total_rows) })}
             style={{ fontSize: 9, background: 'rgba(230,160,60,.18)', color: '#e6a03c', padding: '1px 5px', borderRadius: 99 }}>
@@ -1847,6 +1857,21 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
           </svg>
         </div>
       )}
+      {/* C-19: edge handles -- the right edge sets the width only, the bottom
+          edge the height only. 8px strips along the edges, stopping short of
+          the corner handle so the two never compete. */}
+      {editMode && onResizeStart && (['x', 'y'] as const).map(axis => (
+        <div key={axis} data-testid={`widget-resize-edge-${axis}`} aria-hidden
+          onMouseDown={e => e.stopPropagation()}
+          onPointerDown={e => {
+            e.stopPropagation(); e.preventDefault()
+            try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* jsdom */ }
+            onResizeStart(e, axis)
+          }}
+          style={axis === 'x'
+            ? { position: 'absolute', top: 24, bottom: 24, right: 0, width: 8, cursor: 'ew-resize', touchAction: 'none' }
+            : { position: 'absolute', left: 24, right: 24, bottom: 0, height: 8, cursor: 'ns-resize', touchAction: 'none' }} />
+      ))}
 
       {showTooltipPreview && tooltipPage && (
         <div style={{

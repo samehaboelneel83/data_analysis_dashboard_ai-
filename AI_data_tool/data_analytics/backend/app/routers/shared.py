@@ -81,9 +81,14 @@ def _shape_page(p) -> dict:
         return {"id": p["id"], "name": p["name"], "page_type": p.get("page_type", "normal"),
                 "position": p.get("position", 0),
                 "interaction_mode": _interaction_mode(p.get("mobile_layout")),
+                # C-21: a fixed page size is drawn at its size here too.
+                "page_size": p.get("page_size") or "16:9",
+                "custom_width": p.get("custom_width"), "custom_height": p.get("custom_height"),
                 "widgets": [_shape_widget(w) for w in p.get("widgets", [])]}
     return {"id": p.id, "name": p.name, "page_type": p.page_type, "position": p.position,
             "interaction_mode": _interaction_mode(p.mobile_layout),
+            "page_size": p.page_size or "16:9",
+            "custom_width": p.custom_width, "custom_height": p.custom_height,
             "widgets": [_shape_widget(w) for w in p.widgets]}
 
 
