@@ -642,6 +642,17 @@ describe('WidgetRenderer card', () => {
   })
 })
 
+describe('C-13: card figures fit the tile height too', () => {
+  it('sizes each of three figures by the tile\'s height as well as its width', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [
+      { name: 'revenue', value: 8632597 }, { name: 'cost', value: 20 }, { name: 'units', value: 5 }], sampled: false })
+    renderWidget({ widget: barWidget({ widget_type: 'card', config: { measures: ['revenue', 'cost', 'units'] } }) })
+    const label = await screen.findByText('units')
+    const figure = label.previousElementSibling as HTMLElement
+    expect(figure.style.fontSize).toContain('cqb')
+  })
+})
+
 describe('WidgetRenderer image', () => {
   it('renders an img element sourced from config.url', async () => {
     renderWidget({ widget: barWidget({ widget_type: 'image', config: { url: 'https://example.com/pic.png', alt: 'A pic' } }) })

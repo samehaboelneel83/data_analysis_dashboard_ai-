@@ -106,3 +106,12 @@ describe('bubble-change animation value options', () => {
     expect(getByTestId('anim-value-label').textContent).toBe('2025')
   })
 })
+
+describe('C-13: the arc gauge value fits its tile', () => {
+  it('never wraps and is sized by the tile width', () => {
+    render(<GaugeRenderer {...base} data={{ value: 8632597, target: 9000000 }} cfg={{}} />)
+    const el = screen.getByTestId('gauge-value')
+    expect(el.style.whiteSpace).toBe('nowrap')
+    expect(el.style.fontSize).toContain('cqi')
+  })
+})

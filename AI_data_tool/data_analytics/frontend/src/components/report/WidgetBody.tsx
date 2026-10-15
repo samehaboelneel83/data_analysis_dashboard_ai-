@@ -573,12 +573,14 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
     const rows: any[] = data.rows ?? []
     return (
       // Focusable: a card with more figures than its tile scrolls (E10).
+      // C-13: a SIZE container, so each figure is capped by the tile's height
+      // too (cqb): three rows at 24px plus labels overflowed a short tile.
       <div dir={rtl ? 'rtl' : undefined} tabIndex={0} role="region" aria-label={tw('wb.values')}
-        style={{ height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 10, padding: 8, containerType: 'inline-size' }}>
+        style={{ height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 10, padding: 8, containerType: 'size' }}>
         {rows.map((row, i) => (
           <div key={i} style={{ textAlign: 'center', minWidth: 0 }}>
             <div title={formatMeasure(row.value, allFormats?.[row.name], cfg.aggregation)}
-              style={{ fontSize: fitFigureSize(formatMeasure(row.value, allFormats?.[row.name], cfg.aggregation), 24), fontWeight: 650, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.02em', color: ruleStyles?.rows?.[i]?.fill ?? 'var(--accent)',
+              style={{ fontSize: `min(${fitFigureSize(formatMeasure(row.value, allFormats?.[row.name], cfg.aggregation), 24)}, calc(100cqb / ${(Math.max(rows.length, 1) * 2.2).toFixed(1)}))`, fontWeight: 650, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.02em', color: ruleStyles?.rows?.[i]?.fill ?? 'var(--accent)',
                 whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: 1.15 }}>
               {formatMeasure(row.value, allFormats?.[row.name], cfg.aggregation)}
             </div>
