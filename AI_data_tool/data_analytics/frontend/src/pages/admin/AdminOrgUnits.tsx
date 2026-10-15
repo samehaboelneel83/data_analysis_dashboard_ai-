@@ -5,7 +5,7 @@ import toast from 'react-hot-toast'
 import { orgUnitsApi, adminUsersApi, type OrgUnit, type User } from '../../services/api'
 import { useConfirm } from '../../components/ui/ConfirmDialog'
 import { usePrompt } from '../../components/ui/PromptDialog'
-import { ChevronDown, ChevronRight, Network, Plus, Trash2, Users } from 'lucide-react'
+import { ChevronDown, ChevronRight, Network, Plus, Trash2, Users, Pencil } from 'lucide-react'
 import EmptyState from '../../components/ui/EmptyState'
 import LoadError from '../../components/ui/LoadError'
 import LoadingState from '../../components/ui/LoadingState'
@@ -83,14 +83,40 @@ export default function AdminOrgUnits() {
       title: t('pg.adminPlatform.units.whatKind', { name }),
       body: t('pg.adminPlatform.units.optional'),
       label: t('pg.adminPlatform.units.levelName'), placeholder: t('pg.adminPlatform.units.levelPh'),
+      confirmLabel: t('pg.adminPlatform.units.next'), cancelLabel: t('pg.adminPlatform.cancel'), required: false,
+    }))
+    if (level === null) return
+    // What MYSCOPE() produces for people placed here (QA E-18: never asked).
+    const value = (await prompt({
+      title: t('pg.adminPlatform.units.valueTitle', { name }),
+      body: t('pg.adminPlatform.units.valueBody'),
+      label: t('pg.adminPlatform.units.valueLabel'), defaultValue: name,
       confirmLabel: t('pg.adminPlatform.units.addUnit'), cancelLabel: t('pg.adminPlatform.cancel'), required: false,
-    }))?.trim()
+    }))
+    if (value === null) return
     try {
-      await orgUnitsApi.create({ name, parent_id: parent?.id ?? null, level_name: level || undefined })
+      await orgUnitsApi.create({ name, parent_id: parent?.id ?? null, level_name: level.trim() || undefined,
+        match_value: value.trim() || name })
       load()
       toast.success(t('pg.adminPlatform.units.added', { name }))
     } catch (e: any) {
       toast.error(e?.response?.data?.detail ?? t('pg.adminPlatform.units.addFailed'))
+    }
+  }
+
+  const editValue = async (u: OrgUnit) => {
+    const value = (await prompt({
+      title: t('pg.adminPlatform.units.valueTitle', { name: u.name }),
+      body: t('pg.adminPlatform.units.valueBody'),
+      label: t('pg.adminPlatform.units.valueLabel'), defaultValue: u.match_value,
+      confirmLabel: t('pg.adminPlatform.units.save'), cancelLabel: t('pg.adminPlatform.cancel'),
+    }))?.trim()
+    if (!value || value === u.match_value) return
+    try {
+      await orgUnitsApi.update(u.id, { match_value: value })
+      load()
+    } catch (e: any) {
+      toast.error(e?.response?.data?.detail ?? t('pg.adminPlatform.units.valueFailed'))
     }
   }
 
@@ -154,17 +180,21 @@ export default function AdminOrgUnits() {
               <bdi>{n.level_name}</bdi>
             </span>
           )}
-          {n.match_value !== n.name && (
-            <span title={t('pg.adminPlatform.units.matchTitle')}
-              style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--mono)' }}>
-              = <bdi>{n.match_value}</bdi>
-            </span>
-          )}
+          {/* Always shown, muted when it is just the name (QA E-18). */}
+          <span title={t('pg.adminPlatform.units.matchTitle')}
+            style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--mono)',
+              opacity: n.match_value === n.name ? 0.6 : 1 }}>
+            <bdi>{`= ${n.match_value}`}</bdi>
+          </span>
 
           <span style={{ marginInlineStart: 'auto', display: 'flex', gap: 4 }}>
             <button className="btn btn-ghost btn-sm" onClick={() => addUnit(n)}
               aria-label={t('pg.adminPlatform.units.addUnder', { name: n.name })} style={{ fontSize: 11 }}>
               <Plus size={11} />
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={() => editValue(n)}
+              aria-label={t('pg.adminPlatform.units.editValue', { name: n.name })} style={{ fontSize: 11 }}>
+              <Pencil size={11} />
             </button>
             <button className="btn btn-ghost btn-sm" onClick={() => removeUnit(n)}
               aria-label={t('pg.adminPlatform.units.delete', { name: n.name })} style={{ fontSize: 11, color: 'var(--danger)' }}>
