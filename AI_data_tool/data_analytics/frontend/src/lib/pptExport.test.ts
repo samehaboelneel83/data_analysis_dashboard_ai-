@@ -4,9 +4,12 @@ const addText = vi.fn()
 const addImage = vi.fn()
 const addSlide = vi.fn(() => ({ addText, addImage }))
 const writeFile = vi.fn().mockResolvedValue(undefined)
+const defineLayout = vi.fn()
+const made: { layout: string }[] = []
 
 vi.mock('pptxgenjs', () => ({
-  default: class { layout = ''; addSlide = addSlide; writeFile = writeFile },
+  default: class { layout = ''; addSlide = addSlide; writeFile = writeFile; defineLayout = defineLayout
+    constructor() { made.push(this) } },
 }))
 
 import { exportPrintViewToPptx } from './pptExport'
@@ -29,7 +32,7 @@ function buildDom() {
   }
 }
 
-beforeEach(() => { vi.clearAllMocks(); buildDom() })
+beforeEach(() => { vi.clearAllMocks(); made.length = 0; buildDom() })
 
 describe('exportPrintViewToPptx', () => {
   it('makes one slide per print page and writes the file', async () => {
@@ -51,5 +54,21 @@ describe('exportPrintViewToPptx', () => {
   it('sanitises the file name', async () => {
     await exportPrintViewToPptx('bad/name:*?.pptx', document.body)
     expect(writeFile).toHaveBeenCalledWith({ fileName: 'badnamepptx.pptx' })
+  })
+
+  it('C-21: pages that share a fixed size get slides of that shape', async () => {
+    for (const c of document.querySelectorAll('[data-print-canvas]')) c.setAttribute('data-page-frame', '960x720')
+    await exportPrintViewToPptx('R', document.body)
+    expect(defineLayout).toHaveBeenCalledTimes(1)
+    const { name, width, height } = defineLayout.mock.calls[0][0]
+    expect(made[0].layout).toBe(name)
+    // the content box below the title keeps 4:3
+    expect((width - 0.6) / (height - 0.6 - 0.6)).toBeCloseTo(960 / 720, 1)
+  })
+
+  it('C-21: flowing pages keep the widescreen slide', async () => {
+    await exportPrintViewToPptx('R', document.body)
+    expect(defineLayout).not.toHaveBeenCalled()
+    expect(made[0].layout).toBe('LAYOUT_WIDE')
   })
 })

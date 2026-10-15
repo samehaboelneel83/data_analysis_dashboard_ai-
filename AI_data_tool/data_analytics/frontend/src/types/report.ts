@@ -39,7 +39,8 @@ export interface ReportPage {
   position: number
   widgets: Widget[]
   created_at: string
-  page_size: '16:9' | '4:3' | 'custom'
+  // C-21: 'fit' flows; the rest are a fixed frame of custom_width x custom_height
+  page_size: 'fit' | '16:9' | '4:3' | 'custom'
   custom_width?: number | null
   custom_height?: number | null
   /** A picture the page's objects sit on. Objects set to a transparent

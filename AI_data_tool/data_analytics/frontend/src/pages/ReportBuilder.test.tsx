@@ -3223,3 +3223,32 @@ describe('C-19: resizing a widget', () => {
     await waitFor(() => expect(document.body.style.userSelect).toBe(''))
   })
 })
+
+describe('C-21: the canvas is drawn at the page size', () => {
+  const load = (page: Record<string, unknown>) => {
+    const r = reportWithWidget()
+    Object.assign(r.pages[0], page)
+    vi.mocked(reportsApi.get).mockReset().mockResolvedValue(r as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+  }
+  it('a page with a fixed size gets a frame of that width and height', async () => {
+    load({ page_size: 'custom', custom_width: 1600, custom_height: 1200 })
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    await screen.findByText('Sales by Region')
+    const canvas = document.querySelector<HTMLElement>('[data-canvas]')!
+    expect(canvas.style.width).toBe('1600px')
+    expect(parseFloat(canvas.style.minHeight)).toBeGreaterThanOrEqual(1200)
+    expect(canvas.getAttribute('data-page-frame')).toBe('1600x1200')
+  })
+  it('a page made before page sizes were applied keeps the flowing canvas', async () => {
+    load({ page_size: '16:9' })
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    await screen.findByText('Sales by Region')
+    const canvas = document.querySelector<HTMLElement>('[data-canvas]')!
+    expect(canvas.style.width).toBe('')
+    expect(canvas.hasAttribute('data-page-frame')).toBe(false)
+  })
+})

@@ -818,6 +818,17 @@ async def add_page(report_id: int, body: PageCreate, db: AsyncSession = Depends(
 async def update_page(report_id: int, page_id: int, body: PageUpdate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     page = await _get_page(page_id, report_id, db, current_user)
     changes = body.model_dump(exclude_none=True)
+    # C-21: a dimension sent as null clears it (Undo restores "no frame").
+    for dim in ("custom_width", "custom_height"):
+        if dim in body.model_fields_set and getattr(body, dim) is None:
+            changes[dim] = None
+    if changes.get("page_size") == "fit":
+        changes["custom_width"] = changes["custom_height"] = None
+    elif changes.get("page_size") == "custom":
+        w = changes.get("custom_width", page.custom_width)
+        h = changes.get("custom_height", page.custom_height)
+        if not (w and h):
+            raise HTTPException(422, "A custom page size needs both a width and a height")
     if "background_url" in changes:
         # The same rule every author-typed address in this product follows
         # (image widget, web content, custom visual, precision container):

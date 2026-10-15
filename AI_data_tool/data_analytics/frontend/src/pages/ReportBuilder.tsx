@@ -5,6 +5,7 @@ import AccessExplainer from '../components/report/AccessExplainer'
 import { DEFAULT_SPEC, PRESETS, describeSpec, parseSpec, specProblem, type RelativeSpec } from '../lib/relativeDates'
 import { closeAll, closeOpen, markOpen, readOpen, type OpenReport } from '../lib/openReports'
 import { stackBelow } from '../lib/stackLayouts'
+import { pageFrame } from '../lib/pageSize'
 import OpenReportsMenu from '../components/report/OpenReportsMenu'
 import { useEffect, useState, useCallback, useMemo, useRef, lazy, Suspense, Fragment, type ReactNode } from 'react'
 import LoadError from '../components/ui/LoadError'
@@ -380,7 +381,14 @@ export default function ReportBuilder() {
   // beside another panel) scales the page down to fit, instead of cutting
   // widgets off behind a sideways scroll. Drag and resize use the same scale.
   const { width: columnW, attach: attachColumn } = useMeasuredWidth(0)
-  const fitScale = columnW > 0 && columnW < MIN_CANVAS_W ? columnW / MIN_CANVAS_W : 1
+  // C-21: a page with a fixed size (16:9, 4:3, Custom W x H) is drawn in a
+  // frame of exactly that size, in Edit, View and Present alike; a column
+  // narrower than the frame scales it down the same way. A flowing page
+  // ("Fit to width", and every page made before sizes were applied) fills
+  // the column as before.
+  const frame = pageFrame(activePage)
+  const baseCanvasW = frame ? frame.w : MIN_CANVAS_W
+  const fitScale = columnW > 0 && columnW < baseCanvasW ? columnW / baseCanvasW : 1
   // The render in which the CANVAS changed width (a side panel or the rail
   // opened or closed, the window resized). Tiles snap to their new boxes in
   // that render instead of easing there: an eased tile hands its chart a new
@@ -4174,10 +4182,12 @@ export default function ReportBuilder() {
                 })()}
               </div>
             ) : (
-            <div style={{ height: canvasH(pageWidgets.map(w => ({ ...w, layout: localLayouts[w.id] ?? packedPreview[w.id] ?? w.layout }))) * canvasScale,
-              minWidth: MIN_CANVAS_W * fitScale, overflow: fitScale < 1 && zoom <= 100 ? 'hidden' : undefined }}>
+            <div style={{ height: Math.max(canvasH(pageWidgets.map(w => ({ ...w, layout: localLayouts[w.id] ?? packedPreview[w.id] ?? w.layout }))), frame?.h ?? 0) * canvasScale,
+              minWidth: baseCanvasW * fitScale, overflow: fitScale < 1 && zoom <= 100 ? 'hidden' : undefined,
+              ...(frame ? { width: frame.w * canvasScale, margin: '0 auto' } : {}) }}>
               <div ref={attachCanvas}
                 data-canvas
+                data-page-frame={frame ? `${frame.w}x${frame.h}` : undefined}
                 onDragOver={e => { if (e.dataTransfer.types.includes('application/x-fields') || e.dataTransfer.types.includes('application/x-field') || e.dataTransfer.types.includes('application/x-hierarchy')) {
                   e.preventDefault(); e.dataTransfer.dropEffect = 'copy'
                   // A hierarchy is a target too: it fills a hierarchy widget's levels (QA6 B2).
@@ -4230,7 +4240,7 @@ export default function ReportBuilder() {
                     if (!(target && fillHierarchyLevels(target, Number(hier)))) void addWidgetFromHierarchy(Number(hier))
                   }
                 }}
-                style={{ position:'relative', minHeight:canvasH(pageWidgets.map(w => ({ ...w, layout: localLayouts[w.id] ?? packedPreview[w.id] ?? w.layout }))),
+                style={{ position:'relative', minHeight:Math.max(canvasH(pageWidgets.map(w => ({ ...w, layout: localLayouts[w.id] ?? packedPreview[w.id] ?? w.layout }))), frame?.h ?? 0),
                 // The page's own backdrop, with objects that opt into
                 // transparency floating on it. `cover` rather than `contain`:
                 // a page is a fixed aspect box and a letterboxed photograph
@@ -4242,8 +4252,14 @@ export default function ReportBuilder() {
                 // The dashboard's own look: fonts, card borders, corners, light or dark.
                 ...styleVars(report?.style),
                 borderRadius:'var(--radius)', border:'1px solid var(--border)',
-                ...(fitScale < 1 ? { width: MIN_CANVAS_W } : {}),
+                ...(frame ? { width: frame.w } : fitScale < 1 ? { width: MIN_CANVAS_W } : {}),
                 transform: `scale(${canvasScale})`, transformOrigin: 'top left' }}>
+                {/* C-21: where a fixed page ends, when objects run past it. */}
+                {editMode && frame && pageWidgets.some(w => { const l = localLayouts[w.id] ?? packedPreview[w.id] ?? w.layout
+                  return (l.y + l.h) * (ROW_H + GAP) > frame.h }) && (
+                  <div data-testid="page-frame-edge" aria-hidden
+                    style={{ position:'absolute', left:0, right:0, top:frame.h, borderTop:'1px dashed var(--muted)', pointerEvents:'none', zIndex:0 }} />
+                )}
                 {pageWidgets.length === 0 && (
                   // An empty page TEACHES (SAS: "Drag objects or data items onto
                   // the page, or start from a page template"). The drag-a-field

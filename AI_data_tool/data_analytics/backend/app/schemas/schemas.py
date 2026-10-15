@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal, Any, Optional
+from typing import Annotated, Literal, Any, Optional
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
@@ -454,6 +454,16 @@ class WidgetOut(BaseModel):
     created_at: datetime
 
 
+#: C-21: a page's size. "fit" is the flowing canvas that fills the width;
+#: the others are a FIXED frame of `custom_width` x `custom_height` px (the
+#: presets 16:9 = 1280x720 and 4:3 = 960x720 store their size too). A page with
+#: no stored dimensions flows whatever its `page_size` says -- every page made
+#: before page sizes were applied, so existing dashboards keep their layout.
+PageSize = Literal["fit", "16:9", "4:3", "custom"]
+PAGE_DIM_MIN, PAGE_DIM_MAX = 320, 10000
+PageDim = Annotated[int, Field(ge=PAGE_DIM_MIN, le=PAGE_DIM_MAX)]
+
+
 class PageCreate(BaseModel):
     name: str = "Page 1"
     position: int = 0
@@ -461,9 +471,9 @@ class PageCreate(BaseModel):
     page_type: str = "normal"
     prompt_column: Optional[str] = None
     prompt_label: Optional[str] = None
-    page_size: str = "16:9"
-    custom_width: Optional[int] = None
-    custom_height: Optional[int] = None
+    page_size: PageSize = "16:9"
+    custom_width: Optional[PageDim] = None
+    custom_height: Optional[PageDim] = None
     mobile_layout: Optional[dict] = None
     layout_mode: Optional[str] = "packed"
     layout_template: Optional[str] = "executive"
@@ -479,9 +489,11 @@ class PageUpdate(BaseModel):
     page_type: Optional[str] = None
     prompt_column: Optional[str] = None
     prompt_label: Optional[str] = None
-    page_size: Optional[str] = None
-    custom_width: Optional[int] = None
-    custom_height: Optional[int] = None
+    page_size: Optional[PageSize] = None
+    #: An explicit null clears the frame (Undo of a size change sends the
+    #: values the page had before, null for a page that had none).
+    custom_width: Optional[PageDim] = None
+    custom_height: Optional[PageDim] = None
     mobile_layout: Optional[dict] = None
     layout_mode: Optional[str] = None
     layout_template: Optional[str] = None
