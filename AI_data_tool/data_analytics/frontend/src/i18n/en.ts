@@ -2964,6 +2964,7 @@ export const en = {
   'dsh.new.goalPh': 'e.g. Weekly totals by group against target, with the largest items',
   'dsh.new.aiNote': 'Suggest dashboards reads the dataset and proposes drafts; you choose which to keep.',
   'dsh.new.name': 'Dashboard name',
+  'dsh.new.nameRequired': 'Give the dashboard a name',
   'dsh.new.chooseLater': 'Choose later',
   'dsh.new.pickDataset': 'Pick a dataset',
   'dsh.new.create': 'Create',

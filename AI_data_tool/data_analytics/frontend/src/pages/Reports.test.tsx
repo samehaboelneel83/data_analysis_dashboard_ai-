@@ -579,11 +579,32 @@ describe('creating a dashboard', () => {
     vi.mocked(reportsApi.create).mockResolvedValue({ id: 42, pages: [{ id: 420 }] } as never)
   })
 
-  it('Blank with no data opens the builder asking for data, auto-named', async () => {
+  // C-30 (QA DASH-04): a name is required. This test used to assert that an
+  // empty name auto-named the dashboard "Untitled dashboard"; the product now
+  // asks for the name instead.
+  it('Create stays disabled, and says why, until the dashboard has a name', async () => {
     renderReports()
     await screen.findByTestId('dash-card-1')
     fireEvent.click(screen.getByRole('button', { name: 'New dashboard' }))
     const dialog = await screen.findByRole('dialog', { name: 'Create a dashboard' })
+    const create = within(dialog).getByRole('button', { name: /^Create$/ }) as HTMLButtonElement
+    expect(create.disabled).toBe(true)
+    expect(within(dialog).getByText('Give the dashboard a name')).toBeInTheDocument()
+    fireEvent.change(within(dialog).getByLabelText('Dashboard name'), { target: { value: '   ' } })
+    expect(create.disabled).toBe(true)
+    fireEvent.keyDown(within(dialog).getByLabelText('Dashboard name'), { key: 'Enter' })
+    expect(reportsApi.create).not.toHaveBeenCalled()
+    fireEvent.change(within(dialog).getByLabelText('Dashboard name'), { target: { value: 'Q4 sales' } })
+    expect(create.disabled).toBe(false)
+    expect(within(dialog).queryByText('Give the dashboard a name')).toBeNull()
+  })
+
+  it('Blank with no data opens the builder asking for data', async () => {
+    renderReports()
+    await screen.findByTestId('dash-card-1')
+    fireEvent.click(screen.getByRole('button', { name: 'New dashboard' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Create a dashboard' })
+    fireEvent.change(within(dialog).getByLabelText('Dashboard name'), { target: { value: 'Untitled dashboard' } })
     fireEvent.click(within(dialog).getByRole('button', { name: /^Create$/ }))
     await waitFor(() => expect(reportsApi.create).toHaveBeenCalledWith({ name: 'Untitled dashboard' }))
     await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/reports/42?pick=data'))
@@ -614,6 +635,7 @@ describe('creating a dashboard', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Create a dashboard' })
     fireEvent.click(within(dialog).getByRole('radio', { name: /Template/ }))
     expect(await within(dialog).findByRole('radio', { name: /Four-panel comparison/ })).toHaveAttribute('aria-checked', 'true')
+    fireEvent.change(within(dialog).getByLabelText('Dashboard name'), { target: { value: 'Quad' } })   // C-30: a name is required
     fireEvent.click(within(dialog).getByRole('button', { name: /^Create$/ }))
     await waitFor(() => expect(pageTemplatesApi.addFrom).toHaveBeenCalledWith(42, { builtin: 'quad' }))
     await waitFor(() => expect(reportsApi.deletePage).toHaveBeenCalledWith(42, 420))

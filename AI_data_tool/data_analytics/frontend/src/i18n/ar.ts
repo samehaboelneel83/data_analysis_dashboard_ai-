@@ -2963,6 +2963,7 @@ export const ar: Record<MessageKey, string> = {
   'dsh.new.goalPh': 'مثال: الإجماليات الأسبوعية حسب المجموعة مقابل الهدف، مع أكبر العناصر',
   'dsh.new.aiNote': 'تقرأ ميزة «اقترح لوحات» مجموعة البيانات وتقترح مسودات، وأنت تختار ما تحتفظ به.',
   'dsh.new.name': 'اسم اللوحة',
+  'dsh.new.nameRequired': 'أعطِ اللوحة اسمًا',
   'dsh.new.chooseLater': 'اختر لاحقًا',
   'dsh.new.pickDataset': 'اختر مجموعة بيانات',
   'dsh.new.create': 'إنشاء',
