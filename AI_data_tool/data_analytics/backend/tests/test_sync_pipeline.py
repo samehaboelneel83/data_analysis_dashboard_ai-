@@ -282,5 +282,9 @@ class TestLlmIsOptional:
         )
         await db_session.commit()
         stages = {s["name"]: s for s in run.stages}
-        assert stages["infer_semantic"]["status"] == "ok"
-        assert stages["infer_semantic"]["detail"]["descriptions"] == 0
+        # Not a failure -- and, since AD-01 step 7, not "ok" with nothing
+        # written either: the step says the model was unavailable.
+        assert stages["infer_semantic"]["status"] == "skipped"
+        assert stages["infer_semantic"]["detail"]["reason"].startswith("AI unavailable")
+        assert "semantic_types" in stages["infer_semantic"]["detail"]
+        assert run.status == "ok"
