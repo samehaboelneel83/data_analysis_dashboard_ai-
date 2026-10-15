@@ -250,3 +250,28 @@ describe('C-27: a field dropped onto a role in the Properties pane', () => {
     expect(onUpdate.mock.calls.every(c => c[0].measure !== 'region')).toBe(true)
   })
 })
+
+describe('C-28: the field picker from the keyboard', () => {
+  const choices = [{ value: 'origin_lat', label: 'origin_lat' }, { value: 'origin_lon', label: 'origin_lon' },
+                   { value: 'dest_lat', label: 'dest_lat' }]
+  it('Enter takes the single match', () => {
+    const onApply = vi.fn(), onClose = vi.fn()
+    render(<AddFieldDialog heading="Latitude" multi={false} selected={[]} choices={choices} onApply={onApply} onClose={onClose} />)
+    const search = screen.getByRole('searchbox')
+    fireEvent.change(search, { target: { value: 'origin_la' } })
+    fireEvent.keyDown(search, { key: 'Enter' })
+    expect(onApply).toHaveBeenCalledWith(['origin_lat'])
+  })
+  it('Enter with several matches does nothing', () => {
+    const onApply = vi.fn()
+    render(<AddFieldDialog heading="Latitude" multi={false} selected={[]} choices={choices} onApply={onApply} onClose={vi.fn()} />)
+    const search = screen.getByRole('searchbox')
+    fireEvent.change(search, { target: { value: 'lat' } })
+    fireEvent.keyDown(search, { key: 'Enter' })
+    expect(onApply).not.toHaveBeenCalled()
+  })
+  it('each option is named with its role, unlike the field-list button of the same field', () => {
+    render(<AddFieldDialog heading="Latitude" multi={false} selected={[]} choices={choices} onApply={vi.fn()} onClose={vi.fn()} />)
+    expect(screen.getByRole('option', { name: 'Use origin_lat for Latitude' })).toBeTruthy()
+  })
+})

@@ -301,6 +301,12 @@ export function AddFieldDialog({ heading, multi, choices, selected, onApply, onC
             {multi ? t('bc.canvas.chooseFields') : t('bc.canvas.chooseField')}
           </div>
           <input type="search" value={q} onChange={e => setQ(e.target.value)} aria-label={t('bc.canvas.searchFields')}
+            // C-28: Enter takes the single match (ticks it, in a several-field role).
+            onKeyDown={e => {
+              if (e.key !== 'Enter' || shown.length !== 1) return
+              e.preventDefault()
+              if (multi) toggle(shown[0].value); else choose(shown[0].value)
+            }}
             placeholder={t('bc.canvas.searchFieldsPh')} style={{ width: '100%' }} />
         </div>
         <div role={multi ? 'group' : 'listbox'} aria-label={t('bc.canvas.roleFields', { role: shownHeading })}
@@ -325,6 +331,9 @@ export function AddFieldDialog({ heading, multi, choices, selected, onApply, onC
                   </label>
                 ) : (
                   <button key={c.value} type="button" role="option" aria-selected={on} onClick={() => choose(c.value)}
+                    // C-28: named with the role, so it is not a second "origin_lat" beside the
+                    // Fields panel's own button for that field.
+                    aria-label={t('bc.canvas.useFieldFor', { field: c.label, role: shownHeading })}
                     style={{ display: 'block', width: '100%', textAlign: 'start', padding: '6px 8px', borderRadius: 6,
                       border: 'none', font: 'inherit', fontSize: 13, cursor: 'pointer', color: 'var(--text)',
                       background: on ? 'var(--surface2)' : 'transparent' }}>
