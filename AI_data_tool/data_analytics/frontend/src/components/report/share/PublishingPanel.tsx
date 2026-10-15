@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Archive, ArchiveRestore, History, UserRoundCog } from 'lucide-react'
+import { Archive, ArchiveRestore, History, Send, UserRoundCog } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { publishingApi, reviewApi, type Publication, type ReleaseSummary } from '../../../services/api'
 import { useConfirm } from '../../ui/ConfirmDialog'
@@ -7,6 +7,7 @@ import { useT, type MessageKey } from '../../../i18n'
 import { formatDate } from '../../../lib/dateFormat'
 import { localDigits } from '../../../lib/arabicFormats'
 import type { ShareTarget } from './ShareDashboardDialog'
+import { releaseReport } from '../ReleaseControl'
 
 /**
  * Publishing, for a dashboard's owner (and administrators): where it stands,
@@ -26,10 +27,12 @@ const REASON: Record<string, MessageKey> = {
   publish: 'pub.reason.publish', release: 'pub.reason.release', rollback: 'pub.reason.rollback', first_edit: 'pub.reason.edit',
 }
 
-export default function PublishingPanel({ report, isAdmin, onStateChange }: {
+export default function PublishingPanel({ report, isAdmin, onStateChange, onReleased }: {
   report: ShareTarget
   isAdmin: boolean
   onStateChange?: (state: Publication['state']) => void
+  /** After "Publish these changes", so the builder can re-read its release status. */
+  onReleased?: () => void
 }) {
   const t = useT()
   const confirm = useConfirm()
@@ -74,6 +77,12 @@ export default function PublishingPanel({ report, isAdmin, onStateChange }: {
     await run(() => publishingApi.archive(report.id), t('pub.archive.done'))
     onStateChange?.('archived')
   }
+  const publishChanges = async () => {
+    setBusy(true)
+    try {
+      if (await releaseReport(report.id, t)) { onReleased?.(); load() }
+    } finally { setBusy(false) }
+  }
   // F-09: this switch is the ORGANISATION's, not this dashboard's -- asked first, saying so.
   const setApproval = async (on: boolean) => {
     if (!(await confirm({ title: t(on ? 'pub.review.confirmOn' : 'pub.review.confirmOff'), body: t('pub.review.confirmBody'),
@@ -113,6 +122,14 @@ export default function PublishingPanel({ report, isAdmin, onStateChange }: {
           {pub.unreleased_changes && !archived && <p>{t('pub.unreleased')}</p>}
         </div>
       </div>
+      {/* F-10: the action next to the sentence that asks for it. */}
+      {pub.unreleased_changes && !archived && pub.state === 'published' && (
+        <div className="shx-acts">
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void publishChanges()}>
+            <Send size={14} aria-hidden />{t('pub.releaseNow')}
+          </button>
+        </div>
+      )}
       <div className="shx-acts">
         {archived
           ? <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void restore()}><ArchiveRestore size={14} aria-hidden />{t('pub.restore')}</button>

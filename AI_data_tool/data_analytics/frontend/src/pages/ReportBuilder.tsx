@@ -4739,6 +4739,7 @@ export default function ReportBuilder() {
         <ShareDashboardDialog report={report} canEdit={canEdit} isAdmin={isAdmin} pageId={activePage?.id ?? null}
           onClose={() => setShareOpen(false)}
           onPublishedChange={published => setReport(r => r ? { ...r, published } : r)}
+          onReleased={() => { loadReport().catch(() => {}) }}
           onAccessWhy={Object.keys(access).length ? () => { setShareOpen(false); setAccessOpen2(true) } : undefined}
           onAccessByRole={() => { setShareOpen(false); setAccessOpen(true) }} />
       )}

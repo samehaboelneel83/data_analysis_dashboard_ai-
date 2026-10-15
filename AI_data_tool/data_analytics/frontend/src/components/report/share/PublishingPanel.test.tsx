@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderWithProviders as render, screen, fireEvent, waitFor, within } from '../../../test/renderWithProviders'
 import PublishingPanel from './PublishingPanel'
-import { publishingApi, reviewApi } from '../../../services/api'
+import { publishingApi, reportsApi, reviewApi } from '../../../services/api'
 import toast from 'react-hot-toast'
 
 /**
@@ -16,6 +16,8 @@ vi.mock('../../../services/api', () => ({
   publishingApi: { get: vi.fn(), releases: vi.fn(), set: vi.fn(), archive: vi.fn(), restore: vi.fn(), rollback: vi.fn(),
     transfer: vi.fn(), requestReview: vi.fn(), decideReview: vi.fn() },
   reviewApi: { setApproval: vi.fn() },
+  reportsApi: { release: vi.fn() },
+  describeMissing: (m: string[]) => m.join(', '),
 }))
 vi.mock('react-hot-toast', () => ({ default: { success: vi.fn(), error: vi.fn() } }))
 
@@ -26,7 +28,7 @@ const publication = (over = {}) => ({
   unreleased_changes: true, review: { required: false, state: 'none', current: false, note: null, requested_by: null, decided_by: null },
   depends: { shares: 3, links: 1, schedules: 2 }, ...over,
 })
-const open = (isAdmin = false, onStateChange = vi.fn()) => render(<PublishingPanel report={report} isAdmin={isAdmin} onStateChange={onStateChange} />)
+const open = (isAdmin = false, onStateChange = vi.fn(), onReleased = vi.fn()) => render(<PublishingPanel report={report} isAdmin={isAdmin} onStateChange={onStateChange} onReleased={onReleased} />)
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -90,6 +92,31 @@ describe('PublishingPanel', () => {
     open(false, onStateChange)
     fireEvent.click(await screen.findByRole('button', { name: 'Restore' }))
     await waitFor(() => expect(onStateChange).toHaveBeenCalledWith('published'))
+  })
+
+  it('changes readers do not see yet can be published from here (F-10)', async () => {
+    vi.mocked(reportsApi.release).mockResolvedValue({ missing: [] } as never)
+    vi.mocked(publishingApi.get)
+      .mockResolvedValueOnce(publication() as never)
+      .mockResolvedValue(publication({ unreleased_changes: false }) as never)
+    const onReleased = vi.fn()
+    open(false, vi.fn(), onReleased)
+    fireEvent.click(await screen.findByRole('button', { name: 'Publish these changes' }))
+    await waitFor(() => expect(reportsApi.release).toHaveBeenCalledWith(7))
+    await waitFor(() => expect(onReleased).toHaveBeenCalled())
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Publish these changes' })).not.toBeInTheDocument())
+  })
+
+  it('offers no "Publish these changes" when readers already see everything, or for a draft (F-10)', async () => {
+    vi.mocked(publishingApi.get).mockResolvedValue(publication({ unreleased_changes: false }) as never)
+    const first = open()
+    await screen.findByTestId('publishing-panel')
+    expect(screen.queryByRole('button', { name: 'Publish these changes' })).not.toBeInTheDocument()
+    first.unmount()
+    vi.mocked(publishingApi.get).mockResolvedValue(publication({ state: 'draft' }) as never)
+    open()
+    await screen.findByTestId('publishing-panel')
+    expect(screen.queryByRole('button', { name: 'Publish these changes' })).not.toBeInTheDocument()
   })
 
   it('goes back to an earlier version after being asked; the current one has no button', async () => {

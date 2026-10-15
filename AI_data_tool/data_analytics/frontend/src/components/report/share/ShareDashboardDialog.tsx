@@ -54,7 +54,7 @@ const COLORS = [1, 2, 3, 4, 5, 6]
 const LISTED_SHOWN = 5
 const color = (s: string) => `var(--dl-series-${COLORS[[...s].reduce((n, c) => n + c.charCodeAt(0), 0) % COLORS.length]})`
 
-export default function ShareDashboardDialog({ report, canEdit, isAdmin, pageId, initialTab = 'people', onClose, onPublishedChange, onAccessWhy, onAccessByRole }: {
+export default function ShareDashboardDialog({ report, canEdit, isAdmin, pageId, initialTab = 'people', onClose, onPublishedChange, onReleased, onAccessWhy, onAccessByRole }: {
   report: ShareTarget
   /** The viewer may edit this dashboard: guest links, embedding, schedules. */
   canEdit: boolean
@@ -64,6 +64,8 @@ export default function ShareDashboardDialog({ report, canEdit, isAdmin, pageId,
   initialTab?: Tab
   onClose: () => void
   onPublishedChange?: (published: boolean) => void
+  /** Changes were released from the Publishing tab (F-10). */
+  onReleased?: () => void
   onAccessWhy?: () => void
   onAccessByRole?: () => void
 }) {
@@ -383,7 +385,7 @@ export default function ShareDashboardDialog({ report, canEdit, isAdmin, pageId,
             </div>
           )}
           {tab === 'people' && people}
-          {tab === 'publishing' && <PublishingPanel report={report} isAdmin={isAdmin}
+          {tab === 'publishing' && <PublishingPanel report={report} isAdmin={isAdmin} onReleased={onReleased}
             onStateChange={s => { setPublished(s === 'published'); onPublishedChange?.(s === 'published') }} />}
           {tab === 'embed' && <EmbedSection reportId={report.id} />}
           {tab === 'schedule' && <div className="shx-sched"><SchedulePanel reportId={report.id} /></div>}
