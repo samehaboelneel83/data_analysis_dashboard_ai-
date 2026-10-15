@@ -4,6 +4,7 @@ import { StrictMode } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 import SuggestDashboardsDialog from './SuggestDashboardsDialog'
 import { DirectionProvider } from '../../contexts/DirectionContext'
+import { translate } from '../../i18n'
 import { calcColumnsApi, datasetsApi, jobsApi, measuresApi, reportsApi } from '../../services/api'
 
 /**
@@ -261,6 +262,37 @@ describe('the relations between the widgets', () => {
       { proposals: [PROPOSAL], reason: '', profile: PROFILE } as never)
     await build()
     expect(reportsApi.updateWidget).not.toHaveBeenCalled()
+  })
+})
+
+describe('without a model (F-03, B-10)', () => {
+  it('sends use_profile: false for a blank goal, so the profile text cannot call the model', async () => {
+    open()
+    fireEvent.click(screen.getByRole('button', { name: /suggest/i }))
+    await waitFor(() => expect(datasetsApi.suggestDashboards).toHaveBeenCalledWith(
+      7, expect.objectContaining({ use_profile: false }), expect.anything()))
+  })
+
+  it('does not send use_profile: false when a goal is typed', async () => {
+    open()
+    fireEvent.change(screen.getByLabelText(/what do you do/i), { target: { value: 'I run the ward' } })
+    fireEvent.click(screen.getByRole('button', { name: /suggest/i }))
+    await waitFor(() => expect(datasetsApi.suggestDashboards).toHaveBeenCalled())
+    expect(vi.mocked(datasetsApi.suggestDashboards).mock.calls[0][1]).not.toHaveProperty('use_profile', false)
+  })
+
+  it('says the model could not be reached when the statistics answered instead', async () => {
+    vi.spyOn(datasetsApi, 'suggestDashboards').mockResolvedValue(
+      { proposals: [{ ...PROPOSAL, source: 'insights' }], reason: 'ai_unreachable',
+        profile: PROFILE, source: 'insights' } as never)
+    open()
+    fireEvent.change(screen.getByLabelText(/what do you do/i), { target: { value: 'I run the ward' } })
+    fireEvent.click(screen.getByRole('button', { name: /suggest/i }))
+    expect(await screen.findByTestId('sdd-ai-unreachable')).toHaveTextContent(/could not be reached/i)
+  })
+
+  it('does not blame the dataset size for a slow answer', () => {
+    expect(translate('en', 'sdd.slow')).not.toMatch(/large datasets/i)
   })
 })
 

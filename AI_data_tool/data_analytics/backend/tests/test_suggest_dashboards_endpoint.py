@@ -627,3 +627,106 @@ async def test_a_panel_job_that_fails_says_why(client, db_session, two_orgs, cli
     job = await db_session.get(Job, r.json()["job_id"])
     await db_session.refresh(job)
     assert job.error_code == "panel_failed" and "the facts could not be measured" in job.error
+
+
+@pytest.mark.asyncio
+class TestWhenTheModelIsUnreachable:
+    """F-03: a goal typed while the model is down must not spin for minutes;
+    the statistics engine answers and says why."""
+
+    async def test_a_known_down_model_is_not_waited_for(self, client, db_session, two_orgs,
+                                                        clinic_csv, fake_model):
+        from app.services import llm_endpoints as le
+        for ep in le.endpoints():
+            le.mark(ep.id, False, "ConnectTimeout")
+        ds, headers = await _dataset(db_session, two_orgs["a"]["org"], clinic_csv)
+        r = await client.post(f"/api/v1/datasets/{ds.id}/suggest-dashboards",
+                              json={"goal": "I run the clinic"}, headers=headers)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["source"] == "insights" and body["reason"] == "ai_unreachable"
+        assert body["proposals"] and fake_model.seen == []
+
+    async def test_a_model_that_fails_falls_back_to_the_statistics(
+            self, client, db_session, two_orgs, clinic_csv, monkeypatch):
+        from app.core.config import settings
+        monkeypatch.setattr(settings, "suggest_ai_selection", "cards")
+
+        class Unreachable:
+            enabled = True
+            last_error = None
+            model = "m"
+
+            async def complete_json(self, messages, schema, **kw):
+                self.last_error = "ConnectTimeout: unreachable"
+                return None
+
+            async def complete(self, messages, **kw):
+                self.last_error = "ConnectTimeout: unreachable"
+                return None
+
+        monkeypatch.setattr("app.services.llm.get_client", lambda *a, **k: Unreachable())
+        ds, headers = await _dataset(db_session, two_orgs["a"]["org"], clinic_csv)
+        r = await client.post(f"/api/v1/datasets/{ds.id}/suggest-dashboards",
+                              json={"goal": "I run the clinic"}, headers=headers)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["source"] == "insights" and body["reason"] == "ai_unreachable"
+        assert body["proposals"]
+
+    async def test_a_model_that_hangs_is_cut_off(self, client, db_session, two_orgs,
+                                                 clinic_csv, monkeypatch):
+        import asyncio
+        from app.routers import datasets as datasets_router
+
+        class Hangs:
+            enabled = True
+            last_error = None
+            model = "m"
+
+            async def complete_json(self, messages, schema, **kw):
+                await asyncio.sleep(30)
+
+            async def complete(self, messages, **kw):
+                await asyncio.sleep(30)
+
+        monkeypatch.setattr(datasets_router, "SUGGEST_AI_SECONDS", 0.2)
+        monkeypatch.setattr("app.services.llm.get_client", lambda *a, **k: Hangs())
+        ds, headers = await _dataset(db_session, two_orgs["a"]["org"], clinic_csv)
+        r = await client.post(f"/api/v1/datasets/{ds.id}/suggest-dashboards",
+                              json={"goal": "I run the clinic"}, headers=headers)
+        assert r.status_code == 200, r.text
+        assert r.json()["source"] == "insights" and r.json()["reason"] == "ai_unreachable"
+
+
+@pytest.mark.asyncio
+class TestABlankGoalIsTrulyModelFree:
+    """B-10: a blank box said "no AI involved" but the profile's "about me"
+    stood in for it, so the model path ran and waited on the endpoint."""
+
+    async def test_a_profile_about_text_does_not_turn_a_blank_box_into_a_model_call(
+            self, client, db_session, two_orgs, clinic_csv, fake_model, monkeypatch):
+        from sqlalchemy import select
+        from app.core.config import settings
+        monkeypatch.setattr(settings, "classify_columns_with_model", True)
+        ds, headers = await _dataset(db_session, two_orgs["a"]["org"], clinic_csv)
+        user = (await db_session.execute(select(User).where(User.email == "analyst@example.com"))).scalar_one()
+        user.about = "I manage the outpatient clinic and care about waiting times"
+        await db_session.commit()
+        r = await client.post(f"/api/v1/datasets/{ds.id}/suggest-dashboards",
+                              json={"goal": ""}, headers=headers)
+        assert r.status_code == 200, r.text
+        assert r.json()["source"] == "insights"
+        assert fake_model.seen == [], "the model was asked for a blank goal"
+
+    async def test_an_explicit_use_profile_still_designs_for_the_profile(
+            self, client, db_session, two_orgs, clinic_csv, fake_model):
+        from sqlalchemy import select
+        ds, headers = await _dataset(db_session, two_orgs["a"]["org"], clinic_csv)
+        user = (await db_session.execute(select(User).where(User.email == "analyst@example.com"))).scalar_one()
+        user.about = "I manage the outpatient clinic"
+        await db_session.commit()
+        r = await client.post(f"/api/v1/datasets/{ds.id}/suggest-dashboards",
+                              json={"goal": "", "use_profile": True}, headers=headers)
+        assert r.status_code == 200, r.text
+        assert fake_model.seen and r.json()["source"] == "model"

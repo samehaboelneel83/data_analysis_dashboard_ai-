@@ -480,6 +480,11 @@ async def model_hints(db, dataset, client=None, only: set[str] | None = None,
             from ..core.config import settings
             if not settings.classify_columns_with_model:
                 return numbers
+            # Red light seen moments ago: asking would only wait for the
+            # connect timeout to say the same thing (B-10 / AD-01).
+            from . import llm_endpoints
+            if not llm_endpoints.model_available()[0]:
+                return numbers
             from . import llm
             client = llm.get_client()
         if not getattr(client, "enabled", True):
@@ -576,7 +581,7 @@ async def _map_hints(db, dataset) -> tuple[dict[str, dict], set[str]]:
     return numbers, {o["column"] for o in m.outcomes}
 
 
-async def ensure(db, dataset, df: pd.DataFrame) -> dict:
+async def ensure(db, dataset, df: pd.DataFrame, ask: bool = True) -> dict:
     """The dataset's `column_meta` with every column classified, written back
     when anything was missing. Called where a frame is already in hand (the
     insights scan, the suggestion engines), so classifying costs no extra read.
@@ -584,7 +589,7 @@ async def ensure(db, dataset, df: pd.DataFrame) -> dict:
     all of them did before."""
     try:
         current = dict(dataset.column_meta or {})
-        numbers, outcomes = await hints_for(db, dataset, only={str(c) for c in df.columns})
+        numbers, outcomes = await hints_for(db, dataset, ask=ask, only={str(c) for c in df.columns})
         current = dict(dataset.column_meta or {})
         unclassified = [str(c) for c in df.columns if _open(current.get(str(c)), numbers.get(str(c)))]
         if not unclassified:
