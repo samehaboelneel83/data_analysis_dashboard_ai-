@@ -154,6 +154,37 @@ async def sync_status(
     return _run_payload(run)
 
 
+@router.post("/{source_id}/sync/{run_id}/cancel")
+async def cancel_sync(
+    source_id: int, run_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_org_admin),
+):
+    """B-04: stop a sync that is stuck (a model that never answers, a source
+    that stalls). Cancels the task when it runs in this process and records the
+    run as failed either way, so a new sync is accepted at once."""
+    from datetime import datetime
+    await _get_source(db, source_id, current_user)
+    run = await db.get(SyncRun, run_id)
+    if run is None or run.data_source_id != source_id:
+        raise HTTPException(404, "Sync run not found")
+    check_org(run, current_user, "Sync run not found")
+    if run.status != "running":
+        raise HTTPException(409, "This sync is no longer running")
+    task = sync.RUNNING_TASKS.pop(run_id, None)
+    if task is not None and not task.done():
+        task.cancel()
+    run.status = "failed"
+    run.error = f"Cancelled by {current_user.email}"
+    run.finished_at = datetime.utcnow()
+    source = await db.get(DataSource, source_id)
+    if source is not None:
+        source.sync_status = "failed"
+    await db.commit()
+    await db.refresh(run)
+    return _run_payload(run)
+
+
 def _run_payload(run: SyncRun) -> dict:
     return {
         "id": run.id,

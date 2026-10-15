@@ -45,6 +45,15 @@ describe('Guided setup — Choose data', () => {
     expect(setupApi.suggestDatasets).toHaveBeenCalledWith(38, 'en', undefined)
   })
 
+  it('says at once that the AI is not available instead of a spinner (B-11)', async () => {
+    vi.mocked(setupApi.datasets).mockResolvedValue(step({
+      proposals: { pending: true, failed: null, items: [], language: null, asked: true },
+      ai: { available: false, reason: 'unavailable' } }))
+    renderStep()
+    expect(await screen.findByText(/AI is not available right now/)).toBeInTheDocument()
+    expect(screen.queryByText(/AI is choosing the most useful data/)).not.toBeInTheDocument()
+  })
+
   it('can skip About you', async () => {
     vi.mocked(setupApi.datasets).mockResolvedValue(step({
       proposals: { pending: false, failed: null, items: [], language: null, asked: false }, brief: {} }))

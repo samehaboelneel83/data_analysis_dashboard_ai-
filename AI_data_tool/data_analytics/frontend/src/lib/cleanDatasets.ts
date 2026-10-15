@@ -23,9 +23,11 @@ export function cleanDatasets<T extends Pick<Dataset, 'name' | 'column_meta'> & 
   let visible = list
   if (view === 'certified') visible = visible.filter(isCertified)
   else if (view === 'mine') visible = visible.filter(d => userId != null && d.created_by === userId)
-  // A certified dataset is never hidden as "test data", whatever it is called.
-  const test = visible.filter(d => !isCertified(d) && looksLikeTestData(d.name))
-  if (!showTest) visible = visible.filter(d => isCertified(d) || !looksLikeTestData(d.name))
+  // A certified dataset is never hidden as "test data", whatever it is called,
+  // and neither is one of the viewer's own (B-27): they know what they made.
+  const hideable = (d: T) => !isCertified(d) && !(userId != null && d.created_by === userId) && looksLikeTestData(d.name)
+  const test = visible.filter(hideable)
+  if (!showTest) visible = visible.filter(d => !hideable(d))
   // Certified first: the ones to use are the ones to see.
   visible = [...visible].sort((a, b) => Number(isCertified(b)) - Number(isCertified(a)))
   return { visible, hiddenTest: showTest ? 0 : test.length, certified, mine }

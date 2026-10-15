@@ -7,7 +7,7 @@
  * widget exists, and the same "leave out what could not be created" rule.
  */
 import {
-  calcColumnsApi, measuresApi, reportsApi,
+  calcColumnsApi, datasetsApi, measuresApi, reportsApi,
   type CalcColumn, type DashboardSuggestion, type MeasureDef, type SuggestedWidget,
 } from '../services/api'
 
@@ -173,6 +173,24 @@ export function filledLayout(widgets: SuggestedWidget[]) {
   return slots
 }
 
+/** The config keys that name a field, as the server checks them (widget_data.py). */
+const FIELD_KEYS = ['measure', 'measure2', 'dimension', 'dimension2'] as const
+
+function fieldRefs(w: SuggestedWidget): string[] {
+  const c = (w.config ?? {}) as Record<string, unknown>
+  return FIELD_KEYS.map(k => c[k]).filter((v): v is string => typeof v === 'string' && v !== '')
+}
+
+/** Every column, calculated column and measure the dataset has; null when it cannot be read. */
+async function knownFields(datasetId: number): Promise<Set<string> | null> {
+  try {
+    const ds = await datasetsApi.get(datasetId)
+    if (!ds || !Array.isArray(ds.columns)) return null
+    return new Set([...ds.columns, ...(ds.calculated_columns ?? []), ...(ds.measures ?? [])]
+      .map(f => (f as { name: string }).name))
+  } catch { return null }
+}
+
 export interface DashboardPagePlan {
   datasetId: number
   /** The part of the data the person asked for: set once on the dashboard. */
@@ -196,6 +214,26 @@ export async function buildPages(pages: DashboardPagePlan[], name: string, descr
   for (const p of pages) {
     const failed = await createDerivedFields(p.datasetId, p.derived)
     missing.set(p.datasetId, new Set([...(missing.get(p.datasetId) ?? []), ...failed]))
+  }
+  // B-05: a widget naming a field the dataset does not have and nothing above
+  // created would ship as "'x' is not a column or measure on this dataset".
+  // Checked on the same keys the server checks; if the dataset cannot be read
+  // the check is skipped rather than blocking the build.
+  for (const dsId of new Set(pages.map(p => p.datasetId))) {
+    const known = await knownFields(dsId)
+    if (!known) continue
+    const unknown = missing.get(dsId) ?? new Set<string>()
+    for (const p of pages.filter(pp => pp.datasetId === dsId)) {
+      for (const n of [...p.derived.measures, ...p.derived.calculated_columns].map(d => d.name)) {
+        if (!unknown.has(n)) known.add(n)
+      }
+    }
+    for (const p of pages.filter(pp => pp.datasetId === dsId)) {
+      for (const w of p.proposal.widgets) {
+        for (const name of fieldRefs(w)) if (!known.has(name)) unknown.add(name)
+      }
+    }
+    missing.set(dsId, unknown)
   }
 
   let primary: number

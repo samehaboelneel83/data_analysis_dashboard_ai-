@@ -6,4 +6,7 @@ describe('looksLikeTestData', () => {
     'Sales (copy)', 'Copy of revenue', 'debug-run'])('flags %s', n => expect(looksLikeTestData(n)).toBe(true))
   it.each(['Sales — Global', 'Testimonials', 'Customer churn', 'Attestation log', 'Temperature readings', 'Samples by lab'])(
     'leaves %s alone', n => expect(looksLikeTestData(n)).toBe(false))
+  // B-27: a bare "QA" prefix is a team's name for its work, not a leftover.
+  it.each(['QA B upload', 'QA B complaints DQ', 'QA 2026 review'])('does not flag %s', n =>
+    expect(looksLikeTestData(n)).toBe(false))
 })

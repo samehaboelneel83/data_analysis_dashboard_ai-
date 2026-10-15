@@ -66,6 +66,21 @@ describe('PrepPipelinePanel', () => {
     await waitFor(() => expect(screen.getAllByTestId('prep-step-card')).toHaveLength(1))
   })
 
+  it('closes the add-step menu on Escape and on a click outside it (B-16)', async () => {
+    render(<div><p>outside</p><PrepPipelinePanel datasetId={1} columns={columns} /></div>)
+    await waitFor(() => expect(screen.getByTestId('prep-empty')).toBeInTheDocument())
+    const toggle = screen.getByRole('button', { name: '+ Add step' })
+    fireEvent.click(toggle)
+    expect(screen.getByRole('menu')).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: /Remove duplicates/ })).toBeInTheDocument()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    expect(toggle).toHaveFocus()
+    fireEvent.click(toggle)
+    fireEvent.pointerDown(screen.getByText('outside'))
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+  })
+
   it('reorders a step with the up/down buttons', async () => {
     vi.mocked(prepApi.get).mockResolvedValue([{ kind: 'trim' }, { kind: 'dedupe', subset: [] }])
     render(<PrepPipelinePanel datasetId={1} columns={columns} />)

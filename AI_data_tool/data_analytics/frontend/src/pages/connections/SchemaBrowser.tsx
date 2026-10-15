@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { dataSourcesApi, queryBuilderApi } from '../../services/api'
+import { dataSourcesApi, datasetsApi, queryBuilderApi } from '../../services/api'
 import type { DataSource, Job, SavedQuery } from '../../services/api'
 import SqlEditor from './SqlEditor'
 import ModeExplainer from './ModeExplainer'
@@ -35,6 +35,14 @@ export function SchemaBrowser({ ds, onClose, onQueued }: {
   const [pvLoad,    setPvLoad]    = useState(false)
   const [importing, setImporting] = useState(false)
   const [dsName,    setDsName]    = useState('')
+  // B-24: names already in use, so a clash is said before the import.
+  const [taken,     setTaken]     = useState<Set<string>>(new Set())
+  useEffect(() => {
+    datasetsApi?.list?.()
+      ?.then(list => setTaken(new Set(list.map(d => d.name.trim().toLowerCase()))))
+      .catch(() => { /* no warning, nothing else lost */ })
+  }, [])
+  const nameTaken = dsName.trim() !== '' && taken.has(dsName.trim().toLowerCase())
   const [mode,      setMode]      = useState<'import' | 'directquery'>('import')
   const [schemaError, setSchemaError] = useState<string | null>(null)
   const [attempt,   setAttempt]   = useState(0)
@@ -134,7 +142,8 @@ export function SchemaBrowser({ ds, onClose, onQueued }: {
   const handleSelect = (t: string) => {
     setSelected(t)
     setQuery('')
-    setDsName(t)
+    // B-24: "<connection> — <table>": a bare "shipments" collides across connections.
+    setDsName(`${ds.name} — ${t}`)
     loadPreview(t)
   }
 
@@ -390,6 +399,8 @@ export function SchemaBrowser({ ds, onClose, onQueued }: {
                     ))}
                   </div>
                   <input value={dsName} onChange={e => setDsName(e.target.value)}
+                    onFocus={e => e.currentTarget.select()} aria-label={t('sb.nameLabel')}
+                    aria-describedby={nameTaken ? 'sb-name-taken' : undefined}
                     placeholder={t('sb.namePh')}
                     style={{ flex: 1, fontSize: 12, padding: '5px 8px', background: 'var(--surface2)',
                       border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)' }} />
@@ -401,6 +412,11 @@ export function SchemaBrowser({ ds, onClose, onQueued }: {
                   : <IconLabel icon={Download}>{t('sb.importDs')}</IconLabel>)}
                   </button>
                 </div>
+                {nameTaken && (
+                  <p id="sb-name-taken" role="status" style={{ fontSize: 12, color: 'var(--warning)', margin: '4px 0 0' }}>
+                    {t('sb.nameTaken', { name: dsName.trim() })}
+                  </p>
+                )}
                 <ModeExplainer mode={mode} />
                 {job && (
                   <div className="dl-job-inline">

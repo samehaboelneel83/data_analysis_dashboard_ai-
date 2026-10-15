@@ -1267,9 +1267,10 @@ export const aggregatesApi = {
 export const analysisApi = {
   run: (id: number, type = 'full') =>
     api.post(`/datasets/${id}/analysis`, { analysis_type: type }).then(r => r.data),
-  /** The stored profile, or null when there is none yet (AD-06: 200 null, not a 404). */
+  /** The stored profile, or null when none has been run yet (the server
+   *  answers 200 `null`; a 204 from an older server reads as null too). */
   get: (id: number) =>
-    api.get(`/datasets/${id}/analysis`).then(r => r.data),
+    api.get(`/datasets/${id}/analysis`).then(r => (r.status === 204 || r.data === '' ? null : r.data)),
   // A2: KMeans segmentation over selected (or all usable) numeric columns.
   segment: (id: number, columns?: string[]) =>
     api.post<SegmentResult>(`/datasets/${id}/segment`, { columns: columns ?? null }).then(r => r.data),
@@ -3896,6 +3897,9 @@ export const metadataApi = {
     api.get<SyncRun>(`/data-sources/${sourceId}/sync/latest`).then(r => r.data),
   syncStatus: (sourceId: number, runId: number) =>
     api.get<SyncRun>(`/data-sources/${sourceId}/sync/${runId}`).then(r => r.data),
+  /** B-04: stop a stuck sync; the run comes back recorded as failed. */
+  cancelSync: (sourceId: number, runId: number) =>
+    api.post<SyncRun>(`/data-sources/${sourceId}/sync/${runId}/cancel`).then(r => r.data),
   review:     (sourceId: number) =>
     api.get<ReviewQueue>(`/data-sources/${sourceId}/review`).then(r => r.data),
   confirm:    (sourceId: number, body: {
@@ -4216,12 +4220,24 @@ export interface SetupTable {
   deprecated: boolean
 }
 
+export interface SetupLatestRun {
+  id: number
+  status: string
+  started_at: string | null
+  stages_done: number
+  stages_total: number
+  current: string | null
+  error: string | null
+}
+
 export interface SetupSummary {
   status: 'ready' | 'syncing' | 'failed' | 'empty'
   source: { id: number; name: string; type: string; allow_ai: boolean }
   sync: { status: string; last_synced_at: string | null }
   can_edit: boolean
   language: 'en' | 'ar'
+  /** The connection's latest read (SyncRun); null when it was never read (B-03). */
+  latest_run?: SetupLatestRun | null
   /** True while the exact date ranges are being measured (the page asks again). */
   ranges_pending?: boolean
   /** Present when status is 'ready'. `pending`: the AI is still writing; ask again shortly. */
@@ -4266,7 +4282,11 @@ export interface SetupProposal {
   refine_failed?: string
 }
 
+/** B-11: whether the AI can help on a guided-setup step right now. */
+export interface SetupAiState { available: boolean; reason: 'off' | 'unavailable' | null }
+
 export interface SetupDatasetsStep {
+  ai?: SetupAiState
   proposals: { pending: boolean; failed: string | null; items: SetupProposal[]; language: string | null; asked: boolean
                /** When the running step started (server UTC). */
                since?: string | null }
@@ -4302,6 +4322,8 @@ export interface SetupFindingItem {
 
 export interface SetupFindings {
   pending: boolean
+  /** B-12: the plain findings are in; the AI's ideas are still being written. */
+  ai_pending?: boolean
   failed: string | null
   health: SetupFindingItem[]
   insights: SetupFindingItem[]
@@ -4316,9 +4338,13 @@ export interface SetupFindings {
 }
 
 export interface SetupCheckStep {
+  ai?: SetupAiState
   datasets: { id: number; name: string; mode: string; row_count: number | null
               /** True when the setup made this dataset, so it cleans it by itself. */
-              auto_clean?: boolean; findings: SetupFindings }[]
+              auto_clean?: boolean
+              /** B-33: how many dashboards already read it. */
+              used_by?: { dashboards: number }
+              findings: SetupFindings }[]
   demand?: SetupDemand
   usual?: SetupUsualWaits
 }
@@ -4365,6 +4391,7 @@ export interface SetupDesign {
 }
 
 export interface SetupDashboardStep {
+  ai?: SetupAiState
   designs: { pending: boolean; failed: string | null; items: SetupDesign[]; asked: boolean; report_id: number | null
              /** Designs already made into pages of this analysis's dashboard. */
              used?: string[]; language?: string | null; since?: string | null }

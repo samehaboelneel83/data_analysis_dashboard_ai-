@@ -219,6 +219,8 @@ class TestItIsNotAWayAroundTheRefusals:
         r = await _create(client, auth_headers["a"], src.id)
 
         assert r.status_code == 403
+        # B-09: said about a DATAFLOW, not "Cannot save a snapshot".
+        assert r.json()["detail"].startswith("A dataflow cannot read a dataset with row- or column-security rules")
 
     @pytest.mark.asyncio
     async def test_rules_added_after_creation_still_stop_a_run(

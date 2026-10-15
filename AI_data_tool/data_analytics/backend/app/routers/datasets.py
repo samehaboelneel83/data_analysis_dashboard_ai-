@@ -3454,6 +3454,38 @@ async def get_prep_steps(dataset_id: int, db: AsyncSession = Depends(get_db), cu
     return prep_steps_of(ds)
 
 
+async def _refuse_many_row_cell_edits(ds: Dataset, steps: list[dict]) -> None:
+    """B-08: an edit_cells correction finds its row by the key's value; a value
+    several rows share rewrites every one of them. A NEW correction (one not in
+    the saved pipeline) whose key matches more than one row of the dataset is
+    refused unless its step says `allow_many` -- the grid sets that after the
+    person confirmed "this changes N rows". Corrections already saved are left
+    alone: the pipeline is written wholesale, and an old one must not block
+    every later save."""
+    from ..services.prep import prep_steps_of
+    saved = {(st.get("key_column"), st.get("column"), str(e.get("key")))
+             for st in prep_steps_of(ds) if isinstance(st, dict) and st.get("kind") == "edit_cells"
+             for e in st.get("edits") or [] if isinstance(e, dict)}
+    new = [(st["key_column"], str(e.get("key")))
+           for st in steps if isinstance(st, dict) and st.get("kind") == "edit_cells" and not st.get("allow_many")
+           for e in st.get("edits") or []
+           if isinstance(e, dict) and (st.get("key_column"), st.get("column"), str(e.get("key"))) not in saved]
+    if not new or not ds.filename:
+        return
+    try:
+        df = await asyncio.to_thread(load_file, ds.filename)
+    except Exception:                                       # noqa: BLE001 -- the file is checked elsewhere
+        return
+    for key_column, key in new:
+        if key_column not in df.columns:
+            continue
+        n = int((df[key_column].astype(str) == key).sum())
+        if n > 1:
+            raise HTTPException(400, f"'{key_column}' = '{key}' matches {n} rows, so this correction would "
+                                     f"change all {n} of them. Pick a column that is unique per row, or "
+                                     f"confirm the change for every matching row.")
+
+
 @router.put("/{dataset_id}/prep-steps")
 async def set_prep_steps(dataset_id: int, steps: list[dict], db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Replace the dataset's prep pipeline wholesale (same replace-don't-merge
@@ -3486,6 +3518,7 @@ async def set_prep_steps(dataset_id: int, steps: list[dict], db: AsyncSession = 
         validate_prep_steps(steps, known, join_columns)
     except ValueError as e:
         raise refused(400, e)
+    await _refuse_many_row_cell_edits(ds, steps)
 
     meta = dict(ds.column_meta or {})
     if steps:
@@ -3936,7 +3969,7 @@ async def _validated_join_columns(
     return join_columns
 
 
-async def _refuse_if_ungovernable(db: AsyncSession, source_ids: list[int]) -> dict:
+async def _refuse_if_ungovernable(db: AsyncSession, source_ids: list[int], *, what: str = "snapshot") -> dict:
     """Refuse to snapshot governed data, and honour every source's export policy.
 
     **The security decision this feature turns on.** Every read applies the
@@ -3963,6 +3996,12 @@ async def _refuse_if_ungovernable(db: AsyncSession, source_ids: list[int]) -> di
     strictest: dict | bool | None = None
     for sid in source_ids:
         if await _dataset_has_security(db, sid):
+            if what == "dataflow":
+                raise HTTPException(
+                    403, "A dataflow cannot read a dataset with row- or column-security "
+                         "rules: its output would freeze one person's filtered view as "
+                         "everyone's data. Remove the rules, or build the dataflow on a "
+                         "dataset without them.")
             raise HTTPException(
                 403, "Cannot save a snapshot of a dataset that has row- or "
                      "column-security rules: the result would freeze one "
@@ -4580,9 +4619,16 @@ async def data_preview(dataset_id: int, req: DataPreviewRequest, db: AsyncSessio
         check_org(source, current_user, "Data source not found")
         source_cfg = dict(source.config or {})
         source_cfg["type"] = source.type
+        # B-19: one PAGE, read in a stable order with the exact total
+        # (direct_query._run_table_page). Without `page` a table over the row
+        # cap was a random sample, reshuffled on every Next/Prev, and the
+        # offset was ignored.
+        dq_config: dict = {"page": {"offset": max(0, req.offset), "size": max(1, min(req.limit, 500))}}
+        if req.sort_by:
+            dq_config.update(sort_col=req.sort_by, sort=req.sort_dir)
         try:
             result = run_direct_query(
-                source_cfg, ds, {}, widget_type="table", rls_filter_expr=rls_expr,
+                source_cfg, ds, dq_config, widget_type="table", rls_filter_expr=rls_expr,
                 cache_ttl_seconds=source.cache_ttl_seconds, cache_epoch=source.cache_epoch,
                 org_id=current_user.org_id,
             )

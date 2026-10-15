@@ -109,6 +109,7 @@
 .dl-cn-type[aria-checked="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
 .dl-cn-type b { font-size: 13px; font-weight: 600; }
 .dl-cn-type small { font: 11px var(--font-mono, monospace); color: var(--muted); }
+.dl-cn-type small.dl-cn-type__nodriver { font: 600 11px var(--font-sans, inherit); color: var(--warning); }
 .dl-cn-chosen { display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin-bottom: 16px; border-radius: 12px; background: var(--surface2); }
 .dl-cn-chosen b { flex: 1; font-size: 14px; }
 .dl-cn-chosen .btn { display: inline-flex; align-items: center; gap: 4px; }

@@ -47,6 +47,11 @@ export default function OutlierDetailsDialog({ datasetId, column, onClose }: {
   }, [datasetId, column, detector])
 
   const s = details?.stats
+  // B-28: the inspected column first (and sticky), the others in dataset order.
+  const cols = details?.outliers.columns ?? []
+  const inspected = cols.indexOf(column)
+  const order = inspected < 0 ? cols.map((_, j) => j) : [inspected, ...cols.map((_, j) => j).filter(j => j !== inspected)]
+
   // Box plot geometry on a min→max scale; degenerate ranges collapse gracefully.
   const span = s ? Math.max(s.max - s.min, 1e-9) : 1
   const pct = (v: number) => `${(((v - (s?.min ?? 0)) / span) * 100).toFixed(1)}%`
@@ -58,7 +63,7 @@ export default function OutlierDetailsDialog({ datasetId, column, onClose }: {
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={t('pg.panelsB.out.title', { column })}
           onClick={e => e.stopPropagation()}
         style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
-          padding: 18, width: 560, maxWidth: '92vw', maxHeight: '84vh', overflowY: 'auto' }}>
+          padding: 18, width: 'min(960px, 94vw)', maxHeight: '84vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
           <strong style={{ fontSize: 13 }}>{richT(t, 'pg.panelsB.out.title', { column })}</strong>
           <button onClick={onClose} aria-label={t('pg.panelsB.out.close')}
@@ -121,10 +126,13 @@ export default function OutlierDetailsDialog({ datasetId, column, onClose }: {
                     ? t('pg.panelsB.out.rowsFirst', { n: details.outliers.rows.length }) : t('pg.panelsB.out.rows')}
                 </div>
                 <table style={{ fontSize: 11 }}>
-                  <thead><tr>{details.outliers.columns.map(c => <th key={c}>{c}</th>)}</tr></thead>
+                  <thead><tr>{order.map(j => <th key={details.outliers.columns[j]}
+                    style={{ whiteSpace: 'nowrap', ...(j === inspected ? { position: 'sticky', insetInlineStart: 0, background: 'var(--surface)' } : {}) }}>
+                    {details.outliers.columns[j]}</th>)}</tr></thead>
                   <tbody>
                     {details.outliers.rows.map((row, i) => (
-                      <tr key={i}>{row.map((v, j) => <td key={j}>{v == null ? '—'
+                      <tr key={i}>{order.map(j => row[j]).map((v, k) => <td key={k}
+                        style={{ whiteSpace: 'nowrap', ...(order[k] === inspected ? { position: 'sticky', insetInlineStart: 0, background: 'var(--surface)', fontWeight: 600 } : {}) }}>{v == null ? '—'
                         // QA5 F3: the app's cell format ("-6208.69", not "-6208.6900000000005"), whole and LTR
                         : typeof v === 'number' || (typeof v === 'string' && /^[-+]?\d+(\.\d+)?$/.test(v.trim()))
                           ? <bdi dir="ltr">{formatCell(v as string | number)}</bdi> : String(v)}</td>)}</tr>

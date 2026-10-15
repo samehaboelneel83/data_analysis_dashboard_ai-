@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import Dataflows from './Dataflows'
 import { ConfirmProvider } from '../components/ui/ConfirmDialog'
-import { dataflowsApi, datasetsApi } from '../services/api'
+import { dataflowsApi, datasetsApi, exportPolicyApi } from '../services/api'
 
 vi.mock('../services/api', async (orig) => ({
   ...(await orig<Record<string, unknown>>()),
@@ -13,6 +13,7 @@ vi.mock('../services/api', async (orig) => ({
     before: { rows: 3, columns: ['region'] }, after: { rows: 3, columns: ['region'] }, steps: [],
     sample: { columns: ['region'], rows: [] } }) },
   relationshipsApi: { list: vi.fn().mockResolvedValue([]) },
+  exportPolicyApi: { get: vi.fn().mockResolvedValue({ export_policy: false, has_security_rules: false }) },
 }))
 vi.mock('react-hot-toast', () => ({ default: { success: vi.fn(), error: vi.fn() } }))
 
@@ -52,6 +53,27 @@ describe('Dataflows (E12)', () => {
     expect(row).toHaveTextContent('Every day')
     expect(row).toHaveTextContent('Succeeded, 1,200 rows, 2 hours ago')
     expect(within(row).getByRole('link', { name: 'Sales rollup' })).toHaveAttribute('href', '/datasets/9')
+  })
+
+  it('says inline why a dataflow cannot be created, not only in a toast (B-09)', async () => {
+    vi.mocked(dataflowsApi.create).mockRejectedValue({ response: { status: 403, data: {
+      detail: 'A dataflow cannot read a dataset with row- or column-security rules' } } })
+    renderAt()
+    await screen.findByTestId('flow-5')
+    fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), { target: { value: 'Rollup' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Source dataset' }), { target: { value: '1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('A dataflow cannot read a dataset with row- or column-security rules')
+  })
+
+  it('a source with security rules is explained before Create, and Create is off (B-09)', async () => {
+    vi.mocked(exportPolicyApi.get).mockResolvedValueOnce({ export_policy: false, has_security_rules: true } as never)
+    renderAt()
+    await screen.findByTestId('flow-5')
+    fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), { target: { value: 'Rollup' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Source dataset' }), { target: { value: '1' } })
+    expect(await screen.findByText(/has row or column security rules/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled()
   })
 
   it('creates a dataflow from an import dataset and opens it', async () => {

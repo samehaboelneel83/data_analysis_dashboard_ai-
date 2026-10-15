@@ -345,3 +345,41 @@ async def test_the_api_refuses_a_correction_to_the_key_column(
                "edits": [{"key": "ca", "value": "CA"}]}],
         headers=auth_headers["a"])
     assert r.status_code == 400
+
+
+# B-08: a correction keyed on a value several rows share rewrites all of them.
+# The grid confirms that with the person and then says so (allow_many); a step
+# that does not say so is refused rather than silently changing many rows.
+
+@pytest.mark.asyncio
+async def test_a_correction_on_a_shared_key_is_refused_unless_allowed(
+        client, auth_headers, db_session, two_orgs, messy_ds):
+    ds = await _dataset(db_session, two_orgs["a"]["org"], messy_ds)
+    step = {"kind": "edit_cells", "key_column": "amount", "column": "region",
+            "edits": [{"key": "10.0", "value": "X"}]}
+    r = await client.put(f"/api/v1/datasets/{ds.id}/prep-steps", json=[step], headers=auth_headers["a"])
+    assert r.status_code == 400, r.text
+    assert "2 rows" in r.json()["detail"]
+    r = await client.put(f"/api/v1/datasets/{ds.id}/prep-steps", json=[{**step, "allow_many": True}],
+                         headers=auth_headers["a"])
+    assert r.status_code == 200, r.text
+
+
+@pytest.mark.asyncio
+async def test_a_correction_already_saved_does_not_block_the_next_change(
+        client, auth_headers, db_session, two_orgs, messy_ds):
+    """Pipelines are written wholesale: an edit saved before this check existed
+    must not make every later save fail."""
+    ds = await _dataset(db_session, two_orgs["a"]["org"], messy_ds)
+    old = {"kind": "edit_cells", "key_column": "amount", "column": "region",
+           "edits": [{"key": "10.0", "value": "X"}]}
+    ds.column_meta = {PREP_STEPS_KEY: [old]}
+    await db_session.commit()
+    r = await client.put(f"/api/v1/datasets/{ds.id}/prep-steps", json=[old, {"kind": "trim"}],
+                         headers=auth_headers["a"])
+    assert r.status_code == 200, r.text
+    # A unique key needs no confirmation.
+    r = await client.put(f"/api/v1/datasets/{ds.id}/prep-steps",
+                         json=[{"kind": "edit_cells", "key_column": "region", "column": "amount",
+                                "edits": [{"key": "MX", "value": 1}]}], headers=auth_headers["a"])
+    assert r.status_code == 200, r.text

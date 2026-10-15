@@ -905,6 +905,116 @@ class TestRunStageRollsBackOnFailure:
         assert rows == []
 
 
+class TestAiUnavailableIsSaid:
+    """B-11: with the model down, describe/entities are recorded "skipped --
+    AI unavailable", not "ok" with nothing produced, and nothing waits on it."""
+
+    async def test_a_model_known_down_is_not_called(self, db_session, source, cache):
+        llm = FakeLlm()
+        llm.available = lambda: False
+        run = await _run(db_session, source, cache, llm=llm, allow=True)
+        stages = {s["name"]: s for s in run.stages}
+        assert stages["describe"]["status"] == "skipped"
+        assert stages["describe"]["detail"]["reason"] == "AI unavailable"
+        assert "semantic_types" in stages["describe"]["detail"]
+        assert stages["entities"]["status"] == "skipped"
+        assert llm.calls == []
+        assert run.status == "ok"
+
+    async def test_every_call_failing_is_reported_as_skipped(self, db_session, source, cache):
+        class Down(FakeLlm):
+            tokens_out = 0
+
+            async def complete_json(self, messages, schema, **kw):
+                self.calls.append(messages)
+                self.last_error = "ConnectError: unreachable"
+                return None
+        run = await _run(db_session, source, cache, llm=Down(), allow=True)
+        stages = {s["name"]: s for s in run.stages}
+        assert stages["describe"]["status"] == "skipped"
+        assert stages["describe"]["detail"]["reason"].startswith("AI unavailable: ConnectError")
+        assert stages["entities"]["status"] == "skipped"
+
+
+class TestStuckSyncIsBounded:
+    """B-04: a stage waiting on an unreachable model, or a whole run that
+    stalls, must end on its own -- recorded, not "running" forever."""
+
+    async def test_a_model_stage_over_its_budget_is_skipped_and_the_run_goes_on(self, db_session):
+        import asyncio
+        from app.services.metadata.sync import SyncContext, _run_stage
+
+        context = SyncContext(db_session, data_source_id=1, org_id=1, cache=None)
+
+        async def stalls(ctx):
+            await asyncio.sleep(5)
+
+        result = await _run_stage(context, "describe", stalls, timeout_s=0.05)
+        assert result.status == "skipped"
+        assert "took longer than" in result.detail["reason"]
+
+    async def test_catalog_sync_gives_the_model_stages_a_budget(self, monkeypatch):
+        import asyncio
+        from app.core.config import settings
+        from app.services.metadata import sync as sync_mod
+        seen = {}
+
+        async def fake_run_stage(context, name, fn, timeout_s=None):
+            seen[name] = timeout_s
+            return sync_mod.StageResult(name, "ok")
+        monkeypatch.setattr(catalog_sync, "_run_stage", fake_run_stage)
+        monkeypatch.setattr(settings, "metadata_llm_stage_timeout_s", 42.0)
+
+        class _Cache:
+            def has_sample(self, _):
+                return False
+
+        class _Db:
+            async def flush(self):
+                pass
+
+        src = DataSource(id=1, name="x", type="postgresql", org_id=1)
+        await catalog_sync.run_catalog_sync(_Db(), src, cache=_Cache(),
+                                            run=catalog_sync.SyncRun(data_source_id=1, org_id=1, stages=[]))
+        assert seen["describe"] == seen["entities"] == 42.0
+        assert seen["discover"] is None and seen["sample"] is None
+
+    async def test_a_run_over_the_total_budget_is_recorded_as_timed_out(self, db_session, monkeypatch):
+        import asyncio
+        from contextlib import asynccontextmanager
+        from app.core.config import settings
+        from app.models.models import Organization, SyncRun
+        from app.services.metadata import sync as sync_mod
+
+        org = Organization(name="Acme")
+        db_session.add(org)
+        await db_session.flush()
+        src = DataSource(name="slow", type="postgresql", org_id=org.id, sync_status="running")
+        db_session.add(src)
+        await db_session.flush()
+        run = SyncRun(data_source_id=src.id, org_id=org.id, trigger="manual", status="running", stages=[])
+        db_session.add(run)
+        await db_session.commit()
+
+        async def stalls(*a, **k):
+            await asyncio.sleep(5)
+        monkeypatch.setattr(catalog_sync, "run_catalog_sync", stalls)
+        monkeypatch.setattr(settings, "metadata_sync_timeout_s", 0.05)
+
+        @asynccontextmanager
+        async def factory():
+            yield db_session
+
+        await sync_mod.run_sync_background(factory, run.id, src.id, org.id, cache=None,
+                                           source_config={"type": "postgresql"})
+        await db_session.refresh(run)
+        await db_session.refresh(src)
+        assert run.status == "failed" and run.error.startswith("Timed out after")
+        assert run.finished_at is not None
+        assert src.sync_status == "failed"
+        assert run.id not in sync_mod.RUNNING_TASKS
+
+
 class TestDatasetsImportedBeforeTheSync:
     """The ordinary first run of this product is connect, browse, import, and
     sync afterwards if at all. Linking happens at import time and is idempotent,

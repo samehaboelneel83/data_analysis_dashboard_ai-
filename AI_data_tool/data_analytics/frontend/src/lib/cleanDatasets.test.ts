@@ -19,8 +19,9 @@ describe('clean lists for newcomers (4.7)', () => {
     const list = [ds(1, '13'), ds(2, 'Salaries'), ds(3, 'Current workforce', { column_meta: { __certified__: { by: 1 } } }),
                   ds(4, 'kjhkjhkjhkjh', { created_by: 7 })]
     const got = cleanDatasets(list, 'all', 7, false)
-    expect(got.visible.map((d: { id: number }) => d.id)).toEqual([3, 2])
-    expect(got.hiddenTest).toBe(2)
+    // B-27: #4 is the viewer's own -- never tucked away as "test-looking".
+    expect(got.visible.map((d: { id: number }) => d.id)).toEqual([3, 2, 4])
+    expect(got.hiddenTest).toBe(1)
     expect(got.certified).toBe(1)
     expect(got.mine).toBe(1)
     expect(cleanDatasets(list, 'certified', 7, false).visible.map((d: { id: number }) => d.id)).toEqual([3])
@@ -30,5 +31,13 @@ describe('clean lists for newcomers (4.7)', () => {
   it('never hides a certified dataset, whatever it is called', () => {
     const got = cleanDatasets([ds(1, 'test HR', { column_meta: { __certified__: {} } })], 'all', null, false)
     expect(got.visible).toHaveLength(1)
+  })
+
+  it("never hides the viewer's own datasets; another person's leftovers still are (B-27)", () => {
+    const list = [ds(1, 'QA B upload', { created_by: 7 }), ds(2, 'qa_sample', { created_by: 7 }),
+                  ds(3, 'tmp_orders', { created_by: 8 })]
+    const got = cleanDatasets(list, 'all', 7, false)
+    expect(got.visible.map((d: { id: number }) => d.id)).toEqual([1, 2])
+    expect(got.hiddenTest).toBe(1)
   })
 })

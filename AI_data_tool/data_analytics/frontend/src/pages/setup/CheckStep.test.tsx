@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { renderWithProviders as render } from '../../test/renderWithProviders'
 import { MemoryRouter } from 'react-router-dom'
 import CheckStep from './CheckStep'
 import { setupApi, type SetupCheckStep, type SetupCleaning, type SetupDemand, type SetupFindings } from '../../services/api'
@@ -80,6 +81,46 @@ describe('Guided setup — Check & discover', () => {
     await waitFor(() => expect(setupApi.fix).toHaveBeenCalledWith(38, 226, 'empty:note:0', 'fix', 'en', 7))
     fireEvent.click(screen.getByRole('button', { name: 'Warn me on every refresh' }))
     await waitFor(() => expect(setupApi.fix).toHaveBeenCalledWith(38, 226, 'empty:note:0', 'check', 'en', 7))
+  })
+
+  it('shows a failed fix inline, next to the findings, not only as a toast (B-02)', async () => {
+    vi.mocked(setupApi.check).mockResolvedValue(step())
+    vi.mocked(setupApi.fix).mockRejectedValue({ response: { status: 400, data: {
+      detail: 'A live (DirectQuery) dataset is never refreshed into a file' } } })
+    renderStep()
+    fireEvent.click(await screen.findByRole('button', { name: 'Show details and undo' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Warn me on every refresh' }))
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Could not apply this fix')
+    expect(alert).toHaveTextContent('A live (DirectQuery) dataset is never refreshed into a file')
+  })
+
+  it('shows the plain findings while the AI ideas are still coming, and keeps asking (B-12)', async () => {
+    vi.mocked(setupApi.check).mockResolvedValue(step(findings({ ai_pending: true, insights: [] })))
+    const onNext = renderStep()
+    expect(await screen.findByText(/AI ideas are still coming/)).toBeInTheDocument()
+    expect(screen.getByText(/ready/i)).toBeInTheDocument()
+    // Next is not held back by the AI part.
+    fireEvent.click(screen.getByRole('button', { name: /Next/ }))
+    expect(onNext).toHaveBeenCalled()
+  })
+
+  it('asks before a fix changes a dataset dashboards already use; Cancel changes nothing (B-33)', async () => {
+    const s = step()
+    s.datasets[0] = { ...s.datasets[0], auto_clean: false, used_by: { dashboards: 3 } }
+    vi.mocked(setupApi.check).mockResolvedValue(s)
+    vi.mocked(setupApi.fix).mockResolvedValue({ findings: findings() })
+    renderStep()
+    fireEvent.click(await screen.findByRole('button', { name: 'Show details and undo' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Treat empty as “Unknown”' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent('3 dashboards')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    expect(setupApi.fix).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Treat empty as “Unknown”' }))
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: /Change it for everyone/ }))
+    await waitFor(() => expect(setupApi.fix).toHaveBeenCalledWith(38, 226, 'empty:note:0', 'fix', 'en', 7))
   })
 
   it('undoes one automatic fix, or all of them', async () => {

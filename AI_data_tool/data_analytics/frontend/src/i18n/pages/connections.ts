@@ -45,6 +45,7 @@ export const en = {
   'cn2.typeSearch': 'Search database types',
   'cn2.noTypes': 'No type matches “{q}”.',
   'cn2.next': 'Next',
+  'cn2.noDriver': 'Driver not installed',
   'cn2.change': 'Choose type',
   'cn2.cancel': 'Cancel',
 }
@@ -87,6 +88,7 @@ export const ar: Record<keyof typeof en, string> = {
   'cn2.typeSearch': 'ابحث في أنواع قواعد البيانات',
   'cn2.noTypes': 'لا نوع يطابق «{q}».',
   'cn2.next': 'التالي',
+  'cn2.noDriver': 'برنامج التشغيل غير مثبّت',
   'cn2.change': 'اختر النوع',
   'cn2.cancel': 'إلغاء',
 }

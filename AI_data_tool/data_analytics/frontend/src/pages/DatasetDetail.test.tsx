@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderWithProviders as render, screen, waitFor, fireEvent, act } from '../test/renderWithProviders'
+import { renderWithProviders as render, screen, waitFor, fireEvent, act, within } from '../test/renderWithProviders'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { DirectionProvider } from '../contexts/DirectionContext'
 import DatasetDetail from './DatasetDetail'
@@ -452,6 +452,30 @@ describe('DatasetDetail DirectQuery gating', () => {
     expect(await screen.findByText(/filtered from 10/)).toBeInTheDocument()
   })
 
+  it('pages a DirectQuery preview by its real offset and shows the tools it cannot apply disabled (B-19)', async () => {
+    vi.mocked(datasetsApi.get).mockResolvedValue({ ...directQueryDataset(), columns: [{ name: 'region', dtype: 'string' }] as never })
+    vi.mocked(dataPreviewApi.query).mockResolvedValue({ columns: ['region'], rows: [['north']], total: 250 })
+    renderDetail(28)
+    await screen.findByRole('heading', { name: 'Live Sales' })
+    fireEvent.click(screen.getByRole('tab', { name: /^Data/ }))
+    expect(await screen.findByText('north')).toBeInTheDocument()
+    for (const name of [/^Filter$/, /^Row filter/, /Column$/, /^Group & bin$/]) {
+      expect(screen.getByRole('button', { name })).toBeDisabled()
+    }
+    expect(screen.getByRole('searchbox')).toBeDisabled()
+    expect(screen.getByRole('button', { name: /region/ })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: /Next/ }))
+    await waitFor(() => expect(dataPreviewApi.query).toHaveBeenLastCalledWith(28, [], [], 100, 100))
+  })
+
+  it('explains on Rules & alerts why a live dataset has no data checks (B-20)', async () => {
+    vi.mocked(datasetsApi.get).mockResolvedValue(directQueryDataset())
+    renderDetail(28, 'rules')
+    const card = await screen.findByTestId('rules-checks-live')
+    expect(card).toHaveTextContent('Data checks run when a dataset is refreshed')
+    expect(within(card).getByRole('link', { name: /alert/i })).toHaveAttribute('href', '#dl-rules-alerts')
+  })
+
   it('shows a shared empty state instead of a bare table with no rows when the preview matches nothing', async () => {
     vi.mocked(datasetsApi.get).mockResolvedValue(directQueryDataset())
     vi.mocked(dataPreviewApi.query).mockResolvedValue({ columns: ['region'], rows: [], total: 0 })
@@ -462,6 +486,80 @@ describe('DatasetDetail DirectQuery gating', () => {
 
     await waitFor(() => expect(dataPreviewApi.query).toHaveBeenCalled())
     expect(await screen.findByText(/no rows match/i)).toBeInTheDocument()
+  })
+})
+
+describe('DatasetDetail data filters (B-07)', () => {
+  const withRegion = (): Dataset => ({ ...importDataset(), row_count: 2000,
+    columns: [{ name: 'region', dtype: 'categorical' }] as never })
+
+  it('removing the last filter in the Filters panel reloads the grid unfiltered', async () => {
+    vi.mocked(datasetsApi.get).mockResolvedValue(withRegion())
+    vi.mocked(analysisApi.get).mockRejectedValue(new Error('no analysis yet'))
+    vi.mocked(dataPreviewApi.query).mockResolvedValue({ columns: ['region'], rows: [['Europe']], total: 514 })
+    renderDetail(29)
+    await screen.findByRole('heading', { name: 'CSV Upload' })
+    fireEvent.click(screen.getByRole('tab', { name: /^Data/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /^Filter$/ }))
+    fireEvent.change(screen.getByPlaceholderText('value…'), { target: { value: 'Europe' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Apply Filters' }))
+    await waitFor(() => expect(dataPreviewApi.query).toHaveBeenLastCalledWith(
+      29, [{ column: 'region', op: 'eq', value: 'Europe' }], [], 100, 0, undefined, 'asc', undefined))
+    const panel = screen.getByText('Filters').closest('div')!.parentElement!
+    fireEvent.click(within(panel).getByRole('button', { name: 'Remove filter region Europe' }))
+    await waitFor(() => expect(dataPreviewApi.query).toHaveBeenLastCalledWith(
+      29, [], [], 100, 0, undefined, 'asc', undefined))
+  })
+})
+
+describe('DatasetDetail edit cells key (B-08)', () => {
+  const sales = (): Dataset => ({ ...importDataset(), row_count: 3,
+    columns: [{ name: 'date', dtype: 'datetime' }, { name: 'id', dtype: 'categorical' }, { name: 'amount', dtype: 'numeric' }] as never })
+  const rows = { columns: ['date', 'id', 'amount'], rows: [['2024-01-01', 'a', 'one'], ['2024-01-01', 'b', 'two'], ['2024-01-02', 'c', 'three']], total: 3 }
+
+  async function openEditor() {
+    renderDetail(29)
+    await screen.findByRole('heading', { name: 'CSV Upload' })
+    fireEvent.click(screen.getByRole('tab', { name: /^Data/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Edit cells/ }))
+    return screen.getByLabelText('Rows identified by') as HTMLSelectElement
+  }
+
+  it('defaults the key to a column unique per row, and marks the others', async () => {
+    const { prepApi } = await import('../services/api')
+    vi.mocked(datasetsApi.get).mockResolvedValue(sales())
+    vi.mocked(analysisApi.get).mockResolvedValue({ categorical: { columns: { id: { n_unique: 3 } } },
+      datetime: { columns: { date: { n_unique: 2 } } } } as never)
+    vi.mocked(dataPreviewApi.query).mockResolvedValue(rows as never)
+    vi.mocked(prepApi.get).mockResolvedValue([])
+    const select = await openEditor()
+    expect(select.value).toBe('id')
+    expect(Array.from(select.options).find(o => o.value === 'date')!.textContent).toMatch(/not unique/)
+  })
+
+  it('asks before an edit keyed on a shared value changes several rows, and says so to the server', async () => {
+    const { prepApi } = await import('../services/api')
+    vi.mocked(datasetsApi.get).mockResolvedValue(sales())
+    vi.mocked(analysisApi.get).mockResolvedValue({ datetime: { columns: { date: { n_unique: 2 } } } } as never)
+    vi.mocked(dataPreviewApi.query).mockResolvedValue(rows as never)
+    vi.mocked(prepApi.get).mockResolvedValue([])
+    vi.mocked(prepApi.set).mockImplementation(async (_id, steps) => steps as never)
+    const select = await openEditor()
+    fireEvent.change(select, { target: { value: 'date' } })
+    vi.mocked(dataPreviewApi.query).mockImplementation(async (_id, filters) => {
+      const hit = rows.rows.filter(r => (filters ?? []).every(f => r[0] === f.value))
+      return { ...rows, rows: hit, total: hit.length } as never
+    })
+    fireEvent.click(screen.getByText('one'))
+    const box = screen.getByRole('textbox', { name: /amount/ })
+    fireEvent.change(box, { target: { value: '9' } })
+    fireEvent.blur(box)
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent(/2 rows/)
+    expect(prepApi.set).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('button', { name: /Change 2 rows/ }))
+    await waitFor(() => expect(prepApi.set).toHaveBeenCalledWith(29, [expect.objectContaining({
+      kind: 'edit_cells', key_column: 'date', allow_many: true })]))
   })
 })
 
@@ -1034,11 +1132,13 @@ describe('editing a cell in the data grid', () => {
     ] as never
     vi.mocked(datasetsApi.get).mockResolvedValue(ds)
     vi.mocked(analysisApi.get).mockRejectedValue(new Error('none'))
-    vi.mocked(dataPreviewApi.query).mockResolvedValue({
-      columns: ['order_id', 'region'],
-      rows: [['A-1', 'Nrth'], ['A-2', 'South']],
-      total: 2,
-    } as never)
+    // Answers like the server: a filter narrows the rows (the edit counts the
+    // rows sharing its key with one, B-08).
+    const all = [['A-1', 'Nrth'], ['A-2', 'South']]
+    vi.mocked(dataPreviewApi.query).mockImplementation(async (_id, filters) => {
+      const rows = all.filter(r => (filters ?? []).every(f => r[f.column === 'order_id' ? 0 : 1] === f.value))
+      return { columns: ['order_id', 'region'], rows, total: rows.length } as never
+    })
   }
 
   async function openDataTab() {
@@ -1379,6 +1479,15 @@ describe('a dataset just imported (E06)', () => {
     renderDetail(29)
     await screen.findAllByText('CSV Upload')
     expect(analysisApi.run).not.toHaveBeenCalled()
+  })
+
+  it('a dataset with no profile yet (GET answers 204 -> null) still runs it on arrival (B-15)', async () => {
+    vi.mocked(analysisApi.get).mockResolvedValue(null as never)
+    render(
+      <MemoryRouter initialEntries={['/datasets/29?new=1']}>
+        <Routes><Route path="/datasets/:id" element={<DatasetDetail />} /></Routes>
+      </MemoryRouter>)
+    await waitFor(() => expect(analysisApi.run).toHaveBeenCalledWith(29))
   })
 })
 

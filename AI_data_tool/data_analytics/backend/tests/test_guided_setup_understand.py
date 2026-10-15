@@ -268,6 +268,27 @@ class TestRoutes:
         body = (await client.get(f"/api/v1/setup/{src.id}/summary", headers=auth_headers["a"])).json()
         assert body["status"] == "syncing"
 
+    async def test_summary_reports_the_latest_read(self, client, db_session, two_orgs, auth_headers):
+        """B-03: step 1 must show the real latest SyncRun (running / failed /
+        none), not guess "nothing is reading it now" from source.sync_status."""
+        from app.models.models import SyncRun
+        from app.services.metadata.catalog_sync import STAGE_NAMES
+        org = two_orgs["a"]["org"].id
+        src = DataSource(name="new", type="postgresql", config={}, org_id=org, sync_status="pending")
+        db_session.add(src)
+        await db_session.commit()
+        body = (await client.get(f"/api/v1/setup/{src.id}/summary", headers=auth_headers["a"])).json()
+        assert body["latest_run"] is None
+
+        db_session.add(SyncRun(data_source_id=src.id, org_id=org, trigger="manual", status="running",
+                               stages=[{"name": "discover", "status": "ok"}, {"name": "sample", "status": "ok"}]))
+        await db_session.commit()
+        body = (await client.get(f"/api/v1/setup/{src.id}/summary", headers=auth_headers["a"])).json()
+        run = body["latest_run"]
+        assert run["status"] == "running" and run["started_at"]
+        assert run["stages_done"] == 2 and run["stages_total"] == len(STAGE_NAMES) == 8
+        assert run["error"] is None
+
     async def test_sample_of_a_table_from_another_connection_is_404(
             self, client, db_session, auth_headers, cars, model):
         src, listings, *_ = cars

@@ -204,7 +204,7 @@ async def create_dataflow(req: DataflowIn, db: AsyncSession = Depends(get_db),
     # found driving the new Dataflows page against the demo's Sales, which has
     # row rules). Every run still checks again -- rules may be added later.
     from ..routers.datasets import _refuse_if_ungovernable
-    await _refuse_if_ungovernable(db, [req.source_dataset_id])
+    await _refuse_if_ungovernable(db, [req.source_dataset_id], what="dataflow")
 
     steps = req.steps or []
     if not isinstance(steps, list) or len(steps) > MAX_STEPS:
@@ -381,7 +381,7 @@ async def run_dataflow(flow_id: int, req: RunRequest,
     # Re-run EVERY refusal on each run, not only at create: rules may have been
     # added since, and a run that ignored them would launder newly-governed data.
     inherited = await _refuse_if_ungovernable(
-        db, [flow.source_dataset_id] + list(flow.join_dataset_ids or []))
+        db, [flow.source_dataset_id] + list(flow.join_dataset_ids or []), what="dataflow")
 
     from ..services.analysis_frame import FrameUnavailable
     from ..services.snapshot_flow import merge as merge_snapshot, snapshot_rows, source_frame, validate_spec

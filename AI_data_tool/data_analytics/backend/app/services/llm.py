@@ -78,6 +78,8 @@ def _gates() -> tuple[asyncio.Semaphore, asyncio.Semaphore]:
 #: What `last_error` says when a call was refused by the budget; callers
 #: already treat any None as "no model this time" and fall back.
 BUDGET_SPENT = "the organization's AI budget is used up"
+#: B-11: every endpoint was found down moments ago; the call was not attempted.
+MODEL_UNREACHABLE = "model unreachable"
 
 
 @dataclass
@@ -377,6 +379,16 @@ class LLMClient:
         connect = min(float(settings.llm_connect_timeout_s), float(self.timeout))
         return httpx.Timeout(self.timeout, connect=connect)
 
+    def available(self) -> bool:
+        """B-11: False when the client is off, or every endpoint it would try
+        was found down moments ago (llm_endpoints.known_down) -- so a caller
+        can say "AI unavailable" at once instead of waiting on timeouts."""
+        if not self.enabled:
+            return False
+        from . import llm_endpoints
+        ids = [self.endpoint_id] + [getattr(f, "id", None) for f in self.fallbacks]
+        return not all(llm_endpoints.known_down(i) for i in ids)
+
     async def _post(self, payload: dict[str, Any], weight: str = "normal") -> str | None:
         meter = _meter.get()
         if meter is not None and meter.spent:
@@ -405,6 +417,8 @@ class LLMClient:
                 headers["Authorization"] = f"Bearer {key}"
             llm_endpoints.begin_call(eid)
             try:
+                # A short connect timeout: an unreachable host is known in
+                # seconds, while a slow answer still gets the full budget.
                 async with httpx.AsyncClient(
                     timeout=self._http_timeout(), transport=self._transport
                 ) as http:

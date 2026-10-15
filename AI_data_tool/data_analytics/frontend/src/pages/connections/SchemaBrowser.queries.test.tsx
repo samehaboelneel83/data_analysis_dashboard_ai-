@@ -3,7 +3,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { renderWithProviders } from '../../test/renderWithProviders'
 import { SchemaBrowser } from './SchemaBrowser'
-import { dataSourcesApi } from '../../services/api'
+import { dataSourcesApi, datasetsApi } from '../../services/api'
 import type { DataSource } from '../../services/api'
 
 vi.mock('react-hot-toast', () => ({ default: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }))
@@ -12,6 +12,7 @@ vi.mock('../../services/api', () => ({
                     queries: vi.fn(), saveQuery: vi.fn(), deleteQuery: vi.fn(), downloadCsv: vi.fn() },
   queryBuilderApi: { columns: vi.fn().mockResolvedValue([]) },
   jobsApi: { get: vi.fn() },
+  datasetsApi: { list: vi.fn().mockResolvedValue([]) },
 }))
 
 const render = (ui: React.ReactElement) => renderWithProviders(<MemoryRouter>{ui}</MemoryRouter>)
@@ -69,5 +70,20 @@ describe('Browse saved queries, history, sorting and CSV (4.2–4.4)', () => {
     fireEvent.keyDown(box, { key: 'Escape' })
     expect(onClose).not.toHaveBeenCalled()
     expect(screen.getByLabelText('Custom Query')).toHaveValue('SELECT 1 AS n')
+  })
+})
+
+describe('the name of the dataset made from a table (B-24)', () => {
+  it('starts as "<connection> — <table>", is selected whole on focus, and says when it is taken', async () => {
+    vi.mocked(datasetsApi.list).mockResolvedValue([{ id: 9, name: 'HR — dept_emp' }] as never)
+    render(<SchemaBrowser ds={ds} onClose={() => {}} />)
+    fireEvent.click(await screen.findByText('dept_emp'))
+    const box = await screen.findByLabelText('Dataset name') as HTMLInputElement
+    expect(box).toHaveValue('HR — dept_emp')
+    box.focus(); fireEvent.focus(box)
+    expect([box.selectionStart, box.selectionEnd]).toEqual([0, 'HR — dept_emp'.length])
+    expect(await screen.findByText(/already/i)).toBeInTheDocument()
+    fireEvent.change(box, { target: { value: 'Something new' } })
+    expect(screen.queryByText(/already/i)).not.toBeInTheDocument()
   })
 })

@@ -27,6 +27,8 @@ describe('reading a file for the preview', () => {
   it('names and kinds', () => {
     expect(nameFromFile('enrolments_2025.csv')).toBe('Enrolments 2025')
     expect(kindOf('a.ACCDB')).toBe('access')
-    expect(kindOf('b.tsv')).toBe('csv')
+    // B-22: the server imports neither .tsv nor .txt, so they are not CSV here.
+    expect(kindOf('b.tsv')).toBe('other')
+    expect(kindOf('notes.txt')).toBe('other')
   })
 })

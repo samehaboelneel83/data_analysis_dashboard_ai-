@@ -122,3 +122,12 @@ class TestContractShape:
         clean = safe_clean(dirty)
         assert clean == {"a": 3, "b": 1.5, "c": None, "d": [True], "e": None}
         assert isinstance(clean["a"], int) and not isinstance(clean["a"], np.integer)
+
+
+class TestNoProfileYet:
+    """B-15 / AD-06: a dataset nobody has profiled yet is not an error (that is
+    `200 null`, tested above) -- but a dataset that does not exist still is."""
+
+    async def test_an_unknown_dataset_is_still_404(self, client, auth_headers):
+        r = await client.get("/api/v1/datasets/999999/analysis", headers=auth_headers["a"])
+        assert r.status_code == 404

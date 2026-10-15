@@ -56,8 +56,11 @@ def frontend_required() -> dict[str, set[str]]:
 class TestParityWithTheFrontend:
     def test_the_spec_file_was_actually_read(self):
         """A parser that quietly returns nothing would make every test below
-        pass. The catalogue is 65 types and the doc tests already pin that."""
-        assert len(frontend_required()) == 75, sorted(frontend_required())
+        pass. The catalogue in frontend/src/types/report.ts (ROLE_SPECS) had 77
+        types when this was last checked; a floor rather than an exact count
+        still catches a broken parser without turning CI red each time a chart
+        type is added (`test_every_widget_type_is_covered` guards real parity)."""
+        assert len(frontend_required()) >= 70, sorted(frontend_required())
 
     def test_every_widget_type_is_covered(self):
         missing = set(frontend_required()) - set(REQUIRED_ROLES)

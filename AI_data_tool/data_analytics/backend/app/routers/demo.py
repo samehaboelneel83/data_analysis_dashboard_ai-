@@ -7,6 +7,9 @@ independent -- reports reference datasets, and the feature pass patches widgets 
 report pass created -- so a partial success would leave a demo that loads and looks
 fine while being quietly wrong.
 """
+import asyncio
+import logging
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +28,46 @@ from ..services.demo_content import (
 from ..services.demo_use_cases import seed_demo_use_cases, seed_demo_workspace
 
 router = APIRouter(prefix="/demo", tags=["demo"])
+logger = logging.getLogger(__name__)
+
+
+async def _start_demo_sync(db: AsyncSession, org_id: int, source) -> int | None:
+    """B-26: read the demo connection's catalog right away (a local SQLite
+    file: seconds), so its review page, tables and glossary links are filled
+    for every new user instead of "never synced". The model is not used.
+
+    After the demo's own commit, and never able to fail the seed: a sync that
+    cannot start leaves the connection unsynced, exactly as before, with "Run
+    sync" on its review page. Re-seeding deletes the source, and its runs with
+    it (ON DELETE CASCADE), so this stays idempotent."""
+    from ..core.config import settings
+    if source is None or not settings.demo_sync_on_seed:
+        return None
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from ..models.models import SyncRun
+    from ..services.metadata import cache as cache_module
+    from ..services.metadata import sync
+    try:
+        cache = cache_module.get_cache()
+        run = SyncRun(data_source_id=source.id, org_id=org_id, trigger="demo_seed",
+                      status="running", stages=[])
+        db.add(run)
+        await db.commit()
+        cfg = dict(source.config or {})
+        cfg["type"] = source.type
+        # On the request's own engine: the app's pool (a test's database).
+        factory = async_sessionmaker(db.bind, class_=AsyncSession, expire_on_commit=False)
+        asyncio.create_task(sync.run_sync_background(
+            factory, run.id, source.id, org_id,
+            cache=cache, llm_client=None, allow_llm=False, source_config=cfg))
+        return run.id
+    except Exception:                                       # noqa: BLE001 -- never fails the seed
+        logger.exception("demo: could not start the sync of the demo connection")
+        try:
+            await db.rollback()
+        except Exception:                                   # noqa: BLE001
+            pass
+        return None
 
 
 @router.post("/seed")
@@ -71,6 +114,7 @@ async def seed_demo(
     )).scalar_one()
 
     await db.commit()
+    await _start_demo_sync(db, org_id, direct.get("source"))
 
     return {
         "datasets": len(datasets) + 1,          # + the DirectQuery one

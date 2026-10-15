@@ -171,6 +171,9 @@ export default function DashboardStep({ sourceId, flow, onBack, onNewFlow }: {
         </div>
         <p className="setup-section__sub">{t('setup.a.sub')}</p>
         <div aria-live="polite">
+          {designs.pending && !gaveUp && data.ai?.available === false && (
+            <p className="setup-ai">{t('setup.ai.offDesign')}</p>
+          )}
           {designs.pending && !gaveUp && (
             <p className="setup-ai setup-ai--pending"><Sparkles size={13} aria-hidden="true" /> {t('setup.a.designing')}<WaitTime since={designs.since} usual={data.usual?.designs} /></p>
           )}
