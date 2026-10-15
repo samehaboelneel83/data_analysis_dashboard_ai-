@@ -9,7 +9,7 @@ import { MapLoading } from './geo/MapDataTable'
 import type { CalcColumnFormat } from '../../services/api'
 import type { Widget, WidgetType } from '../../types/report'
 import type { RuleStyles } from '../../lib/displayRules'
-import { fmtStr, formatValue, EmptyState, seriesColor } from './chartUtils'
+import { fmtStr, formatValue, EmptyState, seriesColor, formatForAggregation } from './chartUtils'
 import { CHART_RENDERERS } from './chartRenderers'
 import LatticeRenderer from './chartRenderers/LatticeRenderer'
 import AnimatedRenderer from './chartRenderers/AnimatedRenderer'
@@ -147,8 +147,9 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
 
   // Format for the value column: use measure if set, otherwise fall back to dimension
   // (many widgets aggregate the dimension column directly with no separate measure)
-  const measureFmt = allFormats?.[cfg.measure] ?? allFormats?.[cfg.dimension]
-  const measure2Fmt = allFormats?.[cfg.measure2]
+  // F-12: a count is a number of rows, not an amount -- never in the measure's currency.
+  const measureFmt = formatForAggregation(allFormats?.[cfg.measure] ?? allFormats?.[cfg.dimension], cfg.aggregation)
+  const measure2Fmt = formatForAggregation(allFormats?.[cfg.measure2], cfg.aggregation2)
 
   if (wt === 'text') {
     // Substitute resolved {{agg(column)}} values before link rendering. An unresolved

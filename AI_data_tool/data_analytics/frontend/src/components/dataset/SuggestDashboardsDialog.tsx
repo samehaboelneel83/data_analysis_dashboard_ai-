@@ -407,6 +407,8 @@ export default function SuggestDashboardsDialog(
         )}
 
         {error && <div style={{ ...card, color: 'var(--danger)' }}>{error}</div>}
+        {/* F-11: the person chose "Off — no AI" in the top bar. */}
+        {reason === 'ai_off' && !busy && <div role="status" data-testid="sdd-ai-off" style={{ ...card, ...muted }}>{tr('sdd.aiOff')}</div>}
 
         {profile && (
           <details style={card}>

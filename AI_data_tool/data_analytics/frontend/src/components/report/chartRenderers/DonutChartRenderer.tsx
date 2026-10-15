@@ -1,5 +1,5 @@
 import { PieChart, Pie, Cell, Label, Tooltip, Legend, ResponsiveContainer, Customized } from 'recharts'
-import { TT, sliceLabel, fmtStr, getFillFactory, COLORS, fillPattern, PatternDefs } from '../chartUtils'
+import { TT, sliceLabel, fmtStr, getFillFactory, COLORS, fillPattern, PatternDefs, formatForAggregation, isCountAggregation } from '../chartUtils'
 import type { ChartRendererProps } from './types'
 import { legendProps } from './axisOptions'
 import { seriesName } from './axisOptions'
@@ -14,7 +14,9 @@ export function sharePercent(share: number): string {
   return `${Math.round(p)}%`
 }
 
-export default function DonutChartRenderer({ rows, cfg, rtl, broadcasts, localSelected, onClickPoint, measureFmt, ruleStyles, plotW }: ChartRendererProps) {
+export default function DonutChartRenderer({ rows, cfg, rtl, broadcasts, localSelected, onClickPoint, measureFmt: givenFmt, ruleStyles, plotW }: ChartRendererProps) {
+  // F-12: slices that count rows are numbers of rows, whatever the measure's format.
+  const measureFmt = formatForAggregation(givenFmt, cfg.aggregation)
   const getFill = getFillFactory(broadcasts, localSelected, ruleStyles?.rows)
   const patterns = !!cfg.series_patterns
   // Opt-out: the legend has been on, unconditionally, since this renderer was
@@ -34,8 +36,11 @@ export default function DonutChartRenderer({ rows, cfg, rtl, broadcasts, localSe
   const showTotal = cfg.donut_total !== false
   const total = rows.reduce((sum: number, r: { value?: unknown }) =>
     sum + (typeof r.value === 'number' ? r.value : 0), 0)
+  const measureWords = cfg.measure ? String(cfg.measure).replace(/_/g, ' ') : ''
   const totalCaption = (cfg.donut_total_label as string | undefined)
-    ?? (cfg.measure ? `Total ${String(cfg.measure).replace(/_/g, ' ')}` : '')
+    ?? (cfg.aggregation === 'count' ? 'Rows'
+      : isCountAggregation(cfg.aggregation) ? (measureWords ? `Distinct ${measureWords}` : 'Distinct')
+      : measureWords ? `Total ${measureWords}` : '')
   const pct = (v: unknown) => total > 0 && typeof v === 'number' ? sharePercent(v / total) : ''
   return (
     <div dir={rtl ? 'rtl' : undefined} style={{ height: '100%' }}>

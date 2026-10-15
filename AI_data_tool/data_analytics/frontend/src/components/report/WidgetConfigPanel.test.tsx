@@ -1824,3 +1824,25 @@ describe('only what the author set is written (live check item 14)', () => {
     expect(config).not.toHaveProperty('rtl')
   })
 })
+
+describe('model display options are where display options live (F-16)', () => {
+  const ki = (config: Record<string, unknown> = {}) => widget({ widget_type: 'model_influencers' as Widget['widget_type'], title: 'Key influencers',
+    config: { outcome: 'churn', factors: ['region'], ...config } })
+
+  it('Key influencers: "Drawn as" and the other display choices are in Format; the outcome stays in Data', () => {
+    const onUpdate = vi.fn()
+    const { unmount } = render(<CrossFilterProvider><WidgetConfigPanel widget={ki()} columns={columns} onUpdate={onUpdate}
+      section="format" /></CrossFilterProvider>)
+    expect(screen.getByLabelText('Drawn as')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Event (the outcome being predicted)')).toBeNull()
+    fireEvent.change(screen.getByLabelText('Drawn as'), { target: { value: 'bubbles' } })
+    act(() => { vi.advanceTimersByTime(700) })
+    const [config] = onUpdate.mock.calls[onUpdate.mock.calls.length - 1]
+    expect(config.influencer_style).toBe('bubbles')
+    unmount()
+    render(<CrossFilterProvider><WidgetConfigPanel widget={ki()} columns={columns} onUpdate={vi.fn()}
+      section="data" /></CrossFilterProvider>)
+    expect(screen.getByLabelText('Event (the outcome being predicted)')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Drawn as')).toBeNull()
+  })
+})

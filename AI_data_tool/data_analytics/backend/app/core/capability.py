@@ -334,6 +334,23 @@ async def effective_capabilities(
     return out
 
 
+async def team_shared_report_ids(db: AsyncSession, user: User, report_ids: list[int]) -> set[int]:
+    """The reports among these that an unexpired share names one of this
+    person's teams on (their own units and every unit above them).
+
+    `report_grants` lets a personal share decide alone, so its `via` says
+    "user" even when the team was given the dashboard too; this answers the
+    separate question "was it shared with my team?" (F-05: My team)."""
+    if not report_ids:
+        return set()
+    units = await _my_unit_ids(db, user.org_id, user.id)
+    if not units:
+        return set()
+    rows = (await db.execute(select(ReportUserGrant.report_id, ReportUserGrant.expires_at).where(
+        ReportUserGrant.report_id.in_(report_ids), ReportUserGrant.org_unit_id.in_(units)))).all()
+    return {rid for rid, expires_at in rows if not grant_expired(expires_at)}
+
+
 async def require_capability(db: AsyncSession, user: User, report_id: int, min_level: str) -> None:
     level = await effective_capability(db, user, report_id)
     if level == "none":

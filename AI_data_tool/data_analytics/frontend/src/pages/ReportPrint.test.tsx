@@ -50,6 +50,27 @@ describe('ReportPrint loading and error states', () => {
   })
 })
 
+describe('the print view is a download (F-02)', () => {
+  beforeEach(() => { vi.mocked(reportsApi.get).mockReset() })
+
+  it('asks the server for the print view, so the server can refuse it', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue({ id: 1, name: 'Sales', dataset_id: null, pages: [] } as never)
+    renderAt()
+    await screen.findByRole('heading', { name: 'Sales' })
+    expect(reportsApi.get).toHaveBeenCalledWith(1, { view: 'print' })
+  })
+
+  it("a 403 shows the server's reason with only a way back: no Print, no PowerPoint", async () => {
+    vi.mocked(reportsApi.get).mockRejectedValue({ response: { status: 403, data: { detail: 'Your access to this dashboard does not include downloads.' } } })
+    renderAt()
+    expect(await screen.findByText('Your access to this dashboard does not include downloads.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Print / Save as PDF' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Download PowerPoint' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /try again/i })).toBeNull()
+    expect(screen.getByRole('link', { name: 'Back to report' })).toHaveAttribute('href', '/reports/1')
+  })
+})
+
 describe('the print view (QA2 Visual 7, Translation 15)', () => {
   const report = { id: 1, name: 'Sales', dataset_id: null, pages: [{ id: 10, name: 'P1', page_type: 'normal', widgets: [] }, { id: 11, name: 'P2', page_type: 'normal', widgets: [] }] }
 

@@ -294,13 +294,16 @@ function Thumb({ shape }: { shape: ReturnType<typeof thumbnail> }) {
   )
 }
 
-export default function SuggestionsPane({ columns, analysis, onAdd, reportId, datasetId, pageWidgets, columnMeta }: {
+export default function SuggestionsPane({ columns, analysis, onAdd, onAddMany, reportId, datasetId, pageWidgets, columnMeta }: {
   columns: DatasetColumn[]
   /** The author's column meaning (role, default summary): identifiers are
       never charted as measures, a salary is averaged. */
   columnMeta?: Record<string, ColumnMeta | undefined>
   analysis: { numeric?: { correlation?: Record<string, Record<string, number>> } } | null
   onAdd: (s: Suggestion) => void
+  /** F-15: add every idea shown (under the current chip) at once. Resolves
+   *  false when nothing was added (the builder asked and was told no). */
+  onAddMany?: (list: Suggestion[]) => Promise<boolean>
   /** When set, the pane leads with insight-driven suggestions for this
       report: the insights engine's ranked findings mapped to widgets, with
       findings about columns the report's name/description mentions first. */
@@ -440,6 +443,15 @@ export default function SuggestionsPane({ columns, analysis, onAdd, reportId, da
     remember(v.widget_type, v.config, 'added')
     onAdd({ widget_type: v.widget_type, title: v.headline, reason: v.reason, config: labelled(v) })
   }
+  // F-15: in the order they are shown, strongest section first.
+  const addable = sections.flatMap(sec => sec.items).filter(v => !added.includes(v.key))
+  const addAll = async () => {
+    if (!onAddMany || addable.length === 0) return
+    const ok = await onAddMany(addable.map(v => ({ widget_type: v.widget_type, title: v.headline, reason: v.reason, config: labelled(v) })))
+    if (!ok) return
+    setAdded(a => [...a, ...addable.map(v => v.key)])
+    addable.forEach(v => remember(v.widget_type, v.config, 'added'))
+  }
   const goTo = (w: Widget) => {
     const el = document.querySelector(`[data-widget-id="${w.id}"]`) as HTMLElement | null
     if (!el) return
@@ -468,6 +480,11 @@ export default function SuggestionsPane({ columns, analysis, onAdd, reportId, da
             <span className="dl-sug__title"><Lightbulb size={15} aria-hidden /> {tr('sug.title')}</span>
             <span className="dl-sug__summary">{tr('sug.summary', { n })}</span>
           </div>
+          {onAddMany && addable.length > 0 && (
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => void addAll()}>
+              <Plus size={12} aria-hidden /> {tr('sug.addAll', { n: addable.length })}
+            </button>
+          )}
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSeed(x => x + 1)}
             title={tr('sug.moreTitle')}>
             <RefreshCw size={12} aria-hidden /> {tr('sug.more')}

@@ -2442,11 +2442,14 @@ async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
         from ..services import jobs as job_service
         from ..services.suggest_jobs import PANEL_JOB_KIND
         from ..services import ai_context
+        from ..services import llm_endpoints as _llm_endpoints
+        job_off = _llm_endpoints.is_off()           # F-11: "Off -- no AI" travels with the job
         goal = (await ai_context.for_dataset(db, current_user, ds, req.goal)
-                if (req.goal or "").strip() or _asked_for_profile(req) else "")
+                if not job_off and ((req.goal or "").strip() or _asked_for_profile(req)) else "")
         job, _ = await job_service.enqueue(
             db, user=current_user, kind=PANEL_JOB_KIND,
-            inputs={"dataset_id": dataset_id, "goal": goal, "size": req.size, "fresh": req.fresh},
+            inputs={"dataset_id": dataset_id, "goal": goal, "size": req.size, "fresh": req.fresh,
+                    **({"ai_off": True} if job_off else {})},
             subject=f"Analyst panel: {ds.name}", max_attempts=2)
         return {"job_id": job.id, "state": job.state, "source": "panel"}
 
@@ -2455,10 +2458,12 @@ async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
     # B-10: a blank box is the statistics engine ("no AI involved"); the
     # profile's "about me" stands in only when the caller asked for it.
     from ..services import ai_context
-    goal = (await ai_context.for_dataset(db, current_user, ds, req.goal)
-            if (req.goal or "").strip() or _asked_for_profile(req) else "")
-    # F-03 / AD-01: with every endpoint just seen down, do not wait on one.
     from ..services import llm_endpoints
+    # F-11: "Off -- no AI" in the top bar: the statistics engine, said so.
+    ai_off = llm_endpoints.is_off()
+    goal = (await ai_context.for_dataset(db, current_user, ds, req.goal)
+            if not ai_off and ((req.goal or "").strip() or _asked_for_profile(req)) else "")
+    # F-03 / AD-01: with every endpoint just seen down, do not wait on one.
     ai_ok = bool(goal) and llm_endpoints.model_available()[0]
     try:
         # No goal, or no model: nothing in preparing should ask one either
@@ -2552,7 +2557,7 @@ async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
         # records and a drill-through page -- rather than one page of findings
         # (statistics engine 41% of the analysts' questions on one page,
         # five-dataset review 2026-10-02). Same gate, same selection, no model.
-        return await _statistics_answer(sug, inputs)
+        return await _statistics_answer(sug, inputs, reason=AI_OFF if ai_off else None)
 
     # Each widget states what it actually drew. The proposal's own `why` (a
     # model's expectation, or a finding's text) stays beside it, so a reader
@@ -2607,6 +2612,9 @@ async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
 SUGGEST_AI_SECONDS = 240
 #: `reason` when the statistics engine answered because the model could not.
 AI_UNREACHABLE = "ai_unreachable"
+#: `reason` when the person turned AI off in the top-bar picker (F-11).
+AI_OFF = "ai_off"
+_REASON_I18N = {AI_UNREACHABLE: "sdd.aiUnreachable", AI_OFF: "sdd.aiOff"}
 
 
 def _asked_for_profile(req) -> bool:
@@ -2623,7 +2631,7 @@ async def _statistics_answer(sug, inputs, *, reason: str | None = None) -> dict:
               "proposals": [{**p, "source": "insights"} for p in out["proposals"]]}
     if reason:
         answer["reason"] = reason
-        answer["reason_i18n"] = {"key": "sdd.aiUnreachable"}
+        answer["reason_i18n"] = {"key": _REASON_I18N.get(reason, "sdd.aiUnreachable")}
     return answer
 
 

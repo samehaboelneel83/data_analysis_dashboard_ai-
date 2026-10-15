@@ -625,8 +625,12 @@ def get_client(choice: str | None = None) -> LLMClient:
 
     targets = llm_endpoints.candidates(choice)
     if not targets:
-        return LLMClient(base_url=settings.llm_base_url, model=settings.llm_model,
-                         enabled=False, timeout=settings.llm_timeout_s)
+        off = LLMClient(base_url=settings.llm_base_url, model=settings.llm_model,
+                        enabled=False, timeout=settings.llm_timeout_s)
+        if llm_endpoints.is_off(choice):
+            # F-11: the person chose "Off -- no AI" in the top bar.
+            off.last_error = "AI is off for you (top-bar model picker)."
+        return off
     first, rest = targets[0], targets[1:]
     picked = choice or llm_endpoints.current_choice()
     return LLMClient(

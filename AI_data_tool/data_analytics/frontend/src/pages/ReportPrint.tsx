@@ -30,11 +30,15 @@ export default function ReportPrint() {
   const [report, setReport] = useState<Report | null>(null)
   const [dataset, setDataset] = useState<Dataset | null>(null)
   const [error, setError] = useState<unknown>(null)
+  // F-02: the server's "no downloads for you" -- this page is where Save as
+  // PDF and PowerPoint come from, so a refusal leaves only the way back.
+  const [refused, setRefused] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setError(null)
+    setRefused(null)
     try {
-      const r = await reportsApi.get(reportId)
+      const r = await reportsApi.get(reportId, { view: 'print' })
       // Printed in the report's own palette, an org palette included.
       const customs = r.theme?.startsWith('custom:')
         ? Object.fromEntries((await themesApi.list().catch(() => [])).map(t => [`custom:${t.id}`, t.colors]))
@@ -43,9 +47,13 @@ export default function ReportPrint() {
       setReport(r)
       if (r.dataset_id) setDataset(await datasetsApi.get(r.dataset_id))
     } catch (e) {
-      setError(e)
+      const res = (e as { response?: { status?: number; data?: { detail?: unknown } } })?.response
+      if (res?.status === 403) {
+        const d = res.data?.detail
+        setRefused(typeof d === 'string' && d ? d : t('prt.refused'))
+      } else setError(e)
     }
-  }, [reportId])
+  }, [reportId, t])
   useEffect(() => { load() }, [load])
   // Paper is light (QA2 Visual 7). The whole page, not only this subtree: many
   // dark styles are written as [data-theme="dark"] .x and still match through
@@ -62,6 +70,15 @@ export default function ReportPrint() {
     }
   }, [])
 
+  if (refused !== null) return (
+    <div style={{ padding: 40 }}>
+      <div role="alert" className="card" style={{ padding: 20, maxWidth: 560 }}>
+        <h1 style={{ fontSize: 16, margin: '0 0 8px' }}>{t('prt.refusedTitle')}</h1>
+        <p style={{ margin: '0 0 14px' }}>{refused}</p>
+        <Link className="btn btn-sm" to={`/reports/${reportId}`}>{t('prt.back')}</Link>
+      </div>
+    </div>
+  )
   if (error) return <div style={{ padding: 40 }}><LoadError what="this report" error={error} onRetry={load} /></div>
   if (!report) return <div style={{ padding: 40 }}><LoadingState label={t('prt.preparing')} /></div>
 

@@ -122,6 +122,27 @@ describe('ShareDashboardDialog', () => {
     expect(await within(screen.getByTestId('share-people')).findByText('North')).toBeInTheDocument()
   })
 
+  it('a new person starts at Can view, and is back at Can view after each invite and each switch (F-06)', async () => {
+    vi.mocked(reportGrantsApi.create).mockResolvedValue({ id: 6, user_id: 3, email: 'b@x.io', level: 'edit' } as never)
+    vi.mocked(workspaceApi.shareOptions).mockResolvedValue({ roles: [], org_units: [] } as never)
+    open()
+    const dialog = await screen.findByRole('dialog')
+    const level = () => within(dialog).getByLabelText('Access level') as HTMLSelectElement
+    expect(level().value).toBe('view')
+    fireEvent.change(within(dialog).getByLabelText('Email to share with'), { target: { value: 'b@x.io' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Invite' }))
+    await waitFor(() => expect(reportGrantsApi.create).toHaveBeenCalledWith(7, { email: 'b@x.io', level: 'view' }))
+    fireEvent.change(level(), { target: { value: 'edit' } })
+    fireEvent.change(within(dialog).getByLabelText('Email to share with'), { target: { value: 'c@x.io' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Invite' }))
+    await waitFor(() => expect(reportGrantsApi.create).toHaveBeenLastCalledWith(7, { email: 'c@x.io', level: 'edit' }))
+    await waitFor(() => expect(level().value).toBe('view'))
+    fireEvent.change(level(), { target: { value: 'edit' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'A team' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'A person' }))
+    expect(level().value).toBe('view')
+  })
+
   it('sends an end date, no downloads, sharing on and a message only when chosen', async () => {
     vi.mocked(reportGrantsApi.create).mockResolvedValue({ id: 6, user_id: 3, email: 'b@x.io', level: 'view', can_export: false, can_share: true,
       expires_at: '2030-01-31T23:59:59Z' } as never)
@@ -155,22 +176,48 @@ describe('ShareDashboardDialog', () => {
     await waitFor(() => expect(publishingApi.changeGrant).toHaveBeenCalledWith(7, 5, { can_export: false }))
   })
 
-  it('general access is the publish flag', async () => {
+  it('general access is the publish flag, asked about first (F-08)', async () => {
     vi.mocked(reportsApi.setPublished).mockResolvedValue({ published: true } as never)
     const onPublishedChange = vi.fn()
     open({ onPublishedChange })
     const everyone = await screen.findByRole('radio', { name: /Everyone in your organisation/ })
     expect(screen.getByRole('radio', { name: /Restricted/ })).toHaveAttribute('aria-checked', 'true')
     fireEvent.click(everyone)
+    const ask = await screen.findByRole('alertdialog')
+    expect(ask).toHaveTextContent('Publish “Sales” to everyone in your organisation?')
+    expect(reportsApi.setPublished).not.toHaveBeenCalled()
+    fireEvent.click(within(ask).getByRole('button', { name: 'Publish' }))
     await waitFor(() => expect(reportsApi.setPublished).toHaveBeenCalledWith(7, true))
     expect(onPublishedChange).toHaveBeenCalledWith(true)
     await waitFor(() => expect(everyone).toHaveAttribute('aria-checked', 'true'))
+  })
+
+  it('cancelling the question publishes nothing and changes nothing (F-08)', async () => {
+    open()
+    const everyone = await screen.findByRole('radio', { name: /Everyone in your organisation/ })
+    fireEvent.click(everyone)
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    expect(reportsApi.setPublished).not.toHaveBeenCalled()
+    expect(everyone).toHaveAttribute('aria-checked', 'false')
+  })
+
+  it('making a published dashboard private is asked about too (F-08)', async () => {
+    vi.mocked(reportsApi.setPublished).mockResolvedValue({ published: false } as never)
+    open({ report: report({ published: true }) })
+    fireEvent.click(await screen.findByRole('radio', { name: /Restricted/ }))
+    const ask = await screen.findByRole('alertdialog')
+    expect(ask).toHaveTextContent('Make “Sales” private?')
+    expect(reportsApi.setPublished).not.toHaveBeenCalled()
+    fireEvent.click(within(ask).getByRole('button', { name: 'Make private' }))
+    await waitFor(() => expect(reportsApi.setPublished).toHaveBeenCalledWith(7, false))
   })
 
   it("shows the publish gate's message when publishing is refused", async () => {
     vi.mocked(reportsApi.setPublished).mockRejectedValue({ response: { data: { detail: { message: 'Fix 2 review findings first' } } } })
     open()
     fireEvent.click(await screen.findByRole('radio', { name: /Everyone in your organisation/ }))
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Publish' }))
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Fix 2 review findings first'))
   })
 

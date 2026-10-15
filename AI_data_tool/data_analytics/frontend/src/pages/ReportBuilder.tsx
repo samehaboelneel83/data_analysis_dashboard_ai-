@@ -4,6 +4,7 @@ import RelativeDateEditor from '../components/report/RelativeDateEditor'
 import AccessExplainer from '../components/report/AccessExplainer'
 import { DEFAULT_SPEC, PRESETS, describeSpec, parseSpec, specProblem, type RelativeSpec } from '../lib/relativeDates'
 import { closeAll, closeOpen, markOpen, readOpen, type OpenReport } from '../lib/openReports'
+import { stackBelow } from '../lib/stackLayouts'
 import OpenReportsMenu from '../components/report/OpenReportsMenu'
 import { useEffect, useState, useCallback, useMemo, useRef, lazy, Suspense, Fragment, type ReactNode } from 'react'
 import LoadError from '../components/ui/LoadError'
@@ -265,6 +266,11 @@ export default function ReportBuilder() {
   const [cfSpec, setCfSpec] = useState<RelativeSpec>({ ...DEFAULT_SPEC })
   // Phase 7.3: what this user may do here, with reasons, and the sensitivity in force.
   const [access, setAccess] = useState<Record<string, AuthzDecision>>({})
+  // F-02: the share's "may download". The server refuses every export path
+  // (print view, PDF, workbook, a chart's CSV/Excel) on its own; this only
+  // keeps the UI from offering what will be refused. A screenshot or the
+  // browser's own print of the live view cannot be prevented by any app.
+  const mayDownload = access.download?.allowed !== false
   const [sens, setSens] = useState<{ floor?: string | null; floor_reasons?: string[]; effective?: string | null; effective_reasons?: string[] } | null>(null)
   const [accessOpen2, setAccessOpen2] = useState(false)
   const [dataset,    setDataset]    = useState<Dataset | null>(null)
@@ -415,7 +421,7 @@ export default function ReportBuilder() {
   const [aiTab, setAiTab] = useState<AssistTab>('ask')
   const [askSeed, setAskSeed] = useState<{ q: string; n: number } | null>(null)
   const [focusW, setFocusW] = useState<Widget | null>(null)
-  const aiOffline = useAiOffline().offline
+  const { offline: aiOffline, off: aiOff } = useAiOffline()
   // Refresh in the Modern header remounts the canvas, so every widget asks again.
   const [refreshNonce, setRefreshNonce] = useState(0)
 
@@ -1484,6 +1490,48 @@ export default function ReportBuilder() {
     } finally {
       setSaving(false)
     }
+  }
+
+  /** F-15: the Suggestions pane's "Add all shown". One under another below
+   *  the page (stackBelow), one save of the packed layout, one reload, and ONE
+   *  undo entry that takes them all away. Asks first when there are many. */
+  const addSuggestedWidgets = async (list: Suggestion[]): Promise<boolean> => {
+    if (!activePage) { toast.error(tr('bc.shell.t.selectPage')); return false }
+    if (!list.length) return false
+    if (list.length > 8 && !(await confirm({ title: tr('sug.addAllConfirm', { n: list.length }), body: tr('sug.addAllBody'),
+      confirmLabel: tr('sug.addAll', { n: list.length }), destructive: false }))) return false
+    const ws = activePage.widgets
+    const sizeOf = (t: string) => ({ w: Math.max(6, minSize(t).w), h: Math.max(5, minSize(t).h) })
+    const boxes = stackBelow(ws.map(w => w.layout), list.map(x => sizeOf(x.widget_type)))
+    const pageId = activePage.id
+    const made: Widget[] = []
+    setSaving(true)
+    try {
+      for (let i = 0; i < list.length; i++) {
+        const sug = list[i]
+        made.push(await reportsApi.addWidget(reportId, pageId, {
+          widget_type: sug.widget_type as WidgetType, title: sug.title, config: sug.config, layout: boxes[i],
+        }))
+      }
+    } finally {
+      if (made.length) {
+        const snaps = made.map((w, i) => ({ id: w.id, snap: { widget_type: list[i].widget_type as WidgetType, title: list[i].title,
+          config: list[i].config, layout: w.layout } as Partial<Widget> }))
+        pushUndo({
+          label: tr('sug.addAllDone', { n: made.length }),
+          undo: async () => { for (const m of snaps) await removeWidgetById(pageId, m.id) },
+          redo: async () => { for (const m of snaps) await recreateWidget(pageId, m.id, m.snap) },
+        })
+        if (isPackedMode(activePage.layout_mode) && !needsAutoPack(activePage.layout_mode)) {
+          const nextWidgets = [...ws, ...made]
+          await persistWidgetLayouts({ ...activePage, widgets: nextWidgets }, compact(toLayoutItems(nextWidgets)))
+        }
+        await loadReport()
+        toast.success(tr('sug.addAllDone', { n: made.length }))
+      }
+      setSaving(false)
+    }
+    return made.length === list.length
   }
 
   const applyAlign = async (mode: Parameters<typeof alignWidgets>[1]) => {
@@ -2591,13 +2639,15 @@ export default function ReportBuilder() {
   const resizeStartRef = useRef(handleResizeStart); resizeStartRef.current = handleResizeStart
   const perWidgetHandlers = useMemo(() => {
     const m = new Map<number, { onSelect: (e: React.MouseEvent) => void; onDelete: () => void
-      onDuplicate: () => void
+      onDuplicate: () => void; onEditOptions: () => void
       onDragStart: (e: React.MouseEvent) => void; onResizeStart: (e: React.MouseEvent) => void }>()
     for (const w of (activePage?.widgets ?? [])) {
       m.set(w.id, {
         onSelect: (e) => widgetActionsRef.current.selectWidget(w, e),
         onDelete: () => { void widgetActionsRef.current.deleteWidget(w) },
         onDuplicate: () => { void widgetActionsRef.current.duplicateWidget(w) },
+        // F-16: the widget menu's "Edit options…" -- its Format options, opened.
+        onEditOptions: () => { setSelectedW(w); setRightPanelMode('default'); setPropSection('format'); setRightOpenSignal(n => n + 1) },
         onDragStart: (e) => dragStartRef.current(w)(e),
         onResizeStart: (e) => resizeStartRef.current(w)(e),
       })
@@ -3733,7 +3783,7 @@ export default function ReportBuilder() {
               <ActionMenu label={tr('vw.more')} align="end" portal triggerClassName="btn btn-ghost btn-sm dl-vw-more"
                 trigger={<EllipsisVertical size={15} aria-hidden />}
                 items={[
-                  { key: 'print', label: tr('shx.ex.print'), icon: <Printer size={14} />, onSelect: () => navigate(`/reports/${reportId}/print`) },
+                  ...(mayDownload ? [{ key: 'print', label: tr('shx.ex.print'), icon: <Printer size={14} />, onSelect: () => navigate(`/reports/${reportId}/print`) }] : []),
                   ...(canEdit ? [
                     // QA2 N2: over the view while reading; the rail panel while editing.
                     { key: 'history', label: tr('shx.vh.title'), icon: <History size={14} />, onSelect: () => {
@@ -4049,7 +4099,7 @@ export default function ReportBuilder() {
                         <WidgetRenderer
                           widget={localisedWidgets.get(widget.id) ?? widget}
                           datasetId={report.dataset_id}
-                          reportId={reportId}
+                          reportId={reportId} allowExport={mayDownload}
                           parameters={effectiveParams}
                           onSetParameter={stableOnSetParameter}
                           calculatedColumns={calcCols}
@@ -4217,7 +4267,7 @@ export default function ReportBuilder() {
                         <div className="dl-vw-wt" role="toolbar" aria-label={tr('vw.wt.aria', { title: widget.title || widget.widget_type })}>
                           <button type="button" onClick={() => askAbout(widget)} disabled={aiOffline}
                             aria-label={tr('vw.wt.ask', { title: widget.title || widget.widget_type })}
-                            title={aiOffline ? tr('off.composer') : tr('vw.wt.askShort')}>
+                            title={aiOffline ? tr(aiOff ? 'off.composerMine' : 'off.composer') : tr('vw.wt.askShort')}>
                             <span className="dl-vw-av" aria-hidden><AiMascot size={15} /></span>
                           </button>
                           <button type="button" onClick={() => setFocusW(widget)}
@@ -4225,7 +4275,7 @@ export default function ReportBuilder() {
                             <Maximize2 size={15} aria-hidden />
                           </button>
                           {/* 9-polish: the chart as a picture, for a chart drawn as SVG. */}
-                          {!NO_CHART_IMAGE.test(widget.widget_type) && (
+                          {mayDownload && !NO_CHART_IMAGE.test(widget.widget_type) && (
                             <button type="button" aria-label={tr('pol.copyImage', { title: widget.title || widget.widget_type })} title={tr('pol.copyImageShort')}
                               onClick={e => {
                                 const el = (e.currentTarget as HTMLElement).closest('[data-widget-id]')
@@ -4259,7 +4309,7 @@ export default function ReportBuilder() {
                       <WidgetRenderer
                         widget={localisedWidgets.get(widget.id) ?? widget}
                         datasetId={report.dataset_id}
-                        reportId={reportId}
+                        reportId={reportId} allowExport={mayDownload}
                         parameters={effectiveParams}
                         onSetParameter={stableOnSetParameter}
                         calculatedColumns={calcCols}
@@ -4270,6 +4320,7 @@ export default function ReportBuilder() {
                         onSelect={editMode ? perWidgetHandlers.get(widget.id)?.onSelect : undefined}
                         onDelete={editMode ? perWidgetHandlers.get(widget.id)?.onDelete : undefined}
                         onDuplicate={editMode ? perWidgetHandlers.get(widget.id)?.onDuplicate : undefined}
+                        onEditOptions={editMode ? perWidgetHandlers.get(widget.id)?.onEditOptions : undefined}
                         editMode={editMode}
                         promptFilter={activePromptFilter}
                         onDragStart={editMode ? perWidgetHandlers.get(widget.id)?.onDragStart : undefined}
@@ -4356,7 +4407,7 @@ export default function ReportBuilder() {
                 reportId={canEdit ? reportId : undefined}
                 onComposed={canEdit ? () => { void loadReport() } : undefined} />}
               suggest={canEdit ? (
-                <SuggestionsPane columns={columns} analysis={analysis} onAdd={addSuggestedWidget} reportId={reportId}
+                <SuggestionsPane columns={columns} analysis={analysis} onAdd={addSuggestedWidget} onAddMany={addSuggestedWidgets} reportId={reportId}
                   datasetId={report.dataset_id} pageWidgets={activePage?.widgets ?? []} columnMeta={columnMeta} />
               ) : undefined} />
           )}
@@ -4470,7 +4521,7 @@ export default function ReportBuilder() {
                   }} />
               )}
               {rightPanelMode === 'suggestions' && (
-                <SuggestionsPane columns={columns} analysis={analysis} onAdd={addSuggestedWidget} reportId={reportId}
+                <SuggestionsPane columns={columns} analysis={analysis} onAdd={addSuggestedWidget} onAddMany={addSuggestedWidgets} reportId={reportId}
                   datasetId={report.dataset_id} pageWidgets={activePage?.widgets ?? []} columnMeta={columnMeta} />
               )}
               {rightPanelMode === 'insights' && (
@@ -4659,7 +4710,7 @@ export default function ReportBuilder() {
           askDisabled={aiOffline}
           onAsk={q => { setFocusW(null); setAiOpen(true); setAiTab('ask'); setAskSeed(s => ({ q, n: (s?.n ?? 0) + 1 })) }}
           render={w => (
-            <WidgetRenderer widget={w} datasetId={report.dataset_id} reportId={reportId}
+            <WidgetRenderer widget={w} datasetId={report.dataset_id} reportId={reportId} allowExport={mayDownload}
               parameters={effectiveParams} onSetParameter={stableOnSetParameter}
               calculatedColumns={calcCols} columnFormats={columnFormats} geography={geography}
               datasets={datasets} relationships={relationships} editMode={false}
@@ -4734,6 +4785,7 @@ export default function ReportBuilder() {
         <ShareDashboardDialog report={report} canEdit={canEdit} isAdmin={isAdmin} pageId={activePage?.id ?? null}
           onClose={() => setShareOpen(false)}
           onPublishedChange={published => setReport(r => r ? { ...r, published } : r)}
+          onReleased={() => { loadReport().catch(() => {}) }}
           onAccessWhy={Object.keys(access).length ? () => { setShareOpen(false); setAccessOpen2(true) } : undefined}
           onAccessByRole={() => { setShareOpen(false); setAccessOpen(true) }} />
       )}
@@ -4764,7 +4816,7 @@ export default function ReportBuilder() {
             <WidgetRenderer
               widget={localise(widget)}
               datasetId={report.dataset_id}
-              reportId={reportId}
+              reportId={reportId} allowExport={mayDownload}
               parameters={effectiveParams}
               onSetParameter={stableOnSetParameter}
               calculatedColumns={calcCols}
@@ -4794,7 +4846,7 @@ export default function ReportBuilder() {
             <WidgetRenderer
               widget={localise(widget)}
               datasetId={report.dataset_id}
-              reportId={reportId}
+              reportId={reportId} allowExport={mayDownload}
               parameters={effectiveParams}
               onSetParameter={stableOnSetParameter}
               calculatedColumns={calcCols}

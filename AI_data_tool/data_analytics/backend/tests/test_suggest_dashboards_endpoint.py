@@ -163,6 +163,19 @@ class TestAnEmptyGoalUsesNoModel:
         assert r.status_code == 200, r.text
         assert fake_model.seen == [], "the model was asked despite an empty goal"
 
+    async def test_ai_off_in_the_model_picker_means_the_statistics_engine(
+            self, client, db_session, two_orgs, clinic_csv, fake_model):
+        """F-11: "Off -- no AI" in the top bar. A goal is typed, yet no model is
+        asked; the statistics engine answers at once and says why."""
+        ds, headers = await _dataset(db_session, two_orgs["a"]["org"], clinic_csv)
+        r = await client.post(f"/api/v1/datasets/{ds.id}/suggest-dashboards",
+                              json={"goal": "I run the clinic"},
+                              headers={**headers, "X-LLM-Endpoint": "off"})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["source"] == "insights" and body["reason"] == "ai_off"
+        assert body["proposals"] and fake_model.seen == []
+
     async def test_whitespace_counts_as_empty(self, client, db_session, two_orgs,
                                               clinic_csv, fake_model):
         ds, headers = await _dataset(db_session, two_orgs["a"]["org"], clinic_csv)
@@ -546,6 +559,21 @@ class TestThePanelAsAJob:
         assert all("layout" in w for w in widgets)
         got = await client.get(f"/api/v1/jobs/{job_id}", headers=headers)
         assert got.status_code == 200 and got.json()["state"] == "succeeded"
+
+    async def test_ai_off_travels_with_a_queued_panel(self, client, db_session, two_orgs,
+                                                      clinic_csv, monkeypatch, factory):
+        """F-11: the job runs outside the request that queued it, so "Off --
+        no AI" goes with it: no model is asked when it runs either."""
+        from app.services import jobs
+        lens = LensClient()
+        monkeypatch.setattr("app.services.llm.get_client", lambda *a, **k: lens)
+        ds, headers = await _dataset(db_session, two_orgs["a"]["org"], clinic_csv)
+        r = await client.post(f"/api/v1/datasets/{ds.id}/suggest-dashboards",
+                              json={"goal": "I run the clinic", "mode": "panel", "size": 12,
+                                    "background": True}, headers={**headers, "X-LLM-Endpoint": "off"})
+        assert r.status_code == 200, r.text
+        assert await jobs.run_next(factory, "w1") == jobs.SUCCEEDED
+        assert lens.seen == []
 
     async def test_suggesting_again_asks_the_analysts_afresh(self, client, db_session, two_orgs,
                                                              clinic_csv, monkeypatch, factory):

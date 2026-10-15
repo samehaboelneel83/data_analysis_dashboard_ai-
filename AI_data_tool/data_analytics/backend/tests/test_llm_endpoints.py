@@ -125,6 +125,25 @@ class TestPicking:
             le.release_choice(tok)
 
 
+    async def test_off_is_a_choice_that_reaches_no_model(self, monkeypatch):
+        """F-11: the top bar's "Off -- no AI". Every AI call site goes through
+        get_client, so a disabled client means none of them contacts a model."""
+        le.apply_stored({"default": "a", "endpoints": [dict(e, api_key="") for e in TWO]})
+        tok = le.use_choice("off")
+        try:
+            assert le.is_off() and le.candidates() == []
+            c = llm_service.get_client()
+            assert not c.enabled and c.last_error and "off" in c.last_error.lower()
+
+            def no_network(*a, **k):
+                raise AssertionError("a model was contacted while AI is off")
+            monkeypatch.setattr(httpx.AsyncClient, "post", no_network)
+            assert await c.complete([{"role": "user", "content": "hi"}]) is None
+        finally:
+            le.release_choice(tok)
+        assert not le.is_off() and llm_service.get_client().enabled
+
+
 class TestFailover:
     async def test_auto_fails_over_and_turns_the_light_red(self):
         le.apply_stored({"default": "auto", "endpoints": [dict(e, api_key="") for e in TWO]})

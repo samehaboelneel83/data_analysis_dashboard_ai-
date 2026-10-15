@@ -63,6 +63,37 @@ class TestMapping:
         assert mapping.candidates({"id": "s", "kind": "stage"}, COLUMNS)[0] == "step"
         assert mapping.candidates({"id": "p", "kind": "geography"}, COLUMNS) == ["area"]
 
+    def test_a_place_prefers_a_country_and_a_split_does_not_take_the_place_column(self):
+        """F-13: Executive summary suggested `region` for both "the main way to
+        split it" and "the place of each row". A label-like column fills one
+        slot only, the place is chosen before the split, and a named level
+        (country) beats a generic region."""
+        # Demo -- Sales: region (5 sales regions, tagged geo "region") and country (14).
+        places = [
+            {"name": "region", "kind": "category", "number": None, "distinct": 5, "ordered": False, "geo": "region",
+             "identifier": False, "label": "region"},
+            {"name": "country", "kind": "category", "number": None, "distinct": 14, "ordered": False, "geo": "country",
+             "identifier": False, "label": "country"},
+        ]
+        base = [c for c in COLUMNS if c["name"] in ("id", "day", "amount")]
+        got = mapping.suggest(builtin.BUILTIN["executive"], base + places)
+        assert got["place"] == ["country"]
+        assert got["group"] == ["region"]
+        # With many label columns, still no column in two slots.
+        got = mapping.suggest(builtin.BUILTIN["executive"], [c for c in COLUMNS if c["name"] != "area"] + places)
+        used = sum(got.values(), [])
+        assert got["place"] == ["country"] and len(used) == len(set(used)), got
+
+    def test_a_label_column_is_offered_once_across_label_slots(self):
+        """F-13 (Low): the same column was suggested in two label slots of
+        different kinds (a flag and a category)."""
+        tpl = {"slots": [{"id": "f", "kind": "flag", "required": True},
+                         {"id": "c", "kind": "category", "required": True}]}
+        cols = [{"name": "topic", "kind": "category", "number": None, "distinct": 2, "ordered": False, "geo": None,
+                 "identifier": False, "label": "topic"}]
+        got = mapping.suggest(tpl, cols)
+        assert sum(got.values(), []) == ["topic"]
+
     def test_a_mapping_is_checked_before_anything_is_made(self):
         bad = mapping.validate(self.tpl, {"actual": "amount", "target": "note", "date": "nope"}, COLUMNS)
         assert not bad["ok"]

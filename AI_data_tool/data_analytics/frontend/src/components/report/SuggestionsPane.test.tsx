@@ -62,6 +62,29 @@ describe('SuggestionsPane', () => {
     expect(addButtons()).toHaveLength(before - 1)
   })
 
+  it('"Add all shown" hands the filtered ideas over at once, and each then says Added (F-15)', async () => {
+    const onAddMany = vi.fn().mockResolvedValue(true)
+    render(<SuggestionsPane columns={cols} analysis={analysis} onAdd={vi.fn()} onAddMany={onAddMany} />)
+    fireEvent.click(screen.getByRole('button', { name: /^Trend over time/ }))
+    const shown = addButtons().length
+    fireEvent.click(screen.getByRole('button', { name: `Add all shown (${shown})` }))
+    await waitFor(() => expect(onAddMany).toHaveBeenCalled())
+    const list = onAddMany.mock.calls[0][0]
+    expect(list).toHaveLength(shown)
+    await waitFor(() => expect(screen.queryAllByRole('button', { name: /^Add “/ })).toHaveLength(0))
+    expect(screen.getAllByText('Added')).toHaveLength(shown)
+    expect(screen.queryByRole('button', { name: /Add all shown/ })).toBeNull()
+  })
+
+  it('nothing is marked added when adding them all was cancelled (F-15)', async () => {
+    const onAddMany = vi.fn().mockResolvedValue(false)
+    render(<SuggestionsPane columns={cols} analysis={analysis} onAdd={vi.fn()} onAddMany={onAddMany} />)
+    const before = addButtons().length
+    fireEvent.click(screen.getByRole('button', { name: `Add all shown (${before})` }))
+    await waitFor(() => expect(onAddMany).toHaveBeenCalled())
+    expect(addButtons()).toHaveLength(before)
+  })
+
   it('groups ideas under headings, with chips that filter them', () => {
     render(<SuggestionsPane columns={cols} analysis={analysis} onAdd={vi.fn()} />)
     expect(screen.getByRole('heading', { name: /Trend over time/ })).toBeInTheDocument()

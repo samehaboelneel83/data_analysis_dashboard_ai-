@@ -7,7 +7,7 @@ import type { BrushRange } from './chartRenderers/axisOptions'
 import OverviewStrip from './chartRenderers/OverviewStrip'
 import { StaticChartsContext } from './chartRenderers/useChartViewport'
 import { createPortal } from 'react-dom'
-import { Copy, Trash2, MoreVertical, Link as LinkIcon } from 'lucide-react'
+import { Copy, Trash2, MoreVertical, Link as LinkIcon, SlidersHorizontal } from 'lucide-react'
 import { widgetDataApi } from '../../services/api'
 import { isCanceledRequest } from '../../lib/canceledRequest'
 import { useT, type MessageKey, type TranslateFn } from '../../i18n'
@@ -80,6 +80,8 @@ interface Props {
   /** "Another one of these" -- SAS's Duplicate Object. Separate from widget
    *  templates, which are for reuse ACROSS reports rather than beside this one. */
   onDuplicate?:  () => void
+  /** F-16: select this widget and open its options -- the edit menu's first item. */
+  onEditOptions?: () => void
   editMode?:     boolean
   promptFilter?: { column: string; value: string } | null
   onDragStart?:  (e: React.MouseEvent) => void
@@ -255,7 +257,7 @@ export function binningTitle(b: Binning | undefined | null, t?: TranslateFn): st
     + 'Every row is still counted. Drag the slider under the chart to zoom in and see more detail.'
 }
 
-function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, geography, datasets, selected, isMultiSelected, onSelect, onDelete, onDuplicate, editMode, promptFilter, onDragStart, onResizeStart, isDragging, onFetchComplete, pages, reportDisplayRules, reportFilters, pageFilters, onDrillthrough, isPreview, hierarchy, bookmarks, onNavigateToPage, onApplyBookmark, reportId, parameters, onSetParameter, dataOverride, relationships, eagerFetch, allowExport = true, refreshNonce }: Props) {
+function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, geography, datasets, selected, isMultiSelected, onSelect, onDelete, onDuplicate, onEditOptions, editMode, promptFilter, onDragStart, onResizeStart, isDragging, onFetchComplete, pages, reportDisplayRules, reportFilters, pageFilters, onDrillthrough, isPreview, hierarchy, bookmarks, onNavigateToPage, onApplyBookmark, reportId, parameters, onSetParameter, dataOverride, relationships, eagerFetch, allowExport = true, refreshNonce }: Props) {
   const { emitFilter, emitMultiFilter, getFiltersFor, canBroadcast, canReceive, activeFilters, clearAllFilters, clearFilter, interactions, getReceiveMode, carryFiltersTo, drillOf, setDrill } = useCrossFilter()
   const [data,    setData]    = useState<any>(null)
   const [loading, setLoading] = useState(
@@ -1063,7 +1065,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
     setShowContextMenu(false)
     if (widgetDatasetId == null) return
     try {
-      await widgetDataApi.export(widgetDatasetId, mergedConfig, wt, format, effectiveCalcCols)
+      await widgetDataApi.export(widgetDatasetId, mergedConfig, wt, format, effectiveCalcCols, { reportId })
     } catch {
       toast.error(t('bc.canvas.exportFailed'))
     }
@@ -1569,6 +1571,12 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
                 trigger={<MoreVertical size={15} aria-hidden />} triggerClassName="dl-wicon"
                 label={t('bc.canvas.moreActions', { title })}
                 items={[
+                  // F-16: the options first -- a model widget's display choices
+                  // were hard to find, and Duplicate sat where a first click lands.
+                  ...(onEditOptions
+                    ? [{ key: 'edit-options', label: t('bc.canvas.editOptions'),
+                         icon: <SlidersHorizontal size={12} />, onSelect: () => onEditOptions() }]
+                    : []),
                   // Offered only when the caller can act on it: every existing
                   // caller passes onDelete alone, and a menu item wired to
                   // nothing is worse than an absent one.

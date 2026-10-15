@@ -54,7 +54,7 @@ const COLORS = [1, 2, 3, 4, 5, 6]
 const LISTED_SHOWN = 5
 const color = (s: string) => `var(--dl-series-${COLORS[[...s].reduce((n, c) => n + c.charCodeAt(0), 0) % COLORS.length]})`
 
-export default function ShareDashboardDialog({ report, canEdit, isAdmin, pageId, initialTab = 'people', onClose, onPublishedChange, onAccessWhy, onAccessByRole }: {
+export default function ShareDashboardDialog({ report, canEdit, isAdmin, pageId, initialTab = 'people', onClose, onPublishedChange, onReleased, onAccessWhy, onAccessByRole }: {
   report: ShareTarget
   /** The viewer may edit this dashboard: guest links, embedding, schedules. */
   canEdit: boolean
@@ -64,6 +64,8 @@ export default function ShareDashboardDialog({ report, canEdit, isAdmin, pageId,
   initialTab?: Tab
   onClose: () => void
   onPublishedChange?: (published: boolean) => void
+  /** Changes were released from the Publishing tab (F-10). */
+  onReleased?: () => void
   onAccessWhy?: () => void
   onAccessByRole?: () => void
 }) {
@@ -78,7 +80,8 @@ export default function ShareDashboardDialog({ report, canEdit, isAdmin, pageId,
 
   const [grants, setGrants] = useState<ReportGrant[] | null>(null)
   const [email, setEmail] = useState('')
-  const [level, setLevel] = useState<'view' | 'edit' | 'data'>('edit')
+  // Least privilege (F-06): a new share starts at Can view; more is a choice.
+  const [level, setLevel] = useState<'view' | 'edit' | 'data'>('view')
   const [busy, setBusy] = useState(false)
   const [kind, setKind] = useState<Kind>('user')
   const [options, setOptions] = useState<WorkspaceShareOptions | null>(null)
@@ -151,7 +154,7 @@ export default function ShareDashboardDialog({ report, canEdit, isAdmin, pageId,
     try {
       const g = await reportGrantsApi.create(report.id, body)
       setGrants(prev => [...(prev ?? []).filter(x => x.id !== g.id && (g.user_id == null || x.user_id !== g.user_id)), g])
-      setEmail(''); setGroupId(''); setMessage(''); setUntil(''); setMayDownload(true); setMayShare(false)
+      setEmail(''); setGroupId(''); setMessage(''); setUntil(''); setMayDownload(true); setMayShare(false); setLevel('view')
       toast.success(kind === 'user' ? t('dsh.sd.shared', { email: g.email }) : t('pub.sh.sharedWith', { name: nameOf(g) }))
     } catch (e) {
       toast.error(failure(e, t('dsh.sd.failed')))
@@ -178,6 +181,13 @@ export default function ShareDashboardDialog({ report, canEdit, isAdmin, pageId,
   }
   const setAccess = async (next: boolean) => {
     if (next === published) return
+    // F-08: the whole organisation at once, either way -- asked first, like a
+    // role or a team share. Cancel leaves the choice as it was.
+    if (!(await confirm(next
+      ? { title: t('pub.sh.confirmPublish', { name: report.name }), body: t('pub.sh.confirmPublishBody'),
+          confirmLabel: t('pub.sh.publish'), destructive: false }
+      : { title: t('pub.sh.confirmUnpublish', { name: report.name }), body: t('pub.sh.confirmUnpublishBody'),
+          confirmLabel: t('pub.sh.unpublish') }))) return
     try {
       await reportsApi.setPublished(report.id, next)
       setPublished(next)
@@ -203,7 +213,7 @@ export default function ShareDashboardDialog({ report, canEdit, isAdmin, pageId,
       {manages ? (<>
         <div className="shx-seg" role="group" aria-label={t('pub.sh.kind')} style={{ marginBottom: 10 }}>
           {(['user', 'role', 'team'] as const).map(k => (
-            <button key={k} type="button" aria-pressed={kind === k} onClick={() => { setKind(k); setGroupId(''); if (k !== 'user') setLevel('view') /* many people at once start at view */ }}>
+            <button key={k} type="button" aria-pressed={kind === k} onClick={() => { setKind(k); setGroupId(''); setLevel('view') /* every new share starts at view */ }}>
               {t(k === 'user' ? 'pub.sh.person' : k === 'role' ? 'pub.sh.role' : 'pub.sh.team')}
             </button>
           ))}
@@ -375,7 +385,7 @@ export default function ShareDashboardDialog({ report, canEdit, isAdmin, pageId,
             </div>
           )}
           {tab === 'people' && people}
-          {tab === 'publishing' && <PublishingPanel report={report} isAdmin={isAdmin}
+          {tab === 'publishing' && <PublishingPanel report={report} isAdmin={isAdmin} onReleased={onReleased}
             onStateChange={s => { setPublished(s === 'published'); onPublishedChange?.(s === 'published') }} />}
           {tab === 'embed' && <EmbedSection reportId={report.id} />}
           {tab === 'schedule' && <div className="shx-sched"><SchedulePanel reportId={report.id} /></div>}

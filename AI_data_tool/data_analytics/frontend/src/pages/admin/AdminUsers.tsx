@@ -25,7 +25,9 @@ function UserModal({ initial, roles, onSave, onClose }: {
   const isEdit = !!initial
   const [email, setEmail] = useState(initial?.email ?? '')
   const [password, setPassword] = useState('')
-  const [roleId, setRoleId] = useState<number | ''>(initial?.role.id ?? roles[0]?.id ?? '')
+  // F-07: a new user starts with NO role -- pre-selecting the first one
+  // (often Admin) made "Create" mint another administrator by default.
+  const [roleId, setRoleId] = useState<number | ''>(initial?.role.id ?? '')
   const [isActive, setIsActive] = useState(initial?.is_active ?? true)
   const [saving, setSaving] = useState(false)
 

@@ -47,9 +47,12 @@ async def run_panel_job(ctx: jobs.JobContext) -> None:
         await ctx.checkpoint(stage, **detail)
 
     try:
+        # F-11: a person who chose "Off -- no AI" queued this: no model, here
+        # either (the job runs outside their request, so it is told).
+        off = {"client": None} if ctx.inputs.get("ai_off") else {}
         result = await sug.panel(inputs, ctx.inputs.get("goal") or None,
                                  int(ctx.inputs.get("size") or 24), progress=progress,
-                                 fresh=bool(ctx.inputs.get("fresh")))
+                                 fresh=bool(ctx.inputs.get("fresh")), **off)
     except (jobs.JobCancelled, jobs.LeaseLost):
         raise
     except Exception as exc:                                 # noqa: BLE001

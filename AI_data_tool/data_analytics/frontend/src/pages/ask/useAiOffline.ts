@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useT } from '../../i18n'
-import { choiceLight, effectiveChoice } from '../../components/LlmPicker'
+import { AI_OFF, choiceLight, effectiveChoice } from '../../components/LlmPicker'
 import { getLlmChoice, lastLlmEndpoints, LLM_CHOICE_EVENT, LLM_ENDPOINTS_EVENT } from '../../services/api'
 
 /**
@@ -11,7 +11,7 @@ import { getLlmChoice, lastLlmEndpoints, LLM_CHOICE_EVENT, LLM_ENDPOINTS_EVENT }
  * the top-bar light shows as red: `choiceLight(...) === 'down'`. `checkedAt`
  * is when that answer arrived, for "Checked 20 s ago".
  */
-export function useAiOffline(): { offline: boolean; checkedAt: number | null } {
+export function useAiOffline(): { offline: boolean; checkedAt: number | null; off?: boolean } {
   const [seen, setSeen] = useState(lastLlmEndpoints)
   const [picked, setPicked] = useState(getLlmChoice)
   useEffect(() => {
@@ -24,8 +24,11 @@ export function useAiOffline(): { offline: boolean; checkedAt: number | null } {
       window.removeEventListener(LLM_CHOICE_EVENT, onChoice)
     }
   }, [])
-  if (!seen) return { offline: false, checkedAt: null }
-  return { offline: choiceLight(seen.data, effectiveChoice(seen.data, picked)) === 'down', checkedAt: seen.at }
+  // F-11: "Off — no AI" in the top bar is the person's own choice: AI
+  // features behave as if the model were unreachable, and say why (`off`).
+  if (picked === AI_OFF) return { offline: true, checkedAt: seen?.at ?? null, off: true }
+  if (!seen) return { offline: false, checkedAt: null, off: false }
+  return { offline: choiceLight(seen.data, effectiveChoice(seen.data, picked)) === 'down', checkedAt: seen.at, off: false }
 }
 
 /**
@@ -35,7 +38,8 @@ export function useAiOffline(): { offline: boolean; checkedAt: number | null } {
  * `title={reason}`, or goes straight to its no-AI path.
  */
 export function useAiGate(): { offline: boolean; reason: string | undefined } {
-  const { offline } = useAiOffline()
+  const { offline, off } = useAiOffline()
   const t = useT()
-  return { offline, reason: offline ? t('off.composer') : undefined }
+  // F-11: the person's own "Off — no AI" says so, rather than blaming the server.
+  return { offline, reason: offline ? t(off ? 'off.composerMine' : 'off.composer') : undefined }
 }

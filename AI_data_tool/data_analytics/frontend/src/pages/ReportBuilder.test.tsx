@@ -49,6 +49,9 @@ vi.mock('../services/api', () => ({
   pageVisibilityApi: { roles: vi.fn().mockResolvedValue([]), get: vi.fn().mockResolvedValue({ role_ids: [] }), set: vi.fn() },
   schedulesApi: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), delete: vi.fn(), runNow: vi.fn() },
   deliveriesApi: { list: vi.fn().mockResolvedValue([]) },
+  // The Suggestions pane (F-15): no server ideas, the heuristics only.
+  suggestApi: { forReport: vi.fn().mockResolvedValue([]), feedback: vi.fn().mockResolvedValue({ dismissed: [], types: {}, org_types: {} }),
+                sendFeedback: vi.fn().mockResolvedValue({ dismissed: [], types: {}, org_types: {} }) },
   // View mode (7d) reads the top bar's model light, as Ask AI does.
   lastLlmEndpoints: () => null,
   getLlmChoice: () => null,
@@ -1678,6 +1681,20 @@ describe('ReportBuilder — a view-only viewer gets the dashboard, not the studi
     expect(screen.queryByRole('menuitem', { name: 'Version history' })).not.toBeInTheDocument()
   })
 
+  it('offers no Print when the share does not include downloads (F-02)', async () => {
+    vi.mocked(authzApi.decisions).mockResolvedValue([
+      { resource: 'report', id: 1, action: 'view', allowed: true, reason: 'Shared with you.' },
+      { resource: 'report', id: 1, action: 'download', allowed: false, reason: 'Your access to this dashboard does not include downloads.' },
+    ] as never)
+    try {
+      await renderViewOnly()
+      await waitFor(() => expect(authzApi.decisions).toHaveBeenCalled())
+      fireEvent.click(screen.getByRole('button', { name: 'More' }))
+      expect(await screen.findByRole('menuitem', { name: /Your access/ })).toBeInTheDocument()
+      expect(screen.queryByRole('menuitem', { name: 'Print' })).not.toBeInTheDocument()
+    } finally { vi.mocked(authzApi.decisions).mockResolvedValue([]) }
+  })
+
   it('drops the authoring chrome: panels, add-widget, page controls, copilot', async () => {
     await renderViewOnly()
     for (const gone of [/More panels/i, /Add widget/i, /^\+ Page$/i, /Ask the page/i]) {
@@ -3059,5 +3076,32 @@ describe('Present starts at the top (QA2 Visual 8)', () => {
     scroller.scrollTop = 400
     fireEvent.click(screen.getByRole('button', { name: /Present/ }))
     await waitFor(() => expect((document.querySelector('[data-canvas-scroll]') as HTMLElement).scrollTop).toBe(0))
+  })
+})
+
+
+describe('ReportBuilder Suggestions: "Add all shown" (F-15)', () => {
+  it('adds every shown idea once, one under another below the page, never on top of each other', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [
+      { id: 1, name: 'region', dtype: 'categorical', missing_pct: 0, stats: {} },
+      { id: 2, name: 'day', dtype: 'datetime', missing_pct: 0, stats: {} },
+      { id: 3, name: 'revenue', dtype: 'numeric', missing_pct: 0, stats: {} },
+    ] } as any)
+    let next = 900
+    vi.mocked(reportsApi.addWidget).mockReset().mockImplementation(async (_r: number, _p: number, body: any) => ({ id: next++, page_id: 100, ...body }) as any)
+    renderBuilder()
+    await screen.findByTestId('builder-header')
+    if (screen.getByTestId('mode-toggle').getAttribute('aria-label') === 'View mode') fireEvent.click(screen.getByTestId('mode-toggle'))
+    fireEvent.click(await screen.findByTestId('view-ai-open'))
+    fireEvent.click(within(await screen.findByTestId('view-assist')).getByRole('tab', { name: 'Suggest' }))
+    const all = await screen.findByRole('button', { name: /^Add all shown \((\d+)\)$/ })
+    const n = Number(/\((\d+)\)/.exec(all.textContent ?? '')![1])
+    fireEvent.click(all)
+    await waitFor(() => expect(reportsApi.addWidget).toHaveBeenCalledTimes(n))
+    const boxes = vi.mocked(reportsApi.addWidget).mock.calls.map(c => (c[2] as any).layout)
+    // Below the existing widget (y 0..5), each below the one before.
+    expect(boxes[0].y).toBe(5)
+    for (let i = 1; i < boxes.length; i++) expect(boxes[i].y).toBe(boxes[i - 1].y + boxes[i - 1].h)
   })
 })

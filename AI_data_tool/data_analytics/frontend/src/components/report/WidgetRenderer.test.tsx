@@ -9,7 +9,7 @@ import type { Widget, ReportPage, HierarchyNode } from '../../types/report'
 
 vi.mock('../../services/api', () => ({
   pinsApi: { create: vi.fn().mockResolvedValue({ id: 1, widget_id: 1, already_pinned: false }), list: vi.fn().mockResolvedValue([]), remove: vi.fn().mockResolvedValue(undefined) },
-  widgetDataApi: { query: vi.fn() },
+  widgetDataApi: { query: vi.fn(), export: vi.fn() },
   // The lazily-imported map renderers reach this module through
   // geo/regionSetCache. Without the export the dynamic import fails and the
   // widget sits on "Loading map…" forever, which reads as a renderer bug.
@@ -2083,6 +2083,20 @@ describe('widget header action menu (U1)', () => {
   })
 })
 
+describe('the edit-mode menu leads with the options, not with Duplicate (F-16)', () => {
+  it('"Edit options…" comes first and opens the options; opening the menu fires nothing', () => {
+    const onDuplicate = vi.fn(), onEditOptions = vi.fn()
+    renderWidget({ editMode: true, onDelete: vi.fn(), onDuplicate, onEditOptions })
+    fireEvent.click(screen.getByRole('button', { name: 'More actions for widget Sales' }))
+    const items = screen.getAllByRole('menuitem').map(i => i.textContent)
+    expect(items[0]).toBe('Edit options…')
+    expect(onDuplicate).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Edit options…' }))
+    expect(onEditOptions).toHaveBeenCalledTimes(1)
+    expect(onDuplicate).not.toHaveBeenCalled()
+  })
+})
+
 describe('a refused request explains itself', () => {
   // The import row cap is enforced server-side and returns 413 with a message
   // naming the limit, the actual row count and the two remedies. The widget
@@ -3042,5 +3056,27 @@ describe('groups too small to rank (persona test, plan 1.6)', () => {
     renderWidget({ widget: barWidget() })
     expect(await screen.findByTestId('too-few-to-rank-note')).toHaveTextContent('fewer than 30 rows')
     expect(screen.queryByTestId('small-groups-note')).not.toBeInTheDocument()
+  })
+})
+
+describe('WidgetRenderer chart download (F-02)', () => {
+  it("names the widget's dashboard, so the server asks that dashboard's \"may download\"", async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'A', value: 1 }], sampled: false })
+    vi.mocked(widgetDataApi.export).mockResolvedValue(undefined as never)
+    renderWidget({ reportId: 7 })
+    await waitFor(() => expect(widgetDataApi.query).toHaveBeenCalled())
+    fireEvent.click(await screen.findByRole('button', { name: 'Analyse Sales' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Export data as CSV' }))
+    await waitFor(() => expect(widgetDataApi.export).toHaveBeenCalled())
+    expect(vi.mocked(widgetDataApi.export).mock.calls[0][5]).toEqual({ reportId: 7 })
+  })
+
+  it('offers no data download when the dashboard says no downloads', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'A', value: 1 }], sampled: false })
+    renderWidget({ reportId: 7, allowExport: false })
+    await waitFor(() => expect(widgetDataApi.query).toHaveBeenCalled())
+    fireEvent.click(await screen.findByRole('button', { name: 'Analyse Sales' }))
+    await screen.findAllByRole('menuitem')
+    expect(screen.queryByRole('menuitem', { name: 'Export data as CSV' })).toBeNull()
   })
 })
