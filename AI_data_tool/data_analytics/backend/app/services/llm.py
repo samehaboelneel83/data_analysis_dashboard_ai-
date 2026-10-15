@@ -376,6 +376,8 @@ class LLMClient:
         """The full timeout for reading a slow answer, but a short one for
         CONNECTING: an unreachable host must fail in seconds, not minutes
         (a single float would make connect wait the whole 180 s too)."""
+        if isinstance(self.timeout, httpx.Timeout):
+            return self.timeout  # the caller chose both already (E-17's Test connection)
         connect = min(float(settings.llm_connect_timeout_s), float(self.timeout))
         return httpx.Timeout(self.timeout, connect=connect)
 

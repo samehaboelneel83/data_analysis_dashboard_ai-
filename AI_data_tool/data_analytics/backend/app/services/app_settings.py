@@ -179,6 +179,12 @@ SPECS: list[Spec] = [
     _S("metadata_sample_concurrency", "metadata", "Tables sampled at once"),
     _S("metadata_describe_concurrency", "metadata", "Tables described at once"),
     _S("metadata_cache_max_mb", "metadata", "Sample cache size (MB)"),
+    _S("metadata_sync_timeout_s", "metadata", "Longest metadata sync (seconds)",
+       "A sync still running after this ends as failed (timed out), so a stuck one cannot run forever."),
+    _S("metadata_llm_stage_timeout_s", "metadata", "Longest AI step in a sync (seconds)",
+       "Describing tables or finding entities with the model; a step over this is skipped and the rest of the sync still lands."),
+    _S("demo_sync_on_seed", "metadata", "Read the demo connection when loading the demo",
+       "On: loading the demo content also reads the demo connection's tables, so it is ready to use."),
     _S("fk_overlap_high", "metadata", "Relationship confidence: accept", "0 to 1."),
     _S("fk_overlap_review", "metadata", "Relationship confidence: review", "0 to 1."),
     # -- Performance ----------------------------------------------------------
