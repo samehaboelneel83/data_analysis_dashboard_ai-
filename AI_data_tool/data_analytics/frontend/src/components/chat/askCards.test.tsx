@@ -470,3 +470,44 @@ describe('suggestion cards while new questions are paused (AD-02)', () => {
     expect(asked).not.toHaveBeenCalled()
   })
 })
+
+describe('the composer draft (AD-09)', () => {
+  it('is cleared by New chat (the thread becomes null)', async () => {
+    const { useState } = await import('react')
+    function Host() {
+      const [id, setId] = useState<number | null>(7)
+      return <><button type="button" onClick={() => setId(null)}>new chat</button>
+        <ChatPane datasetIds={[1]} conversationId={id} card={{ scopeName: 'Demo — Sales' }} /></>
+    }
+    render(<Host />)
+    await settle()
+    const box = screen.getByPlaceholderText(/ask/i) as HTMLTextAreaElement
+    fireEvent.change(box, { target: { value: 'an old draft' } })
+    expect(box.value).toBe('an old draft')
+    fireEvent.click(screen.getByRole('button', { name: 'new chat' }))
+    await settle()
+    expect((screen.getByPlaceholderText(/ask/i) as HTMLTextAreaElement).value).toBe('')
+  })
+
+  it('keeps a draft handed in at mount', async () => {
+    render(<ChatPane datasetIds={[1]} conversationId={null} initialInput="Total sales" card={{ scopeName: 'S' }} />)
+    await settle()
+    expect((screen.getByPlaceholderText(/ask/i) as HTMLTextAreaElement).value).toBe('Total sales')
+  })
+
+  it('cannot be filled by "Edit question" while new questions are paused', async () => {
+    vi.spyOn(agentApi, 'ask').mockResolvedValue(BAR)
+    pane()
+    await ask()
+    act(() => {
+      window.dispatchEvent(new CustomEvent(LLM_ENDPOINTS_EVENT, { detail: { at: Date.now(), data: {
+        llm_enabled: true, default: 'env', auto_pick: null, source: 'environment',
+        endpoints: [{ id: 'env', name: 'Default', model: 'q', enabled: true, is_default: true, strength: 5, context: null,
+          status: { ok: false, latency_ms: null, checked_at: new Date().toISOString(), error: 'down' } }],
+      } } }))
+    })
+    const edits = screen.getAllByRole('button', { name: new RegExp(translate('en', 'err3.edit'), 'i') })
+    expect(edits.length).toBeGreaterThan(0)
+    for (const b of edits) expect(b).toBeDisabled()
+  })
+})

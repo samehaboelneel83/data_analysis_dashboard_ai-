@@ -245,7 +245,9 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
     setConvId(conversationId ?? null)
     setMessages([])
     setLoadError(null)
-    if (conversationId == null) { setLoading(false); return }
+    // AD-09: "New chat" starts with an empty box, not the last thread's draft.
+    // (The pane's own new thread never gets here: knownId already matches.)
+    if (conversationId == null) { setInput(''); setLoading(false); return }
     const seq = ++loadSeq.current
     setLoading(true)
     agentApi.messages(conversationId)
@@ -594,7 +596,8 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                               onClick={() => void send(turn.question!.text)}>
                               <RotateCcw size={14} aria-hidden /> {t('ask.retry')}
                             </button>
-                            <button type="button" className="dl-act" onClick={() => setInput(turn.question!.text)}>
+                            <button type="button" className="dl-act" disabled={offline}
+                              title={offline ? t('off.composer') : undefined} onClick={() => setInput(turn.question!.text)}>
                               <Pencil size={14} aria-hidden /> {t('err3.edit')}
                             </button>
                           </div>
@@ -871,7 +874,8 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
         )}
         {question && (
           <div className="dl-ac__acts">
-            <button type="button" className="dl-act dl-act--primary" onClick={() => setInput(question)}>
+            <button type="button" className="dl-act dl-act--primary" disabled={offline}
+              title={offline ? t('off.composer') : undefined} onClick={() => setInput(question)}>
               <Pencil size={14} aria-hidden /> {t('err3.edit')}
             </button>
             <button type="button" className="dl-act" disabled={busy || offline} onClick={() => void send(question)}>
@@ -965,7 +969,8 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
           )}
           {question && (
             <>
-              <button type="button" className="dl-act" title={t('err3.edit')} onClick={() => setInput(question)}>
+              <button type="button" className="dl-act" title={offline ? t('off.composer') : t('err3.edit')} disabled={offline}
+                onClick={() => setInput(question)}>
                 <Pencil size={14} aria-hidden /> <span className="dl-act__text">{t('err3.edit')}</span>
               </button>
               <button type="button" className="dl-act" title={t('ask.retry')} disabled={busy || offline} onClick={() => void send(question)}>
