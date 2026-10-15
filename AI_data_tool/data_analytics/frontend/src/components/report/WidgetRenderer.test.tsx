@@ -3213,3 +3213,21 @@ describe('WidgetRenderer chart download (F-02)', () => {
     expect(screen.queryByRole('menuitem', { name: 'Export data as CSV' })).toBeNull()
   })
 })
+
+describe('C-24: an automatically chosen date grain is said', () => {
+  it('a dual-axis time series bucketed by week says "by week (automatic)"', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: '2024-01-01', value: 1, value2: 2 }],
+      auto_granularity: 'week', sampled: false } as never)
+    renderWidget({ widget: barWidget({ widget_type: 'dual_axis_time_series',
+      config: { start: 'date', measure: 'revenue', measure2: 'units' } }) })
+    expect(await screen.findByTestId('auto-grain-chip')).toHaveTextContent('by week (automatic)')
+  })
+  it('no chip when the author chose the grain', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: '2024-01', value: 1, value2: 2 }], sampled: false })
+    renderWidget({ widget: barWidget({ widget_type: 'dual_axis_time_series',
+      config: { start: 'date', measure: 'revenue', measure2: 'units', dimension_granularity: 'month' } }) })
+    await screen.findByText(/./, { selector: '[role="heading"]' })
+    await new Promise(r => setTimeout(r, 50))
+    expect(screen.queryByTestId('auto-grain-chip')).toBeNull()
+  })
+})

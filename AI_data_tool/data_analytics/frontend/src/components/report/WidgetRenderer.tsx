@@ -1478,6 +1478,15 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
             </span>
           )
         })()}
+        {/* C-24: the server chose the date grain (a long daily axis drawn by
+            week, say): said, so a reader knows each point is a week. */}
+        {typeof (data as { auto_granularity?: unknown } | null)?.auto_granularity === 'string' && (
+          <span data-testid="auto-grain-chip" title={t('bc.canvas.autoGrainTitle')}
+            style={{ fontSize: 9, padding: '1px 5px', borderRadius: 99, whiteSpace: 'nowrap',
+              background: 'color-mix(in srgb, var(--accent) 14%, transparent)', color: 'var(--accent)' }}>
+            {t('bc.canvas.autoGrain', { grain: grainWord((data as { auto_granularity: string }).auto_granularity, t) })}
+          </span>
+        )}
         {data?.sampled && (
           <span title={t('bc.canvas.sampleTitle', { n: String(data.sample_size), total: String(data.total_rows) })}
             style={{ fontSize: 9, background: 'rgba(230,160,60,.18)', color: '#e6a03c', padding: '1px 5px', borderRadius: 99 }}>
