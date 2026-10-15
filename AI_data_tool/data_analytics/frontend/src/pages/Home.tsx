@@ -94,7 +94,7 @@ export default function Home() {
   const sources = useSlot<DataSource[]>(() => dataSourcesApi.list())
   const convs = useSlot(() => agentApi.listConversations())
   const runs = useSlot<RefreshRunRow[]>(() => monitoringApi.refreshRuns({ limit: 200 }), isAdmin)
-  const activity = useSlot<ActivityRow[]>(() => monitoringApi.activity(200), isAdmin)
+  const activity = useSlot<ActivityRow[]>(() => monitoringApi.activity({ limit: 200 }), isAdmin)
 
   const digest = useMemo(() => runs.data ? jobsDigest(runs.data) : null, [runs.data])
   const feed = useMemo(() => activity.data ? feedItems(activity.data, user?.email, reports, datasets) : [],

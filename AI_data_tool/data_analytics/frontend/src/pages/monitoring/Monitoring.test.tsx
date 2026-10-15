@@ -228,6 +228,29 @@ describe('MonitoringActivity', () => {
     expect(screen.getByText('share #7')).toBeInTheDocument()
   })
 
+  it('pages with "Load more", filters by action on the server, and opens a row (AD-19)', async () => {
+    const row = (id: number) => ({ id, user_email: 'a@b.com', action: 'report.create', entity: 'report',
+      entity_id: id, detail: `detail ${id}`, created_at: '2026-09-01T10:00:00Z' })
+    vi.mocked(monitoringApi.activity)
+      .mockResolvedValueOnce(Array.from({ length: 100 }, (_, i) => row(500 - i)))
+      .mockResolvedValueOnce([row(300)])
+      .mockResolvedValue([row(42)])
+    renderIn(<MonitoringActivity />)
+    await screen.findByText('detail 500')
+    expect(vi.mocked(monitoringApi.activity).mock.calls[0][0]).toMatchObject({ limit: 100 })
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }))
+    expect(await screen.findByText('detail 300')).toBeInTheDocument()
+    expect(vi.mocked(monitoringApi.activity).mock.calls[1][0]).toMatchObject({ before_id: 401 })
+    expect(screen.queryByRole('button', { name: 'Load more' })).toBeNull()   // a short page is the end
+
+    fireEvent.change(screen.getByLabelText('Action'), { target: { value: 'report.create' } })
+    await waitFor(() => expect(vi.mocked(monitoringApi.activity).mock.calls[2][0]).toMatchObject({ action: 'report.create' }))
+    fireEvent.click(await screen.findByText('detail 42'))
+    const detail = await screen.findByTestId('activity-detail-42')
+    expect(detail).toHaveTextContent('detail 42')
+    expect(detail.querySelector('a[href="/reports/42"]')).not.toBeNull()
+  })
+
   it('empty and error states are distinct', async () => {
     vi.mocked(monitoringApi.activity).mockResolvedValue([])
     const { unmount } = renderIn(<MonitoringActivity />)

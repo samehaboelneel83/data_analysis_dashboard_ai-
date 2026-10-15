@@ -422,7 +422,7 @@ function Activity({ ds, me }: { ds: Dataset; me: { id: number | null; email: str
     let on = true
     const target = `dataset:${ds.id}`
     Promise.all([
-      Promise.resolve().then(() => monitoringApi?.activity?.(200)).catch(() => []),
+      Promise.resolve().then(() => monitoringApi?.activity?.({ limit: 200 })).catch(() => []),
       Promise.resolve().then(() => adminAuditApi?.list?.({ limit: 200, q: target })).catch(() => []),
     ]).then(([general, admin]) => {
       if (!on) return

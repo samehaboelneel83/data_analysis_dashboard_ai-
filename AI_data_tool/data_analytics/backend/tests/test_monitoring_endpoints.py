@@ -199,3 +199,39 @@ class TestAutomationRunsAndChecks:
         await db_session.commit()
         runs = (await client.get("/api/v1/admin/monitoring/refresh-runs", headers=auth_headers["a"])).json()
         assert runs[0]["checks_summary"] == {"pass": 2, "warn": 1, "fail": 0}
+
+
+class TestActivityPaging:
+    """AD-19: the Activity log pages and filters on the server."""
+
+    async def _log(self, db_session, two_orgs, n=5):
+        from app.models.models import AuditLogEntry
+        org = two_orgs["a"]["org"].id
+        for i in range(n):
+            db_session.add(AuditLogEntry(org_id=org, user_email="x@example.com" if i % 2 else "y@example.com",
+                                         action="report.create" if i % 2 else "dataset.upload",
+                                         created_at=datetime(2026, 9, 1 + i, tzinfo=timezone.utc)))
+        db_session.add(AuditLogEntry(org_id=two_orgs["b"]["org"].id, action="report.create"))
+        await db_session.commit()
+
+    async def test_before_id_pages_without_overlap(self, client, db_session, two_orgs, auth_headers):
+        await self._log(db_session, two_orgs)
+        url = "/api/v1/admin/audit-log"
+        first = (await client.get(url, params={"limit": 2}, headers=auth_headers["a"])).json()
+        second = (await client.get(url, params={"limit": 2, "before_id": first[-1]["id"]},
+                                   headers=auth_headers["a"])).json()
+        rest = (await client.get(url, params={"limit": 10, "before_id": second[-1]["id"]},
+                                 headers=auth_headers["a"])).json()
+        ids = [r["id"] for r in first + second + rest]
+        assert len(ids) == 5 and len(set(ids)) == 5 and ids == sorted(ids, reverse=True)
+
+    async def test_filters(self, client, db_session, two_orgs, auth_headers):
+        await self._log(db_session, two_orgs)
+        url = "/api/v1/admin/audit-log"
+        by_action = (await client.get(url, params={"action": "report.create"}, headers=auth_headers["a"])).json()
+        assert len(by_action) == 2 and {r["action"] for r in by_action} == {"report.create"}
+        by_user = (await client.get(url, params={"user_email": "y@example.com"}, headers=auth_headers["a"])).json()
+        assert len(by_user) == 3
+        dated = (await client.get(url, params={"since": "2026-09-02", "until": "2026-09-03T23:59:59"},
+                                  headers=auth_headers["a"])).json()
+        assert len(dated) == 2

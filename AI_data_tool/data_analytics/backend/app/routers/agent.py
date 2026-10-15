@@ -347,6 +347,13 @@ async def ask(cid: int, body: AskIn, db: AsyncSession = Depends(get_db),
     db.add(AgentMessage(conversation_id=conv.id, role="assistant",
                         content=run.answer or run.error or "",
                         agent_run_id=run.id))
+    # AD-19 (decision): Ask AI questions appear in Activity -- the thread and
+    # the data it asked about, NEVER the question text, which may hold names
+    # or figures the asker would not post in a shared log.
+    from ..services.audit import record as audit
+    scope = (", ".join(f"dataset #{d}" for d in conv.dataset_ids) if conv.dataset_ids
+             else f"connection #{conv.data_source_id}")
+    await audit(db, user, "agent.ask", "conversation", conv.id, f"Asked about {scope}")
     await db.commit()
     steps = (await db.execute(select(AgentStep).where(
         AgentStep.agent_run_id == run.id).order_by(AgentStep.id))).scalars().all()

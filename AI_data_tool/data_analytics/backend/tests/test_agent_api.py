@@ -140,6 +140,22 @@ class TestAsk:
         msgs = (await db_session.execute(select(AgentMessage))).scalars().all()
         assert [m.role for m in msgs] == ["user", "assistant"]
 
+    async def test_an_ask_is_in_the_activity_log_without_its_question(
+            self, client, auth_headers, seeded_source, scripted_ok, db_session):
+        """AD-19 (decision): the conversation and its data, never the
+        question text -- a question can carry sensitive words."""
+        from app.models.models import AuditLogEntry
+        cid = (await client.post("/api/v1/agent/conversations",
+                                 json={"data_source_id": seeded_source.id},
+                                 headers=auth_headers["a"])).json()["id"]
+        await client.post(f"/api/v1/agent/conversations/{cid}/ask",
+                          json={"question": "salary of Jane Secret"}, headers=auth_headers["a"])
+        [e] = (await db_session.execute(select(AuditLogEntry).where(
+            AuditLogEntry.action == "agent.ask"))).scalars().all()
+        assert e.entity == "conversation" and e.entity_id == cid
+        assert "Jane" not in (e.detail or "") and "salary" not in (e.detail or "")
+        assert f"connection #{seeded_source.id}" in (e.detail or "")
+
     async def test_a_run_is_readable_with_its_steps(self, client,
                                                     auth_headers,
                                                     seeded_source, scripted_ok):

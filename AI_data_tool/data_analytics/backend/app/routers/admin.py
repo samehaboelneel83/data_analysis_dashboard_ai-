@@ -1,5 +1,6 @@
 import asyncio
 import re
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
@@ -526,16 +527,40 @@ async def delete_rule(rule_id: int, db: AsyncSession = Depends(get_db), current_
 @router.get("/audit-log")
 async def list_audit_log(
     limit: int = 200,
+    before_id: int | None = None,
+    action: str | None = None,
+    user_email: str | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
     db: AsyncSession = Depends(get_db),
     admin: User = Depends(require_org_admin),
 ):
     """The org's audit trail, newest first. Admin-only and org-scoped: the log records
-    an org's own actions and is readable by that org's admins alone."""
+    an org's own actions and is readable by that org's admins alone.
+
+    AD-19: `before_id` pages (keyset on the same newest-first order: the next
+    page starts after that row), `action` and `user_email` filter exactly,
+    `since` / `until` bound the time."""
+    from sqlalchemy import and_, or_
     limit = max(1, min(limit, 1000))
+    stmt = select(AuditLogEntry).where(AuditLogEntry.org_id == admin.org_id)
+    if action:
+        stmt = stmt.where(AuditLogEntry.action == action)
+    if user_email:
+        stmt = stmt.where(AuditLogEntry.user_email == user_email)
+    if since is not None:
+        stmt = stmt.where(AuditLogEntry.created_at >= since)
+    if until is not None:
+        stmt = stmt.where(AuditLogEntry.created_at <= until)
+    if before_id is not None:
+        anchor = await db.get(AuditLogEntry, before_id)
+        if anchor is None or anchor.org_id != admin.org_id:
+            return []
+        stmt = stmt.where(or_(AuditLogEntry.created_at < anchor.created_at,
+                              and_(AuditLogEntry.created_at == anchor.created_at,
+                                   AuditLogEntry.id < anchor.id)))
     rows = (await db.execute(
-        select(AuditLogEntry)
-        .where(AuditLogEntry.org_id == admin.org_id)
-        .order_by(AuditLogEntry.created_at.desc(), AuditLogEntry.id.desc())
+        stmt.order_by(AuditLogEntry.created_at.desc(), AuditLogEntry.id.desc())
         .limit(limit)
     )).scalars().all()
     return [

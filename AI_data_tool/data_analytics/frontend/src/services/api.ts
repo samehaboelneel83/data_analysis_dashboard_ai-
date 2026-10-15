@@ -2674,8 +2674,10 @@ export const monitoringApi = {
   /** AD-17: the org's automated analyses, newest first. */
   automationRuns: (limit = 100) =>
     api.get<MonitoringAutomationRunRow[]>('/admin/monitoring/automation-runs', { params: { limit } }).then(r => r.data),
-  activity: (limit = 200) =>
-    api.get<ActivityRow[]>('/admin/audit-log', { params: { limit } }).then(r => r.data),
+  /** AD-19: newest first; `before_id` pages, the rest filter on the server. */
+  activity: (params: { limit?: number; before_id?: number; action?: string; user_email?: string
+                       since?: string; until?: string } = {}) =>
+    api.get<ActivityRow[]>('/admin/audit-log', { params: { limit: 200, ...params } }).then(r => r.data),
 }
 
 /** One node of the organization's own chart (Country → Region → Branch → …).
