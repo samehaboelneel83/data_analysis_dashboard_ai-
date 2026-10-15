@@ -3252,3 +3252,38 @@ describe('C-21: the canvas is drawn at the page size', () => {
     expect(canvas.hasAttribute('data-page-frame')).toBe(false)
   })
 })
+
+describe('C-17 (sweep): any write this session makes is not "changed in another session"', () => {
+  it('a write announced by the API client re-syncs the known revision; the next poll raises no banner', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      vi.mocked(reportsApi.get).mockReset().mockResolvedValue({ ...baseReport(), revision: 3 } as any)
+      vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+      vi.mocked(reportsApi.getRevision).mockReset().mockResolvedValue(3)
+      renderBuilder()
+      await screen.findByTestId('view-strip')
+      await waitFor(() => expect(reportsApi.getRevision).toHaveBeenCalled())
+      // A panel wrote to this report without reloading it (the server bumped it to 4).
+      vi.mocked(reportsApi.getRevision).mockResolvedValue(4)
+      act(() => { window.dispatchEvent(new CustomEvent('datalytics:report-write', { detail: { reportId: 1 } })) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(21_000) })
+      expect(screen.queryByText(/changed in another session/i)).not.toBeInTheDocument()
+    } finally { vi.useRealTimers() }
+  })
+  it("another session's write still raises it", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      vi.mocked(reportsApi.get).mockReset().mockResolvedValue({ ...baseReport(), revision: 3 } as any)
+      vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+      vi.mocked(reportsApi.getRevision).mockReset().mockResolvedValue(3)
+      renderBuilder()
+      await screen.findByTestId('view-strip')
+      await waitFor(() => expect(reportsApi.getRevision).toHaveBeenCalled())
+      vi.mocked(reportsApi.getRevision).mockResolvedValue(4)
+      // a write to ANOTHER report in this session says nothing about this one
+      act(() => { window.dispatchEvent(new CustomEvent('datalytics:report-write', { detail: { reportId: 2 } })) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(21_000) })
+      expect(await screen.findByText(/changed in another session/i)).toBeInTheDocument()
+    } finally { vi.useRealTimers() }
+  })
+})

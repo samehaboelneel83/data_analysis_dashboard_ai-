@@ -6,6 +6,7 @@ import { DEFAULT_SPEC, PRESETS, describeSpec, parseSpec, specProblem, type Relat
 import { closeAll, closeOpen, markOpen, readOpen, type OpenReport } from '../lib/openReports'
 import { stackBelow } from '../lib/stackLayouts'
 import { pageFrame } from '../lib/pageSize'
+import { REPORT_WRITE_EVENT, type ReportWriteDetail } from '../lib/reportWrites'
 import OpenReportsMenu from '../components/report/OpenReportsMenu'
 import { useEffect, useState, useCallback, useMemo, useRef, lazy, Suspense, Fragment, type ReactNode } from 'react'
 import LoadError from '../components/ui/LoadError'
@@ -550,6 +551,8 @@ export default function ReportBuilder() {
   // our writes mid-drag would be worse than telling us to reload.
   const [loadedRevision, setLoadedRevision] = useState<number | null>(null)
   const loadedRevisionRef = useRef<number | null>(null)
+  /** When this session last wrote to the report (C-17). */
+  const lastOwnWriteRef = useRef(0)
   const [staleRevision, setStaleRevision] = useState<number | null>(null)
   /** E09: a save refused because someone else changed the widget first. */
   const [editConflict, setEditConflict] = useState<EditConflict | null>(null)
@@ -735,11 +738,14 @@ export default function ReportBuilder() {
       // Skip while one of our own writes is in flight: it bumps the counter and then
       // reloads, and reporting that as somebody else's edit would be a false alarm.
       if (savingRef.current) return
+      // C-17: nor just after one this session announced (its re-sync is on the way).
+      const ownWriteRecent = () => Date.now() - lastOwnWriteRef.current < 3000
+      if (ownWriteRecent()) return
       try {
         const remote = await reportsApi.getRevision(reportId)
         // The fetch may have started before our save; ignore if we wrote meanwhile
         // or if loadReport already caught up.
-        if (savingRef.current) return
+        if (savingRef.current || ownWriteRecent()) return
         const known = loadedRevisionRef.current
         if (!cancelled && known != null && remote > known) setStaleRevision(remote)
       } catch {
@@ -1146,6 +1152,27 @@ export default function ReportBuilder() {
   const syncRevisionAfterOwnWrite = async () => {
     try { setLoadedRevision(await reportsApi.getRevision(reportId)) } catch { /* next poll decides */ }
   }
+  // C-17 (sweep): ANY successful write this session makes to this report --
+  // the API client announces each one (lib/reportWrites) -- re-syncs the known
+  // revision, so no write path has to remember to, and none raises "changed in
+  // another session" on the author's own edit. A burst of writes syncs once.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const onWrite = (e: Event) => {
+      if ((e as CustomEvent<ReportWriteDetail>).detail?.reportId !== reportId) return
+      lastOwnWriteRef.current = Date.now()
+      clearTimeout(timer)
+      timer = setTimeout(() => {
+        reportsApi.getRevision(reportId).then(r => {
+          // The ref at once too: the poll reads it, and must not wait a render.
+          if (loadedRevisionRef.current == null || r > loadedRevisionRef.current) loadedRevisionRef.current = r
+          setLoadedRevision(known => known == null || r > known ? r : known)
+        }).catch(() => { /* next poll decides */ })
+      }, 250)
+    }
+    window.addEventListener(REPORT_WRITE_EVENT, onWrite)
+    return () => { window.removeEventListener(REPORT_WRITE_EVENT, onWrite); clearTimeout(timer) }
+  }, [reportId])
 
   /** Change the dashboard's look (fonts, borders, corners...) as one undoable step. */
   const setStyleUndoable = async (next: DashboardStyle) => {
