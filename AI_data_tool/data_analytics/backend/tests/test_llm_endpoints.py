@@ -251,3 +251,49 @@ class TestSmartAuto:
             {"id": "qwen3.5_9b", "max_model_len": 16384}]}))
         await le.probe(ep, transport=t)
         assert le.context_of(ep) == 16384
+
+
+class TestModelAvailable:
+    """AD-01: one shared answer to "can an AI call succeed right now?"."""
+
+    def _two(self):
+        le.apply_stored({"default": "auto", "endpoints": [dict(e, api_key="") for e in TWO]})
+
+    def test_a_fresh_down_mark_is_unavailable(self):
+        self._two()
+        le.mark("a", False, "down")
+        assert le.known_down("a") is True
+        assert le.model_available("a")[0] is False
+
+    def test_a_stale_down_mark_counts_as_available(self):
+        self._two()
+        le.mark("a", False, "down")
+        le._health["a"]["at"] -= 10 * le.PROBE_SECONDS
+        assert le.known_down("a") is False
+        assert le.model_available("a") == (True, None)
+
+    def test_never_checked_counts_as_available(self):
+        self._two()
+        assert le.known_down("a") is False
+        assert le.model_available("a") == (True, None)
+
+    def test_auto_with_one_up_is_available(self):
+        self._two()
+        le.mark("a", False, "down"); le.mark("b", True)
+        assert le.model_available("auto") == (True, None)
+
+    def test_auto_with_every_endpoint_down_is_unavailable_with_the_reason(self):
+        self._two()
+        le.mark("a", False, "ConnectTimeout"); le.mark("b", False, "refused")
+        ok, why = le.model_available("auto")
+        assert ok is False and why
+
+    def test_ai_switched_off_is_unavailable(self, monkeypatch):
+        monkeypatch.setattr(settings, "llm_enabled", False)
+        assert le.model_available()[0] is False
+
+    async def test_the_public_list_says_whether_ai_is_available(self, client, two_orgs, auth_headers):
+        self._two()
+        le.mark("a", False, "down"); le.mark("b", False, "down")
+        r = await client.get(PUBLIC, headers=auth_headers["a"])
+        assert r.status_code == 200 and r.json()["ai_available"] is False

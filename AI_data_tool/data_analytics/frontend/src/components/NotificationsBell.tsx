@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { notificationsApi, type AppNotification } from '../services/api'
 import { Bell, Clock, MessageSquare, RefreshCw, Zap } from 'lucide-react'
 import { formatTimeAgo, useT } from '../i18n'
@@ -32,6 +32,21 @@ export default function NotificationsBell() {
     return () => clearInterval(t)
   }, [])
 
+  // AD-14: Escape closes it (focus back on the bell), as does opening the
+  // command palette (Ctrl/Cmd+K) and moving to another page.
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setOpen(false); buttonRef.current?.focus() }
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') setOpen(false)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [open])
+  const { pathname } = useLocation()
+  useEffect(() => { setOpen(false) }, [pathname])
+
   useEffect(() => {
     if (!open) return
     const onDown = (e: MouseEvent) => {
@@ -54,7 +69,7 @@ export default function NotificationsBell() {
 
   return (
     <div ref={rootRef} style={{ position: 'relative' }}>
-      <button onClick={toggle} aria-label={unread ? t('bell.unread', { n: unread }) : t('bell.title')}
+      <button ref={buttonRef} onClick={toggle} aria-label={unread ? t('bell.unread', { n: unread }) : t('bell.title')}
         title={t('bell.title')}
         style={{ position: 'relative', width: 40, height: 40, borderRadius: 8, border: 'none',
           background: open ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : 'transparent', cursor: 'pointer',

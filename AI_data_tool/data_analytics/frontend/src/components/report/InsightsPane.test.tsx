@@ -33,6 +33,13 @@ beforeEach(() => {
 })
 
 describe('InsightsPane', () => {
+  it('has no Pin button on a finding: pins were shown nowhere (AD-05)', async () => {
+    render(<InsightsPane datasetId={5} columnTypes={types} onAdd={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /Generate/ }))
+    await waitFor(() => expect(screen.getByTestId('rb-insight-standout')).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: /Pin finding/ })).toBeNull()
+  })
+
   it('scans on demand and infers the right chart per finding', async () => {
     const onAdd = vi.fn()
     render(<InsightsPane datasetId={5} columnTypes={types} onAdd={onAdd} />)

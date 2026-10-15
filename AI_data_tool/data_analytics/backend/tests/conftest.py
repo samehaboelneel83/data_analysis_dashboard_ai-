@@ -53,6 +53,17 @@ def _no_model_column_classes_by_default(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _fresh_llm_health():
+    """The model's up/down lights (services/llm_endpoints.py) are process
+    state, and a fresh red light makes LLMClient skip the call (AD-01): one
+    test's failing fake model must not silence the next test's."""
+    from app.services import llm_endpoints
+    llm_endpoints._health.clear()
+    yield
+    llm_endpoints._health.clear()
+
+
+@pytest.fixture(autouse=True)
 def _no_duckdb_pushdown_by_default(monkeypatch):
     """Pin `widget_duckdb_pushdown` OFF for the suite.
 

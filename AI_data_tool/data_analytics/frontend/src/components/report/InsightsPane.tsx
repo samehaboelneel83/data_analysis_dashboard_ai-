@@ -1,9 +1,9 @@
 import { sayText } from '../../lib/readbackText'
 import { useState } from 'react'
 import toast from 'react-hot-toast'
-import { findingKey, insightsApi, pinsApi, suggestApi } from '../../services/api'
+import { insightsApi, suggestApi } from '../../services/api'
 import IconLabel from '../ui/IconLabel'
-import { RefreshCw, Sparkles, Pin } from 'lucide-react'
+import { RefreshCw, Sparkles } from 'lucide-react'
 import type { Suggestion } from './SuggestionsPane'
 import { useT, type MessageKey } from '../../i18n'
 import { localDigits } from '../../lib/arabicFormats'
@@ -160,18 +160,6 @@ export default function InsightsPane({ datasetId, columnTypes, onAdd, reportId, 
                         config: { content: `${f.title}. ${f.detail}` } })}>
                       {t('ins.addText')}
                     </button>
-                    )}
-                    {datasetId != null && (
-                      <button className="btn" style={{ fontSize: 11 }}
-                        aria-label={t('ins.pinAria', { title: f.title })}
-                        title={t('ins.pinTitle')}
-                        onClick={() => void pinsApi
-                          .create({ dataset_id: datasetId, finding_key: findingKey(f) })
-                          .then(r => toast.success(r.already_pinned
-                            ? t('ins.pinAlready') : t('ins.pinned')))
-                          .catch(() => toast.error(t('ins.pinFailed')))}>
-                        <IconLabel icon={Pin} size={11}>{t('ins.pin')}</IconLabel>
-                      </button>
                     )}
                     {chart && onAdd && (
                       <button className="btn btn-primary" style={{ fontSize: 11 }} onClick={() => onAdd(chart)}>

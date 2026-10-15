@@ -355,3 +355,27 @@ def make_validator(checks: list[dict], previous_rows: int | None,
         if not force and blocking_failures(results):
             raise ChecksBlocked(results)
     return _validate
+
+
+def summarize(results) -> dict:
+    """{pass, warn, fail} counts of check results (AD-17): a failed "block"
+    check is a fail, a failed "warn" check a warning. Counts only -- never
+    a value from the data."""
+    out = {"pass": 0, "warn": 0, "fail": 0}
+    for r in results or []:
+        if not isinstance(r, dict):
+            continue
+        if r.get("passed"):
+            out["pass"] += 1
+        elif r.get("severity") == "block":
+            out["fail"] += 1
+        else:
+            out["warn"] += 1
+    return out
+
+
+def summary_text(rows: int, counts: dict) -> str:
+    """'Checked 2,000 rows · 2 pass · 1 warn' -- the Activity line."""
+    parts = [f"{counts[k]} {k}" for k in ("pass", "warn", "fail") if counts.get(k)]
+    return f"Checked {rows:,} rows" + "".join(f" · {p}" for p in parts or ["no checks"])
+

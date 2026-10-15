@@ -599,7 +599,7 @@ export const datasetsApi = {
    *  the `size` best by what the data shows: minutes rather than seconds, so
    *  its timeout is longer. */
   suggestDashboards: (id: number, body: { goal?: string; count?: number; mode?: 'quick' | 'panel'; size?: number;
-                                          background?: boolean; fresh?: boolean },
+                                          background?: boolean; fresh?: boolean; use_profile?: boolean },
                       signal?: AbortSignal) =>
     api.post<SuggestDashboardsAnswer>(
       `/datasets/${id}/suggest-dashboards`, body,
@@ -1060,6 +1060,8 @@ export interface LlmEndpointsOut {
   auto_pick: string | null
   source: 'saved' | 'deployment' | 'environment'
   endpoints: LlmEndpoint[]
+  /** Whether the default choice can be used now (AD-01's server-side gate). */
+  ai_available?: boolean
   /** This person's most recent answered calls, oldest first. */
   last_used?: LlmUse[]
 }
@@ -1261,6 +1263,7 @@ export const aggregatesApi = {
 export const analysisApi = {
   run: (id: number, type = 'full') =>
     api.post(`/datasets/${id}/analysis`, { analysis_type: type }).then(r => r.data),
+  /** The stored profile, or null when there is none yet (AD-06: 200 null, not a 404). */
   get: (id: number) =>
     api.get(`/datasets/${id}/analysis`).then(r => r.data),
   // A2: KMeans segmentation over selected (or all usable) numeric columns.
@@ -2154,6 +2157,10 @@ export const narrateApi = {
 }
 
 const _insightsInFlight = new Map<number, Promise<unknown>>()
+/** AD-06: the last finished scan per dataset, so "View full scan →" from the
+ *  Insights hub shows the scan just seen instead of an empty panel. */
+const _insightsDone = new Map<number, { at: number; result: unknown }>()
+const INSIGHTS_FRESH_MS = 5 * 60_000
 
 export const insightsApi = {
   /** `novelty` is present only when a previous scan exists and the caller is
@@ -2164,11 +2171,22 @@ export const insightsApi = {
                            /** Tested findings only: the test, its population and effect (Phase 7.2). */
                            p_value?: number | null; p_adjusted?: number | null; significant?: boolean | null
                            evidence?: { test: string; n: number; effect: string } | null }[]
-               narrative: string }>(`/datasets/${dsId}/insights`).then(r => r.data),
+               narrative: string }>(`/datasets/${dsId}/insights`).then(r => {
+      _insightsDone.set(dsId, { at: Date.now(), result: r.data })
+      return r.data
+    }),
+  /** The scan finished in the last few minutes for this dataset, if any. */
+  cached(dsId: number) {
+    const hit = _insightsDone.get(dsId)
+    if (!hit || Date.now() - hit.at > INSIGHTS_FRESH_MS) return null
+    return hit.result as Awaited<ReturnType<typeof insightsApi.run>>
+  },
   /** Like run(), but N concurrent callers on one dataset share ONE request --
    *  every Dynamic Pin card on the dashboard evaluates through this, so five
    *  cards over the same dataset cost one scan, not five. */
   runShared(dsId: number) {
+    const done = insightsApi.cached(dsId)
+    if (done) return Promise.resolve(done)
     const hit = _insightsInFlight.get(dsId)
     if (hit) return hit as ReturnType<typeof insightsApi.run>
     const p = insightsApi.run(dsId).finally(() => _insightsInFlight.delete(dsId))
@@ -2597,8 +2615,8 @@ export interface MonitoringJobRow {
   id: number
   name: string
   interval_minutes: number
-  /** A calendar report schedule ("weekly on Monday at 09:00"). */
-  calendar?: { kind: 'daily' | 'weekly' | 'monthly'; hour: number; minute: number; weekday?: number; monthday?: number } | null
+  /** A calendar report schedule ("weekly on Monday at 09:00"); `paused`: shown, never run. */
+  calendar?: { kind: 'daily' | 'weekly' | 'monthly'; hour: number; minute: number; weekday?: number; monthday?: number; paused?: boolean } | null
   timezone?: string | null
   last_run_at: string | null
   status: string | null
@@ -2612,6 +2630,18 @@ export interface MonitoringJobRow {
 }
 
 /** One dataset refresh or dataflow run, scheduled or manual. */
+/** AD-17: one automated analysis on the Refresh & jobs page. */
+export interface MonitoringAutomationRunRow {
+  id: number
+  status: 'pending' | 'running' | 'failed' | 'needs_review' | 'done' | 'cancelled'
+  dataset_id: number | null
+  dataset_name: string | null
+  started_at: string | null
+  finished_at: string | null
+  /** The step it is at (or stopped at); null once every step is done. */
+  step: string | null
+  error: string | null
+}
 export interface RefreshRunRow {
   id: number
   kind: 'dataset' | 'dataflow'
@@ -2626,6 +2656,8 @@ export interface RefreshRunRow {
   duration_ms: number | null
   error: string | null
   error_code: string | null
+  /** AD-17: this run's checks as counts; null when none ran. */
+  checks_summary?: { pass: number; warn: number; fail: number } | null
 }
 
 export interface MonitoringDeliveryRow extends DeliveryRow {
@@ -2639,8 +2671,13 @@ export const monitoringApi = {
     api.get<RefreshRunRow[]>('/admin/monitoring/refresh-runs', { params }).then(r => r.data),
   deliveries: (limit = 200) =>
     api.get<MonitoringDeliveryRow[]>('/admin/monitoring/deliveries', { params: { limit } }).then(r => r.data),
-  activity: (limit = 200) =>
-    api.get<ActivityRow[]>('/admin/audit-log', { params: { limit } }).then(r => r.data),
+  /** AD-17: the org's automated analyses, newest first. */
+  automationRuns: (limit = 100) =>
+    api.get<MonitoringAutomationRunRow[]>('/admin/monitoring/automation-runs', { params: { limit } }).then(r => r.data),
+  /** AD-19: newest first; `before_id` pages, the rest filter on the server. */
+  activity: (params: { limit?: number; before_id?: number; action?: string; user_email?: string
+                       since?: string; until?: string } = {}) =>
+    api.get<ActivityRow[]>('/admin/audit-log', { params: { limit: 200, ...params } }).then(r => r.data),
 }
 
 /** One node of the organization's own chart (Country → Region → Branch → …).
@@ -3200,6 +3237,8 @@ export const automationApi = {
     api.post<AutomationRunRow>(`/automation/runs/${id}/reject`, { reason: reason || null }).then(r => r.data),
   cancel: (id: number) => api.post<AutomationRunRow>(`/automation/runs/${id}/cancel`).then(r => r.data),
   retry: (id: number) => api.post<AutomationRunRow>(`/automation/runs/${id}/retry`).then(r => r.data),
+  /** AD-22: a stopped (failed or cancelled) run only. */
+  remove: (id: number) => api.delete(`/automation/runs/${id}`).then(() => undefined),
 }
 
 export const jobsApi = {

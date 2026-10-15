@@ -160,6 +160,24 @@ class TestStopping:
         again = await c.post(f"/api/v1/automation/runs/{run['id']}/cancel", headers=world["ana"])
         assert again.json()["status"] == "cancelled"
 
+    async def test_cancelling_someone_elses_run_tells_its_creator(self, world, db_session):
+        from app.models.models import Notification
+        run = (await _start(world)).json()
+        r = await world["c"].post(f"/api/v1/automation/runs/{run['id']}/cancel", headers=world["admin"])
+        assert r.status_code == 200 and r.json()["status"] == "cancelled"
+        ana = (await db_session.execute(select(User).where(User.email == "ana@example.com"))).scalar_one()
+        notes = (await db_session.execute(select(Notification).where(
+            Notification.user_id == ana.id, Notification.kind == "automation"))).scalars().all()
+        assert len(notes) == 1 and "cancelled" in notes[0].text
+        assert notes[0].link == f"/automation?run={run['id']}"
+
+    async def test_cancelling_your_own_run_does_not_notify_you(self, world, db_session):
+        from app.models.models import Notification
+        run = (await _start(world)).json()
+        await world["c"].post(f"/api/v1/automation/runs/{run['id']}/cancel", headers=world["ana"])
+        assert (await db_session.execute(select(Notification).where(
+            Notification.kind == "automation"))).scalars().first() is None
+
     async def test_a_step_finishing_after_a_cancel_does_not_revive_the_run(self, world, db_session):
         """The worker's copy of the run says running; the cancel is a write
         from another request."""
@@ -205,3 +223,65 @@ class TestStopping:
         assert r.status_code == 200
         profile = next(s for s in r.json()["steps"] if s["name"] == "profile")
         assert profile["next_attempt_at"] is None and profile["error"] == "source down"
+
+
+class TestStoppedRunsCanBeRetriedOrDeleted:
+    """AD-22 (decision): a stopped run -- failed or cancelled -- can be deleted
+    or retried. Nothing else is deletable; no naming/editing/scheduling."""
+
+    async def test_deleting_a_cancelled_run_removes_it_and_its_steps(self, world, db_session):
+        run = (await _start(world)).json()
+        c = world["c"]
+        await c.post(f"/api/v1/automation/runs/{run['id']}/cancel", headers=world["ana"])
+        r = await c.delete(f"/api/v1/automation/runs/{run['id']}", headers=world["ana"])
+        assert r.status_code == 204, r.text
+        db_session.expire_all()
+        assert await db_session.get(AutomationRun, run["id"]) is None
+        assert (await db_session.execute(select(AutomationStep).where(
+            AutomationStep.run_id == run["id"]))).scalars().first() is None
+        assert (await db_session.execute(select(AuditLogEntry).where(
+            AuditLogEntry.action == "automation.delete"))).scalars().first() is not None
+
+    async def test_a_failed_run_may_be_deleted_but_not_a_running_or_finished_one(self, world, db_session):
+        c = world["c"]
+        run = (await _start(world)).json()
+        assert (await c.delete(f"/api/v1/automation/runs/{run['id']}", headers=world["ana"])).status_code == 409
+        await _set_status(db_session, run["id"], "running")
+        assert (await c.delete(f"/api/v1/automation/runs/{run['id']}", headers=world["ana"])).status_code == 409
+        await _set_status(db_session, run["id"], "done")
+        assert (await c.delete(f"/api/v1/automation/runs/{run['id']}", headers=world["ana"])).status_code == 409
+        await _set_status(db_session, run["id"], "failed")
+        assert (await c.delete(f"/api/v1/automation/runs/{run['id']}", headers=world["ana"])).status_code == 204
+
+    async def test_someone_elses_run_is_not_found(self, world):
+        run = (await _start(world)).json()
+        await world["c"].post(f"/api/v1/automation/runs/{run['id']}/cancel", headers=world["ana"])
+        assert (await world["c"].delete(f"/api/v1/automation/runs/{run['id']}",
+                                        headers=world["ben"])).status_code == 404
+
+    async def test_retrying_a_cancelled_run_starts_it_again_from_the_first_step(self, world, db_session):
+        c = world["c"]
+        run = (await _start(world)).json()
+        step = (await db_session.execute(select(AutomationStep).where(
+            AutomationStep.run_id == run["id"], AutomationStep.name == "profile"))).scalar_one()
+        step.status, step.output_ref = "ok", "file:///gone.json"
+        await db_session.commit()
+        await c.post(f"/api/v1/automation/runs/{run['id']}/cancel", headers=world["ana"])
+        r = await c.post(f"/api/v1/automation/runs/{run['id']}/retry", headers=world["ana"])
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["status"] == "pending" and body["error"] is None
+        assert all(s["status"] == "pending" for s in body["steps"])
+        db_session.expire_all()
+        steps = (await db_session.execute(select(AutomationStep).where(
+            AutomationStep.run_id == run["id"]))).scalars().all()
+        assert all(s.output_ref is None for s in steps)   # its artifacts were discarded on cancel
+
+    async def test_a_cancelled_run_is_not_retried_while_another_run_of_the_dataset_is_going(self, world, db_session):
+        c = world["c"]
+        first = (await _start(world)).json()
+        await c.post(f"/api/v1/automation/runs/{first['id']}/cancel", headers=world["ana"])
+        second = (await _start(world)).json()
+        assert second["id"] != first["id"]
+        r = await c.post(f"/api/v1/automation/runs/{first['id']}/retry", headers=world["ana"])
+        assert r.status_code == 409

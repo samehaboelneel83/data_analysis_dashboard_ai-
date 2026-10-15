@@ -110,4 +110,19 @@ describe('FindingChart', () => {
     expect(vi.mocked(widgetDataApi.query).mock.calls.at(-1)![1]).toMatchObject({ aggregation: 'avg' })
     expect(screen.getByTestId('mini-bar-row')).toHaveTextContent('88.6k')
   })
+
+  it('averages a per-row finding the way the figures say, whatever its title (AD-07)', async () => {
+    render(<FindingChart datasetId={5} columnTypes={{ city: 'categorical', shipments: 'numeric' }}
+      finding={{ kind: 'pattern', title: 'Sao Paulo has the highest shipments per row', columns: ['city', 'shipments'],
+        figures: { per_row: true } }} />)
+    await waitFor(() => expect(widgetDataApi.query).toHaveBeenCalled())
+    expect(vi.mocked(widgetDataApi.query).mock.calls.at(-1)![1]).toMatchObject({ aggregation: 'avg' })
+  })
+
+  it('takes figures.aggregation when the server states it', async () => {
+    render(<FindingChart datasetId={5} columnTypes={COLUMN_TYPES}
+      finding={{ kind: 'standout', title: 'APAC leads', columns: ['region', 'revenue'], figures: { aggregation: 'avg' } }} />)
+    await waitFor(() => expect(widgetDataApi.query).toHaveBeenCalled())
+    expect(vi.mocked(widgetDataApi.query).mock.calls.at(-1)![1]).toMatchObject({ aggregation: 'avg' })
+  })
 })

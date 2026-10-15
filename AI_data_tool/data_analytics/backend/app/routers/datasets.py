@@ -2060,6 +2060,13 @@ async def try_data_checks(dataset_id: int, db: AsyncSession = Depends(get_db),
     from ..services.data_checks import known_types
     results = evaluate(df, await load_checks(db, ds.id), previous_rows=None,
                        known_types=await known_types(db, ds.id))
+    # AD-17: a manual run leaves a line in Monitoring > Activity -- counts
+    # only, nothing from the rows. The check results themselves are not
+    # stored: this endpoint stays a "would my checks pass?" preview.
+    from ..services.data_checks import summarize, summary_text
+    await audit(db, current_user, "dataset.checks_run", "dataset", ds.id,
+                summary_text(int(len(df)), summarize(results)))
+    await db.commit()
     import json as _json
     return {"rows": int(len(df)), "results": _json.loads(_json.dumps(results, default=str))}
 
@@ -2436,35 +2443,61 @@ async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
         from ..services.suggest_jobs import PANEL_JOB_KIND
         from ..services import ai_context
         goal = (await ai_context.for_dataset(db, current_user, ds, req.goal)
-                if (req.goal or "").strip() or req.use_profile else "")
+                if (req.goal or "").strip() or _asked_for_profile(req) else "")
         job, _ = await job_service.enqueue(
             db, user=current_user, kind=PANEL_JOB_KIND,
             inputs={"dataset_id": dataset_id, "goal": goal, "size": req.size, "fresh": req.fresh},
             subject=f"Analyst panel: {ds.name}", max_attempts=2)
         return {"job_id": job.id, "state": job.state, "source": "panel"}
 
+    # Their own words, then what they and others have written about them and
+    # this data (profile, connection, dataset) -- services/ai_context.py.
+    # B-10: a blank box is the statistics engine ("no AI involved"); the
+    # profile's "about me" stands in only when the caller asked for it.
+    from ..services import ai_context
+    goal = (await ai_context.for_dataset(db, current_user, ds, req.goal)
+            if (req.goal or "").strip() or _asked_for_profile(req) else "")
+    # F-03 / AD-01: with every endpoint just seen down, do not wait on one.
+    from ..services import llm_endpoints
+    ai_ok = bool(goal) and llm_endpoints.model_available()[0]
     try:
-        inputs = await sug.prepare(db, current_user, ds)
+        # No goal, or no model: nothing in preparing should ask one either
+        # (column classes).
+        inputs = await sug.prepare(db, current_user, ds, ask_model=ai_ok)
     except sug.SuggestUnavailable as exc:
         raise HTTPException(exc.status, exc.message)
     df, type_map, profile = inputs.df, inputs.type_map, inputs.profile
     probe, drawn, know = inputs.probe, inputs.drawn, inputs.knowledge
 
-    # Their own words, then what they and others have written about them and
-    # this data (profile, connection, dataset) -- services/ai_context.py.
-    from ..services import ai_context
-    goal = (await ai_context.for_dataset(db, current_user, ds, req.goal)
-            if (req.goal or "").strip() or req.use_profile else "")
+    if goal and not ai_ok:
+        return await _statistics_answer(sug, inputs, reason=AI_UNREACHABLE)
     if req.mode == "panel":
         return await sug.panel(inputs, goal, req.size, fresh=req.fresh)
     fields: dict = {"facts": []}
     from ..services.analyst_panel import selection_mode
+    from ..services.ai_deadline import AiStepTimeout, ai_step
     if goal and selection_mode() == "cards":
         # The validated set is the single source of truth: the model chooses
         # among charts already built and drawn (the panel in "cards" mode --
         # one question-reading call and one choosing call), instead of the
         # quick designer inventing its own (settings.suggest_ai_selection).
-        out = await sug.panel(inputs, goal, 24, fresh=req.fresh)
+        from ..services.llm import get_client
+        try:
+            model = get_client()
+        except Exception:                                    # noqa: BLE001
+            model = None
+        if model is None or not getattr(model, "enabled", True):
+            return await _statistics_answer(sug, inputs, reason=AI_UNREACHABLE)
+        try:
+            out = await ai_step(sug.panel(inputs, goal, 24, fresh=req.fresh, client=model),
+                                seconds=SUGGEST_AI_SECONDS, what="Suggest dashboards")
+        except AiStepTimeout:
+            return await _statistics_answer(sug, inputs, reason=AI_UNREACHABLE)
+        picks = (out.get("panel") or {}).get("chosen", len(out.get("proposals") or []))
+        if not picks and getattr(model, "last_error", None):
+            # The model never answered, so nothing was chosen for the goal:
+            # the statistics' pages, said to be such, not "chosen by the AI".
+            return await _statistics_answer(sug, inputs, reason=AI_UNREACHABLE)
         return {**out, "question": None}
     if goal:
         # Measured facts, not column shapes: the designer proposes for the
@@ -2504,11 +2537,14 @@ async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
         df, type_map, profile = inputs.df, inputs.type_map, inputs.profile
         probe, drawn = inputs.probe, inputs.drawn
         from ..services.suggest_dataset_dashboard import suggest_for_dataset
-        proposals, reason = await suggest_for_dataset(
-            profile, goal, req.count, probe=probe, knowledge=know, facts=facts["text"],
-            column_meta=inputs.column_meta, mixed_units=facts.get("mixed_units"),
-            one_to_one=facts.get("one_to_one"), identical=facts.get("identical"),
-            edges=facts.get("edges"))
+        try:
+            proposals, reason = await ai_step(suggest_for_dataset(
+                profile, goal, req.count, probe=probe, knowledge=know, facts=facts["text"],
+                column_meta=inputs.column_meta, mixed_units=facts.get("mixed_units"),
+                one_to_one=facts.get("one_to_one"), identical=facts.get("identical"),
+                edges=facts.get("edges")), seconds=SUGGEST_AI_SECONDS, what="Suggest dashboards")
+        except AiStepTimeout:
+            return await _statistics_answer(sug, inputs, reason=AI_UNREACHABLE)
         source = "model"
     else:
         # No goal, no model: the panel's own statistics -- findings, the
@@ -2516,9 +2552,7 @@ async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
         # records and a drill-through page -- rather than one page of findings
         # (statistics engine 41% of the analysts' questions on one page,
         # five-dataset review 2026-10-02). Same gate, same selection, no model.
-        out = await sug.panel(inputs, None, 24, client=None)
-        return {**out, "source": "insights", "question": None,
-                "proposals": [{**p, "source": "insights"} for p in out["proposals"]]}
+        return await _statistics_answer(sug, inputs)
 
     # Each widget states what it actually drew. The proposal's own `why` (a
     # model's expectation, or a finding's text) stays beside it, so a reader
@@ -2566,6 +2600,31 @@ async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
             # off a sample is still a good dashboard; presenting it as though it
             # had seen everything is what would not be.
             "measured": inputs.measured}
+
+
+#: F-03: the longest a model-designed suggestion may take before the
+#: statistics engine answers instead (the browser gives up at 300 s).
+SUGGEST_AI_SECONDS = 240
+#: `reason` when the statistics engine answered because the model could not.
+AI_UNREACHABLE = "ai_unreachable"
+
+
+def _asked_for_profile(req) -> bool:
+    """B-10: only an explicit `use_profile: true` lets the profile's text
+    stand in for a blank goal; the default no longer turns a blank box (which
+    promises "no AI") into a model call."""
+    return bool(req.use_profile) and "use_profile" in req.model_fields_set
+
+
+async def _statistics_answer(sug, inputs, *, reason: str | None = None) -> dict:
+    """The statistics engine's pages: no model, deterministic, instant."""
+    out = await sug.panel(inputs, None, 24, client=None)
+    answer = {**out, "source": "insights", "question": None,
+              "proposals": [{**p, "source": "insights"} for p in out["proposals"]]}
+    if reason:
+        answer["reason"] = reason
+        answer["reason_i18n"] = {"key": "sdd.aiUnreachable"}
+    return answer
 
 
 def _drawn_key(widget_type, config) -> str:

@@ -39,6 +39,27 @@ describe('suggestions', () => {
     expect(s.some(q => /listing no/.test(q))).toBe(false)
   })
 
+  it('never totals a coordinate (AD-11)', () => {
+    const s = datasetSuggestions([{ name: 'from_city', dtype: 'object' }, { name: 'origin_lat', dtype: 'float64' },
+      { name: 'origin_lon', dtype: 'float64' }], t as never)
+    expect(s.some(q => /origin lat|origin lon/i.test(q) && /^Total|Top 5/.test(q))).toBe(false)
+  })
+
+  it('averages a percentage or a body measure by its name when nothing is stored (AD-11)', () => {
+    const s = datasetSuggestions([{ name: 'task', dtype: 'object' }, { name: 'progress_pct', dtype: 'float64' }], t as never)
+    expect(s.some(q => /^Total/.test(q))).toBe(false)
+    expect(s.some(q => /^Top 5 task/.test(q))).toBe(false)
+    expect(s).toContain('Which task has the highest average progress pct?')
+    const h = datasetSuggestions([{ name: 'group', dtype: 'object' }, { name: 'height', dtype: 'float64' }], t as never)
+    expect(h).not.toContain('Total height by group')
+  })
+
+  it('a stored level class gives highestAvg (AD-11)', () => {
+    const s = datasetSuggestions([{ name: 'team', dtype: 'object' }, { name: 'val2', dtype: 'float64' }], t as never,
+      { val2: { number: 'level' } })
+    expect(s).toContain('Which team has the highest average val2?')
+  })
+
   it('falls back to generic questions when the columns say little', () => {
     const s = datasetSuggestions([], t as never)
     expect(s.length).toBeGreaterThanOrEqual(3)

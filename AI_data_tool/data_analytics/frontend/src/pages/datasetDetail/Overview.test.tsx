@@ -155,7 +155,7 @@ describe('Overview recent activity (3b)', () => {
     show({ isAdmin: true })
     const card = await screen.findByTestId('overview-activity')
     await waitFor(() => expect(within(card).getAllByRole('listitem')).toHaveLength(2))
-    expect(monitoringApi.activity).toHaveBeenCalledWith(200)
+    expect(monitoringApi.activity).toHaveBeenCalledWith({ limit: 200 })
     expect(adminAuditApi.list).toHaveBeenCalledWith({ limit: 200, q: 'dataset:1' })
     expect(card).toHaveTextContent('You shared it omar@x.io')
     expect(card).toHaveTextContent('You uploaded it')

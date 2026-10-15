@@ -237,7 +237,9 @@ async def get_analysis(dataset_id: int, db: AsyncSession = Depends(get_db), curr
     )
     ar = result.scalar_one_or_none()
     if not ar:
-        raise HTTPException(404, "No analysis found — run POST first")
+        # AD-06: no profile yet is the normal state of a new dataset, not an
+        # error; `null` says "none" without a 404 in every visitor's console.
+        return None
     return as_response(ar.result)
 
 

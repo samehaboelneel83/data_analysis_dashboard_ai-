@@ -21,7 +21,7 @@ vi.mock('../services/api', () => ({
   jobsApi: { get: vi.fn(), cancel: vi.fn() },
   isJobActive: (j: { state: string }) => j.state === 'queued' || j.state === 'running',
   analysisApi: { get: vi.fn(), run: vi.fn(), segment: vi.fn(), keyInfluencers: vi.fn(), associationRules: vi.fn() },
-  insightsApi: { run: vi.fn() },
+  insightsApi: { run: vi.fn(), runShared: vi.fn() },
   // Phase 7.6: the "Use in Python" snippet reads the API origin.
   api: { defaults: { baseURL: 'http://localhost:8000/api/v1' } },
   // Phase 7.3: the header's sensitivity control.
@@ -135,6 +135,42 @@ describe('DatasetDetail insights engine', () => {
     expect(await screen.findByTestId('insights-narrative')).toHaveTextContent('Across 2,000 rows')
     expect(screen.getByTestId('insight-standout')).toHaveTextContent('Software carries 40% of revenue')
     expect(screen.getByTestId('insight-data_quality')).toHaveTextContent('52% missing')
+  })
+
+  it('shows the scan the reader just saw on the hub without a click (AD-06)', async () => {
+    const { insightsApi } = await import('../services/api')
+    vi.mocked(datasetsApi.get).mockResolvedValue(importDataset())
+    vi.mocked(analysisApi.get).mockResolvedValue(null)
+    vi.mocked(insightsApi.runShared).mockResolvedValue({
+      narrative: 'Across 2,000 rows: Software leads.', findings: [] } as never)
+    renderDetail(29, 'analysis#insights')
+    expect(await screen.findByTestId('insights-narrative')).toHaveTextContent('Software leads')
+    expect(insightsApi.run).not.toHaveBeenCalled()
+  })
+
+  it('marks a finding whose test did not hold as not significant (AD-07)', async () => {
+    const { insightsApi } = await import('../services/api')
+    vi.mocked(datasetsApi.get).mockResolvedValue(importDataset())
+    vi.mocked(analysisApi.get).mockResolvedValue(null)
+    vi.mocked(insightsApi.runShared).mockResolvedValue({ narrative: 'n', findings: [
+      { kind: 'pattern', score: 0.3, title: 'Sao Paulo has the highest shipments per row', detail: 'd',
+        columns: ['category', 'revenue'], significant: false, p_value: 0.2216 }] } as never)
+    renderDetail(29, 'analysis#insights')
+    const card = await screen.findByTestId('insight-pattern')
+    expect(card).toHaveTextContent(/not significant \(p = 0\.22\)/i)
+  })
+
+  it('offers no "Pin finding": pins were shown nowhere (AD-05)', async () => {
+    const { insightsApi } = await import('../services/api')
+    vi.mocked(datasetsApi.get).mockResolvedValue(importDataset())
+    vi.mocked(analysisApi.get).mockRejectedValue(new Error('none'))
+    vi.mocked(insightsApi.run).mockResolvedValue({
+      narrative: 'n', findings: [{ kind: 'standout', score: 0.8, title: 'Software leads', detail: 'd', columns: ['category', 'revenue'] }],
+    })
+    renderDetail(29, 'analysis#insights')
+    fireEvent.click(await screen.findByRole('button', { name: /Generate insights/ }))
+    await screen.findByTestId('insight-standout')
+    expect(screen.queryByRole('button', { name: /Pin finding/ })).toBeNull()
   })
 
   it('charts a finding inline once its column pairing is known', async () => {

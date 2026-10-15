@@ -139,11 +139,17 @@ async def set_org_quota(org_id: int, body: OrgQuotaSet, db: AsyncSession = Depen
     row.max_concurrent_asks = body.max_concurrent_asks
     row.max_ai_tokens_per_day = body.max_ai_tokens_per_day
     row.max_ai_tokens_per_month = body.max_ai_tokens_per_month
+    # AD-18: in words, not "queries=None asks=None ...".
+    def _lim(v, unit=""):
+        return "no limit" if v is None else f"{v:,}{unit}"
     await audit(db, current_user, "platform.set_org_quota", "organization", org_id,
-               f"queries={body.max_queries_per_day} asks={body.max_agent_asks_per_day} "
-               f"storage_mb={body.max_storage_mb} concurrent={body.max_concurrent_asks} "
-               f"ai_tokens_day={body.max_ai_tokens_per_day} "
-               f"ai_tokens_month={body.max_ai_tokens_per_month}")
+               " · ".join([
+                   f"Daily queries: {_lim(body.max_queries_per_day)}",
+                   f"AI asks per day: {_lim(body.max_agent_asks_per_day)}",
+                   f"Storage: {_lim(body.max_storage_mb, ' MB')}",
+                   f"Concurrent asks: {_lim(body.max_concurrent_asks)}",
+                   f"AI tokens per day: {_lim(body.max_ai_tokens_per_day)}",
+                   f"AI tokens per month: {_lim(body.max_ai_tokens_per_month)}"]))
     await db.commit()
     quotas.invalidate_quota_cache(org_id)
     return {"org_id": org_id, "max_queries_per_day": row.max_queries_per_day,
@@ -273,6 +279,8 @@ async def set_org_parent(org_id: int, body: OrgParentSet, db: AsyncSession = Dep
         existing.parent_org_id = parent_id
     else:
         db.add(OrgParent(org_id=org_id, parent_org_id=parent_id))
-    await audit(db, current_user, "platform.set_org_parent", "organization", org_id, f"parent={parent_id}")
+    parent = await db.get(Organization, parent_id)
+    await audit(db, current_user, "platform.set_org_parent", "organization", org_id,
+                f"Parent organization: {parent.name if parent is not None else f'#{parent_id}'}")
     await db.commit()
     return {"org_id": org_id, "parent_org_id": parent_id}

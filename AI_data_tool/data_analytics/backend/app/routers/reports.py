@@ -782,8 +782,9 @@ async def delete_grant(report_id: int, grant_id: int,
     grant = await db.get(ReportUserGrant, grant_id)
     if grant is None or grant.report_id != report_id:
         raise HTTPException(404, "Grant not found")
+    from .publishing import grant_subject
     await audit(db, current_user, "report.unshare", "report", report.id,
-                f"grant:{grant_id}")
+                f"Stopped sharing with {await grant_subject(db, grant)}")
     await db.delete(grant)
     await db.commit()
 
@@ -2649,7 +2650,8 @@ async def set_report_capabilities(report_id: int, body: dict, db: AsyncSession =
     for rid, lvl in clean.items():
         db.add(ReportCapability(report_id=report_id, role_id=rid, level=lvl))
     await audit(db, current_user, "report.capabilities", "report", report_id,
-                "; ".join(f"role {rid}={lvl}" for rid, lvl in clean.items()) or "cleared")
+                "; ".join(f"role {org_roles[rid].name}: {lvl}" for rid, lvl in clean.items())
+                or "No role restrictions")
     await db.commit()
     return {"levels": clean}
 

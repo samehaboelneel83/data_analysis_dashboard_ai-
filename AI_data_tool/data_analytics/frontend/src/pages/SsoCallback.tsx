@@ -1,5 +1,6 @@
 import { useT } from '../i18n'
 import { useEffect } from 'react'
+import { takeReturnTo } from '../lib/returnTo'
 
 /** Landing page for the SSO redirect (OIDC and SAML). Since T6 the backend sets
  *  the session as an httpOnly cookie on that redirect -- the token no longer
@@ -10,7 +11,8 @@ import { useEffect } from 'react'
 export default function SsoCallback() {
   const t9 = useT()
   useEffect(() => {
-    window.location.replace('/')
+    // AD-12: back to the page that asked for the sign-in, when it is ours.
+    window.location.replace(takeReturnTo() ?? '/')
   }, [])
 
   return (

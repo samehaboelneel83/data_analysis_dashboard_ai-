@@ -450,6 +450,11 @@ class TestIdentitiesAndGrants:
         now = datetime.utcnow()
         for row in scheds:
             assert schedule_is_due(row, now) is False
+        # AD-16: the weekly demo says what it would do -- a calendar, paused --
+        # instead of "—" on the jobs page.
+        from app.services.refresh_scheduler import calendar_spec
+        spec = calendar_spec(scheds[0].recipients)
+        assert spec and spec["kind"] == "weekly" and spec.get("paused") is True
         for row in alerts:
             assert is_due(row.interval_minutes, row.last_checked_at, now) is False
 

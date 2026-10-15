@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useT, type MessageKey, type TranslateFn } from '../../i18n'
 import { Link } from 'react-router-dom'
 import { monitoringApi } from '../../services/api'
-import type { MonitoringJobRow, RefreshRunRow } from '../../services/api'
+import type { MonitoringAutomationRunRow, MonitoringJobRow, RefreshRunRow } from '../../services/api'
 import { useListFilter } from '../../components/ui/ListFilter'
 import { RefreshCw, GitBranch, Mail, Bell, CalendarClock, type LucideIcon } from 'lucide-react'
 import EmptyState from '../../components/ui/EmptyState'
@@ -50,16 +50,18 @@ function schedule(j: MonitoringJobRow, t: TranslateFn): string {
   const c = j.calendar
   if (c) {
     const at = `${String(c.hour).padStart(2, '0')}:${String(c.minute).padStart(2, '0')} ${j.timezone || 'UTC'}`
-    if (c.kind === 'weekly') return t('pg.dataPages.jobs.weeklyAt', { day: t(WEEKDAY[c.weekday ?? 0]), at })
-    if (c.kind === 'monthly') return t('pg.dataPages.jobs.monthlyAt', { day: c.monthday ?? 1, at })
-    return t('pg.dataPages.jobs.dailyAt', { at })
+    const when = c.kind === 'weekly' ? t('pg.dataPages.jobs.weeklyAt', { day: t(WEEKDAY[c.weekday ?? 0]), at })
+      : c.kind === 'monthly' ? t('pg.dataPages.jobs.monthlyAt', { day: c.monthday ?? 1, at })
+      : t('pg.dataPages.jobs.dailyAt', { at })
+    // AD-16: a calendar kept but switched off says so.
+    return c.paused ? `${when} ${t('pg.dataPages.jobs.pausedSuffix')}` : when
   }
   return interval(j.interval_minutes, t)
 }
 
 function interval(minutes: number, t: TranslateFn): string {
-  // Some seeded rows carry 0 -- "runs on demand", not "every 0 minutes".
-  if (minutes <= 0) return '—'
+  // Some rows carry 0 -- not scheduled, not "every 0 minutes" (AD-16: said, not "—").
+  if (minutes <= 0) return t('pg.dataPages.jobs.paused')
   if (minutes % 1440 === 0) return minutes === 1440 ? t('pg.dataPages.jobs.daily') : t('pg.dataPages.jobs.everyDays', { n: minutes / 1440 })
   if (minutes % 60 === 0) return minutes === 60 ? t('pg.dataPages.jobs.hourly') : t('pg.dataPages.jobs.everyHours', { n: minutes / 60 })
   return t('pg.dataPages.jobs.everyMinutes', { n: minutes })
@@ -89,6 +91,65 @@ function duration(ms: number | null, t: TranslateFn): string {
   const s = ms / 1000
   return s < 60 ? t('pg.dataPages.jobs.seconds', { n: s.toFixed(1) })
     : t('pg.dataPages.jobs.minSec', { m: Math.floor(s / 60), s: Math.round(s % 60) })
+}
+
+/** AD-17: "pass 2 · warn 1" for a run's checks; '—' when none ran. */
+function checksText(c: RefreshRunRow['checks_summary'], t: TranslateFn): string {
+  if (!c) return '—'
+  const parts = (['pass', 'warn', 'fail'] as const).filter(k => c[k] > 0)
+    .map(k => t(`jobs.checks.${k}` as MessageKey, { n: c[k] }))
+  return parts.length ? parts.join(' · ') : '—'
+}
+
+/** AD-17: automated analyses run too; "Everything that runs" lists them. */
+function AutomationRuns() {
+  const t = useT()
+  const [runs, setRuns] = useState<MonitoringAutomationRunRow[] | null>(null)
+  useEffect(() => {
+    let live = true
+    Promise.resolve().then(() => monitoringApi.automationRuns())
+      .then(r => { if (live) setRuns(r ?? []) }).catch(() => { if (live) setRuns([]) })
+    return () => { live = false }
+  }, [])
+  if (!runs || runs.length === 0) return null
+  return (
+    <section style={{ marginTop: 28 }} aria-labelledby="automation-runs-title" data-testid="automation-runs">
+      <h2 id="automation-runs-title" style={{ margin: '0 0 8px', fontSize: 16 }}>{t('jobs.auto.title')}</h2>
+      <div className="card dl-table-card"><table className="dl-table dl-table--stack">
+        <thead>
+          <tr>
+            <th>{t('jobs.history.started')}</th>
+            <th>{t('col.name')}</th>
+            <th>{t('col.status')}</th>
+            <th>{t('jobs.auto.step')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {runs.map(r => {
+            const tone = r.status === 'failed' ? 'bad' : r.status === 'done' ? 'ok' : 'info'
+            return (
+              <tr key={r.id}>
+                <td data-label={t('jobs.history.started')} style={{ whiteSpace: 'nowrap' }}>{r.started_at ? formatDate(r.started_at) : '—'}</td>
+                <td data-label={t('col.name')} style={{ fontWeight: 600 }}>
+                  <Link to={`/automation?run=${r.id}`} className="row-name" style={{ color: 'var(--text)' }}>
+                    {t('jobs.auto.run', { id: r.id })}
+                  </Link>
+                  {r.dataset_name && <span style={{ color: 'var(--muted)', fontWeight: 400 }}> · {r.dataset_name}</span>}
+                </td>
+                <td data-label={t('col.status')} style={{ color: TONE_COLOR[tone] }}>{t(`auto.status.${r.status}` as MessageKey)}</td>
+                <td data-label={t('jobs.auto.step')}>
+                  {r.step ?? '—'}
+                  {r.error && (
+                    <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 2, whiteSpace: 'normal' }}>{r.error}</div>
+                  )}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table></div>
+    </section>
+  )
 }
 
 /** Pipeline plan, phase 1: every refresh and dataflow run, newest first, so
@@ -125,7 +186,7 @@ function RefreshHistory() {
         <p style={{ color: 'var(--muted)' }}>{failedOnly ? t('jobs.history.noFailures') : t('jobs.history.empty')}</p>
       )}
       {!loading && loadError == null && runs.length > 0 && (
-        <div className="card dl-table-card"><table className="dl-table" data-testid="refresh-history">
+        <div className="card dl-table-card"><table className="dl-table dl-table--stack" data-testid="refresh-history">
           <thead>
             <tr>
               <th>{t('jobs.history.started')}</th>
@@ -134,6 +195,7 @@ function RefreshHistory() {
               <th>{t('col.status')}</th>
               <th style={{ textAlign: 'end' }}>{t('jobs.history.rows')}</th>
               <th style={{ textAlign: 'end' }}>{t('jobs.history.duration')}</th>
+              <th>{t('jobs.history.checks')}</th>
             </tr>
           </thead>
           <tbody>
@@ -141,21 +203,23 @@ function RefreshHistory() {
               const tone = statusTone(r.status)
               return (
                 <tr key={r.id}>
-                  <td style={{ whiteSpace: 'nowrap' }}>{r.started_at ? formatDate(r.started_at) : '—'}</td>
-                  <td style={{ fontWeight: 600 }}>
+                  <td data-label={t('jobs.history.started')} style={{ whiteSpace: 'nowrap' }}>{r.started_at ? formatDate(r.started_at) : '—'}</td>
+                  <td data-label={t('col.name')} style={{ fontWeight: 600 }}>
                     {r.name != null
                       ? <Link to={link(r)} className="row-name" style={{ color: 'var(--text)' }}>{r.name}</Link>
                       : <span style={{ color: 'var(--muted)' }}>{t('jobs.history.deleted')}</span>}
                   </td>
-                  <td>{t(r.trigger === 'manual' ? 'jobs.history.manual' : 'jobs.history.schedule')}</td>
-                  <td style={{ color: tone ? TONE_COLOR[tone] : 'var(--muted)' }}>
+                  <td data-label={t('jobs.history.trigger')}>{t(r.trigger === 'manual' ? 'jobs.history.manual' : 'jobs.history.schedule')}</td>
+                  <td data-label={t('col.status')} style={{ color: tone ? TONE_COLOR[tone] : 'var(--muted)' }}>
                     {statusText(r.status)}
                     {r.error && r.status !== 'ok' && (
                       <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 2, whiteSpace: 'normal' }}>{r.error}</div>
                     )}
                   </td>
-                  <td style={{ textAlign: 'end', fontVariantNumeric: 'tabular-nums' }}>{r.rows != null ? r.rows.toLocaleString() : '—'}</td>
-                  <td style={{ textAlign: 'end', whiteSpace: 'nowrap' }}>{duration(r.duration_ms, t)}</td>
+                  <td data-label={t('jobs.history.rows')} style={{ textAlign: 'end', fontVariantNumeric: 'tabular-nums' }}>{r.rows != null ? r.rows.toLocaleString() : '—'}</td>
+                  <td data-label={t('jobs.history.duration')} style={{ textAlign: 'end', whiteSpace: 'nowrap' }}>{duration(r.duration_ms, t)}</td>
+                  <td data-label={t('jobs.history.checks')} style={{ whiteSpace: 'nowrap', color: r.checks_summary?.fail ? TONE_COLOR.bad
+                    : r.checks_summary?.warn ? TONE_COLOR.info : undefined }}>{checksText(r.checks_summary, t)}</td>
                 </tr>
               )
             })}
@@ -217,7 +281,7 @@ export default function MonitoringJobs() {
       {noMatches && <p style={{ color: 'var(--muted)' }}>{t('jobs.noMatch')}</p>}
 
       {!loading && loadError == null && filtered.length > 0 && (
-        <div className="card dl-table-card"><table className="dl-table">
+        <div className="card dl-table-card"><table className="dl-table dl-table--stack">
           <thead>
             <tr>
               <th>{t('col.kind')}</th>
@@ -232,23 +296,23 @@ export default function MonitoringJobs() {
               const tone = statusTone(j.status)
               return (
                 <tr key={`${j.kind}-${j.id}`}>
-                  <td style={{ whiteSpace: 'nowrap' }}>
+                  <td data-label={t('col.kind')} style={{ whiteSpace: 'nowrap' }}>
                     <span aria-hidden style={{ display: 'inline-flex', verticalAlign: -2,
                       marginInlineEnd: 6, color: 'var(--muted)' }}>
                       {(() => { const I = KIND_ICON[j.kind]; return <I size={13} /> })()}
                     </span>
                     {t(`jobs.kind.${j.kind}` as MessageKey)}
                   </td>
-                  <td style={{ fontWeight: 600 }}>
+                  <td data-label={t('col.name')} style={{ fontWeight: 600 }}>
                     {jobLink(j) != null
                       ? <Link to={jobLink(j)!} className="row-name" style={{ color: 'var(--text)' }}>{j.name}</Link>
                       : j.name}
                   </td>
-                  <td style={{ whiteSpace: 'nowrap' }}>{schedule(j, t)}</td>
-                  <td style={{ whiteSpace: 'nowrap' }}>
+                  <td data-label={t('col.schedule')} style={{ whiteSpace: 'nowrap' }}>{schedule(j, t)}</td>
+                  <td data-label={t('col.lastRun')} style={{ whiteSpace: 'nowrap' }}>
                     {j.last_run_at ? formatDate(j.last_run_at) : t('jobs.never')}
                   </td>
-                  <td style={{ color: tone ? TONE_COLOR[tone] : 'var(--muted)' }}
+                  <td data-label={t('col.status')} style={{ color: tone ? TONE_COLOR[tone] : 'var(--muted)' }}
                     title={j.error ?? undefined}>
                     {j.status ? statusText(j.status) : '—'}
                     {/* 5.19: "skipped" alone left the reader guessing why. */}
@@ -270,6 +334,7 @@ export default function MonitoringJobs() {
         </table></div>
       )}
 
+      {!loading && loadError == null && <AutomationRuns />}
       {!loading && loadError == null && <RefreshHistory />}
     </div>
   )

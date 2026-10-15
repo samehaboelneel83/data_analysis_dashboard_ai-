@@ -316,3 +316,34 @@ def test_a_finished_month_that_fell_is_still_reported():
     rev = [100.0 if d.month < 5 else 20.0 for d in days]
     out = generate_insights(_pd.DataFrame({"day": days, "revenue": rev}), {"day": "datetime", "revenue": "numeric"})
     assert any(f["kind"] == "trend" and "2026-05" in f["title"] and "below" in f["title"] for f in out["findings"])
+
+
+def _weak_per_row_frame():
+    n = 40
+    base = np.linspace(-1.5, 1.5, n)
+    vals = np.concatenate([mu + 90 * base for mu in (100, 100, 100, 125)]).clip(1)
+    return pd.DataFrame({"city": ["Dubai"] * n + ["Cairo"] * n + ["Lagos"] * n + ["Sao Paulo"] * n,
+                         "shipments": vals})
+
+
+def test_a_non_significant_per_row_standout_is_not_called_a_standout():
+    """AD-07: "Sao Paulo has the highest shipments per row" at p = 0.47 was
+    labelled STANDOUT and charted as a sum, where another city led."""
+    r = generate_insights(_weak_per_row_frame(), {"city": "categorical", "shipments": "numeric"})
+    weak = [f for f in r["findings"] if "Sao Paulo" in f["title"]]
+    assert weak, r["findings"]
+    f = weak[0]
+    assert f["significant"] is False
+    assert f["kind"] == "pattern"
+    assert f["figures"]["aggregation"] == "avg" and f["figures"]["per_row"] is True
+
+
+def test_a_significant_mean_standout_keeps_its_kind_and_says_it_is_an_average():
+    df = pd.DataFrame({"dept": ["Sales"] * 40 + ["Ops"] * 40,
+                       "salary": [90.0 + (i % 3) for i in range(40)] + [60.0 + (i % 3) for i in range(40)]})
+    r = generate_insights(df, {"dept": "categorical", "salary": "numeric"},
+                          {"salary": {"number": "level"}})
+    top = [f for f in r["findings"] if f["kind"] == "standout"]
+    for f in top:
+        if (f.get("figures") or {}).get("mean") is not None:
+            assert f["figures"]["aggregation"] == "avg"

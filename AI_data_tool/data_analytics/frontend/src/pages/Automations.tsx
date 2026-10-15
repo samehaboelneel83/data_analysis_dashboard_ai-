@@ -21,7 +21,7 @@ import {
 import EmptyState from '../components/ui/EmptyState'
 import LoadError from '../components/ui/LoadError'
 import LoadingState from '../components/ui/LoadingState'
-import DatasetListFilter, { useCleanDatasets } from '../components/dataset/DatasetListFilter'
+import DatasetListFilter, { useCleanDatasets, withSelected } from '../components/dataset/DatasetListFilter'
 import { isCertified } from '../lib/cleanDatasets'
 import { formatDate } from '../lib/dateFormat'
 
@@ -57,6 +57,16 @@ export function shownStepStatus(run: Pick<AutomationRunRow, 'status' | 'steps'>,
 export function estimateMinutes(rows: number | null | undefined): number {
   const r = Math.max(0, rows ?? 0)
   return Math.max(1, Math.round((40 + 25 * (r / 100_000)) / 60))
+}
+
+/** AD-03: the step in progress has run for more than twice the whole run's
+ *  estimate -- say so, instead of a promise of "about 1 min" for 12 minutes. */
+export function isRunSlow(run: Pick<AutomationRunRow, 'status' | 'steps'>, rows: number | null | undefined, now = Date.now()): boolean {
+  if (run.status !== 'running' && run.status !== 'pending') return false
+  const step = run.steps.find(s => s.status === 'running')
+  if (!step?.started_at) return false
+  const started = Date.parse(step.started_at)
+  return Number.isFinite(started) && now - started > 2 * estimateMinutes(rows) * 60_000
 }
 
 /** The run's one line in the reader's language, from its fields (the server's
@@ -131,9 +141,17 @@ export default function Automations() {
     }
   }
 
-  const act = async (run: AutomationRunRow, what: 'approve' | 'reject' | 'cancel' | 'retry') => {
+  const act = async (run: AutomationRunRow, what: 'approve' | 'reject' | 'cancel' | 'retry' | 'remove') => {
     setBusy(run.id)
     try {
+      if (what === 'remove') {
+        // AD-22: a stopped run can be removed; the list reloads without it.
+        await automationApi.remove(run.id)
+        setRuns(rs => rs?.filter(r => r.id !== run.id) ?? rs)
+        if (open === run.id) setOpen(null)
+        await load()
+        return
+      }
       const next = what === 'reject' ? await automationApi.reject(run.id, reason.trim() || undefined)
         : await automationApi[what](run.id)
       setDetail(d => ({ ...d, [run.id]: next }))
@@ -156,7 +174,7 @@ export default function Automations() {
           {t('auto.dataset')}
           <select value={chosen} onChange={e => setChosen(e.target.value)} style={{ minWidth: 260 }}>
             <option value="">{t('auto.chooseDataset')}</option>
-            {clean.visible.map(d => <option key={d.id} value={d.id}>{isCertified(d) ? '✓ ' : ''}{d.name}{d.mode === 'directquery' ? ` · ${t('common.live')}` : ''}</option>)}
+            {withSelected(clean.visible, datasets, chosen).map(d => <option key={d.id} value={d.id}>{isCertified(d) ? '✓ ' : ''}{d.name}{d.mode === 'directquery' ? ` · ${t('common.live')}` : ''}{d.hiddenByFilter ? ` · ${t('dsf.hiddenByFilter')}` : ''}</option>)}
           </select>
         </label>
         <DatasetListFilter state={clean} />
@@ -205,12 +223,20 @@ export default function Automations() {
                     </li>
                   ))}
                 </ol>
-                <span style={{ marginInlineStart: 'auto', display: 'flex', gap: 6 }}>
+                <span className="dl-rows__acts">
                   {run.result_report && (
                     <Link className="btn btn-sm" to={`/reports/${run.result_report.id}`}>{t('auto.openReport')}</Link>
                   )}
-                  {run.status === 'failed' && (
+                  {(run.status === 'failed' || run.status === 'cancelled') && (
                     <button className="btn btn-ghost btn-sm" disabled={busy === run.id} onClick={() => void act(run, 'retry')}>{t('auto.retry')}</button>
+                  )}
+                  {(run.status === 'failed' || run.status === 'cancelled') && (
+                    <button className="btn btn-ghost btn-sm" disabled={busy === run.id} onClick={() => void act(run, 'remove')}>{t('auto.delete')}</button>
+                  )}
+                  {isRunSlow(run, datasets.find(x => x.id === run.dataset?.id)?.row_count) && (
+                    <span data-testid="run-slow" role="status" style={{ fontSize: 12, color: 'var(--warning, #b45309)', alignSelf: 'center' }}>
+                      {t('auto.slow')}
+                    </span>
                   )}
                   {(isAutomationActive(run) || run.status === 'needs_review') && (
                     <button className="btn btn-ghost btn-sm" disabled={busy === run.id} onClick={() => void act(run, 'cancel')}>{t('auto.cancel')}</button>

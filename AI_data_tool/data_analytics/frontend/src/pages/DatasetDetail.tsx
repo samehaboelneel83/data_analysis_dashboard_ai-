@@ -18,7 +18,7 @@ import NotebookSnippet from '../components/NotebookSnippet'
 import LoadError from '../components/ui/LoadError'
 import LoadingState from '../components/ui/LoadingState'
 import EmptyState from '../components/ui/EmptyState'
-import { findingKey, pinsApi, reportsApi } from '../services/api'
+import { allowAiApi, reportsApi } from '../services/api'
 import { navArrows, useDirection } from '../contexts/DirectionContext'
 import { useParams, Link, useLocation, useSearchParams, useNavigate } from 'react-router-dom'
 import { useCrumbTitle } from '../lib/crumb'
@@ -37,7 +37,7 @@ import './datasetDetail/data.css'
 import OutlierDetailsDialog from '../components/report/OutlierDetailsDialog'
 import IconLabel from '../components/ui/IconLabel'
 import {
-  Bot, Plug, FolderOpen, RefreshCw, Sparkles, Pin, Link2, TriangleAlert, Search, ShieldCheck,
+  Bot, Plug, FolderOpen, RefreshCw, Sparkles, Link2, TriangleAlert, Search, ShieldCheck,
   Database, FileText, Pencil, Filter, X,
 } from 'lucide-react'
 import { insightsApi, datasetsApi, analysisApi, dataPreviewApi, filterExprApi, dataSourcesApi, prepApi, alertsApi } from '../services/api'
@@ -285,22 +285,25 @@ export default function DatasetDetail() {
       // one (the backend would 400) — skip the request entirely rather than
       // firing a call that can only fail.
       if (ds.mode === 'directquery') { setLoading(false); return }
-      analysisApi.get(dsId).then(setAnalysis)
+      // AD-06: "no profile yet" is `null` (200), no longer a 404; an error
+      // (a restricted caller still gets 404) is treated the same way.
+      const none = () => {
+        // Once per dataset: the load runs twice (StrictMode in development,
+        // or a reload of the same dataset), both GETs 404 before either
+        // run lands, and `searchParams` still says new=1 after replaceState
+        // -- two scans and two "Analysis complete" toasts (live QA 2026-09-28).
+        if (searchParams.get('new') === '1' && autoAnalysedRef.current !== dsId) {
+          autoAnalysedRef.current = dsId
+          window.history.replaceState(null, '', window.location.pathname)
+          void runAnalysisRef.current?.()
+        }
+      }
+      analysisApi.get(dsId).then(a => { if (a == null) none(); else setAnalysis(a) })
         // E06: straight after an import the profile is run, not left behind a
         // button -- the first thing a person does with new data is look at it.
         // Only then: a normal visit does not trigger a full scan. `new` is
         // dropped from the address so a reload does not scan again.
-        .catch(() => {
-          // Once per dataset: the load runs twice (StrictMode in development,
-          // or a reload of the same dataset), both GETs 404 before either
-          // run lands, and `searchParams` still says new=1 after replaceState
-          // -- two scans and two "Analysis complete" toasts (live QA 2026-09-28).
-          if (searchParams.get('new') === '1' && autoAnalysedRef.current !== dsId) {
-            autoAnalysedRef.current = dsId
-            window.history.replaceState(null, '', window.location.pathname)
-            void runAnalysisRef.current?.()
-          }
-        })
+        .catch(none)
         .finally(() => setLoading(false))
     }).catch(e => { setLoadError(e ?? new Error('failed')); setLoading(false) })
   }, [dsId])
@@ -601,13 +604,39 @@ export default function DatasetDetail() {
   const colTypes: Record<string, string> = Object.fromEntries((ds?.columns ?? []).map(c => [c.name, c.dtype]))
 
   // hooks live above the loading return -- a hook below it renders conditionally
-  const [insights, setInsights] = useState<{ findings: { kind: string; score: number; title: string; detail: string; columns: string[]; novelty?: 'new' | 'changed' | 'unchanged' }[]; narrative: string } | null>(null)
+  const [insights, setInsights] = useState<{ findings: { kind: string; score: number; title: string; detail: string; columns: string[]; novelty?: 'new' | 'changed' | 'unchanged'
+    significant?: boolean | null; p_value?: number | null; p_adjusted?: number | null
+    figures?: { aggregation?: string; per_row?: boolean } | null }[]; narrative: string } | null>(null)
   const [insightsBusy, setInsightsBusy] = useState(false)
   const generateInsights = () => {
     if (!ds) return
     setInsightsBusy(true)
     insightsApi.run(ds.id).then(setInsights).finally(() => setInsightsBusy(false))
   }
+  // AD-10: with AI not allowed for this data, "Ask about this data" says it
+  // answers with the built-in analyses only.
+  const [aiOff, setAiOff] = useState(false)
+  useEffect(() => {
+    setAiOff(false)
+    if (!ds) return
+    let live = true
+    const id = ds.id
+    Promise.resolve().then(() => allowAiApi.get(id))
+      .then(r => { if (live) setAiOff(r?.effective === false) }).catch(() => {})
+    return () => { live = false }
+  }, [ds?.id])
+  // AD-06: opening Insights shows the scan at once for file-backed data --
+  // from the hub ("View full scan →") it is the scan just seen, from the
+  // cache. Live data keeps the explicit button: its scan reads up to 250K rows.
+  useEffect(() => {
+    if (!ds || analysisPick !== 'insights' || insights != null || ds.mode === 'directquery') return
+    let live = true
+    const id = ds.id
+    Promise.resolve().then(() => insightsApi.runShared(id))
+      .then(r => { if (live && r) setInsights(r) }).catch(() => {})
+    return () => { live = false }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ds?.id, ds?.mode, analysisPick])
   // Saved checks and alerts: the Rules & alerts tab count, and the Overview's
   // trust card and "Used by" list.
   const [ruleChecks, setRuleChecks] = useState<DataCheck[] | null>(null)
@@ -923,8 +952,8 @@ export default function DatasetDetail() {
             )}
           </div>
         )}
-          <Link to={`/ask?dataset=${dsId}`} className="btn btn-sm" title={tr('dataset.askTitle')}>
-            <Bot size={14} aria-hidden /> {tr('ov3.askAbout')}
+          <Link to={`/ask?dataset=${dsId}`} className="btn btn-sm" title={aiOff ? tr('dataset.askTitleNoAi') : tr('dataset.askTitle')}>
+            <Bot size={14} aria-hidden /> {aiOff ? tr('ov3.askAboutNoAi') : tr('ov3.askAbout')}
           </Link>
           {ds.mode !== 'directquery' && <NotebookSnippet datasetId={ds.id} datasetName={ds.name} />}
           {isAdmin && (
@@ -1307,16 +1336,13 @@ export default function DatasetDetail() {
                                     {f.novelty === 'new' ? tr('i2d.dd.new') : tr('i2d.dd.changed')}
                                   </span>
                                 )}
-                                <button aria-label={tr('i2d.dd.pinFinding', { title: f.title })}
-                                  title={tr('i2d.dd.pinTitle')}
-                                  onClick={() => void pinsApi
-                                    .create({ dataset_id: ds.id,
-                                              finding_key: findingKey(f) })
-                                    .then(r => toast.success(r.already_pinned
-                                      ? tr('i2d.dd.pinAlready') : tr('i2d.dd.pinned')))
-                                    .catch(() => toast.error(tr('i2d.dd.pinFailed')))}
-                                  style={{ background: 'none', border: 'none', cursor: 'pointer',
-                                    fontSize: 11, padding: 0, marginInlineStart: 'auto' }}><Pin size={12} /></button>
+                                {f.significant === false && (f.p_adjusted ?? f.p_value) != null && (
+                                  // AD-07: the test did not hold -- say so where the finding is read.
+                                  <span data-testid="insight-not-significant" style={{ border: '1px solid var(--border)', color: 'var(--muted)',
+                                    borderRadius: 3, padding: '0 4px', fontSize: 9.5 }}>
+                                    {tr('i2d.dd.notSignificant', { p: Number(f.p_adjusted ?? f.p_value).toFixed(2) })}
+                                  </span>
+                                )}
                                 <span style={{ fontSize: 10.5, color: 'var(--muted)', marginInlineStart: 'auto' }}>{Math.round(f.score * 100)}</span>
                               </div>
                               {/* QA3 D5: own direction; numbers and ranges keep their order */}
