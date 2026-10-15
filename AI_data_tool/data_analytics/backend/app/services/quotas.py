@@ -67,6 +67,18 @@ class QuotaExceeded(Exception):
         telemetry.quota_rejections.add(1, {"quota": kind})
 
 
+class AiNotAllowed(Exception):
+    """The person's role may not use AI (QA E-08).
+
+    A domain exception for the same reason as QuotaExceeded: this module must
+    not import the web framework (test_layer_conformance). `app.main` turns it
+    into a 403 carrying `detail`, the readable reason."""
+
+    def __init__(self, detail: str):
+        super().__init__(detail)
+        self.detail = detail
+
+
 _QUOTA_CACHE_TTL_SECONDS = 30.0
 # org_id -> (cached Quota row or None, expiry monotonic timestamp)
 _quota_cache: dict[int, tuple[Quota | None, float]] = {}
@@ -277,8 +289,7 @@ def enforce_ai_budget(meter: UsageMeter) -> None:
     QA E-08: a person whose role may not use AI is refused with 403 and the
     reason, before the budget is looked at."""
     if meter.denied:
-        from fastapi import HTTPException
-        raise HTTPException(403, meter.denied)
+        raise AiNotAllowed(meter.denied)
     if not meter.spent:
         return
     kind = meter.limit_kind or "ai_tokens"

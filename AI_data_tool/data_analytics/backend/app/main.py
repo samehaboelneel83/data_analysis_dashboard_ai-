@@ -10,7 +10,7 @@ from .core.widget_errors import CodedHTTPException
 from .core.said_errors import SaidHTTPException
 from .services.memory_guard import TooLargeToLoad as _TooLargeToLoad
 from .core.config import settings
-from .services.quotas import QuotaExceeded
+from .services.quotas import AiNotAllowed, QuotaExceeded
 
 logger = logging.getLogger(__name__)
 from .core.database import engine, Base, AsyncSessionLocal
@@ -939,6 +939,13 @@ async def _coded_http_exception_handler(request, exc: CodedHTTPException):
     return JSONResponse(status_code=exc.status_code,
                         content={"detail": exc.detail, "code": exc.code},
                         headers=getattr(exc, "headers", None))
+
+
+@app.exception_handler(AiNotAllowed)
+async def _ai_not_allowed_handler(request, exc: AiNotAllowed):
+    """QA E-08: a role without "use AI" asked a model-first feature -> 403 with
+    the readable reason (registered here for the CORS reason given below)."""
+    return JSONResponse(status_code=403, content={"detail": exc.detail})
 
 
 @app.exception_handler(QuotaExceeded)

@@ -253,3 +253,19 @@ async def test_download_decision_says_no_for_a_role_without_export(client, db_se
     d = r.json()["decisions"][0] if isinstance(r.json(), dict) else r.json()[0]
     assert d["allowed"] is False
     assert "download or export" in d["reason"]
+
+
+def test_ai_refusal_is_a_domain_exception_not_a_web_error():
+    """The AI-permission refusal is raised by a service (quotas), which must not
+    import FastAPI (test_layer_conformance): it raises AiNotAllowed and
+    app.main translates it into the same 403 + reason the /ask test checks."""
+    import pytest as _pytest
+    from fastapi import HTTPException
+    from app.services import quotas
+    from app.services.llm import UsageMeter
+    meter = UsageMeter(org_id=1, user_id=1, feature="ask",
+                       denied="Your role (X) is not allowed to use AI features.")
+    with _pytest.raises(quotas.AiNotAllowed) as caught:
+        quotas.enforce_ai_budget(meter)
+    assert not isinstance(caught.value, HTTPException)
+    assert caught.value.detail.startswith("Your role (X)")
