@@ -58,7 +58,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       authApi.logout().catch(() => {})
       throw e
     }
-    navigate('/')
+    // No navigate('/') here: the sign-in page sends the person on, to the page
+    // that asked for the sign-in when there is one (AD-12). Pushing "/" first
+    // unmounted it and dropped that target (seen in a real browser 2026-10-15).
   }
 
   return (
