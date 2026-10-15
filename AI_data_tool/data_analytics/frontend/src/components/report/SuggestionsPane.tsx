@@ -33,6 +33,7 @@ export function suggestWidgets(
   analysis: {
     numeric?: { correlation?: Record<string, Record<string, number>> }
     categorical?: { columns?: Record<string, { n_unique?: number }> }
+    overview?: { rows?: number }
   } | null,
   seed = 0,
   meta: Record<string, ColumnMeta | undefined> = {},
@@ -45,7 +46,17 @@ export function suggestWidgets(
     && meta[c.name]?.eligible_for_suggestion !== false)
   // An identifier is never a measure: "Emp no by gender" summed employee
   // numbers (HR evaluation). It is what a head-count counts instead.
-  const idCol = visible.find(c => isIdentifier(c.name, meta))
+  // C-18: and it is head-counted only when it really tells the rows apart:
+  // "distinct store_id" over 12 stores in 1,000 rows is not how many things
+  // there are. With the profile's row count and distinct count both known, an
+  // identifier at or under 50% unique is not one to count; unknown keeps the
+  // name/classification rule.
+  const rowCount = Number(analysis?.overview?.rows ?? NaN)
+  const mostlyUnique = (c: DatasetColumn) => {
+    const n = Number(analysis?.categorical?.columns?.[c.name]?.n_unique ?? NaN)
+    return !(Number.isFinite(n) && Number.isFinite(rowCount) && rowCount > 0) || n / rowCount > 0.5
+  }
+  const idCol = visible.find(c => isIdentifier(c.name, meta) && mostlyUnique(c))
   const numeric = visible.filter(c => (c.dtype === 'numeric' || roleOf(c) === 'measure')
     && !isIdentifier(c.name, meta) && !['category', 'temporal', 'geography'].includes(roleOf(c) ?? '')
     // The stored classification first (a code is never a measure, whatever its
