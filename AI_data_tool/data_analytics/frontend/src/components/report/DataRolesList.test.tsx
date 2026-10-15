@@ -173,6 +173,27 @@ describe('Assign data', () => {
   })
 
 
+  it('C-04: a press on the backdrop alone does not close it; a full click on the backdrop does', () => {
+    renderPanel(bar())
+    fireEvent.click(screen.getByRole('button', { name: /^Assign data$/ }))
+    const backdrop = screen.getByRole('dialog', { name: /^Assign data/ }).parentElement!
+    // Closing on mousedown let the release land on whatever was under the
+    // backdrop (the page-tab "+" created a page).
+    fireEvent.mouseDown(backdrop)
+    expect(screen.getByRole('dialog', { name: /^Assign data/ })).toBeTruthy()
+    fireEvent.click(backdrop)
+    expect(screen.queryByRole('dialog', { name: /^Assign data/ })).toBeNull()
+  })
+
+  it('C-04: a press that starts inside the dialog and ends on the backdrop does not close it', () => {
+    renderPanel(bar())
+    fireEvent.click(screen.getByRole('button', { name: /^Assign data$/ }))
+    const dialog = screen.getByRole('dialog', { name: /^Assign data/ })
+    fireEvent.mouseDown(dialog)
+    fireEvent.click(dialog.parentElement!)
+    expect(screen.getByRole('dialog', { name: /^Assign data/ })).toBeTruthy()
+  })
+
   it('opens by itself when a chart is inserted', () => {
     renderPanel(bar())
     expect(screen.queryByRole('dialog')).toBeNull()

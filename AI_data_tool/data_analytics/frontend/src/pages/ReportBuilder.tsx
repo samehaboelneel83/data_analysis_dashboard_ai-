@@ -399,6 +399,13 @@ export default function ReportBuilder() {
   const canvasScale = (zoom / 100) * fitScale
   const [multiSelectedIds, setMultiSelectedIds] = useState<Set<number>>(new Set())
   useEffect(() => { setZoom(100); setMultiSelectedIds(new Set()) }, [activePage?.id])
+  // C-04: a page change (add, switch, bookmark, Present) drops a selected
+  // widget that is not on the new page. Kept, the Properties pane went on
+  // editing it and every edit PATCHed /pages/<new page>/widgets/<old widget>: 404.
+  useEffect(() => {
+    setSelectedW(s => s && activePage?.widgets.some(w => w.id === s.id) ? s : null)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePage?.id])
   type RightPanelMode = 'default' | 'mobile' | 'selection' | 'sync' | 'bookmarks' | 'taborder' | 'performance' | 'reportrules' | 'parameters' | 'schedule' | 'review' | 'comments' | 'outline' | 'suggestions' | 'translations' | 'insights' | 'ask' | 'history'
   const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>('default')
   const [pageMenuOpen, setPageMenuOpen] = useState(false)
@@ -2075,7 +2082,12 @@ export default function ReportBuilder() {
 
   const updateWidgetConfig = useCallback(async (config: Record<string, unknown>, title: string, overwrite = false) => {
     if (!selectedW || !activePage) return
-    const before = activePage.widgets.find(x => x.id === selectedW.id) ?? selectedW
+    // C-04: write to the page the widget is really on. A widget no longer in
+    // the report is said, not sent (the request could only 404).
+    const home = activePage.widgets.some(x => x.id === selectedW.id) ? activePage
+      : report?.pages.find(p => p.widgets.some(x => x.id === selectedW.id))
+    if (!home) { setSelectedW(null); toast.error(tr('bc.shell.t.widgetGone')); return }
+    const before = home.widgets.find(x => x.id === selectedW.id) ?? selectedW
     const beforeCfg = (before.config ?? {}) as Record<string, unknown>
     const beforeTitle = before.title
     setSaving(true)
@@ -2085,14 +2097,14 @@ export default function ReportBuilder() {
       // "Save mine anyway" sends it without one.
       const base = overwrite ? undefined : (loadedRevisionRef.current ?? undefined)
       try {
-        await reportsApi.updateWidget(reportId, activePage.id, selectedW.id,
+        await reportsApi.updateWidget(reportId, home.id, selectedW.id,
           { config, title, ...(base != null ? { base_revision: base } : {}) })
       } catch (err) {
         const status = (err as { response?: { status?: number } })?.response?.status
         const detail = structuredDetail<ConflictDetail & { code?: string }>(err)
         if (status === 409 && detail?.code === 'edit_conflict') {
           setEditConflict(conflictFrom(detail,
-            { widget_type: before.widget_type, title, config }, activePage.id, selectedW.id,
+            { widget_type: before.widget_type, title, config }, home.id, selectedW.id,
             () => { setEditConflict(null); updateWidgetConfig(config, title, true) }))
           return
         }
@@ -2101,7 +2113,7 @@ export default function ReportBuilder() {
       setEditConflict(null)
       const keys = changedKeys(beforeCfg, config)
       if (keys.length || beforeTitle !== title) {
-        const pageId = activePage.id
+        const pageId = home.id
         const id = selectedW.id
         const write = (c: Record<string, unknown>, t: string) =>
           reportsApi.updateWidget(reportId, pid(pageId), widgetIds.current.resolve(id), { config: c, title: t }).then(() => {})
@@ -2117,7 +2129,7 @@ export default function ReportBuilder() {
     } finally {
       setSaving(false)
     }
-  }, [selectedW, activePage, reportId, loadReport, pushUndo])
+  }, [selectedW, activePage, report, reportId, loadReport, pushUndo, tr])
 
   /** Save the combination of the editor's change and a colleague's (E09).
    *  Sent against the revision the conflict reported, so a THIRD edit made

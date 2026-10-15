@@ -3064,3 +3064,31 @@ describe('Present starts at the top (QA2 Visual 8)', () => {
     await waitFor(() => expect((document.querySelector('[data-canvas-scroll]') as HTMLElement).scrollTop).toBe(0))
   })
 })
+
+describe('C-04: a page change drops a selection that is not on the new page', () => {
+  const datasetWithColumns = () => ({ id: 10, name: 'Sales Data', columns: [
+    { id: 1, name: 'region', dtype: 'text', missing_pct: 0, stats: {} },
+    { id: 2, name: 'sales', dtype: 'numeric', missing_pct: 0, stats: {} }] })
+  it('adding a page while a widget is selected clears the selection; no update goes to the old widget', async () => {
+    const r = reportWithWidget()
+    const withTwo = reportWithWidget()
+    withTwo.pages.push({ id: 101, report_id: 1, name: 'Page 2', page_type: 'normal', position: 1,
+      created_at: '2026-01-01', widgets: [] } as any)
+    vi.mocked(reportsApi.get).mockReset()
+    vi.mocked(reportsApi.get).mockResolvedValue(r as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue(datasetWithColumns() as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    vi.mocked(reportsApi.updateWidget).mockReset().mockResolvedValue({} as any)
+    vi.mocked(reportsApi.addPage).mockResolvedValue({ id: 101, report_id: 1, name: 'Page 2', position: 1, widgets: [] } as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    fireEvent.click(await screen.findByText('Sales by Region'))
+    await screen.findByText('Widget: Sales by Region')
+
+    vi.mocked(reportsApi.get).mockResolvedValue(withTwo as any)
+    fireEvent.click(screen.getByRole('button', { name: 'Add page' }))
+    await waitFor(() => expect(reportsApi.addPage).toHaveBeenCalled())
+    await waitFor(() => expect(screen.queryByText('Widget: Sales by Region')).not.toBeInTheDocument())
+    expect(reportsApi.updateWidget).not.toHaveBeenCalledWith(1, 101, 5, expect.anything())
+  })
+})

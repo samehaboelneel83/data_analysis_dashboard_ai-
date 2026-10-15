@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import type { RoleField } from '../../types/report'
 import { useModalDialog } from '../ui/useModalDialog'
 import { useT } from '../../i18n'
@@ -34,6 +34,22 @@ export interface DataRolesListProps {
 }
 
 /** "Dimension (Group / X-axis)" -> heading "Dimension", hint "Group / X-axis". */
+
+/** C-04: close on a full click on the backdrop -- pressed AND released on it.
+ *  Closing on mousedown let the release (and its click) land on whatever lay
+ *  under the backdrop: the page-tab "+" created a page. A press that starts
+ *  inside the dialog (a text selection dragged out) never closes it. */
+function useBackdropClose(onClose: () => void) {
+  const pressed = useRef(false)
+  return {
+    onMouseDown: (e: ReactMouseEvent) => { pressed.current = e.target === e.currentTarget },
+    onClick: (e: ReactMouseEvent) => {
+      if (pressed.current && e.target === e.currentTarget) onClose()
+      pressed.current = false
+    },
+  }
+}
+
 function splitLabel(rf: RoleField): { heading: string; hint?: string } {
   const text = rf.label ?? rf.role
   const m = /^(.*?)\s*\((.*)\)\s*$/.exec(text)
@@ -169,6 +185,7 @@ export function AssignDataDialog({ objectName, focusRole, onClose, children }: {
   children: ReactNode
 }) {
   const ref = useModalDialog<HTMLDivElement>(onClose)
+  const backdrop = useBackdropClose(onClose)
   const t = useT()
   useEffect(() => {
     if (!focusRole) return
@@ -177,7 +194,7 @@ export function AssignDataDialog({ objectName, focusRole, onClose, children }: {
     row?.querySelector<HTMLElement>('button:not([disabled])')?.focus()
   }, [focusRole, ref])
   return (
-    <div onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}
+    <div {...backdrop}
       style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center',
         justifyContent: 'center', background: 'rgba(0,0,0,.45)', padding: 16 }}>
       <div ref={ref} role="dialog" aria-modal="true" aria-label={t('bc.canvas.assignDataFor', { name: objectName })}
@@ -224,6 +241,7 @@ export function AddFieldDialog({ heading, multi, choices, selected, onApply, onC
   onClose: () => void
 }) {
   const ref = useModalDialog<HTMLDivElement>(onClose)
+  const backdrop = useBackdropClose(onClose)
   const t = useT()
   const role = useRoleLabel()
   // The caller passes the role's English short name; it is shown translated.
@@ -237,7 +255,7 @@ export function AddFieldDialog({ heading, multi, choices, selected, onApply, onC
   const choose = (v: string) => { onApply([v]); onClose() }
   const changed = picked.length !== selected.length || picked.some((v, i) => v !== selected[i])
   return (
-    <div onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}
+    <div {...backdrop}
       style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center',
         justifyContent: 'center', background: 'rgba(0,0,0,.45)', padding: 16 }}>
       <div ref={ref} role="dialog" aria-modal="true" aria-label={t('bc.canvas.addRole', { role: shownHeading })}
