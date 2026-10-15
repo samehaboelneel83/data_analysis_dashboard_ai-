@@ -498,7 +498,7 @@ def _glossary_payload(t: GlossaryTerm) -> dict:
             "synonyms": t.synonyms or [], "maps_to_object": t.maps_to_object,
             "maps_to_column": t.maps_to_column,
             "rule": getattr(t, "rule", None), "always": bool(getattr(t, "always", False)),
-            "data_source_id": t.data_source_id}
+            "data_source_id": t.data_source_id, "dataset_id": getattr(t, "dataset_id", None)}
 
 
 @router.get("/{source_id}/glossary")
@@ -517,6 +517,8 @@ async def list_glossary(
             GlossaryTerm.org_id == current_user.org_id,
             or_(GlossaryTerm.data_source_id == source_id,
                 GlossaryTerm.data_source_id.is_(None)),
+            # One dataset's term (B-21) is listed on that dataset only.
+            GlossaryTerm.dataset_id.is_(None),
         ).order_by(GlossaryTerm.term)
     )).scalars().all()
     return [_glossary_payload(t) for t in rows]
@@ -566,7 +568,7 @@ async def update_glossary_term(
     await _get_source(db, source_id, current_user)
     term = await db.get(GlossaryTerm, term_id)
     check_org(term, current_user, "Glossary term not found")
-    if term.data_source_id not in (None, source_id):
+    if term.data_source_id not in (None, source_id) or term.dataset_id is not None:
         raise HTTPException(404, "Glossary term not found")
     data = body.model_dump(exclude_unset=True)
     if "definition" in data:
@@ -597,7 +599,7 @@ async def delete_glossary_term(
     # A source-scoped delete must not reach into another source's term —
     # only this source's own rows, or an org-wide (NULL) row, are fair game
     # from this endpoint.
-    if term.data_source_id not in (None, source_id):
+    if term.data_source_id not in (None, source_id) or term.dataset_id is not None:
         raise HTTPException(404, "Glossary term not found")
     await db.delete(term)
     await db.commit()

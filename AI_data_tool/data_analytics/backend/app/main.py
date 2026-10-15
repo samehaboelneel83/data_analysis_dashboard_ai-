@@ -81,6 +81,9 @@ async def _migrate(conn):
         # 0047: business rules on glossary terms (HR evaluation, blocker 3).
         "ALTER TABLE glossary_terms ADD COLUMN IF NOT EXISTS rule TEXT",
         "ALTER TABLE glossary_terms ADD COLUMN IF NOT EXISTS always BOOLEAN NOT NULL DEFAULT FALSE",
+        # 0071: a term of one dataset (B-21); NULL keeps every existing term as it was.
+        "ALTER TABLE glossary_terms ADD COLUMN IF NOT EXISTS dataset_id INTEGER REFERENCES datasets(id) ON DELETE CASCADE",
+        "CREATE INDEX IF NOT EXISTS ix_glossary_terms_dataset_id ON glossary_terms (dataset_id)",
         # 0048: a connection's sensitivity label (HR evaluation, item 2.2).
         "ALTER TABLE data_sources ADD COLUMN IF NOT EXISTS sensitivity VARCHAR(20)",
         # 0049: dataset share levels; dataset_group_shares is a new table.
@@ -885,6 +888,8 @@ app.include_router(automation_router.router, prefix="/api/v1")
 # different resources: sync/review/drift under a data source, column
 # statistics under a dataset.
 app.include_router(metadata.router,      prefix="/api/v1")
+from .routers import dataset_glossary  # noqa: E402
+app.include_router(dataset_glossary.router, prefix="/api/v1")
 app.include_router(metadata.stats_router, prefix="/api/v1")
 # Guided setup (docs/guided-setup/PLAN.md): one journey per person and connection.
 app.include_router(guided_setup.router, prefix="/api/v1")

@@ -3950,6 +3950,18 @@ export const metadataApi = {
     api.patch<GlossaryTerm>(`/data-sources/${sourceId}/glossary/${termId}`, body).then(r => r.data),
   deleteTerm: (sourceId: number, termId: number) =>
     api.delete(`/data-sources/${sourceId}/glossary/${termId}`),
+  /** B-21: the terms that apply to ONE dataset (org-wide, its connection's and
+   *  its own), and its own terms' writes -- an uploaded file has no connection. */
+  datasetGlossary: (datasetId: number) =>
+    api.get<GlossaryTerm[]>(`/datasets/${datasetId}/glossary`).then(r => r.data),
+  addDatasetTerm: (datasetId: number, body: { term: string; definition?: string
+                                      synonyms?: string[]; maps_to_column?: string; rule?: string; always?: boolean }) =>
+    api.post<GlossaryTerm>(`/datasets/${datasetId}/glossary`, body).then(r => r.data),
+  updateDatasetTerm: (datasetId: number, termId: number, body: { definition?: string | null
+                                      synonyms?: string[]; rule?: string | null; always?: boolean }) =>
+    api.patch<GlossaryTerm>(`/datasets/${datasetId}/glossary/${termId}`, body).then(r => r.data),
+  deleteDatasetTerm: (datasetId: number, termId: number) =>
+    api.delete(`/datasets/${datasetId}/glossary/${termId}`),
 }
 
 /** A business term and its aliases. `data_source_id` null means the term is
@@ -3967,6 +3979,8 @@ export interface GlossaryTerm {
   /** Apply `rule` to every question on this connection, named or not. */
   always?: boolean
   data_source_id: number | null
+  /** Set when the term belongs to one dataset only (B-21). */
+  dataset_id?: number | null
 }
 
 /** One share on a workspace folder, names resolved server-side. Exactly one

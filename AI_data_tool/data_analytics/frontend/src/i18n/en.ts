@@ -36,6 +36,7 @@ export const en = {
   'nav.glossary': 'Glossary',
   'glossary.subtitle': 'The words your company uses and the rules behind them. Ask AI, Insights and the dashboard designer read these — a rule marked “Always” (for example, an open record is a row whose end date is empty) is applied to every question on that connection.',
   'glossary.connection': 'Connection',
+  'glossary.scope': 'Connection or dataset',
   'glossary.noSources': 'Add a connection first:',
   'nav.lineage': 'Lineage',
   'nav.dataflows': 'Dataflows',
