@@ -14,7 +14,16 @@
 
 ---
 
-> **Fix status — 15 Oct 2026.** The findings below describe `main` @ `0cb8f48` as tested on 14 Oct and are kept as recorded. Since then, on branch `s_mostafa`:
+> **Fix status — 15 Oct 2026 (final).** The findings below describe `main` @ `0cb8f48` as tested on 14 Oct and are kept as recorded. Since then, on the integration branch `fix/integ2` (not yet merged into `s_mostafa`):
+> - **All 122 Critical/High/Medium tasks of `TODO_PLAN.md` are ticked**, each with its commits; database revisions `0069`–`0072` added. Details per task and the review of the four known gaps (B-21, E-08, C-11, B-18): `TODO_PLAN.md` → *Progress*.
+> - **Browser QA re-run, 57 high cases, real Chromium:** **50 pass / 0 fail / 7 blocked** (baseline before the remaining fixes: 46 / 4 / 7). The four earlier failures now pass: DASH-04 (empty dashboard name), MAP-02 (one count per bubble), INS-02 ("View full scan"), SEC-02 (restricted column → friendly message). Fix checks in the browser, 7 of 7 pass: AD-12, B-18, B-21, E-08, C-21, C-11, C-07. Console: no page errors or uncaught exceptions.
+> - **Blocked, not failed:** ASK-02, ASK-03, ASK-04, ASK-06, SEC-03, BUILD-10, BUILD-11 need a reachable AI model server, which this environment does not have; they are unverified.
+> - **Automated tests on the final code:** frontend 411 files / 5,015 passed (tsc clean); backend 8,857 passed / 4 skipped / 0 failed after two fixes found by the final run (an E-08 layering regression, fixed; an outdated B-36 test, updated) — see `TODO_PLAN.md` → *Final verification*.
+> - **Minor issues seen in the final QA (no case fails):** cramped dashboards list at phone width; dual-axis roles both labelled "Line"; the gauge writes "$ 8.632.597" with dots; deleting a glossary term asks no confirmation.
+> - **Not verified here:** a real `docker compose up` (registries blocked) and any AI feature with a live model.
+> - Evidence: `qa_rerun_2026-10-15_final/REPORT.md` and `qa_rerun_2026-10-15_final/shots/` (this folder); the earlier re-run `qa_rerun_2026-10-15/REPORT.md`.
+>
+> *Earlier note (morning of 15 Oct), kept for the record:*
 > - **Fixed:**
 >   - #2, guest links on map dashboards (`16a84654`)
 >   - #1, the `init.sql` schema gap (`62a54a56`): it turned out worse on this code, because the backend would not start on such a database

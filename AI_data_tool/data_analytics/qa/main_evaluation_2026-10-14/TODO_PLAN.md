@@ -2,15 +2,84 @@
 
 | | |
 |---|---|
-| **Branch** | `s_mostafa` @ `2926eb5` (same app code as `main` @ `0cb8f48`). All file paths are relative to `AI_data_tool/data_analytics/`. |
+| **Branch** | Written against `s_mostafa` @ `2926eb5` (same app code as `main` @ `0cb8f48`); the fixes are on the integration branch `fix/integ2`, not yet merged into `s_mostafa`. All file paths are relative to `AI_data_tool/data_analytics/`. |
 | **Source** | `qa/main_evaluation_2026-10-14/EVALUATION.md`: 147 Critical/High/Medium findings from the exhaustive UI journey, the QA plan failures (DASH-04, INS-02, MAP-02, SEC-02) and the automated test results. Duplicates were merged into **122 tasks**, and each was traced to the code on this branch. |
 | **Date** | 15 Oct 2026 |
 
 ## Progress
 
-| Date | Done | Commits on `s_mostafa` |
+| Date | Done | Commits (integration branch `fix/integ2`; the first row is on `s_mostafa`) |
 |---|---|---|
 | 15 Oct 2026 | **F-01, E-01, E-02** (the three Critical issues) and **B-01** | `16a84654` F-01 · `55c6ac61` E-01/E-02 · `62a54a56` B-01 |
+| 15 Oct 2026 | **Round 1:** the rest of the 122 tasks, by area (AD, B, C, E, F); 20 left partly done, 4 deferred/not started | merges `ef9755e2` (AD) · `79f30a91` (F) · `ed82a0e8` (E) · `ad612c52` (B) · `0810f9fa` (C); integration fixes `80706552` · `e38b4882` · `610bb057` |
+| 15 Oct 2026 | **Round 2:** every remaining item (owner: "solve all") — B-35, B-21, E-08, C-21, C-07 and the partial leftovers | merges `9ed04374` (B) · `506ca75e` (E) + `9301cc48` (Alembic chain 0070 → 0071 → 0072) · `b239583a` (C); docs `e3f6c4d5` |
+| 15 Oct 2026 | **Known-gap review** (release readiness): B-21, E-08, C-11, B-18 re-examined; 2 more defects found and fixed (AD-12 in a real browser, count-KPI caption); 2 backend failures of the final full run resolved | `71ff169c` E-08 layering · `ffa1c85c` B-36 test · `18c98c7f` AD-12 · `fb96b609` KPI caption · merges `f07a88d9` (B-21, `302279bc`) · `ddddd25f` (E-08, `f41a0730`) · docs `a9acecbb` |
+
+**Status: 122 of 122 tasks ticked.** Schema changes: Alembic `0069_users_email_ci_unique`, `0070_roles_org_name_unique`, `0071_glossary_dataset_scope`, `0072_role_capabilities`, each mirrored in `app.main._migrate` for databases adopted without revisions.
+
+### Release-readiness review of the known gaps (15 Oct 2026, evening)
+
+| Gap | Classification | Status |
+|---|---|---|
+| B-21 — org-wide glossary terms could not be created from the Glossary page | Confirmed defect (missing plan step 1) | **Fixed and verified** |
+| E-08 — permissions not enforced on every dataset/dashboard creation path; publishing | 7 confirmed bypasses + missing coverage; publishing = accepted limitation | **Fixed and verified** (bypasses); **accepted limitation** (publishing, UI buttons) |
+| C-11 — DuckDB/DirectQuery path "not reproducible" | Reproduced on the unfixed code after all (DirectQuery); fixed by the shared server fix | **Fixed and verified** |
+| B-18 — not reproduced in a real browser | Could not be reproduced on the unfixed or the fixed build | **Investigated but not reproduced** (protective change in place) |
+
+- **B-21.**
+  - *Root cause:* the model already allowed org-wide terms (`data_source_id` and `dataset_id` both NULL) and the AI context already read them, but no route created them and the page had no org-wide choice.
+  - *Change:* `GET/POST /api/v1/glossary`, `PATCH/DELETE /api/v1/glossary/{id}` (new `routers/org_glossary.py`, sharing the per-connection validation helpers); "All data (org-wide)" first in the Glossary selector (en/ar); writes org-admin only, reads any member, other org → 404, a scoped term through these routes → 404. Side fix: the per-connection PATCH/DELETE could edit or delete an org-wide term; they now return 404.
+  - *Tests:* 6 backend + 3 frontend tests, all failing before; related suites 374 + 14 + 171 passed.
+  - *Real stack:* admin@example.invalid created a term in the browser → stored with both scopes NULL, survives a reload; demo-global sees it read-only (no Add/Edit/Delete); its POST /glossary → 403 "Admin privileges required". Final QA fix check: pass.
+  - *Remaining risk:* low. Deleting a term asks no confirmation (cosmetic, seen in QA).
+- **E-08.**
+  - *Inventory* of every request or run that constructs a `Dataset`/`Report` (table in the `fix3/e8b` log and commit `f41a0730`). Already gated: upload, batch, new connection, new/duplicate dashboard, templates; admin-only by design: combine across connections, import from a connection, guided-setup import.
+  - *Confirmed bypasses, now refused with the readable reason:* materialize, aggregates, dataflow run with a new output name, batch scoring (Add data); automated analysis — refused at start and its compose step re-checks the run owner's role at run time (Create dashboards); demo seed/unseed was open to any member → org-admin only (no screen calls it).
+  - *Left by design:* re-running existing dataflows/refreshes (not new data); editing existing dashboards (copilot, pages) needs edit rights.
+  - *Accepted limitation — publishing:* there is no publish permission in the 5-permission set; publishing stays author-or-org-admin and needs approval where the org requires it, now pinned by a test.
+  - *Accepted limitation — UI:* the Materialize / Aggregate / new-output / Score / Start-analysis buttons are still shown to a role without the right; the server answers 403 with "Your role (…) is not allowed to add or upload data…".
+  - *Tests:* 8 new (`test_role_permissions_gaps.py`), 7 failed before (materialize 200, aggregate 201, dataflow output 200, score-jobs 202, automation start 201, compose not stopped, demo seed 200); the publishing test passed before, as intended. Related suites ≈775 passed.
+  - *Real stack:* a role with Add data and Create dashboards off → materialize 403 and new dashboard 403 with the reason; member demo seed 403. Final QA: the roles × permissions matrix is on Admin → Roles.
+- **C-11.**
+  - *Original reproduction:* Bar+line / dual-axis with margin_pct on the second axis summed it (0–12,000 %).
+  - *Evidence (same request against the unfixed `main` backend and the fixed one, Demo — Sales, month × revenue | margin_pct, no aggregation2):* unfixed 2024-01 `value2 = 1654.7`; fixed `22.36` (average) — for dual_axis_line, dual_axis_bar, dual_axis_bar_line and dual_axis_time_series, with the DuckDB pushdown setting on (default). An explicit `aggregation2: "sum"` is still honoured (1654.7).
+  - *DirectQuery:* a DirectQuery dataset over a SQLite table built for the check (`c11_sales`, known average 19.698 and sum 984.9 for 2024-01): unfixed `984.9` (summed), fixed `19.698`. So the DirectQuery path **was** affected on the unfixed code and is fixed by the shared server change (`shape_dual_series` default summary); the round-2 "not reproducible" note was wrong and is corrected here.
+  - *Tests:* guard tests from round 2 (`test_dual_series_default_summary.py`, axis titles) plus the end-to-end API evidence above; final QA fix check: right axis avg(margin_pct) 0–28 %.
+  - *Remaining risk:* axis titles still read "avg(margin_pct)" (wording, product-wide decision); the right axis tick labels are partly covered by the rotated title (cosmetic).
+- **B-18.**
+  - *Original report:* on `/ask?dataset=1` with the model offline, "typing in the disabled box and pressing Enter" reset the page to Step 1 and dropped the dataset; Ctrl+A selected the page. The original screenshot (B-44) shows a **keyboard focus ring on the sidebar "Ask AI" link**.
+  - *Reproduction attempts on the unfixed `main` build, real Chromium:* (1) /ask?dataset=1 → click the box, type, Enter; (2) via the dataset page; (3) sidebar Ask AI → pick Demo — Sales → click box, type, Enter; (4) click box, type, Tab, Enter (opened the dataset picker); (5) then type + Enter in the picker; (6) the original driver path. The dataset stayed selected every time.
+  - *Most likely cause (inferred, not proven):* Enter on a focused sidebar "Ask AI" link, which opens bare /ask by design; the disabled box could not take focus, so keys went to whatever had it.
+  - *On the fixed build:* the box is read-only + aria-disabled and takes focus; click/type/Enter and Tab+Enter keep `dataset=1` (real browser, and the final QA fix check). Page test `askScopeOffline.test.tsx` fails with the old disabled box.
+  - *Status:* investigated but not reproduced; not claimed as fixed.
+- **Found during the review and fixed:**
+  - **AD-12 (real browser):** a signed-out visit to /ask?dataset=1 went to /login with the target, but after signing in landed on Home. Root cause: `AuthContext.login` ended with `navigate('/')`, unmounting the sign-in page before it could read the target (the AD-12 page tests mock AuthContext). Fix `18c98c7f`; new `AuthContext.returnTo.test.tsx` with the real provider (failed before). Real browser: /ask?dataset=1 → sign in → /ask?dataset=1; plain sign-in → /.
+  - **Count KPI caption:** B-36 (round 2) captioned a count KPI "Records", re-opening the live-QA finding that it did not say what was counted (full frontend run, 1 failure). Now "Count of {column}" / "عدد {column}" (`fb96b609`).
+
+### Final verification (15 Oct 2026)
+
+- **Frontend:** full vitest on the final integration code — 411 files, **5,015 passed**, 0 failed, no unhandled errors. `tsc --noEmit` clean.
+- **Backend, final full run** (two halves run in parallel because of a 2-hour limit on one background job; the halves cover all 559 test files exactly once, checked):
+  - first run on `a9acecbb`: 8,853 passed, 4 skipped, **2 failed** (half 1: 4,136 passed / 1 skipped / 0 failed; half 2: 4,717 passed / 3 skipped / 2 failed). A first single-process run was stopped at 60 % by the job limit and is not counted.
+  - `test_layer_conformance::TestDocumentedInvariants::test_no_service_imports_fastapi` — **genuine regression** (architecture rule) from E-08: `services/quotas.enforce_ai_budget` raised `fastapi.HTTPException`. Reproduced alone. Fixed `71ff169c`: domain exception `quotas.AiNotAllowed` + handler in `app.main` (same 403 + reason on the wire); new regression test failed before; 582 related tests passed.
+  - `test_suggest_catalogue::test_every_idea_draws_names_real_columns_and_says_why_it_fits` — **outdated test**, not a product defect: it expected a card of totals mixing a weight with two unit-less numbers, which B-36 deliberately stopped offering. Reproduced alone. The test now pins B-36 on both sides (`ffa1c85c`, no assertion weakened beyond the card, which got its own stricter test); 18 related tests passed.
+  - re-run of the full suite after both fixes: on `ffa1c85c`, **8,857 passed, 4 skipped, 0 failed** (half 1: 4,136 passed / 1 skipped; half 2: 4,721 passed / 3 skipped; the 4 extra passes over the first run are the 2 fixed tests and the 2 new regression tests).
+- **Migrations on Postgres:** fresh empty DB → `0072`; an existing DB at `0070` → `0072` (roles keep every right); downgrade to `0070` and upgrade again clean; a pre-Alembic DB and an `init.sql` DB start with health 200 and the new columns; `0069` refuses (and names the accounts) on case-duplicate emails, and after clean-up adds the index.
+- **Browser QA re-run (57 high cases, real Chromium):** **50 pass / 0 fail / 7 blocked** (baseline 46 / 4 / 7). All 4 baseline failures (DASH-04, MAP-02, INS-02, SEC-02) pass; the 7 blocked need an AI model server, which this environment does not have. 7 of 7 fix checks pass. Report: `qa_rerun_2026-10-15_final/REPORT.md`.
+- **Browser console** during the QA run: no page errors and no uncaught exceptions (only expected 401/403/404 responses and "tile still loading" warnings for off-screen tiles).
+- **Blocked ≠ failed:** the 7 blocked cases (ASK-02, ASK-03, ASK-04, ASK-06, SEC-03, BUILD-10, BUILD-11) need a reachable AI model server; none exists in this environment, so the app correctly shows "The model server isn't reachable, so new questions are paused." and disables Send. They were not run and are **not** verified.
+- **Not verified here:** a real `docker compose up` (container registries are blocked from this environment); every AI feature with a live model.
+
+### Remaining work, by priority
+
+1. **Before a release that relies on AI:** run the 7 AI-dependent cases (ASK-02/03/04/06, SEC-03, BUILD-10/11) against a reachable model server; and a real `docker compose up` once registry access exists.
+2. **Medium (UX, permissions):** hide or disable the Materialize / Aggregate / dataflow new-output / Score / Start-analysis buttons for roles without "Add data" / "Create dashboards" (the server already refuses with a reason).
+3. **Low (seen in the final QA, no case fails):** cramped dashboards list at phone width (/reports keeps its side panel); dual-axis roles both labelled "Line" (no left/right hint) and the right-axis title overlapping its ticks; the gauge formats "$ 8.632.597" with dots while other tiles use commas; deleting a glossary term asks no confirmation.
+4. **Decisions left open:** human axis titles ("Average margin_pct" instead of "avg(margin_pct)") across the product; a publish permission in the role matrix; B-18 stays "not reproduced" (watch for it in real use).
+
+Evidence: final QA report `qa/main_evaluation_2026-10-14/qa_rerun_2026-10-15_final/REPORT.md`, screenshots in `qa_rerun_2026-10-15_final/shots/` (86 files); the earlier re-run `qa_rerun_2026-10-15/`.
+
+The notes below describe the first four fixes of the morning.
 
 What each fix found and changed, and where it differs from the original task text:
 - **F-01 — guest links and embeds on map dashboards.**
@@ -47,10 +116,10 @@ Verification for these four:
 - Report: `qa_rerun_2026-10-15/REPORT.md`.
 - **A real `docker compose up` could not be run.** This environment's network blocks every container registry (Docker Hub returns 403). The same code path was tested instead: an empty Postgres database followed by backend start-up.
 
-### Open follow-ups from this work
-- **E-02 data cleanup:** an account created *before* this fix with a case-variant of an allowlisted address still counts as a platform admin. Check every deployment once with `SELECT id, org_id, email FROM users WHERE lower(email) IN (<allowlisted addresses, lower-case>) ORDER BY lower(email);` More than one row per address means a copy exists. Then add a unique index on `lower(email)`.
-- **E-02 config:** `docker-compose.yml` still defaults `SUPER_ADMIN_EMAILS` to `admin@datalytics.local,admin,admin@admin.com`. Org admins can no longer claim those addresses, but the bare `admin` and `admin@admin.com` should be removed from the default (task E-02 step 4, left unchanged here because it changes deployment config).
-- **Flaky test (pre-existing):** `ReportBuilder.test.tsx` lets a `CopilotChat` timer fire after teardown.
+### Open follow-ups from the first fixes (status at the end of 15 Oct)
+- **E-02 data cleanup:** done in code — revision `0069_users_email_ci_unique` stops (and names the accounts) when two addresses differ only by letter case, and otherwise lower-cases every address and adds a unique index on `lower(email)`; databases adopted without revisions get the same check at start-up (health 503 until cleaned). Verified on Postgres. Each deployment still has to clean up any accounts it names.
+- **E-02 config:** done — `docker-compose.yml` defaults `SUPER_ADMIN_EMAILS` to `admin@datalytics.local` only.
+- **Flaky test:** fixed in round 1 (agent C): the CopilotChat timer no longer fires after teardown; later full runs had no unhandled errors.
 
 ## How to use this plan
 
@@ -88,55 +157,55 @@ Privilege escalation, data leaving the app against the share settings, guest lin
 - [x] **E-01** — Block org admins from editing or deleting platform super-admin accounts · *Critical, effort S* · ✅ **done** `55c6ac61`
 - [x] **E-02** — Normalise emails case-insensitively and close the super-admin allowlist escalation · *Critical, effort M* · ✅ **done** `55c6ac61`
 - [x] **F-01** — Serve map settings to guest/embed viewers and stop 401 → /login redirects on public pages · *Critical, effort M* · ✅ **done** `16a84654`
-- [ ] **F-02** — Enforce the "may download" right on the server for every export path (print, PPTX, widget CSV/Excel) · *High, effort M*
-- [ ] **E-03** — Expand MYSCOPE() during row-rule validation so org-chart rules can be saved · *High, effort S*
-- [ ] **E-04** — Validate email and password server-side for users and new org admins · *High, effort M*
-- [ ] **E-05** — Stop pre-selecting the Admin role and the first dataset in admin forms · *High, effort S*
-- [ ] **E-06** — Reject negative quota values (client and API) · *High, effort S*
-- [ ] **E-07** — Connection rules: show why the table list is empty and link to sync · *High, effort S*
+- [x] **F-02** — Enforce the "may download" right on the server for every export path (print, PPTX, widget CSV/Excel) · *High, effort M* · ✅ **done** `1cd6ca3d`
+- [x] **E-03** — Expand MYSCOPE() during row-rule validation so org-chart rules can be saved · *High, effort S* · ✅ **done** `602cf081`
+- [x] **E-04** — Validate email and password server-side for users and new org admins · *High, effort M* · ✅ **done** `5e79eea4` `b5f1a220`
+- [x] **E-05** — Stop pre-selecting the Admin role and the first dataset in admin forms · *High, effort S* · ✅ **done** `5e79eea4`
+- [x] **E-06** — Reject negative quota values (client and API) · *High, effort S* · ✅ **done** `e8a98b7e`
+- [x] **E-07** — Connection rules: show why the table list is empty and link to sync · *High, effort S* · ✅ **done** `09b58690`
 
 ## Phase 2 — Broken behaviour & data safety
 
 Hard errors, data that can be silently overwritten, stale or wrong results, and a red CI. 15 tasks, ≈ 8 dev-days.
 
-- [ ] **B-14** — Update the stale widget-type count in the backend parity test (CI red) · *Medium, effort S*
-- [ ] **B-13** — Give the test suite its own DuckDB metadata cache path · *Medium, effort S*
+- [x] **B-14** — Update the stale widget-type count in the backend parity test (CI red) · *Medium, effort S* · ✅ **done** `ee5d6cab`
+- [x] **B-13** — Give the test suite its own DuckDB metadata cache path · *Medium, effort S* · ✅ **done** `5b5d97c7`
 - [x] **B-01** — Close the fresh-install schema gap (8 columns missing on an init.sql-built database) · *High, effort S* · ✅ **done** `62a54a56`
-- [ ] **B-02** — Fix the ImportError behind "Warn me on every refresh" (guided setup step 3) · *High, effort S*
-- [ ] **B-08** — Default Edit cells to a unique row key and say how many rows an edit changes · *High, effort M*
-- [ ] **B-07** — Reload the data grid when the last filter is removed · *High, effort S*
-- [ ] **AD-04** — Ignore stale scan responses on the Insights hub · *High, effort S*
-- [ ] **B-06** — Show the sheet picker for multi-sheet XLSX uploads · *High, effort S*
-- [ ] **B-09** — Explain why a dataflow cannot be built on a governed dataset · *High, effort M*
-- [ ] **B-05** — Save the derived fields the plain dashboard design uses (6/17 widgets broken) · *High, effort M*
-- [ ] **C-04** — Drop a stale widget selection when the page changes, so no 404 PATCH is sent to a widget on another page · *High, effort S*
-- [ ] **C-05** — Show the dataset chosen in "Create a dashboard" as soon as the builder opens · *High, effort S*
-- [ ] **C-01** — Render tiles already on screen without needing a scroll, in View and in Present · *High, effort M*
-- [ ] **AD-05** — Remove "Pin finding", which promises a dashboard that doesn't exist · *High, effort S*
-- [ ] **C-03** — Fix the seeded demo configs: the World Sales Map contour tile and the "Can I trust this data?" use case · *High, effort M*
+- [x] **B-02** — Fix the ImportError behind "Warn me on every refresh" (guided setup step 3) · *High, effort S* · ✅ **done** `96f016a5`
+- [x] **B-08** — Default Edit cells to a unique row key and say how many rows an edit changes · *High, effort M* · ✅ **done** `22dd7dfc`
+- [x] **B-07** — Reload the data grid when the last filter is removed · *High, effort S* · ✅ **done** `77579bb9`
+- [x] **AD-04** — Ignore stale scan responses on the Insights hub · *High, effort S* · ✅ **done** `b7b5ad04`
+- [x] **B-06** — Show the sheet picker for multi-sheet XLSX uploads · *High, effort S* · ✅ **done** `fe201a16`
+- [x] **B-09** — Explain why a dataflow cannot be built on a governed dataset · *High, effort M* · ✅ **done** `326a8c1e`
+- [x] **B-05** — Save the derived fields the plain dashboard design uses (6/17 widgets broken) · *High, effort M* · ✅ **done** `4570c393`
+- [x] **C-04** — Drop a stale widget selection when the page changes, so no 404 PATCH is sent to a widget on another page · *High, effort S* · ✅ **done** `fd2e2d0b`
+- [x] **C-05** — Show the dataset chosen in "Create a dashboard" as soon as the builder opens · *High, effort S* · ✅ **done** `ea67a167`
+- [x] **C-01** — Render tiles already on screen without needing a scroll, in View and in Present · *High, effort M* · ✅ **done** `9ba3e2dd`
+- [x] **AD-05** — Remove "Pin finding", which promises a dashboard that doesn't exist · *High, effort S* · ✅ **done** `7c2f35c5`
+- [x] **C-03** — Fix the seeded demo configs: the World Sales Map contour tile and the "Can I trust this data?" use case · *High, effort M* · ✅ **done** `f3b1d3de`
 
 ## Phase 3 — Fail fast without AI
 
 One shared model-health gate and timeouts, then the features that hang when the model is down. Do AD-01 first; the rest build on it. 7 tasks, ≈ 9 dev-days.
 
-- [ ] **AD-01** — Add one shared model health gate and a per-step AI timeout (fail fast when the model is down) · *High, effort L*
-- [ ] **AD-02** — Make Ask AI suggestion cards respect "new questions are paused" · *High, effort S*
-- [ ] **AD-03** — Time out stuck automation steps, watch for stale "running" steps, and notify on failure · *High, effort M*
-- [ ] **F-03** — Make AI dashboard suggestions fail fast and fall back to the statistics engine when the model is unreachable · *High, effort M*
-- [ ] **B-10** — Make "Suggest dashboards" with a blank goal truly model-free · *High, effort S*
-- [ ] **B-03** — Stop guided setup swallowing sync errors and show the running read · *High, effort M*
-- [ ] **B-04** — Give a stuck metadata sync a timeout and a Cancel · *High, effort L*
+- [x] **AD-01** — Add one shared model health gate and a per-step AI timeout (fail fast when the model is down) · *High, effort L* · ✅ **done** `a4c0795d` + round 2 `e5b954a4`
+- [x] **AD-02** — Make Ask AI suggestion cards respect "new questions are paused" · *High, effort S* · ✅ **done** `8f3a1808`
+- [x] **AD-03** — Time out stuck automation steps, watch for stale "running" steps, and notify on failure · *High, effort M* · ✅ **done** `3dde8572`
+- [x] **F-03** — Make AI dashboard suggestions fail fast and fall back to the statistics engine when the model is unreachable · *High, effort M* · ✅ **done** (with B-10) `6967affb`
+- [x] **B-10** — Make "Suggest dashboards" with a blank goal truly model-free · *High, effort S* · ✅ **done** (with F-03) `6967affb`
+- [x] **B-03** — Stop guided setup swallowing sync errors and show the running read · *High, effort M* · ✅ **done** `3431145d`
+- [x] **B-04** — Give a stuck metadata sync a timeout and a Cancel · *High, effort L* · ✅ **done** `03a8eb6c`
 
 ## Phase 4 — Charts & number formatting (High)
 
 One shared formatter, then the broken chart types and map roles. 6 tasks, ≈ 4 dev-days.
 
-- [ ] **C-02** — One shared number formatter for every value in tables, crosstabs, matrices, KPIs and cards · *High, effort M*
-- [ ] **C-06** — Make the Word cloud draw its words and reject a number as "Word text" · *High, effort S*
-- [ ] **C-07** — Give Scatter an X measure and a Y measure, and say so when nothing can be plotted · *High, effort M*
-- [ ] **C-08** — Label Sankey nodes and colour flows by their source · *High, effort S*
-- [ ] **C-09** — Put each clicked field into a role of the matching type and validate map coordinates · *High, effort M*
-- [ ] **C-10** — Make a map's lat/lon or country mode explicit, show a placeholder when it is unassigned, and hide the country-match note in lat/lon mode · *High, effort M*
+- [x] **C-02** — One shared number formatter for every value in tables, crosstabs, matrices, KPIs and cards · *High, effort M* · ✅ **done** `8490df7f`
+- [x] **C-06** — Make the Word cloud draw its words and reject a number as "Word text" · *High, effort S* · ✅ **done** (step 4 in 4f2830c6) `9b30ba55` `4f2830c6`
+- [x] **C-07** — Give Scatter an X measure and a Y measure, and say so when nothing can be plotted · *High, effort M* · ✅ **done** `6b4541b7` `bdc56cfe` `e01c3821` + round 2 `24a97a46`
+- [x] **C-08** — Label Sankey nodes and colour flows by their source · *High, effort S* · ✅ **done** `0e2a9b8f`
+- [x] **C-09** — Put each clicked field into a role of the matching type and validate map coordinates · *High, effort M* · ✅ **done** `aa05f916` + round 2 `dd820ae2`
+- [x] **C-10** — Make a map's lat/lon or country mode explicit, show a placeholder when it is unassigned, and hide the country-match note in lat/lon mode · *High, effort M* · ✅ **done** (mode hint in eccc0ced) `438c8ee6` `eccc0ced`
 
 ## Phase 5 — Medium issues
 
@@ -144,108 +213,108 @@ One shared formatter, then the broken chart types and map roles. 6 tasks, ≈ 4 
 
 ### Admin, security & access control (10)
 
-- [ ] **E-09** — Audit connection (Ask AI) rule and custom connector changes · *Medium, effort S*
-- [ ] **E-10** — Validate connection rule columns against the table · *Medium, effort S*
-- [ ] **E-11** — Type-check custom connector fields (number port, TLS select) · *Medium, effort S*
-- [ ] **E-12** — Show a friendly message for a tile whose measure uses a hidden column (QA SEC-02) · *Medium, effort S*
-- [ ] **E-13** — Hide measures and calculated columns built on hidden columns from restricted roles · *Medium, effort M*
-- [ ] **E-14** — Compute dataset row and column counts after row and column security · *Medium, effort M*
-- [ ] **E-15** — Enforce unique role names per organization · *Medium, effort M*
-- [ ] **E-16** — Add search, filters and pagination to the Users list · *Medium, effort M*
-- [ ] **E-17** — Make the LLM "Test connection" fail fast with a readable reason · *Medium, effort S*
-- [ ] **E-18** — Let admins set and see an org unit's "match value" · *Medium, effort S*
+- [x] **E-09** — Audit connection (Ask AI) rule and custom connector changes · *Medium, effort S* · ✅ **done** `ef6bd2c2`
+- [x] **E-10** — Validate connection rule columns against the table · *Medium, effort S* · ✅ **done** `d1e9c6ed`
+- [x] **E-11** — Type-check custom connector fields (number port, TLS select) · *Medium, effort S* · ✅ **done** `d4c9527d`
+- [x] **E-12** — Show a friendly message for a tile whose measure uses a hidden column (QA SEC-02) · *Medium, effort S* · ✅ **done** `2ac8a652`
+- [x] **E-13** — Hide measures and calculated columns built on hidden columns from restricted roles · *Medium, effort M* · ✅ **done** `4bed887a`
+- [x] **E-14** — Compute dataset row and column counts after row and column security · *Medium, effort M* · ✅ **done** `1118a825` `037da8a3`
+- [x] **E-15** — Enforce unique role names per organization · *Medium, effort M* · ✅ **done** `a6e5466e`
+- [x] **E-16** — Add search, filters and pagination to the Users list · *Medium, effort M* · ✅ **done** `6909fad8`
+- [x] **E-17** — Make the LLM "Test connection" fail fast with a readable reason · *Medium, effort S* · ✅ **done** `68e57f0a`
+- [x] **E-18** — Let admins set and see an org unit's "match value" · *Medium, effort S* · ✅ **done** `ee8f2705` + round 2 `5dd23346` `4757635d`
 
 ### Sharing, publishing, templates & suggestions (11)
 
-- [ ] **F-04** — Restore an archived dashboard as a draft (or ask before re-publishing) · *Medium, effort S*
-- [ ] **F-05** — List team-shared dashboards under "My team" even when the reader is also named personally · *Medium, effort S*
-- [ ] **F-06** — Default a new person share to "Can view" · *Medium, effort S*
-- [ ] **F-07** — Make the New-user role select start empty ("Select a role…") · *Medium, effort S*
-- [ ] **F-08** — Confirm before publishing to (or unpublishing from) the whole organisation · *Medium, effort S*
-- [ ] **F-09** — Guard the org-wide "Ask for approval before publishing" switch · *Medium, effort S*
-- [ ] **F-10** — Add a "Publish these changes" action to the Publishing tab · *Medium, effort S*
-- [ ] **F-12** — Do not show row counts in the measure's currency format, and label the count donut correctly · *Medium, effort S*
-- [ ] **F-13** — Template mapping: prefer a country-level column for "place" and do not reuse the main split's column · *Medium, effort S*
-- [ ] **F-14** — Stop cutting small-cardinality suggested bar charts at 12 categories · *Medium, effort S*
-- [ ] **F-16** — Make model-widget display options (Key influencers) findable and stop accidental Duplicate · *Medium, effort M*
+- [x] **F-04** — Restore an archived dashboard as a draft (or ask before re-publishing) · *Medium, effort S* · ✅ **done** `1ca89f6b`
+- [x] **F-05** — List team-shared dashboards under "My team" even when the reader is also named personally · *Medium, effort S* · ✅ **done** `9f3c2295`
+- [x] **F-06** — Default a new person share to "Can view" · *Medium, effort S* · ✅ **done** `92fd8e7f`
+- [x] **F-07** — Make the New-user role select start empty ("Select a role…") · *Medium, effort S* · ✅ **done** `3feb502c`
+- [x] **F-08** — Confirm before publishing to (or unpublishing from) the whole organisation · *Medium, effort S* · ✅ **done** `125ae1be`
+- [x] **F-09** — Guard the org-wide "Ask for approval before publishing" switch · *Medium, effort S* · ✅ **done** `c77b289f` + round 2 `24de856b`
+- [x] **F-10** — Add a "Publish these changes" action to the Publishing tab · *Medium, effort S* · ✅ **done** `06d3cd9d`
+- [x] **F-12** — Do not show row counts in the measure's currency format, and label the count donut correctly · *Medium, effort S* · ✅ **done** `c3c7c926`
+- [x] **F-13** — Template mapping: prefer a country-level column for "place" and do not reuse the main split's column · *Medium, effort S* · ✅ **done** `bf60d815`
+- [x] **F-14** — Stop cutting small-cardinality suggested bar charts at 12 categories · *Medium, effort S* · ✅ **done** `999c0249` + round 2 `858b3479`
+- [x] **F-16** — Make model-widget display options (Key influencers) findable and stop accidental Duplicate · *Medium, effort M* · ✅ **done** `732a05f8` + round 2 `14138961`
 
 ### Data, upload, connections & guided setup (21)
 
-- [ ] **B-11** — Fail fast and say so when the AI model is unreachable · *Medium, effort L*
-- [ ] **B-12** — Return the plain data checks first, add AI items later · *Medium, effort M*
-- [ ] **B-15** — Stop the 404 on every dataset page load (GET /datasets/{id}/analysis) · *Medium, effort S*
-- [ ] **B-16** — Let the "Add step" menu close on Esc and outside click · *Medium, effort S*
-- [ ] **B-17** — Draw the chart for insight cards about calculated columns (empty OUTLIER IMPACT tile) · *Medium, effort S*
-- [ ] **B-18** — Keep the preselected dataset on Ask when the AI is offline · *Medium, effort M*
-- [ ] **B-19** — Make the DirectQuery Data tab stable and honest (paged ORDER BY, disabled tools) · *Medium, effort M*
-- [ ] **B-22** — Reject unsupported files when they are added to the upload queue · *Medium, effort S*
-- [ ] **B-23** — Mark connection types whose driver is not installed in the type grid · *Medium, effort S*
-- [ ] **B-24** — Make the import dataset name easy to replace and less collision-prone · *Medium, effort S*
-- [ ] **B-25** — Fix "We read 0 rows" on a new DirectQuery dataset · *Medium, effort S*
-- [ ] **B-27** — Do not hide a user's own datasets as "test-looking" in pickers · *Medium, effort S*
-- [ ] **B-28** — Widen the Inspect outliers dialog so the inspected column is visible · *Medium, effort S*
-- [ ] **B-29** — Refresh the connection review page when a sync finishes · *Medium, effort M*
-- [ ] **B-30** — Say "row count unknown" instead of "0 rows", and pluralise "tables" · *Medium, effort S*
-- [ ] **B-31** — Make "Show details" in setup step 1 not leave the wizard by surprise · *Medium, effort S*
-- [ ] **B-32** — Recount rows and columns after one-click fixes · *Medium, effort M*
-- [ ] **B-33** — Confirm before one-click fixes change a dataset already in use · *Medium, effort S*
-- [ ] **B-34** — Add the two missed checks: numbers stored as text in the source, and end-before-start dates · *Medium, effort M*
-- [ ] **B-35** — Let the dashboard designer answer "by <entity>" through a linked key · *Medium, effort L*
-- [ ] **B-36** — Stop proposing meaningless derived metrics and totals · *Medium, effort M*
+- [x] **B-11** — Fail fast and say so when the AI model is unreachable · *Medium, effort L* · ✅ **done** `0dcc5586` `12cd8462`
+- [x] **B-12** — Return the plain data checks first, add AI items later · *Medium, effort M* · ✅ **done** `c11ae02c`
+- [x] **B-15** — Stop the 404 on every dataset page load (GET /datasets/{id}/analysis) · *Medium, effort S* · ✅ **done** `261bd9b9`
+- [x] **B-16** — Let the "Add step" menu close on Esc and outside click · *Medium, effort S* · ✅ **done** `a296dbe4`
+- [x] **B-17** — Draw the chart for insight cards about calculated columns (empty OUTLIER IMPACT tile) · *Medium, effort S* · ✅ **done** `2685a123`
+- [x] **B-18** — Keep the preselected dataset on Ask when the AI is offline · *Medium, effort M* · ✅ **done** `1d4da9d0` + round 2 `9da68f35`
+- [x] **B-19** — Make the DirectQuery Data tab stable and honest (paged ORDER BY, disabled tools) · *Medium, effort M* · ✅ **done** `1c049626`
+- [x] **B-22** — Reject unsupported files when they are added to the upload queue · *Medium, effort S* · ✅ **done** `8aa2d25b`
+- [x] **B-23** — Mark connection types whose driver is not installed in the type grid · *Medium, effort S* · ✅ **done** `60f7c218`
+- [x] **B-24** — Make the import dataset name easy to replace and less collision-prone · *Medium, effort S* · ✅ **done** `673c0c8d`
+- [x] **B-25** — Fix "We read 0 rows" on a new DirectQuery dataset · *Medium, effort S* · ✅ **done** `e3f06a11`
+- [x] **B-27** — Do not hide a user's own datasets as "test-looking" in pickers · *Medium, effort S* · ✅ **done** `a15d2ab6`
+- [x] **B-28** — Widen the Inspect outliers dialog so the inspected column is visible · *Medium, effort S* · ✅ **done** `f39b2a52`
+- [x] **B-29** — Refresh the connection review page when a sync finishes · *Medium, effort M* · ✅ **done** `a9b65348`
+- [x] **B-30** — Say "row count unknown" instead of "0 rows", and pluralise "tables" · *Medium, effort S* · ✅ **done** `9e531904`
+- [x] **B-31** — Make "Show details" in setup step 1 not leave the wizard by surprise · *Medium, effort S* · ✅ **done** `ad99ed43`
+- [x] **B-32** — Recount rows and columns after one-click fixes · *Medium, effort M* · ✅ **done** `a6dbbbca`
+- [x] **B-33** — Confirm before one-click fixes change a dataset already in use · *Medium, effort S* · ✅ **done** `6e8f0bc6`
+- [x] **B-34** — Add the two missed checks: numbers stored as text in the source, and end-before-start dates · *Medium, effort M* · ✅ **done** `169c8a8d`
+- [x] **B-35** — Let the dashboard designer answer "by <entity>" through a linked key · *Medium, effort L* · ✅ **done** round 2 `41a9d5e7`
+- [x] **B-36** — Stop proposing meaningless derived metrics and totals · *Medium, effort M* · ✅ **done** `d999762b` + round 2 `446237fb`
 
 ### Dashboards, builder & charts (18)
 
-- [ ] **C-11** — Default percentages and ratios to Average, never Sum, on every role and every aggregation path · *Medium, effort S*
-- [ ] **C-12** — Keep the hover toolbars inside their own tile, in View and Edit · *Medium, effort S*
-- [ ] **C-13** — Fit KPI, card and gauge numbers inside their tiles · *Medium, effort S*
-- [ ] **C-14** — Show the "Needs Dimension" placeholder for a pie (or any category chart) given only a measure · *Medium, effort S*
-- [ ] **C-15** — Label sunburst segments and colour them by top-level branch · *Medium, effort S*
-- [ ] **C-16** — Make box-plot category labels readable · *Medium, effort S*
-- [ ] **C-17** — Stop the false "changed in another session" banner after my own classification or comment · *Medium, effort S*
-- [ ] **C-18** — Stop the Suggest pane counting distinct years as if they were identifiers · *Medium, effort S*
-- [ ] **C-19** — Make widget resize reliable, with no page text selected during the drag · *Medium, effort S*
-- [ ] **C-20** — Add "Duplicate" (Save as copy) to the dashboard card menu · *Medium, effort M*
-- [ ] **C-21** — Add width × height inputs for a Custom page size · *Medium, effort M*
-- [ ] **C-22** — Give dual-axis charts enough width when added or auto-laid-out · *Medium, effort S*
-- [ ] **C-23** — Make "Split into multiples by" a required data role for Small multiples · *Medium, effort S*
-- [ ] **C-24** — Show the whole time range on a dual-axis time series by default · *Medium, effort S*
-- [ ] **C-26** — Use one picker interaction everywhere: apply the choice on click in multi-field roles · *Medium, effort S*
-- [ ] **C-27** — Accept a field dropped onto a role in the Properties panel · *Medium, effort S*
-- [ ] **C-28** — Let the field picker take the single match on Enter, and give each option a distinct accessible name · *Medium, effort S*
-- [ ] **C-29** — Show one readable count per bubble on the World Sales Map "Origin density" tile (QA MAP-02) · *Medium, effort S*
+- [x] **C-11** — Default percentages and ratios to Average, never Sum, on every role and every aggregation path · *Medium, effort S* · ✅ **done** `3d28f12c` + round 2 `cc55316e`
+- [x] **C-12** — Keep the hover toolbars inside their own tile, in View and Edit · *Medium, effort S* · ✅ **done** `fea8651f` + round 2 `408734be`
+- [x] **C-13** — Fit KPI, card and gauge numbers inside their tiles · *Medium, effort S* · ✅ **done** `62cf9993` + round 2 `62be2d4c`
+- [x] **C-14** — Show the "Needs Dimension" placeholder for a pie (or any category chart) given only a measure · *Medium, effort S* · ✅ **done** `a3621ca1`
+- [x] **C-15** — Label sunburst segments and colour them by top-level branch · *Medium, effort S* · ✅ **done** `f01f3b28`
+- [x] **C-16** — Make box-plot category labels readable · *Medium, effort S* · ✅ **done** `0ba650f2` + round 2 `3f90b9f8`
+- [x] **C-17** — Stop the false "changed in another session" banner after my own classification or comment · *Medium, effort S* · ✅ **done** `da356a7a` + round 2 `3b5ee2ff`
+- [x] **C-18** — Stop the Suggest pane counting distinct years as if they were identifiers · *Medium, effort S* · ✅ **done** `1dcb03ea` + round 2 `652c4291`
+- [x] **C-19** — Make widget resize reliable, with no page text selected during the drag · *Medium, effort S* · ✅ **done** `f903ee26` + round 2 `7427ee4f`
+- [x] **C-20** — Add "Duplicate" (Save as copy) to the dashboard card menu · *Medium, effort M* · ✅ **done** `dee483ec` + round 2 `c864dcfc`
+- [x] **C-21** — Add width × height inputs for a Custom page size · *Medium, effort M* · ✅ **done** round 2 `cf6b5e41` `8a097419`
+- [x] **C-22** — Give dual-axis charts enough width when added or auto-laid-out · *Medium, effort S* · ✅ **done** `b249eeee`
+- [x] **C-23** — Make "Split into multiples by" a required data role for Small multiples · *Medium, effort S* · ✅ **done** `0e65e6c6` + round 2 `eca493f6`
+- [x] **C-24** — Show the whole time range on a dual-axis time series by default · *Medium, effort S* · ✅ **done** `b3eb40ca` + round 2 `fed35edb` `28bd7c59`
+- [x] **C-26** — Use one picker interaction everywhere: apply the choice on click in multi-field roles · *Medium, effort S* · ✅ **done** `10b256d1`
+- [x] **C-27** — Accept a field dropped onto a role in the Properties panel · *Medium, effort S* · ✅ **done** `4f19426f`
+- [x] **C-28** — Let the field picker take the single match on Enter, and give each option a distinct accessible name · *Medium, effort S* · ✅ **done** `ad84a293` + round 2 `d228e51a`
+- [x] **C-29** — Show one readable count per bubble on the World Sales Map "Origin density" tile (QA MAP-02) · *Medium, effort S* · ✅ **done** `3e9be7bd` + round 2 `2fd968c2`
 
 ### Shell, Ask AI, Insights, automations & monitoring (16)
 
-- [ ] **AD-06** — Make "View full scan →" show the scan just seen, and stop the analysis 404s (INS-02) · *Medium, effort M*
-- [ ] **AD-07** — Stop labelling non-significant per-row findings STANDOUT, and chart them the way they are stated · *Medium, effort M*
-- [ ] **AD-08** — Keep the chosen dataset when an Insights filter chip hides it · *Medium, effort S*
-- [ ] **AD-09** — Fix the Ask AI composer draft: clear it on New chat, and disable "Edit question" while paused · *Medium, effort S*
-- [ ] **AD-10** — Say "AI is not allowed for this dataset" before the first question · *Medium, effort S*
-- [ ] **AD-11** — Stop suggesting SUM of latitude, percentages, body measures and per-row ID columns in Ask AI · *Medium, effort S*
-- [ ] **AD-12** — Keep the deep-link target through login · *Medium, effort S*
-- [ ] **AD-13** — Replace the bare "Loading…" during auth bootstrap with the app loader · *Medium, effort S*
-- [ ] **AD-14** — Close the notifications panel on Escape, on route change and when the command palette opens · *Medium, effort S*
-- [ ] **AD-15** — Lay out the Home stat cards 2×2 on phones · *Medium, effort S*
-- [ ] **AD-16** — Show the demo weekly schedule (and paused or on-demand schedules) on Refresh & jobs, not "—" · *Medium, effort S*
-- [ ] **AD-17** — List automation runs and data-check runs in Monitoring · *Medium, effort M*
-- [ ] **AD-18** — Write Activity details in plain words (no "key=None" or "grant:3:") · *Medium, effort M*
-- [ ] **AD-19** — Add paging, filters and row detail to Activity; decide on logging Ask AI · *Medium, effort M*
-- [ ] **AD-20** — Stack the Monitoring tables (Activity, Jobs, Deliveries) as cards on phones · *Medium, effort S*
-- [ ] **AD-21** — Stop the automation row squeezing the dataset name to one letter per line on phones · *Medium, effort S*
+- [x] **AD-06** — Make "View full scan →" show the scan just seen, and stop the analysis 404s (INS-02) · *Medium, effort M* · ✅ **done** `c2cf8f19`
+- [x] **AD-07** — Stop labelling non-significant per-row findings STANDOUT, and chart them the way they are stated · *Medium, effort M* · ✅ **done** `e0c175da`
+- [x] **AD-08** — Keep the chosen dataset when an Insights filter chip hides it · *Medium, effort S* · ✅ **done** `121b9415`
+- [x] **AD-09** — Fix the Ask AI composer draft: clear it on New chat, and disable "Edit question" while paused · *Medium, effort S* · ✅ **done** `e2eccfd6`
+- [x] **AD-10** — Say "AI is not allowed for this dataset" before the first question · *Medium, effort S* · ✅ **done** `47cd8138`
+- [x] **AD-11** — Stop suggesting SUM of latitude, percentages, body measures and per-row ID columns in Ask AI · *Medium, effort S* · ✅ **done** `46a66163` + round 2 `847c37cc`
+- [x] **AD-12** — Keep the deep-link target through login · *Medium, effort S* · ✅ **done** (with AD-13) `35e2ad0a`
+- [x] **AD-13** — Replace the bare "Loading…" during auth bootstrap with the app loader · *Medium, effort S* · ✅ **done** (with AD-12) `35e2ad0a`
+- [x] **AD-14** — Close the notifications panel on Escape, on route change and when the command palette opens · *Medium, effort S* · ✅ **done** `696d002b`
+- [x] **AD-15** — Lay out the Home stat cards 2×2 on phones · *Medium, effort S* · ✅ **done** `f14695c1`
+- [x] **AD-16** — Show the demo weekly schedule (and paused or on-demand schedules) on Refresh & jobs, not "—" · *Medium, effort S* · ✅ **done** `a8346153`
+- [x] **AD-17** — List automation runs and data-check runs in Monitoring · *Medium, effort M* · ✅ **done** `2687a49b`
+- [x] **AD-18** — Write Activity details in plain words (no "key=None" or "grant:3:") · *Medium, effort M* · ✅ **done** `ae51a9f5`
+- [x] **AD-19** — Add paging, filters and row detail to Activity; decide on logging Ask AI · *Medium, effort M* · ✅ **done** `b020e3d4`
+- [x] **AD-20** — Stack the Monitoring tables (Activity, Jobs, Deliveries) as cards on phones · *Medium, effort S* · ✅ **done** `f126d9bd`
+- [x] **AD-21** — Stop the automation row squeezing the dataset name to one letter per line on phones · *Medium, effort S* · ✅ **done** `ec8e8248`
 
 ## Decisions needed (product choices, not bugs)
 
 Agree on these first. Each one has its options in the detailed section.
 
-- [ ] **E-08** — Define a per-role capability (permission) matrix · *High, effort L*
-- [ ] **B-20** — Explain why data checks are not offered for live datasets · *Medium, effort S*
-- [ ] **B-21** — Decide on dataset-scoped glossary terms and a column link from the Columns tab · *Medium, effort L*
-- [ ] **B-26** — Decide whether the seeded demo connection is synced at seed time · *Medium, effort S*
-- [ ] **C-25** — Decide how to present the negative revenue axis on daily time series · *Medium, effort S*
-- [ ] **C-30** — Decide whether "Create a dashboard" may proceed with an empty name (QA DASH-04) · *Medium, effort S*
-- [ ] **F-11** — Add a per-user "AI off" choice to the top-bar model picker · *Medium, effort M*
-- [ ] **F-15** — Add "Add all shown" to the builder's Suggestions pane · *Medium, effort M*
-- [ ] **AD-22** — Decide on automation management (name, edit, delete, schedule/trigger), and allow delete/retry for stopped runs · *Medium, effort S*
+- [x] **E-08** — Define a per-role capability (permission) matrix · *High, effort L* · ✅ **done** round 2 `10865916` `574524a1`
+- [x] **B-20** — Explain why data checks are not offered for live datasets · *Medium, effort S* · ✅ **done** `8e4b2565`
+- [x] **B-21** — Decide on dataset-scoped glossary terms and a column link from the Columns tab · *Medium, effort L* · ✅ **done** round 2 `c1091381`
+- [x] **B-26** — Decide whether the seeded demo connection is synced at seed time · *Medium, effort S* · ✅ **done** `70a708c6`
+- [x] **C-25** — Decide how to present the negative revenue axis on daily time series · *Medium, effort S* · ✅ **done** (decision: keep data; cheap axis treatment) `b3821164`
+- [x] **C-30** — Decide whether "Create a dashboard" may proceed with an empty name (QA DASH-04) · *Medium, effort S* · ✅ **done** (decision: require a name) `eade000f`
+- [x] **F-11** — Add a per-user "AI off" choice to the top-bar model picker · *Medium, effort M* · ✅ **done** (decision: build it) `216869d9`
+- [x] **F-15** — Add "Add all shown" to the builder's Suggestions pane · *Medium, effort M* · ✅ **done** (decision: build it) `a7abc97f`
+- [x] **AD-22** — Decide on automation management (name, edit, delete, schedule/trigger), and allow delete/retry for stopped runs · *Medium, effort S* · ✅ **done** (decision: stopped runs only) `5194b095`
 
 Several fix tasks also include a small decision step: B-03, E-02 (store super-admin as a DB flag?), F-02 (document what "no downloads" can and can't guarantee), AD-05 (Pinned section vs remove), AD-17 and AD-19 (what to log).
 
