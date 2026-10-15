@@ -692,6 +692,21 @@ async def test_every_widget_returns_data_the_renderer_can_actually_draw(db_sessi
     assert checked == expected_checked
 
 
+async def test_no_seeded_widget_is_left_with_a_roles_only_config(db_session, two_orgs):
+    """C-03: the builder's placeholder reads the flat role keys the panel edits.
+    A seeded map with only a nested `roles` dict (the World Sales Map contour
+    tile) counted as unfinished and drew "Needs Latitude · Longitude"."""
+    from app.services.widget_roles import missing_roles
+    org_id = two_orgs["a"]["org"].id
+    await _seed(db_session, org_id)
+    for report in await _loaded_reports(db_session, org_id):
+        for w in _widgets(report):
+            assert "roles" not in (w.config or {}), f"{report.name} / {w.title}: {w.config}"
+            if w.widget_type.startswith("map_"):
+                # (A raw table legitimately runs without its "required" dimension.)
+                assert missing_roles(w.widget_type, w.config) == [], f"{report.name} / {w.title}"
+
+
 async def test_a_configured_column_list_is_the_column_list_that_comes_back(db_session, two_orgs):
     """shape_series answers an unrecognised `columns` key by dumping every column in
     the file. The result is a perfectly valid, non-empty table — of the wrong thing —

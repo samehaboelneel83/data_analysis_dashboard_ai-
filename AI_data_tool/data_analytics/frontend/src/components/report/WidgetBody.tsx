@@ -327,6 +327,8 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
     const drawable = data?.rows?.length || data?.matrix?.length || data?.cells?.length
       || data?.bars?.length || data?.links?.length || data?.forecast?.length
       || data?.points?.length || data?.series?.length || (data?.value != null ? 1 : 0)
+      // A contour answers with a density `grid`, a tree/network with `nodes` (C-03).
+      || data?.grid?.length || data?.nodes?.length
     const nothingToDraw = !data || !drawable
     // A chart with no dimension is answered by the shaper's raw-table branch
     // (every column, row by row) -- and a line renderer then draws that as a

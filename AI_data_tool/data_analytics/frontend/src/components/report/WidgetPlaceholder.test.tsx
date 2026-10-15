@@ -15,6 +15,22 @@ describe('missingRequiredRoles', () => {
   })
 })
 
+describe('C-03: a config whose roles sit in a nested `roles` dict', () => {
+  it('counts the nested roles as assigned, as the server does', () => {
+    expect(missingRequiredRoles({ widget_type: 'map_contour',
+      config: { roles: { lat: 'a', lon: 'b' } } } as never)).toEqual([])
+    expect(missingWidgetOptions({ widget_type: 'map_layers',
+      config: { roles: { lat: 'a', lon: 'b' } } } as never)).toEqual([])
+  })
+  it('a contour result (a grid, no rows) is drawn, not replaced by the placeholder', () => {
+    render(<WidgetBody widget={{ id: 1, page_id: 1, widget_type: 'map_contour', title: 'Contour',
+      config: { lat: 'a', lon: 'b' }, layout: { x: 0, y: 0, w: 6, h: 4 } } as never}
+      data={{ type: 'geo_contour', grid: [[0, 1], [1, 2]] }}
+      localSelected={null} onClickPoint={() => {}} broadcasts={false} />)
+    expect(screen.queryByTestId('widget-placeholder')).toBeNull()
+  })
+})
+
 describe('familyOf', () => {
   it('maps widget types to a sample shape', () => {
     expect(familyOf('bar')).toBe('bars')
