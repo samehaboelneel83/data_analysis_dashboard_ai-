@@ -31,6 +31,20 @@ describe('C-03: a config whose roles sit in a nested `roles` dict', () => {
   })
 })
 
+describe('C-10: an unassigned point or bubble map is unfinished', () => {
+  it('needs a country or a coordinate pair', () => {
+    for (const wt of ['map_points', 'map_bubbles']) {
+      expect(missingWidgetOptions({ widget_type: wt, config: {} } as never)).toEqual(['Country or Latitude/Longitude'])
+      expect(missingWidgetOptions({ widget_type: wt, config: { dimension: 'country' } } as never)).toEqual([])
+      expect(missingWidgetOptions({ widget_type: wt, config: { lat: 'a', lon: 'b' } } as never)).toEqual([])
+    }
+  })
+  it('names the missing half of a coordinate pair', () => {
+    expect(missingWidgetOptions({ widget_type: 'map_points', config: { lat: 'a' } } as never)).toEqual(['Longitude'])
+    expect(missingWidgetOptions({ widget_type: 'map_points', config: { lon: 'b', dimension: 'c' } } as never)).toEqual(['Latitude'])
+  })
+})
+
 describe('familyOf', () => {
   it('maps widget types to a sample shape', () => {
     expect(familyOf('bar')).toBe('bars')

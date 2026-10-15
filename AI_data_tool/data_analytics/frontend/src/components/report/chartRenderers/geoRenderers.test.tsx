@@ -840,3 +840,16 @@ describe('a map played through time', () => {
     expect(container.querySelector('[data-testid="map-zoom-controls"]')).not.toBeNull()
   })
 })
+
+describe('C-10: the country-match note belongs to country mode only', () => {
+  it('a raw-table answer (no roles yet) is not "300 rows did not match a country"', () => {
+    render(<GeoPointsRenderer {...base} data={{ type: 'table' }}
+      rows={[{ from_city: 'Paris', shipments: 4 }, { from_city: 'Lagos', shipments: 2 }] as any} />)
+    expect(screen.queryByTestId('geo-unmatched')).toBeNull()
+  })
+  it('coordinate rows never count a row as an unmatched country', () => {
+    render(<GeoPointsRenderer {...base} data={{ type: 'geo_points' }}
+      rows={[{ lat: 48.85, lon: 2.35, name: 'Paris', value: 4 }, { name: 'Nowhere', value: 1 }] as any} />)
+    expect(screen.queryByTestId('geo-unmatched')).toBeNull()
+  })
+})

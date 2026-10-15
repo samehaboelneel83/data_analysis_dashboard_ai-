@@ -87,6 +87,17 @@ export function missingWidgetOptions(widget: Pick<Widget, 'widget_type' | 'confi
     return hasRole('category') || (hasRole('lat') && hasRole('lon'))
       ? [] : ['Country or Latitude/Longitude']
   }
+  if (wt === 'map_points' || wt === 'map_bubbles') {
+    // C-10: unassigned, the server answers with the raw table and the map
+    // called every row "did not match a country". Half a coordinate pair is
+    // named: the server refuses it rather than guessing country mode.
+    const hasRole = (r: string) => {
+      const v = roleValue(cfg, r)
+      return !(v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0))
+    }
+    if (hasRole('lat') !== hasRole('lon')) return [hasRole('lat') ? 'Longitude' : 'Latitude']
+    return hasRole('category') || hasRole('lat') ? [] : ['Country or Latitude/Longitude']
+  }
   if (wt === 'model_score') return has('prediction_model_id') ? [] : ['Saved model']
   if (wt === 'model_compare') return has('compare') ? [] : ['Models to compare']
   return []

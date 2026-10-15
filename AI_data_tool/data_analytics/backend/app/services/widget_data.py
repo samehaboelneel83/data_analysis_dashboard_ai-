@@ -2773,6 +2773,19 @@ def shape_vector_plot(df: pd.DataFrame, config: dict) -> dict:
     return {"type": "vector_plot", "x": x, "y": y, "size": size, "direction": direction, "rows": rows, "total": len(df)}
 
 
+def _coordinate_problem(df: pd.DataFrame, lat: str | None, lon: str | None) -> str | None:
+    """Why a lat/lon pair cannot place points, or None when it can."""
+    for name, col in (("Latitude", lat), ("Longitude", lon)):
+        if not col:
+            return f"{name} is not assigned. Assign both Latitude and Longitude, or clear them to place by country."
+        if col not in df.columns:
+            return f"{name} column '{col}' is not in this data."
+        s = df[col]
+        if not pd.api.types.is_numeric_dtype(s) and pd.to_numeric(s, errors="coerce").notna().sum() == 0 and s.notna().any():
+            return f"{name} column '{col}' holds no numbers."
+    return None
+
+
 def shape_geo_points(df: pd.DataFrame, config: dict) -> dict:
     """Rows for a point/bubble map.
 
@@ -2786,6 +2799,13 @@ def shape_geo_points(df: pd.DataFrame, config: dict) -> dict:
     """
     roles = resolve_roles(config)
     lat, lon = roles.get("lat"), roles.get("lon")
+    if lat or lon:
+        # C-10: coordinates assigned means coordinate mode. Half a pair (or a
+        # column that is not one) used to fall back silently to country mode
+        # on whatever sat in Country -- a city -- and plot a wrong dot.
+        problem = _coordinate_problem(df, lat, lon)
+        if problem:
+            return {"type": "error", "code": "incomplete_coordinates", "message": problem}
     if not (lat and lon and lat in df.columns and lon in df.columns):
         return shape_series(df, config)
 

@@ -68,6 +68,7 @@ function GeoPointMapRenderer({ rows, data, cfg, measureFmt, ruleStyles, variant,
     const e = (data as { fit_extent?: [number, number][] } | undefined)?.fit_extent
     return Array.isArray(e) ? e.map(p => [p[0], p[1]] as [number, number]) : []
   }, [data])
+  const rawTable = (data as { type?: string } | undefined)?.type === 'table'
   const coordinateMode = useMemo(() => (rows as Record<string, unknown>[]).some(
     r => typeof r.lat === 'number' && typeof r.lon === 'number'), [rows])
   const { placed, unmatched } = useMemo(() => {
@@ -84,12 +85,16 @@ function GeoPointMapRenderer({ rows, data, cfg, measureFmt, ruleStyles, variant,
         placed.push({ name: String(r.name ?? `${r.lat}, ${r.lon}`), value, coord: [r.lon, r.lat], row })
         return
       }
+      // C-10: only COUNTRY mode matches names. In coordinate mode a row
+      // without coordinates is dropped (the server counts those), and a raw
+      // table (roles not assigned yet) is no country list at all.
+      if (coordinateMode || rawTable) return
       const f = matchCountry(r.name)
       if (!f) { unmatched++; return }
       placed.push({ name: f.properties.name, value, coord: countryCentroid(f), row })
     })
     return { placed, unmatched }
-  }, [rows])
+  }, [rows, coordinateMode, rawTable])
 
   /**
    * Author-placed annotations: "our new depot", "the flood line". Read from the
