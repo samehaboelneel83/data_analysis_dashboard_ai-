@@ -29,6 +29,16 @@ describe('FindingChart', () => {
     expect(await screen.findAllByTestId('mini-bar-row')).toHaveLength(2)
   })
 
+  it('charts a finding about a calculated column, sending that column with the query (B-17)', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: '0-10', value: 3 }] } as any)
+    const profit = { name: 'profit', expression: 'revenue - cost', dtype: 'numeric' }
+    render(<FindingChart datasetId={5} columnTypes={COLUMN_TYPES} calculatedColumns={[profit]}
+      finding={{ kind: 'outlier_impact', title: '85 outlying rows move the average profit', columns: ['profit'] }} />)
+    await waitFor(() => expect(widgetDataApi.query).toHaveBeenCalledWith(
+      5, { measure: 'profit', bins: 20 }, [profit], 'histogram'))
+    expect(await screen.findAllByTestId('mini-bar-row')).toHaveLength(1)
+  })
+
   it('says what the bars are of', async () => {
     // Each bar names its own category; nothing named the MEASURE, so a
     // reader could see "APAC 40" without knowing what 40 counts. That is the

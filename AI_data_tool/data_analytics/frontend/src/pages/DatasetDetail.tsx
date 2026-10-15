@@ -1381,7 +1381,7 @@ export default function DatasetDetail() {
                               {/* QA3 D5: own direction; numbers and ranges keep their order */}
                               <div dir="auto" style={{ fontSize: 13, fontWeight: 600, marginBottom: 3 }}>{isolateNumbers(sayText(tr, f.title, (f as { title_i18n?: { key: string; vars?: Record<string, unknown> } | null }).title_i18n as never))}</div>
                               <div dir="auto" style={{ fontSize: 11, color: 'var(--muted)' }}>{isolateNumbers(sayText(tr, f.detail, (f as { detail_i18n?: unknown }).detail_i18n as never))}</div>
-                              <FindingChart datasetId={ds.id} finding={f}
+                              <FindingChart datasetId={ds.id} finding={f} calculatedColumns={calcCols}
                                 columnTypes={Object.fromEntries(ds.columns.map(c => [c.name, c.dtype ?? '']))} />
                             </div>
                           ))}

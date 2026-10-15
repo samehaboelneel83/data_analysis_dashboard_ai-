@@ -210,7 +210,7 @@ export default function InsightsHub() {
                       <strong>{isolateNumbers(sayText(t, f.title, (f as { title_i18n?: { key: string; vars?: Record<string, unknown> } | null }).title_i18n as never))}</strong>
                       {f.detail && <span style={{ color: 'var(--muted)' }}> — {isolateNumbers(sayText(t, f.detail, (f as { detail_i18n?: unknown }).detail_i18n as never))}</span>}
                       {current && (
-                        <FindingChart datasetId={current.id} finding={f}
+                        <FindingChart datasetId={current.id} finding={f} calculatedColumns={current.calculated_columns ?? []}
                           columnTypes={Object.fromEntries(current.columns.map(c => [c.name, c.dtype ?? '']))} />
                       )}
                     </li>
