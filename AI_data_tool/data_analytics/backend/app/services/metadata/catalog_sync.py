@@ -947,6 +947,12 @@ async def stage_link_datasets(context: CatalogContext) -> dict:
 
 # ── runner ──────────────────────────────────────────────────────────────────
 
+#: The stages of a catalog sync, in the order run_catalog_sync runs them; the
+#: UI shows "step x of len(STAGE_NAMES)" from it.
+STAGE_NAMES = ("discover", "sample", "profile", "infer_keys",
+               "describe", "entities", "drift", "link_datasets")
+
+
 async def run_catalog_sync(
     db, source: DataSource, *, cache, llm_client=None, allow_llm: bool = False,
     source_config: dict | None = None, trigger: str = "manual",

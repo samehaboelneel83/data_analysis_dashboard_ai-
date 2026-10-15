@@ -191,6 +191,16 @@ describe('SourceReview', () => {
       'A sync is already running for this source'))
   })
 
+  it('says a sync that could not start failed (B-03 regression guard)', async () => {
+    const toast = (await import('react-hot-toast')).default
+    vi.spyOn(metadataApi, 'sync').mockRejectedValue({ response: { status: 500 } })
+    renderPage()
+    await waitFor(() => screen.getByText('Run sync'))
+    fireEvent.click(screen.getByText('Run sync'))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(toast.error).mock.calls[0][0]).not.toBe('A sync is already running for this source')
+  })
+
   it('polls the run and reports progress while it is still going', async () => {
     // The whole reason the sync moved to the background: stages have to become
     // visible DURING the run, not all at once when it finishes.

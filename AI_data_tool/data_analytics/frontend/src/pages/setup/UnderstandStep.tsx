@@ -55,6 +55,9 @@ export default function UnderstandStep({ sourceId, onNext }: { sourceId: number;
   // Bumped on every answer, so polling continues even when an answer is
   // identical to the last one (React skips a render for the same object).
   const [answers, setAnswers] = useState(0)
+  // What happened when "Read the database now" was pressed (B-03): a read
+  // already running (named), or the error -- never a silent reload.
+  const [readMsg, setReadMsg] = useState<{ kind: 'running' | 'error'; text: string } | null>(null)
 
   const load = useCallback(async (fresh = false) => {
     try {
@@ -84,21 +87,59 @@ export default function UnderstandStep({ sourceId, onNext }: { sourceId: number;
     // demo source, or one made before guided setup) reports "syncing" with
     // nothing running, and the page waited forever. Once that is clear, or
     // after the polling stops, it says so and offers to read it now (an
-    // admin's action) and a way back.
-    const neverRead = data.status === 'syncing' && data.sync?.status === 'pending' && !data.sync?.last_synced_at
+    // admin's action) and a way back. B-03: "never read" comes from the real
+    // latest run when the server sends it, not a guess from the source status.
+    const run = data.latest_run
+    const running = run?.status === 'running'
+    const neverRead = data.status === 'syncing' && (run !== undefined
+      ? !running
+      : data.sync?.status === 'pending' && !data.sync?.last_synced_at)
     const stuck = data.status === 'syncing' && (gaveUp || neverRead)
+    const failedRun = data.status === 'failed' && run?.status === 'failed'
     const key = stuck ? (neverRead ? 'setup.u.neverRead' : 'setup.u.slowSync')
       : data.status === 'syncing' ? 'setup.u.syncing' : data.status === 'failed' ? 'setup.u.syncFailed' : 'setup.u.empty'
+    const progress = (r: { started_at: string | null; done: number; total: number }) =>
+      t('setup.u.readingStep', {
+        time: r.started_at ? new Date(r.started_at).toLocaleTimeString(language === 'ar' ? 'ar-u-nu-latn' : undefined,
+          { hour: '2-digit', minute: '2-digit' }) : '—',
+        step: localDigits(String(Math.min(r.done + 1, r.total))), total: localDigits(String(r.total)) })
     const readNow = async () => {
-      try { await metadataApi.sync(sourceId) } catch { /* 409: a run is already going -- just watch it */ }
+      setReadMsg(null)
+      try {
+        await metadataApi.sync(sourceId)
+      } catch (e) {
+        const res = (e as { response?: { status?: number; data?: { detail?: unknown } } })?.response
+        if (res?.status === 409) {
+          // A read is already going: name it instead of pretending to start one.
+          try {
+            const r = await metadataApi.latestSync(sourceId)
+            setReadMsg({ kind: 'running', text: `${t('setup.u.alreadyReading')} ${progress({
+              started_at: r.started_at ?? null, done: (r.stages ?? []).length, total: run?.stages_total ?? 8 })}` })
+          } catch { setReadMsg({ kind: 'running', text: t('setup.u.alreadyReading') }) }
+        } else {
+          const detail = res?.data?.detail
+          const text = typeof detail === 'string' && detail ? detail : t('setup.u.readFailed')
+          toast.error(text)
+          setReadMsg({ kind: 'error', text })
+          return
+        }
+      }
       polls.current = 0; setGaveUp(false); load()
     }
     return (
       <section className="card setup-card" aria-live="polite">
         <p className="setup-card__lead">{t(key)}</p>
-        {stuck && !data.can_edit && <p className="setup-section__sub">{t('setup.u.askAdmin')}</p>}
+        {data.status === 'syncing' && running && run && (
+          <p className="setup-section__sub">{progress({ started_at: run.started_at, done: run.stages_done, total: run.stages_total })}</p>
+        )}
+        {failedRun && run?.error && <p className="setup-section__sub">{run.error}</p>}
+        {readMsg && (
+          <p className={readMsg.kind === 'error' ? 'setup-ai setup-ai--error' : 'setup-section__sub'}
+            role={readMsg.kind === 'error' ? 'alert' : undefined}>{readMsg.text}</p>
+        )}
+        {(stuck || failedRun) && !data.can_edit && <p className="setup-section__sub">{t('setup.u.askAdmin')}</p>}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {stuck && data.can_edit && (
+          {(stuck || failedRun) && data.can_edit && (
             <button type="button" className="btn btn-primary btn-sm" onClick={() => void readNow()}>
               <RefreshCw size={13} aria-hidden /> {t('setup.u.readNow')}
             </button>

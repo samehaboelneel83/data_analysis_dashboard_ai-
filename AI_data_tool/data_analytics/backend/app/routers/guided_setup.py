@@ -530,6 +530,25 @@ def _since(state: dict) -> str | None:
     return state.get("at") if state.get("pending") else None
 
 
+async def _latest_run(db: AsyncSession, source: DataSource) -> dict | None:
+    """The connection's latest read (SyncRun), so step 1 can say what is really
+    happening -- running (step x of n), failed (and why) or never read -- rather
+    than guess from source.sync_status (B-03)."""
+    from ..models.models import SyncRun
+    from ..services.metadata.catalog_sync import STAGE_NAMES
+    run = (await db.execute(select(SyncRun).where(SyncRun.data_source_id == source.id)
+                            .order_by(SyncRun.id.desc()).limit(1))).scalar_one_or_none()
+    if run is None:
+        return None
+    stages = run.stages or []
+    return {"id": run.id, "status": run.status,
+            "started_at": run.started_at.isoformat() if run.started_at else None,
+            "stages_done": len(stages), "stages_total": len(STAGE_NAMES),
+            "current": (STAGE_NAMES[len(stages)] if run.status == "running" and len(stages) < len(STAGE_NAMES)
+                        else None),
+            "error": run.error}
+
+
 async def _summary(db: AsyncSession, user: User, source: DataSource, lang: str,
                    *, fresh: bool = False) -> dict:
     from ..services.guided_setup import understand
@@ -543,6 +562,7 @@ async def _summary(db: AsyncSession, user: User, source: DataSource, lang: str,
                  "last_synced_at": source.last_synced_at.isoformat() if source.last_synced_at else None},
         "can_edit": _may_administer(source, user),
         "language": lang,
+        "latest_run": await _latest_run(db, source),
     }
     if not facts:
         # Nothing catalogued: still syncing, the sync failed, or the database is empty.

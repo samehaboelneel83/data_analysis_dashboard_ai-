@@ -4165,12 +4165,24 @@ export interface SetupTable {
   deprecated: boolean
 }
 
+export interface SetupLatestRun {
+  id: number
+  status: string
+  started_at: string | null
+  stages_done: number
+  stages_total: number
+  current: string | null
+  error: string | null
+}
+
 export interface SetupSummary {
   status: 'ready' | 'syncing' | 'failed' | 'empty'
   source: { id: number; name: string; type: string; allow_ai: boolean }
   sync: { status: string; last_synced_at: string | null }
   can_edit: boolean
   language: 'en' | 'ar'
+  /** The connection's latest read (SyncRun); null when it was never read (B-03). */
+  latest_run?: SetupLatestRun | null
   /** True while the exact date ranges are being measured (the page asks again). */
   ranges_pending?: boolean
   /** Present when status is 'ready'. `pending`: the AI is still writing; ask again shortly. */
