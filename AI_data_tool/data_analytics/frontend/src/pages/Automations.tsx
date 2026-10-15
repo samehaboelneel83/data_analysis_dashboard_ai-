@@ -21,7 +21,7 @@ import {
 import EmptyState from '../components/ui/EmptyState'
 import LoadError from '../components/ui/LoadError'
 import LoadingState from '../components/ui/LoadingState'
-import DatasetListFilter, { useCleanDatasets } from '../components/dataset/DatasetListFilter'
+import DatasetListFilter, { useCleanDatasets, withSelected } from '../components/dataset/DatasetListFilter'
 import { isCertified } from '../lib/cleanDatasets'
 import { formatDate } from '../lib/dateFormat'
 
@@ -166,7 +166,7 @@ export default function Automations() {
           {t('auto.dataset')}
           <select value={chosen} onChange={e => setChosen(e.target.value)} style={{ minWidth: 260 }}>
             <option value="">{t('auto.chooseDataset')}</option>
-            {clean.visible.map(d => <option key={d.id} value={d.id}>{isCertified(d) ? '✓ ' : ''}{d.name}{d.mode === 'directquery' ? ` · ${t('common.live')}` : ''}</option>)}
+            {withSelected(clean.visible, datasets, chosen).map(d => <option key={d.id} value={d.id}>{isCertified(d) ? '✓ ' : ''}{d.name}{d.mode === 'directquery' ? ` · ${t('common.live')}` : ''}{d.hiddenByFilter ? ` · ${t('dsf.hiddenByFilter')}` : ''}</option>)}
           </select>
         </label>
         <DatasetListFilter state={clean} />

@@ -311,4 +311,21 @@ describe("the preview shows only findings worth the reader's attention", () => {
     expect(screen.getByText('Metrics story.')).toBeInTheDocument()
     expect(screen.getByTestId('insights-top-heading')).toHaveTextContent('Metrics')
   })
+
+  it('keeps the chosen dataset when a filter chip hides it, and does not scan another (AD-08)', async () => {
+    const { AuthContext } = await import('../contexts/AuthContext')
+    try { localStorage.removeItem('datalytics:dataset-view') } catch { /* ignore */ }
+    const MINE = { id: 8, name: 'My own', mode: 'import', created_by: 1, created_at: '2026-04-01T00:00:00Z', columns: [] } as any
+    const THEIRS = { id: 9, name: 'Projects', mode: 'import', created_by: 2, created_at: '2026-04-02T00:00:00Z', columns: [] } as any
+    vi.mocked(datasetsApi.list).mockResolvedValue([MINE, THEIRS])
+    render(<AuthContext.Provider value={{ user: { id: 1 } } as any}><MemoryRouter><InsightsHub /></MemoryRouter></AuthContext.Provider>)
+    const picker = await screen.findByLabelText('Dataset') as HTMLSelectElement
+    fireEvent.change(picker, { target: { value: '9' } })
+    await waitFor(() => expect(insightsApi.runShared).toHaveBeenCalledWith(9))
+    fireEvent.click(screen.getByRole('radio', { name: /Mine/ }))
+    expect(picker.value).toBe('9')
+    expect(screen.getByRole('option', { name: /Projects.*hidden by filter/ })).toBeInTheDocument()
+    await new Promise(r => setTimeout(r, 20))
+    expect(insightsApi.runShared).toHaveBeenCalledTimes(1)
+  })
 })

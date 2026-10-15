@@ -368,6 +368,7 @@ export const en = {
   'dsf.mine': 'Mine',
   'dsf.showTest': 'Show {n} test-looking',
   'dsf.hideTest': 'Hide test-looking',
+  'dsf.hiddenByFilter': 'hidden by filter',
   'dsf.badge': 'Certified',
   'dsf.certify': 'Certify',
   'dsf.uncertify': 'Remove certification',

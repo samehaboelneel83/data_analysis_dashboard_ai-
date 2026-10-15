@@ -10,7 +10,7 @@ import LoadingState from '../components/ui/LoadingState'
 import FindingChart from '../components/insights/FindingChart'
 import { Database } from 'lucide-react'
 import { useT } from '../i18n'
-import DatasetListFilter, { useCleanDatasets } from '../components/dataset/DatasetListFilter'
+import DatasetListFilter, { useCleanDatasets, withSelected } from '../components/dataset/DatasetListFilter'
 import { isCertified } from '../lib/cleanDatasets'
 import SetupInsights from '../components/setup/SetupInsights'
 import { isolateNumbers } from '../lib/isolateNumbers'
@@ -140,9 +140,10 @@ export default function InsightsHub() {
               style={{ fontSize: 12, padding: '6px 8px', background: 'var(--surface2)',
                 border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', minWidth: 240 }}>
               <option value="" disabled>{t('insights.choose')}</option>
-              {(noMatches ? clean.visible : filtered).map(d => (
+              {withSelected(noMatches ? clean.visible : filtered, datasets, selected).map(d => (
                 <option key={d.id} value={d.id}>
                   {isCertified(d) ? '✓ ' : ''}{d.name}{d.mode === 'directquery' ? ` · ${t('common.live')}` : ''}
+                  {d.hiddenByFilter ? ` · ${t('dsf.hiddenByFilter')}` : ''}
                 </option>
               ))}
             </select>

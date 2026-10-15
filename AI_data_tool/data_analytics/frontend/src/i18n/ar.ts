@@ -368,6 +368,7 @@ export const ar: Record<MessageKey, string> = {
   'dsf.mine': 'الخاصة بي',
   'dsf.showTest': 'إظهار {n} تبدو تجريبية',
   'dsf.hideTest': 'إخفاء التجريبية',
+  'dsf.hiddenByFilter': 'مخفية بالمرشّح',
   'dsf.badge': 'معتمدة',
   'dsf.certify': 'اعتماد',
   'dsf.uncertify': 'إزالة الاعتماد',
