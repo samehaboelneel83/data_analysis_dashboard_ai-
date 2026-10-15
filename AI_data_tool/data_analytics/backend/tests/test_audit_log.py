@@ -69,3 +69,42 @@ async def test_a_whole_table_export_is_recorded(client, auth_headers, db_session
     assert len(export) == 1
     assert export[0].entity_id == ds.id
     assert "2 rows" in export[0].detail
+
+
+async def _details(db, org_id, action):
+    return [e.detail for e in await _entries(db, org_id) if e.action == action]
+
+
+@pytest.mark.asyncio
+async def test_an_org_quota_is_written_in_words_without_none(client, auth_headers, db_session, two_orgs, monkeypatch):
+    """AD-18: 'queries=None asks=None storage_mb=None…' read as code."""
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "super_admin_emails", "admin-a@example.com")
+    org_b = two_orgs["b"]["org"].id
+    r = await client.put(f"/api/v1/platform/organizations/{org_b}/quota",
+                         json={"max_queries_per_day": 500}, headers=auth_headers["a"])
+    assert r.status_code == 200, r.text
+    [detail] = await _details(db_session, two_orgs["a"]["org"].id, "platform.set_org_quota")
+    assert "None" not in detail and "=" not in detail
+    assert "Daily queries: 500" in detail and "AI asks per day: no limit" in detail
+
+
+@pytest.mark.asyncio
+async def test_share_changes_name_who_not_a_grant_id(client, auth_headers, db_session, two_orgs):
+    from app.models.models import Role
+    role = Role(org_id=two_orgs["a"]["org"].id, name="Sales", is_org_admin=False)
+    db_session.add(role)
+    await db_session.commit()
+    rid = (await client.post("/api/v1/reports", json={"name": "Shared"}, headers=auth_headers["a"])).json()["id"]
+    g = await client.post(f"/api/v1/reports/{rid}/grants", json={"role_id": role.id, "level": "view"},
+                          headers=auth_headers["a"])
+    assert g.status_code == 201, g.text
+    gid = g.json()["id"]
+    await client.patch(f"/api/v1/reports/{rid}/grants/{gid}", json={"can_export": False}, headers=auth_headers["a"])
+    await client.delete(f"/api/v1/reports/{rid}/grants/{gid}", headers=auth_headers["a"])
+    org = two_orgs["a"]["org"].id
+    [changed] = await _details(db_session, org, "report.share_change")
+    [removed] = await _details(db_session, org, "report.unshare")
+    for d in (changed, removed):
+        assert "grant:" not in d and "role Sales" in d
+    assert "no downloads" in changed

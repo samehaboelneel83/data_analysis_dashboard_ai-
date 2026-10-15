@@ -10,6 +10,23 @@ import LoadError from '../../components/ui/LoadError'
 import LoadingState from '../../components/ui/LoadingState'
 import { formatDate } from '../../lib/dateFormat'
 
+/** AD-18: older rows were written as code -- "queries=None asks=5",
+ *  "grant:3". Newer writers use words; for the legacy shapes, split
+ *  key=value pairs into "key: value" chips (None reads "no limit") and
+ *  name a bare grant id as a share. Anything else is shown as written. */
+export function detailParts(detail: string | null | undefined, noLimit: string): string[] | null {
+  if (!detail) return null
+  const text = detail.replace(/\bgrant:(\d+)/g, 'share #$1')
+  const tokens = text.trim().split(/\s+/)
+  if (tokens.length > 0 && tokens.every(tok => /^[A-Za-z_]+=\S*$/.test(tok))) {
+    return tokens.map(tok => {
+      const [k, v] = [tok.slice(0, tok.indexOf('=')), tok.slice(tok.indexOf('=') + 1)]
+      return `${k.replace(/_/g, ' ')}: ${v === 'None' || v === '' ? noLimit : v}`
+    })
+  }
+  return [text]
+}
+
 /**
  * The org's general activity log -- logins, uploads, report edits, deletes.
  * The backend has recorded this since S4 (`/admin/audit-log`); this page is
@@ -86,7 +103,17 @@ export default function MonitoringActivity() {
                 <td>
                   {r.entity ? <bdi dir="ltr">{`${r.entity}${r.entity_id != null ? ` #${r.entity_id}` : ''}`}</bdi> : '—'}
                 </td>
-                <td style={{ color: 'var(--muted)' }}>{r.detail ?? '—'}</td>
+                <td style={{ color: 'var(--muted)' }}>
+                  {(() => {
+                    const parts = detailParts(r.detail, t('pg.dataPages.act.noLimit'))
+                    if (!parts) return '—'
+                    if (parts.length === 1) return parts[0]
+                    return <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 4 }}>
+                      {parts.map((p, i) => <span key={i} className="dl-chip-sm" style={{ border: '1px solid var(--border)',
+                        borderRadius: 999, padding: '0 6px', fontSize: 11.5 }}>{p}</span>)}
+                    </span>
+                  })()}
+                </td>
               </tr>
             ))}
           </tbody>

@@ -214,6 +214,20 @@ describe('MonitoringActivity', () => {
     expect(screen.getByText('orders.csv')).toBeInTheDocument()
   })
 
+  it('writes a legacy key=value detail in words: None is "no limit" (AD-18)', async () => {
+    vi.mocked(monitoringApi.activity).mockResolvedValue([
+      { id: 1, user_email: 'a@b.com', action: 'platform.set_org_quota', entity: 'organization',
+        entity_id: 2, detail: 'queries=None asks=5', created_at: '2026-09-01T10:00:00Z' },
+      { id: 2, user_email: 'a@b.com', action: 'report.unshare', entity: 'report',
+        entity_id: 3, detail: 'grant:7', created_at: '2026-09-01T10:00:00Z' },
+    ])
+    renderIn(<MonitoringActivity />)
+    expect(await screen.findByText('queries: no limit')).toBeInTheDocument()
+    expect(screen.getByText('asks: 5')).toBeInTheDocument()
+    expect(screen.queryByText(/None/)).toBeNull()
+    expect(screen.getByText('share #7')).toBeInTheDocument()
+  })
+
   it('empty and error states are distinct', async () => {
     vi.mocked(monitoringApi.activity).mockResolvedValue([])
     const { unmount } = renderIn(<MonitoringActivity />)
