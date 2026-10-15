@@ -371,6 +371,20 @@ class TestACategoryAxisStaysReadable:
             self.cfg(14))
         assert "limit" not in got["config"] and got["config"]["orientation"] == "horizontal"
 
+    def test_a_tile_of_many_bars_is_tall_enough_for_them(self):
+        """F-14 step 2: 14 bars on their side in a 4-row tile were stubs
+        under crowded labels; the tile grows with the bars it draws."""
+        from app.services.analyst_panel import layout_section
+        bar = {"widget_type": "bar", "title": "Rows by country", "row_count": 14,
+               "config": {"dimension": "country", "aggregation": "count", "orientation": "horizontal"}}
+        few = {"widget_type": "bar", "title": "Rows by region", "row_count": 5,
+               "config": {"dimension": "region", "aggregation": "count"}}
+        slots = {w["title"]: s for w, s in layout_section([bar, few], "composition")}
+        assert slots["Rows by country"]["h"] >= 7          # ceil(14 / 3) + 2
+        assert next(iter(s for _w, s in layout_section([few], "composition")))["h"] == 4
+        many = {**bar, "row_count": 60}
+        assert layout_section([many], "composition")[0][1]["h"] <= 9
+
     def test_an_orientation_the_model_chose_is_kept(self):
         got = polish_widget(
             {"widget_type": "bar", "title": "x",

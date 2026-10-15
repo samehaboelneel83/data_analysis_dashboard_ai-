@@ -55,7 +55,12 @@ export default function BarChartRenderer({ rows, data, cfg, rtl, broadcasts, loc
   // (useChartViewport). Recharts draws only the window, and it hands Cells
   // and overlays the WINDOW's bars -- so everything laid out per bar below
   // walks `view.visible` and offsets back to the full rows with `view.start`.
-  const view = useChartViewport(cfg, series.length > 0 ? seriesRows : rows, plotW,
+  // F-14: bars lying down put each name on its own line, so the window that
+  // keeps UPRIGHT labels from crowding the width does not apply -- it cut 14
+  // countries to 9 with no slider to reach the rest. They are drawn whole.
+  const lying = cfg.orientation === 'horizontal' && series.length === 0
+    && !rows.some((r: any) => typeof r.target === 'number' || typeof r.highlight === 'number')
+  const view = useChartViewport(lying ? { ...cfg, overview_axis: false } : cfg, series.length > 0 ? seriesRows : rows, plotW,
     { dataKey: series.length > 0 ? undefined : 'value', onChange: onBrushChange })
   const brush = view.brush
 
