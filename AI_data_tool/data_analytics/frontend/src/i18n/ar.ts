@@ -4749,7 +4749,7 @@ export const ar: Record<MessageKey, string> = {
   'setup.u.sampleRestricted': 'ترى فقط الصفوف التي تسمح بها صلاحياتك.',
   'setup.u.emptyValue': 'فارغ',
   'setup.u.questions': 'أسئلة يمكن لهذه البيانات أن تجيب عنها',
-  'setup.u.details': 'اعرض التفاصيل: كل عمود وعلاقة ومصطلح عمل',
+  'setup.u.details': 'افتح المراجعة الكاملة (في علامة تبويب جديدة): كل عمود وعلاقة ومصطلح عمل',
   'setup.u.factsFootnote': 'الأعداد من قراءة Datalytics لقاعدة البيانات: {tables} جداول، ونحو {rows} صف.',
   'setup.start': 'الإعداد الموجَّه',
   'setup.continueStep': 'متابعة الإعداد · الخطوة {n} من {total}',

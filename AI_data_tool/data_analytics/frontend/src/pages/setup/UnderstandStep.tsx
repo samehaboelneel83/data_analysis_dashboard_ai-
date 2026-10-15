@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
-import { ChevronDown, Pencil, RefreshCw, Sparkles, Table2 } from 'lucide-react'
+import { ExternalLink, Pencil, RefreshCw, Sparkles, Table2 } from 'lucide-react'
 import { useT, type TranslateFn } from '../../i18n'
 import { useDirection } from '../../contexts/DirectionContext'
 import { localDigits } from '../../lib/arabicFormats'
@@ -220,8 +220,10 @@ export default function UnderstandStep({ sourceId, onNext }: { sourceId: number;
       )}
 
       <div className="setup-footer">
-        <Link to={`/connections/${sourceId}/review`} className="setup-details-link">
-          <ChevronDown size={14} aria-hidden="true" /> {t('setup.u.details')}
+        {/* B-31: a link that looked like an expander but left the wizard; it
+            now says it opens the full review in a new tab, and does. */}
+        <Link to={`/connections/${sourceId}/review`} className="setup-details-link" target="_blank" rel="noopener noreferrer">
+          <ExternalLink size={14} aria-hidden="true" /> {t('setup.u.details')}
         </Link>
         <button type="button" className="btn btn-primary" onClick={onNext}>
           {t('setup.next', { step: t('setup.step.data') })}

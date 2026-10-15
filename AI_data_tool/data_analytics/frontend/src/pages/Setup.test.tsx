@@ -81,7 +81,11 @@ describe('Guided setup — Understand', () => {
     expect(screen.getAllByText(/\(approximate\)/).length).toBeGreaterThan(0)
     // System tables are folded away, not removed.
     expect(screen.getByText('System tables (1)')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /Show details/ })).toHaveAttribute('href', '/connections/37/review')
+    // B-31: the full review opens in a new tab, so the wizard keeps its place.
+    const details = screen.getByRole('link', { name: /Open the full review \(new tab\)/ })
+    expect(details).toHaveAttribute('href', '/connections/37/review')
+    expect(details).toHaveAttribute('target', '_blank')
+    expect(details).toHaveAttribute('rel', expect.stringContaining('noopener'))
   })
 
   it('without AI words it still describes the database from the facts', async () => {

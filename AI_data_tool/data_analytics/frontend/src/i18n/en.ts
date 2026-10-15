@@ -4752,7 +4752,7 @@ export const en = {
   'setup.u.sampleRestricted': 'You see only the rows your access allows.',
   'setup.u.emptyValue': 'Empty',
   'setup.u.questions': 'Questions this data can answer',
-  'setup.u.details': 'Show details: every column, relationship and business term',
+  'setup.u.details': 'Open the full review (new tab): every column, relationship and business term',
   'setup.u.factsFootnote': 'Counts come from Datalytics reading the database: {tables} tables, about {rows} rows.',
   'setup.start': 'Guided setup',
   'setup.continueStep': 'Continue setup · step {n} of {total}',
