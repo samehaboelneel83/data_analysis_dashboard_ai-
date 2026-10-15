@@ -97,7 +97,7 @@ function RuleModal({ initial, roles, datasets, onSave, onClose }: {
         const units = await orgUnitsApi.list()
         if (live) setScopeValues([...new Set(units.map(u => (u.match_value ?? '').trim()).filter(Boolean))])
       } catch {
-        if (live) setScopeValues([])
+        // Unknown is not "no units": say nothing rather than something wrong.
       }
     })()
     return () => { live = false }
