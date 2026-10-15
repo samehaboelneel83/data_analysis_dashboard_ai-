@@ -1616,6 +1616,69 @@ describe('viewport-lazy fetch', () => {
     renderWidget({ eagerFetch: true })
     await waitFor(() => expect(widgetDataApi.query).toHaveBeenCalled())
   })
+
+  // C-01: a tile already on screen whose observer never reports an
+  // intersection (layout not settled at observe time) used to wait for a scroll.
+  class InertIO { observe() {} disconnect() {} unobserve() {} }
+  const inView = { top: 10, left: 0, bottom: 210, right: 300, width: 300, height: 200, x: 0, y: 10, toJSON() {} } as DOMRect
+
+  it('fetches on mount when the tile is already in the viewport, even if the observer never fires', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'A', value: 1 }] })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(globalThis as any).IntersectionObserver = InertIO
+    const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(inView)
+    try {
+      renderWidget()
+      await waitFor(() => expect(widgetDataApi.query).toHaveBeenCalled())
+    } finally { spy.mockRestore() }
+  })
+
+  it('re-checks the position after layout settles and fetches without a scroll', async () => {
+    // Real timers: fake ones strand module-level rAF work and leak into later tests.
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'A', value: 1 }] })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(globalThis as any).IntersectionObserver = InertIO
+    const zero = { top: 0, left: 0, bottom: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON() {} } as DOMRect
+    let rect = zero
+    const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => rect)
+    try {
+      renderWidget()
+      await act(async () => { await Promise.resolve() })
+      expect(widgetDataApi.query).not.toHaveBeenCalled()
+      rect = inView                       // the canvas has now been laid out
+      await waitFor(() => expect(widgetDataApi.query).toHaveBeenCalled(), { timeout: 3000 })
+    } finally { spy.mockRestore() }
+  })
+
+  it('a tile far below the fold still waits for the observer', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'A', value: 1 }] })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(globalThis as any).IntersectionObserver = InertIO
+    const far = { ...inView, top: 5000, bottom: 5200, y: 5000 } as DOMRect
+    const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(far)
+    try {
+      renderWidget()
+      await act(async () => { await Promise.resolve() })
+      expect(widgetDataApi.query).not.toHaveBeenCalled()
+    } finally { spy.mockRestore() }
+  })
+
+  it('clears "Loading…" when a superseded fetch is replaced by a newer one', async () => {
+    // The first answer never arrives (the request is aborted by the config change).
+    vi.mocked(widgetDataApi.query)
+      .mockImplementationOnce((_ds, _cfg, _cc, _wt, opts) => new Promise((_res, rej) => {
+        opts?.signal?.addEventListener('abort', () => rej(Object.assign(new Error('canceled'), { name: 'CanceledError', code: 'ERR_CANCELED' })))
+      }) as never)
+      .mockResolvedValue({ rows: [{ name: 'A', value: 1 }] })
+    const { rerender } = renderWidget({ eagerFetch: true })
+    await waitFor(() => expect(widgetDataApi.query).toHaveBeenCalledTimes(1))
+    rerender(
+      <CrossFilterProvider>
+        <WidgetRenderer widget={barWidget({ config: { dimension: 'product' } })} datasetId={10} eagerFetch />
+      </CrossFilterProvider>)
+    await waitFor(() => expect(widgetDataApi.query).toHaveBeenCalledTimes(2), { timeout: 3000 })
+    await waitFor(() => expect(screen.queryByText(/Loading/)).toBeNull())
+  })
 })
 
 describe('render discipline (React.memo)', () => {
