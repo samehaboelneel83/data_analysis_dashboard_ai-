@@ -26,7 +26,7 @@ import { AGGREGATIONS, DUAL_MEASURE_WIDGETS, MULTI_MEASURE_WIDGETS, PIVOT_WIDGET
 import { dtypeShort } from '../../lib/dtypeName'
 import { useT } from '../../i18n'
 import { ASSIGN_DATA_EVENT, ADD_DATASET_EVENT, emptyPickerReason } from './WidgetPlaceholder'
-import { fieldUse, semanticAggregationWarning, nonAdditiveKind, SAFE_AGGREGATION } from '../../lib/semanticGuard'
+import { fieldUse, semanticAggregationWarning, nonAdditiveKind, SAFE_AGGREGATION, defaultSummary } from '../../lib/semanticGuard'
 import { savePending, clearPending } from '../../lib/pendingEdits'
 import type { DatasetColumn, Dataset } from '../../services/api'
 import InteractionSettings from './InteractionSettings'
@@ -1201,6 +1201,17 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
     if (rf.role === 'category') { pickCategory(values[0] ?? ''); return }
     if (rf.role === 'category2') { pickColumns(values[0] ?? ''); return }
     setRole(rf.role, values[0] ?? '')
+    // C-11: a measure starts on the summary that means something for it -- a
+    // percentage or rate is averaged, never summed (a right axis read 12,000%).
+    // Only over the defaults: an aggregation the author picked is kept.
+    const col = values[0]
+    if (col && rf.role === 'measure') {
+      const s = defaultSummary(col)
+      if ((agg === 'sum' && s !== 'sum') || (!roleValues.measure && agg === 'count')) setAgg(s)
+    } else if (col && rf.role === 'measure2' && !agg2) {
+      const s = defaultSummary(col)
+      if (s !== agg) setAgg2(s)
+    }
   }
   const assignedFields: Record<string, string[]> = Object.fromEntries(roleSpecs.map(rf => [rf.role, fieldsOf(rf)]))
   // QA6 B4: the Fields panel's rule (fieldUse), so "year" is a category here too.

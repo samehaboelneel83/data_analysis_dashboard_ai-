@@ -1824,3 +1824,28 @@ describe('only what the author set is written (live check item 14)', () => {
     expect(config).not.toHaveProperty('rtl')
   })
 })
+
+describe('C-11: a percentage given a role is averaged, never summed', () => {
+  const cols: DatasetColumn[] = [
+    { id: 1, name: 'month', dtype: 'text', missing_pct: 0, stats: {} },
+    { id: 2, name: 'revenue', dtype: 'numeric', missing_pct: 0, stats: {} },
+    { id: 3, name: 'margin_pct', dtype: 'numeric', missing_pct: 0, stats: {} },
+  ] as DatasetColumn[]
+  it('Assign data: revenue on the left axis stays Sum, margin_pct on the right axis becomes Average', () => {
+    const onUpdate = vi.fn()
+    render(<CrossFilterProvider><WidgetConfigPanel
+      widget={widget({ widget_type: 'dual_axis_line', config: { dimension: 'month', measure: 'revenue' } })}
+      columns={cols} onUpdate={onUpdate} /></CrossFilterProvider>)
+    fireEvent.click(screen.getByRole('button', { name: /^Assign data$/ }))
+    const roles = screen.getByRole('dialog', { name: /^Assign data/ })
+    // The second "Add Line" is the right axis (labels drop their parenthesis).
+    fireEvent.click(within(roles).getAllByRole('button', { name: 'Add Line' })[1])
+    const fields = screen.getByRole('dialog', { name: 'Add Line' })
+    fireEvent.click(within(fields).getAllByRole('option').find(o => (o.textContent ?? '').includes('margin_pct'))!)
+    act(() => { vi.advanceTimersByTime(700) })
+    const [config] = onUpdate.mock.calls[onUpdate.mock.calls.length - 1]
+    expect(config.measure2).toBe('margin_pct')
+    expect(config.aggregation ?? 'sum').toBe('sum')
+    expect(config.aggregation2).toBe('avg')
+  })
+})

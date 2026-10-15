@@ -2006,6 +2006,13 @@ def shape_dual_series(df: pd.DataFrame, config: dict) -> dict:
     # falls back to `aggregation`, which is what every chart saved before this
     # existed relies on.
     agg2 = (config.get("aggregation2") or agg).lower()
+    if not config.get("aggregation2") and agg == "sum":
+        # C-11: a percentage or rate on the second axis is never summed (a
+        # right axis read 12,000%). Additive measures keep the inherited Sum.
+        from .semantic_guard import default_summary
+        sensible = default_summary(roles.get("measure2"))
+        if sensible != "sum":
+            agg2 = sensible
     agg_fn = _pandas_agg_fn(agg)
     agg_fn2 = _pandas_agg_fn(agg2)
 

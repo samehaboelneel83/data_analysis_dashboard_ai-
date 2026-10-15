@@ -2392,7 +2392,10 @@ export default function ReportBuilder() {
         const sensible = defaultSummary(columnName, columnMeta)
         // Written only when it changes the meaning: an unset aggregation
         // already sums, so an amount on a fresh chart is left as it was.
-        if (!cfg[configKeyFor(target.role)] && (was === 'count' || (was === '' && sensible !== 'sum'))) {
+        // C-11: a blank aggregation2 means "same as the first axis", so the
+        // second measure is compared with THAT, not with Sum.
+        const inherited = target.role === 'measure2' ? String(cfg.aggregation ?? 'sum').toLowerCase() : 'sum'
+        if (!cfg[configKeyFor(target.role)] && (was === 'count' || (was === '' && sensible !== inherited))) {
           next[aggKey] = sensible
         }
       }
