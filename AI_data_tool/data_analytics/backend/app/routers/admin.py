@@ -265,15 +265,23 @@ def _refuse_if_aggregate(dataset: Dataset) -> None:
                  f"on the source dataset, not the aggregate.")
 
 
-async def _validate_filter_expr(dataset: Dataset, filter_expr: str) -> None:
-    # Resolve any USEREMAIL()/USER()/USERID() tokens against a placeholder identity so
-    # the rule validates as the concrete expression it becomes at query time — the
-    # column references and grammar are what we are checking here, not a real user.
-    from ..core.rls import apply_user_context
-    filter_expr = apply_user_context(
+def _placeholder_expr(filter_expr: str) -> str:
+    """Resolve USEREMAIL()/USER()/USERID()/ORGID()/ORGNAME() against a placeholder
+    identity, and MYSCOPE() against a one-value placeholder scope, so a rule
+    validates as the concrete expression it becomes at query time -- the column
+    references and grammar are what is checked, not a real user. One value keeps
+    `col in [...]` valid for both the pandas evaluator and the SQL translator.
+    The stored rule keeps its tokens; this is only what gets checked."""
+    from ..core.rls import apply_scope, apply_user_context
+    expr = apply_user_context(
         filter_expr, email="validator@example.com", user_id=0,
         org_id=0, org_name="validator-org",
     ) or filter_expr
+    return apply_scope(expr, ["__scope_validator__"]) or expr
+
+
+async def _validate_filter_expr(dataset: Dataset, filter_expr: str) -> None:
+    filter_expr = _placeholder_expr(filter_expr)
     if dataset.mode == "directquery":
         # No file to sample against -- validate the same way DirectQuery pushdown
         # itself will: does this expression translate to SQL against the dataset's
@@ -463,14 +471,12 @@ async def rule_preflight(
     import-mode expression the pandas evaluator accepts but the translator
     rejects (function calls, %, **, chained compares) reports no columns --
     see the spec's follow-up list, item 12."""
-    from ..core.rls import apply_user_context
     role = await db.get(Role, role_id)
     check_org(role, current_user, "Role not found")
     dataset = (await db.execute(select(Dataset).options(selectinload(Dataset.columns))
                                 .where(Dataset.id == dataset_id))).scalar_one_or_none()
     check_org(dataset, current_user, "Dataset not found")
-    expr = apply_user_context(filter_expr, email="validator@example.com", user_id=0,
-                              org_id=0, org_name="validator-org") or filter_expr
+    expr = _placeholder_expr(filter_expr)
     known = {c.name for c in dataset.columns}
     try:
         columns = sorted(expression_columns(expr, known))
