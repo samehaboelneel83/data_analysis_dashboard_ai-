@@ -2025,14 +2025,24 @@ def shape_scatter_measures(df: pd.DataFrame, config: dict) -> dict:
     if not cat or cat not in df.columns:
         return shape_xy_numeric(df, {**{k: v for k, v in config.items() if k not in ("roles", "dimension")},
                                      "measure": x, "measure2": y})
-    sub = df[[cat, x, y]].copy()
-    sub[x] = pd.to_numeric(sub[x], errors="coerce")
-    sub[y] = pd.to_numeric(sub[y], errors="coerce")
-    grouped = sub.groupby(cat, dropna=True).agg(__x=(x, _pandas_agg_fn(agg2)), __y=(y, _pandas_agg_fn(agg))).reset_index()
-    grouped, _truncation = _cut(grouped, int(config.get("limit") or 500), "categories")
-    rows = [{"name": _safe(r[cat]), "x": _safe(r["__x"]), "y": _safe(r["__y"])} for _, r in grouped.iterrows()]
-    return {"type": "xy_series", "x": x, "y": y, "category": cat, "rows": rows,
-            "total": len(df), "truncation": _truncation}
+    # C-07 (round 2): Y per label comes from the grouped-series shaper, so every
+    # option a scatter offers (sort, having, Top-N, percentage, quick calcs...)
+    # works on it exactly as it does on the old scatter; X is then read for
+    # each label that survived.
+    y_cfg = {k: v for k, v in config.items() if k not in ("measure2", "aggregation2", "roles")}
+    y_cfg.update({"dimension": cat, "measure": y})
+    ys = shape_series(df, {**y_cfg, "limit": config.get("limit") or 500})
+    xs = pd.to_numeric(df[x], errors="coerce").groupby(df[cat], dropna=True).agg(_pandas_agg_fn(agg2))
+    x_by = {str(k): v for k, v in xs.items()}
+    rows = []
+    for r in ys.get("rows") or []:
+        xv = x_by.get(str(r.get("name")))
+        if xv is None or pd.isna(xv):
+            continue                      # "All Other" and the like have no single X
+        rows.append({"name": r.get("name"), "x": _safe(xv), "y": r.get("value")})
+    out = {k: v for k, v in ys.items() if k not in ("rows", "type")}
+    return {**out, "type": "xy_series", "x": x, "y": y, "category": cat, "rows": rows,
+            "total": ys.get("total", len(df))}
 
 
 def shape_dual_series(df: pd.DataFrame, config: dict) -> dict:
@@ -4729,6 +4739,8 @@ def get_widget_data_from_df(
     `check_fields=False` is for a PRE-AGGREGATED frame (the DuckDB and DirectQuery
     aggregate paths), which holds only the dimension and measure columns and whose
     caller has already validated the config's fields against the dataset."""
+    from .widget_roles import scatter_config
+    config = scatter_config(widget_type, config)   # C-07: an old scatter, drawn as before
     # A bar of several measures and no category: one bar per measure, each
     # measure resolved as its own headline number (multi_measure.py).
     from .period_change import change_over, resolve as resolve_change
@@ -5573,6 +5585,8 @@ def get_widget_data(
     result cache together; now the first computes and the rest take its answer.
     A pipeline that reads other frames handed in by the caller is never shared."""
     from . import single_flight
+    from .widget_roles import scatter_config
+    config = scatter_config(widget_type, config)   # C-07: an old scatter, drawn as before
     key = None
     if prep_aux_frames is None:
         try:

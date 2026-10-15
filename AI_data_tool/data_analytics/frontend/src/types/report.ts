@@ -348,9 +348,13 @@ export const ROLE_SPECS: Record<WidgetType, RoleField[]> = {
              { role: 'measure',  label: 'Measure (numeric column)',   required: false }],
   donut:    [{ role: 'category', label: 'Dimension (Group / X-axis)', required: true },
              { role: 'measure',  label: 'Measure (numeric column)',   required: false }],
-  scatter:  [{ role: 'category', label: 'Dimension (Group / X-axis)', required: true },
-             { role: 'measure',  label: 'Measure (numeric column)',   required: false },
-             { role: 'measure2', label: 'X axis (numeric, optional)', required: false }],
+  // C-07: an X measure against a Y measure, one point per row -- or per Label
+  // value when a Label is set. `measure` stays Y so an old scatter's measure
+  // keeps its meaning; an OLD scatter (a dimension on X, no X measure) is held
+  // to its old rule (WidgetPlaceholder.legacyScatter) and drawn as before.
+  scatter:  [{ role: 'measure2', label: 'X axis (numeric)', required: true },
+             { role: 'measure',  label: 'Y axis (numeric)', required: true },
+             { role: 'category', label: 'Label',            required: false }],
   treemap:  [{ role: 'category', label: 'Dimension (Group / X-axis)', required: true },
              { role: 'measure',  label: 'Measure (numeric column)',   required: false }],
   step: [{ role: 'category', label: 'Dimension (X-axis)',       required: true },

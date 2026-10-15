@@ -53,9 +53,19 @@ function roleValue(cfg: Record<string, unknown>, role: string): unknown {
   return nested !== undefined && nested !== null && nested !== '' ? nested : cfg[configKeyFor(role)]
 }
 
+/** C-07: a scatter of the old shape -- its X axis is the dimension -- as saved
+ *  (no X measure) or as the builder migrates it (X = that dimension). MIRRORS
+ *  `widget_roles.legacy_scatter` on the server. */
+export function legacyScatter(cfg: Record<string, unknown>): boolean {
+  const cat = roleValue(cfg, 'category'), x = roleValue(cfg, 'measure2')
+  return !!cat && (!x || x === cat)
+}
+
 export function missingRequiredRoles(widget: Pick<Widget, 'widget_type' | 'config'>): string[] {
   const cfg = (widget.config ?? {}) as Record<string, unknown>
   if (measuresAsBars(widget)) return []
+  // An old scatter needed only its dimension, which it has.
+  if (widget.widget_type === 'scatter' && legacyScatter(cfg)) return []
   return (ROLE_SPECS[widget.widget_type as WidgetType] ?? [])
     .filter(rf => rf.required)
     .filter(rf => {

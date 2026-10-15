@@ -31,6 +31,9 @@ export function seedRoleValues(cfg: Record<string, unknown>, wt: WidgetType): Re
   for (const rf of (ROLE_SPECS[wt] ?? []).filter(rf => !rf.multi)) {
     values[rf.role] = (cfg[configKeyFor(rf.role)] as string) ?? ''
   }
+  // C-07: an old scatter drew its dimension on X; the X axis role says so (the
+  // server draws "X = the label's own column" exactly as the old chart).
+  if (wt === 'scatter' && !values.measure2 && values.category) values.measure2 = values.category
   return values
 }
 
