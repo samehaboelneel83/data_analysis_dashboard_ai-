@@ -6,6 +6,8 @@ import { agentApi } from '../../services/api'
 import type { AgentAnswer, AgentMessage } from '../../services/api'
 import { REACTION_MS } from '../../pages/ask/robotMood'
 import { translate } from '../../i18n'
+import { LLM_ENDPOINTS_EVENT } from '../../services/api'
+import SuggestionGrid from '../../pages/ask/SuggestionGrid'
 
 /** Step 10, Part B: the Ask AI page's loading and answer cards. */
 
@@ -426,5 +428,45 @@ describe('sqlTokens', () => {
     expect(toks.map(t => t.text).join('')).toBe(sql)
     expect(toks.filter(t => t.kind === 'kw').map(t => t.text)).toEqual(['SELECT', 'FROM', 'WHERE', 'group'])
     expect(toks.filter(t => t.kind === 'str').map(t => t.text)).toEqual([`'from ''here'''`])
+  })
+})
+
+describe('suggestion cards while new questions are paused (AD-02)', () => {
+  const down = () => act(() => {
+    window.dispatchEvent(new CustomEvent(LLM_ENDPOINTS_EVENT, { detail: { at: Date.now(), data: {
+      llm_enabled: true, default: 'env', auto_pick: null, source: 'environment',
+      endpoints: [{ id: 'env', name: 'Default', model: 'q', enabled: true, is_default: true, strength: 5, context: null,
+        status: { ok: false, latency_ms: null, checked_at: new Date().toISOString(), error: 'ConnectTimeout' } }],
+    } } }))
+  })
+  const cards = [{ text: 'Total revenue by region', icon: 'total' as const, columns: ['revenue', 'region'] }]
+  const withCards = () => pane({
+    startView: (send, busy, reason) => <SuggestionGrid cards={cards} onAsk={send} disabled={busy} disabledReason={reason} />,
+  })
+
+  it('disables every card, explains why, and never sends', async () => {
+    const asked = vi.spyOn(agentApi, 'ask').mockResolvedValue(BAR)
+    const { container } = withCards()
+    down()
+    const all = [...container.querySelectorAll<HTMLButtonElement>('.dl-sug__card')]
+    expect(all.length).toBe(1)
+    for (const c of all) {
+      expect(c).toBeDisabled()
+      expect(c.title).toMatch(/paused/i)
+    }
+    fireEvent.click(all[0])
+    await settle()
+    expect(asked).not.toHaveBeenCalled()
+  })
+
+  it('also refuses the typed question on Enter while paused', async () => {
+    const asked = vi.spyOn(agentApi, 'ask').mockResolvedValue(BAR)
+    pane()
+    down()
+    const box = screen.getByPlaceholderText(/ask|paused/i)
+    fireEvent.change(box, { target: { value: 'total revenue' } })
+    fireEvent.keyDown(box, { key: 'Enter' })
+    await settle()
+    expect(asked).not.toHaveBeenCalled()
   })
 })

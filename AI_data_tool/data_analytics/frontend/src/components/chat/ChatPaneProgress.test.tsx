@@ -52,6 +52,15 @@ describe('the pending indicator', () => {
     expect(screen.getByText(/checked against your database/i)).toBeInTheDocument()
   })
 
+  it('does not blame the database for an ordinary slow answer (AD-02)', () => {
+    /* No query has necessarily been written yet: the wait may be the model. */
+    render(<Pending question="what were total sales?" />)
+    act(() => { vi.advanceTimersByTime(21_000) })
+    const text = screen.getByRole('status').textContent ?? ''
+    expect(text).toMatch(/longer than usual/i)
+    expect(text).not.toMatch(/database/i)
+  })
+
   it('names dashboard design specifically, because that is the slow one', () => {
     render(<Pending question="Suggest a dashboard for me" />)
     act(() => { vi.advanceTimersByTime(21_000) })

@@ -352,11 +352,11 @@ export default function AskAI() {
         </div>
         <div className="dl-ask__pane">
           {selected !== undefined && (() => {
-            const startView = (ask: (q: string) => void, busy: boolean) => (
+            const startView = (ask: (q: string) => void, busy: boolean, reason?: string) => (
               <AskHero id="dl-ask-picked" small title={t('ask2.picked.title')}
                 sub={rich(sourceId != null ? 'ask2.picked.subSource' : 'ask2.picked.sub', scopeItem?.name ?? '')}
                 step={2} stepLabel={t('ask2.step2')}>
-                <SuggestionGrid cards={cards} onAsk={ask} disabled={busy} />
+                <SuggestionGrid cards={cards} onAsk={ask} disabled={busy} disabledReason={reason} />
               </AskHero>
             )
             return sourceId != null

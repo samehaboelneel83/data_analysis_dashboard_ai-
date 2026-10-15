@@ -3445,7 +3445,7 @@ export const en = {
   'pend.secs': '{n} s',
   'pend.mins': '{m}m {s}s',
   'pend.designing': 'Designing dashboards',
-  'pend.slow': 'Still working — the query is being checked against your database.',
+  'pend.slow': 'Still working — this is taking longer than usual.',
   'pend.slowDashboards': 'Each dashboard’s query is being checked against your database, and repaired if it does not run. This can take a few minutes.',
   'clar3.ways': 'Ways to continue',
   'clar3.use': 'Use {col}',

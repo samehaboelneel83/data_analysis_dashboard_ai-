@@ -75,7 +75,7 @@ export interface ChatPaneProps {
   /** Step 10: what an empty thread shows instead of the starter chips -- the
    *  Ask AI page's "What would you like to know?" hero and its suggestion
    *  cards. Handed the pane's own send, so a card is sent like a typed question. */
-  startView?: (ask: (question: string) => void, busy: boolean) => ReactNode
+  startView?: (ask: (question: string) => void, busy: boolean, disabledReason?: string) => ReactNode
   /** Step 10: what the pane is doing, for the Ask AI page's robot -- the
    *  question box has focus or text (`compose-on`) or neither, a key in it, a
    *  question sent, and how it came back. `rest` when the pane goes away. */
@@ -287,7 +287,9 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
    *  resolver -- so a button is never a second way of asking. */
   const send = async (choice?: string) => {
     const question = (choice ?? input).trim()
-    if (!question || busy) return
+    // Paused while the model is unreachable: every way in (a card, a chip,
+    // Enter) stops here, not only the buttons that look disabled.
+    if (!question || busy || offline) return
     interacted.current = true
     if (choice === undefined) setInput('')
     setBusy(true)
@@ -511,12 +513,12 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
         {loading && <p className="dl-chat__note">{t('common.loading')}</p>}
         {loadError && <p role="alert" className="dl-chat__note dl-chat__note--error">{loadError}</p>}
         {!loading && !loadError && messages.length === 0 && (
-          startView ? (pending === null ? startView(q => void send(q), busy) : null) : suggestions && suggestions.length > 0 ? (
+          startView ? (pending === null ? startView(q => void send(q), busy || offline, offline ? t('off.composer') : undefined) : null) : suggestions && suggestions.length > 0 ? (
             <div className="dl-chat__start">
               <p className="dl-chat__start-title">{t('ask.tryOne')}</p>
               <div className="dl-chips" role="group" aria-label={t('ask.suggested')}>
                 {suggestions.map(s => (
-                  <button key={s} type="button" className="dl-chip" disabled={busy}
+                  <button key={s} type="button" className="dl-chip" disabled={busy || offline}
                     onClick={() => void send(s)}>
                     <Sparkles size={13} aria-hidden /> {s}
                   </button>
@@ -577,7 +579,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                         {!MODEL_DOWN.test(msg.text) && rephraseFor(turn.question?.text).length > 0 && (
                           <div className="dl-chips dl-chips--small" role="group" aria-label={t('ask.err.tryInstead')}>
                             {rephraseFor(turn.question?.text).map(s => (
-                              <button key={s} type="button" className="dl-chip" disabled={busy}
+                              <button key={s} type="button" className="dl-chip" disabled={busy || offline}
                                 onClick={() => void send(s)}>{s}</button>
                             ))}
                           </div>
