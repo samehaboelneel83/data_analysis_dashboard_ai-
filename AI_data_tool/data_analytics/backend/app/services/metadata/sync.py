@@ -564,10 +564,23 @@ async def stage_infer_keys(context: SyncContext) -> dict:
             "needs_review": written - high, "declared": declared}
 
 
+def _llm_known_down(client) -> bool:
+    """True when the client says every endpoint is known down (B-11)."""
+    check = getattr(client, "available", None)
+    try:
+        return callable(check) and not bool(check())
+    except Exception:                                       # noqa: BLE001
+        return False
+
+
 async def stage_infer_semantic(context: SyncContext) -> dict:
     """Semantic types, roles, deprecation, and optionally descriptions."""
     typed = 0
     described = 0
+    # AD-01 step 7: a model known to be down is not asked; the run log says
+    # "skipped -- AI unavailable" instead of "ok" with nothing written.
+    wants_llm = bool(context.allow_llm and context.llm_client)
+    down = wants_llm and _llm_known_down(context.llm_client)
 
     for dataset in context.datasets:
         rows = context.cache.get_sample(dataset.id)
@@ -616,7 +629,7 @@ async def stage_infer_semantic(context: SyncContext) -> dict:
             dataset.name,
             [{"name": c.name, "dtype": c.dtype} for c in columns],
             context.llm_client,
-            allow=context.allow_llm,
+            allow=context.allow_llm and not down,
         )
         for name, text_value in descriptions.items():
             column = by_name.get(name)
@@ -631,7 +644,7 @@ async def stage_infer_semantic(context: SyncContext) -> dict:
     # fit together -- which is not visible from inside any one table.
     overview_written = False
     tables_described = 0
-    if context.allow_llm and context.llm_client and context.datasets:
+    if context.allow_llm and context.llm_client and context.datasets and not down:
         source = await context.db.get(DataSource, context.data_source_id)
         by_id = {d.id: d for d in context.datasets}
 
@@ -682,6 +695,13 @@ async def stage_infer_semantic(context: SyncContext) -> dict:
                     dataset.description_source = "inferred"
                     tables_described += 1
 
+    if down:
+        raise StageSkipped("AI unavailable", {"semantic_types": typed})
+    client = context.llm_client
+    if (wants_llm and getattr(client, "last_error", None) and getattr(client, "tokens_out", 0) == 0
+            and not (described or tables_described or overview_written)):
+        # Every call failed: the model never answered this step.
+        raise StageSkipped(f"AI unavailable: {client.last_error}", {"semantic_types": typed})
     return {"semantic_types": typed, "descriptions": described,
             "tables_described": tables_described,
             "source_overview": overview_written,

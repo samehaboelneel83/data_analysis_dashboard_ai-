@@ -4,6 +4,7 @@ import KeyInfluencersResultView from '../components/analysis/KeyInfluencersResul
 import { pickInfluencerOutcome } from './datasetDetail/influencerOutcome'
 import AggregatesPanel from '../components/dataset/AggregatesPanel'
 import ColumnMeaningPanel from '../components/dataset/ColumnMeaningPanel'
+import ColumnTermsPanel from '../components/dataset/ColumnTermsPanel'
 import AlertsPanel from '../components/dataset/AlertsPanel'
 import PredictionModelsPanel from '../components/dataset/PredictionModelsPanel'
 import { PipelineAlertsForm, PipelineHealthLine, usePipelineHealth } from '../components/dataset/PipelineHealth'
@@ -1076,6 +1077,7 @@ export default function DatasetDetail() {
           {/* Guided setup phase 5: plain first, the full column table below. */}
           <DatasetHealth datasetId={ds.id} dataSourceId={ds.data_source_id} onChanged={loadDataset} showInsights={false} />
           <ColumnMeaningPanel dataset={ds} canEdit onSaved={loadDataset} analysis={analysis} />
+          <ColumnTermsPanel datasetId={ds.id} columns={(ds.columns ?? []).map(c => c.name)} canEdit={isAdmin} />
           {analysis && (numCols.length > 0 || dtCols.length > 0 || catCols.length > 0) && (
             <details className="dl-cols__details">
               <summary>{tr('cols3.detailed')}</summary>

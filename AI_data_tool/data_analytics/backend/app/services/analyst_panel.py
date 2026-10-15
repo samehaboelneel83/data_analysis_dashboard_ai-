@@ -1383,6 +1383,8 @@ _TALL = {"model_linear": 6, "model_logistic": 6, "model_tree": 6, "model_cluster
          "model_rules": 6, "heatmap": 5, "correlation_matrix": 6, "sunburst": 5, "treemap": 5,
          "circle_pack": 5}
 _HEADLINE = ("kpi", "gauge", "card")
+#: The tallest a tile of horizontal bars grows (F-14).
+MAX_BAR_TILE = 9
 
 
 def _size(w: dict, section: str, first_in_section: bool) -> tuple[int, int]:
@@ -1401,6 +1403,15 @@ def _size(w: dict, section: str, first_in_section: bool) -> tuple[int, int]:
     # page loses the years it is about.
     if section == "time" and first_in_section and wt in ("line", "area", "step", "bar"):
         return 12, 4
+    if wt == "bar" and (w.get("config") or {}).get("orientation") == "horizontal":
+        # F-14: bars on their side need a row of height per few bars, or 14
+        # countries are stubs under crowded labels (a third of a row per bar,
+        # plus the title; at most MAX_BAR_TILE rows).
+        try:
+            bars = int(w.get("row_count") or 0)
+        except (TypeError, ValueError):
+            bars = 0
+        return 6, max(_TALL.get(wt, 4), min(MAX_BAR_TILE, math.ceil(bars / 3) + 2))
     return 6, _TALL.get(wt, 4)
 
 

@@ -172,3 +172,75 @@ def test_the_same_chart_may_be_used_for_two_parts_but_not_twice_for_one():
 def test_without_parts_nothing_about_them_is_said():
     _pages, client = pick({"pages": []})
     assert "THE PARTS" not in client.calls[0][0][1]["content"] and "part" not in client.calls[0][0][0]["content"]
+
+
+# ── "by <entity>" through a linked key (B-35) ────────────────────────────────
+
+LINKED_PROFILE = {"columns": [
+    {"name": "shipment_id", "role": "categorical", "is_identifier": True, "distinct": 900},
+    {"name": "origin_branch_id", "role": "numeric", "is_identifier": True, "distinct": 12},
+    {"name": "service_type", "role": "categorical", "distinct": 3},
+    {"name": "delivery_fee_egp", "role": "numeric", "distinct": 400},
+]}
+FEES_BY_BRANCH = {"sentence": "late deliveries and delivery fees by branch",
+                  "questions": [{"id": "q1", "text": "Which branch collects the most delivery fees?"}]}
+
+
+def test_a_key_linked_to_a_named_entity_is_a_dimension():
+    links = [{"column": "origin_branch_id", "table": "public.branches"}]
+    linked = answer.linked_dimensions(LINKED_PROFILE, FEES_BY_BRANCH, links)
+    assert linked == [{"column": "origin_branch_id", "entity": "branch", "table": "branches"}]
+    cards = answer.standard_cards(LINKED_PROFILE, [], None, linked=linked)
+    by = [c for c in cards if c["config"].get("dimension") == "origin_branch_id"]
+    assert by and all(c["widget_type"] == "bar" for c in by)
+    # Captioned for what it is: the branch's key, not its name.
+    assert any(c["title"] == "Total delivery fee egp by branch (id)" for c in by), [c["title"] for c in by]
+    # The model designing its own pages is told the same.
+    note = answer.linked_notes(linked)[0]
+    assert "`origin_branch_id`" in note and "branch" in note
+
+
+def test_a_key_is_not_a_dimension_without_a_link_or_a_question_naming_it():
+    assert answer.linked_dimensions(LINKED_PROFILE, FEES_BY_BRANCH, []) == []
+    other = {"questions": [{"id": "q1", "text": "Which service type is late most often?"}]}
+    assert answer.linked_dimensions(LINKED_PROFILE, other, [{"column": "origin_branch_id", "table": "branches"}]) == []
+    # A key with a value per row is no grouping, whatever is asked.
+    wide = {"columns": [{**c, "distinct": 900} if c["name"] == "origin_branch_id" else c
+                        for c in LINKED_PROFILE["columns"]]}
+    assert answer.linked_dimensions(wide, FEES_BY_BRANCH, [{"column": "origin_branch_id", "table": "branches"}]) == []
+    cards = answer.standard_cards(LINKED_PROFILE, [], None)
+    assert not any(c["config"].get("dimension") == "origin_branch_id" for c in cards)
+
+
+async def test_only_defined_links_of_this_dataset_are_read(db_session, two_orgs):
+    from app.models.models import (DataSource, Dataset, Relationship, SourceObject, SourceRelationship)
+    org = two_orgs["a"]["org"].id
+    src = DataSource(name="Nile", type="postgresql", config={}, org_id=org)
+    db_session.add(src)
+    await db_session.flush()
+    ship = Dataset(name="Shipments", org_id=org, data_source_id=src.id, source_table="public.shipments")
+    branches = Dataset(name="Branches", org_id=org)
+    db_session.add_all([ship, branches])
+    objs = {n: SourceObject(data_source_id=src.id, org_id=org, schema_name="public", name=n)
+            for n in ("shipments", "branches", "couriers", "zones")}
+    db_session.add_all(objs.values())
+    await db_session.flush()
+    db_session.add_all([
+        Relationship(org_id=org, from_dataset_id=ship.id, from_column="dest_branch_id",
+                     to_dataset_id=branches.id, to_column="id", source="confirmed"),
+        SourceRelationship(data_source_id=src.id, org_id=org, from_object_id=objs["shipments"].id,
+                           from_column="origin_branch_id", to_object_id=objs["branches"].id, to_column="id",
+                           source="declared"),
+        # A guess nobody confirmed is not a link to group by.
+        SourceRelationship(data_source_id=src.id, org_id=org, from_object_id=objs["shipments"].id,
+                           from_column="courier_id", to_object_id=objs["couriers"].id, to_column="id",
+                           source="inferred"),
+        # Another table's link is not this dataset's.
+        SourceRelationship(data_source_id=src.id, org_id=org, from_object_id=objs["couriers"].id,
+                           from_column="zone_id", to_object_id=objs["zones"].id, to_column="id",
+                           source="declared"),
+    ])
+    await db_session.commit()
+    links = await answer.links_of(db_session, ship)
+    assert sorted((d["column"], d["table"]) for d in links) == [
+        ("dest_branch_id", "Branches"), ("origin_branch_id", "branches")]

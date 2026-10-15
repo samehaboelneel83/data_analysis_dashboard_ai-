@@ -96,3 +96,33 @@ describe('GlossaryPanel', () => {
     expect(await screen.findByRole('button', { name: /retry|try again/i })).toBeInTheDocument()
   })
 })
+
+describe('GlossaryPanel on one dataset (B-21)', () => {
+  const DS_TERMS: GlossaryTerm[] = [
+    { ...TERMS[0] },
+    { id: 7, term: 'Revenue', definition: 'What was sold', synonyms: [], maps_to_object: null,
+      maps_to_column: 'amount', data_source_id: null, dataset_id: 5 },
+  ]
+
+  it('lists the dataset\'s terms, marks its own, and lets an admin change only those', async () => {
+    const read = vi.spyOn(metadataApi, 'datasetGlossary').mockResolvedValue(DS_TERMS)
+    render(<GlossaryPanel datasetId={5} canEdit columnNames={['amount', 'region']} />)
+    expect(await screen.findByText('Revenue')).toBeInTheDocument()
+    expect(read).toHaveBeenCalledWith(5)
+    expect(screen.getByText('this dataset only')).toBeInTheDocument()
+    expect(screen.getByText('organisation-wide')).toBeInTheDocument()
+    expect(screen.getByLabelText('Delete Revenue')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Delete GMV')).toBeNull()
+  })
+
+  it('opens linked to the column it was asked for, and saves the term on the dataset', async () => {
+    vi.spyOn(metadataApi, 'datasetGlossary').mockResolvedValue([])
+    const add = vi.spyOn(metadataApi, 'addDatasetTerm').mockResolvedValue(DS_TERMS[1])
+    render(<GlossaryPanel datasetId={5} canEdit columnNames={['amount', 'region']} initialColumn="amount" />)
+    fireEvent.change(await screen.findByPlaceholderText('GMV'), { target: { value: 'Revenue' } })
+    expect((screen.getByLabelText('Column (optional)') as HTMLSelectElement).value).toBe('amount')
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(add).toHaveBeenCalledWith(5, expect.objectContaining({
+      term: 'Revenue', maps_to_column: 'amount' })))
+  })
+})

@@ -36,3 +36,25 @@ describe('WidgetBody — restricted data', () => {
     expect(screen.getByText(/name 'cost' is not defined/)).toBeInTheDocument()
   })
 })
+
+describe('WidgetBody — KPI caption (B-36)', () => {
+  const kpi = (config: Record<string, unknown>) => ({ id: 2, widget_type: 'kpi', title: 'Shipments', config } as unknown as Widget)
+  const data = { type: 'scalar', rows: [{ value: 1200 }] }
+
+  it('says what was counted in words, never the raw countd(column)', () => {
+    render(<WidgetBody widget={kpi({ measure: 'shipment_id', aggregation: 'countd' })} data={data}
+      localSelected={null} onClickPoint={vi.fn()} broadcasts={false} />)
+    expect(screen.queryByText('countd(shipment_id)')).toBeNull()
+    expect(screen.getByText('Distinct shipment id')).toBeInTheDocument()
+  })
+
+  it('an average and a row count read as words too; a caption written for the reader still wins', () => {
+    const { unmount } = render(<WidgetBody widget={kpi({ measure: 'delivery_fee', aggregation: 'avg' })} data={data}
+      localSelected={null} onClickPoint={vi.fn()} broadcasts={false} />)
+    expect(screen.getByText('Average delivery fee')).toBeInTheDocument()
+    unmount()
+    render(<WidgetBody widget={kpi({ measure: 'shipment_id', aggregation: 'countd', caption: 'Shipments' })} data={data}
+      localSelected={null} onClickPoint={vi.fn()} broadcasts={false} />)
+    expect(screen.getAllByText('Shipments').length).toBeGreaterThan(0)
+  })
+})

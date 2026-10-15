@@ -121,6 +121,20 @@ function FetchErrorState({ err, onRetry }: { err: { detail: string; code?: strin
   return <EmptyState msg={msg} action={retry ? { label: t('widget.err.retry'), onClick: onRetry! } : undefined} />
 }
 
+/** B-36: a KPI's caption in words ("Distinct shipment id", "Average fee"),
+ *  never the raw "countd(shipment_id)" an axis title uses. */
+const KPI_CAPTION: Record<string, MessageKey> = {
+  count: 'widget.kpiCap.count', countd: 'widget.kpiCap.countd', avg: 'widget.kpiCap.avg', mean: 'widget.kpiCap.avg',
+  median: 'widget.kpiCap.median', min: 'widget.kpiCap.min', max: 'widget.kpiCap.max',
+}
+function kpiCaption(cfg: { measure?: unknown; aggregation?: unknown }, t: TranslateFn): string {
+  const key = KPI_CAPTION[String(cfg.aggregation ?? '').toLowerCase()]
+  if (!key) return seriesName(cfg as never)
+  const m = String(cfg.measure ?? '').replace(/_/g, ' ').trim()
+  const text = t(key, { m })
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
 export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, onClickPoint, broadcasts, allFormats, checked, onToggleSlicerValue, onButtonClick, ruleStyles, parameters, geography, textFilter, onSubmitTextFilter, rangeFilter, onSubmitRangeFilter, treePaths, onTreeChange, gridOpen, onToggleGridBranch, onGridClick, onAssignData, onBrushChange, brushNonce, onAnimationFrame, onApplyFix, onLoadMore, loadingMore }:
   { widget: Widget; data: any; fetchError?: { detail: string; code?: string } | null; onRetry?: () => void; localSelected: unknown; onClickPoint: (v: unknown) => void; broadcasts: boolean; allFormats?: Record<string, CalcColumnFormat | undefined>; checked?: Set<unknown>; onToggleSlicerValue?: (v: unknown) => void; onButtonClick?: () => void; ruleStyles?: RuleStyles; parameters?: Record<string, unknown>; geography?: Record<string, number>;
     textFilter?: string; onSubmitTextFilter?: (value: string, column: string) => void
@@ -523,7 +537,7 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
               instead of "avg(is_late_pct)". */}
           {typeof cfg.caption === 'string' && cfg.caption.trim() ? cfg.caption
             : cfg.measure && cfg.aggregation && String(cfg.aggregation).toLowerCase() !== 'sum'
-              ? seriesName(cfg) : (cfg.measure || cfg.dimension || 'Value')}
+              ? kpiCaption(cfg, tw) : (cfg.measure || cfg.dimension || 'Value')}
         </div>
         {change && (
           <div data-testid="kpi-period-change" dir="ltr" style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>

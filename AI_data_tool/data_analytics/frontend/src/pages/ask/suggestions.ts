@@ -56,6 +56,23 @@ function numberKind(c: string, classes?: ColumnClasses): string | undefined {
   return undefined
 }
 
+/** AD-11 step 3: label columns with (nearly) a value per row -- a task name,
+ *  an order number -- are not groups to compare. Read from the dataset's
+ *  stored profile (GET /datasets/{id}/analysis: `categorical.columns[c].n_unique`
+ *  over `overview.rows`, the rows it was computed on), which the server only
+ *  returns to a reader with no row or column rule. No profile: nothing skipped. */
+export const NEAR_UNIQUE = 0.9
+export function nearUniqueLabels(profile: unknown): Set<string> {
+  const p = profile as { overview?: { rows?: number }; categorical?: { columns?: Record<string, { n_unique?: number }> } } | null
+  const rows = Number(p?.overview?.rows ?? 0)
+  const out = new Set<string>()
+  if (!(rows >= 20)) return out
+  for (const [c, s] of Object.entries(p?.categorical?.columns ?? {})) {
+    if (typeof s?.n_unique === 'number' && s.n_unique >= NEAR_UNIQUE * rows) out.add(c)
+  }
+  return out
+}
+
 /** Which picture a suggestion card shows (SuggestionGrid maps it to an icon). */
 export type SuggestionIcon = 'total' | 'top' | 'trend' | 'average' | 'highest' | 'count' | 'rows' | 'summary' | 'columns' | 'tables'
 
@@ -73,6 +90,7 @@ export interface SuggestionCard { text: string; icon: SuggestionIcon; columns: s
  *  "Total car age years by make", "Total review score by days late"). */
 export function datasetSuggestionCards(
   columns: Pick<DatasetColumn, 'name' | 'dtype'>[] | undefined, t: Translate, classes?: ColumnClasses,
+  perRow?: Set<string>,
 ): SuggestionCard[] {
   const kind = (c: string) => numberKind(c, classes)
   const isCode = (c: string) => kind(c) === 'code' || kind(c) === 'coordinate' || classes?.[c]?.role === 'identifier'
@@ -81,7 +99,7 @@ export function datasetSuggestionCards(
   // An amount first: what a "total" is about.
   numeric.sort((a, b) => Number(!ADDS_UP.has(kind(a) ?? 'amount')) - Number(!ADDS_UP.has(kind(b) ?? 'amount')))
   const { dates } = sorted
-  const labels = sorted.labels.filter(c => !isCode(c))
+  const labels = sorted.labels.filter(c => !isCode(c) && !perRow?.has(c))
   const out: SuggestionCard[] = []
   const [n0, c0, c1, d0] = [numeric[0], labels[0], labels[1], dates[0]]
   const num = n0 && humanize(n0)
@@ -106,8 +124,9 @@ export function datasetSuggestionCards(
 /** 4-6 questions this dataset can answer; generic ones when the columns say little. */
 export function datasetSuggestions(
   columns: Pick<DatasetColumn, 'name' | 'dtype'>[] | undefined, t: Translate, classes?: ColumnClasses,
+  perRow?: Set<string>,
 ): string[] {
-  return datasetSuggestionCards(columns, t, classes).map(c => c.text)
+  return datasetSuggestionCards(columns, t, classes, perRow).map(c => c.text)
 }
 
 /** A live connection has tables, not columns, until a question names one. */

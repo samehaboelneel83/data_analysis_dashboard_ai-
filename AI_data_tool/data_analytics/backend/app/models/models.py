@@ -1876,6 +1876,10 @@ class GlossaryTerm(Base):
     id             = Column(Integer, primary_key=True)
     org_id         = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     data_source_id = Column(Integer, ForeignKey("data_sources.id", ondelete="CASCADE"), nullable=True, index=True)
+    #: B-21: a term of ONE dataset (an uploaded file has no connection to hang
+    #: it on). Shown and used only where that dataset is readable; NULL for an
+    #: org-wide or a connection's term (0071_glossary_dataset_scope).
+    dataset_id     = Column(Integer, ForeignKey("datasets.id", ondelete="CASCADE"), nullable=True, index=True)
     term           = Column(String(200), nullable=False)
     definition     = Column(Text, nullable=True)
     synonyms       = Column(JSON, nullable=False, default=list)   # ["GMV", "إجمالي المبيعات"]

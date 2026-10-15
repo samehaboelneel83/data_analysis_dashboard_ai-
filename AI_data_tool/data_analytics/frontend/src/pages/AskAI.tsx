@@ -4,7 +4,7 @@ import { BarChart3, Bot, Code2, History, MessageSquareText, Sparkles } from 'luc
 import EmptyState from '../components/ui/EmptyState'
 import ChatPane from '../components/chat/ChatPane'
 import Composer from '../components/chat/Composer'
-import { agentApi, allowAiApi, datasetsApi, dataSourcesApi } from '../services/api'
+import { agentApi, allowAiApi, analysisApi, datasetsApi, dataSourcesApi } from '../services/api'
 import type { AgentConversation, Dataset, DatasetColumn } from '../services/api'
 import { useT } from '../i18n'
 import AskHero from './ask/AskHero'
@@ -13,7 +13,7 @@ import DataPicker, { useItemMeta, type PickerItem } from './ask/DataPicker'
 import HistoryPanel from './ask/HistoryPanel'
 import { signalRobot } from './ask/robotMood'
 import { useConfirm } from '../components/ui/ConfirmDialog'
-import { connectionSuggestionCards, datasetSuggestionCards, type ColumnClasses } from './ask/suggestions'
+import { connectionSuggestionCards, datasetSuggestionCards, nearUniqueLabels, type ColumnClasses } from './ask/suggestions'
 import './ask/ask.css'
 import './ask/askLayout.css'
 import './ask/askCards.css'
@@ -267,10 +267,23 @@ export default function AskAI() {
   const paneOpen = scoped && selected !== undefined
   useEffect(() => { if (paneOpen && pendingQ) setPendingQ('') }, [paneOpen, pendingQ])
   const columns = datasetId != null ? columnsById[datasetId] : undefined
+  // AD-11 step 3: which labels have a value per row, from the stored profile
+  // (one cached read; the server withholds it from a reader under a row or
+  // column rule, and then nothing is skipped).
+  const [perRow, setPerRow] = useState<{ id: number; cols: Set<string> } | null>(null)
+  useEffect(() => {
+    if (datasetId == null || typeof analysisApi?.get !== 'function') return
+    let alive = true
+    Promise.resolve().then(() => analysisApi.get(datasetId))
+      .then(p => { if (alive) setPerRow({ id: datasetId, cols: nearUniqueLabels(p) }) })
+      .catch(() => { /* no profile: nothing skipped */ })
+    return () => { alive = false }
+  }, [datasetId])
+  const skip = perRow && perRow.id === datasetId ? perRow.cols : undefined
   const cards = useMemo(
     () => (sourceId != null ? connectionSuggestionCards(t)
-      : datasetSuggestionCards(columns, t, datasetId != null ? classesById[datasetId] : undefined)),
-    [sourceId, columns, t, datasetId, classesById],
+      : datasetSuggestionCards(columns, t, datasetId != null ? classesById[datasetId] : undefined, skip)),
+    [sourceId, columns, t, datasetId, classesById, skip],
   )
   const suggestions = useMemo(() => cards.map(c => c.text), [cards])
   const itemMeta = useItemMeta()

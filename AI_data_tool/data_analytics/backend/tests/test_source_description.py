@@ -270,3 +270,34 @@ class TestApi:
                                json={"allow_llm_sampling": True},
                                headers=auth_headers["a"])
         assert r.status_code == 404
+
+
+class TestAiUnavailableIsSaidOnUploads:
+    """AD-01 step 7: the dataset sync's describe step (infer_semantic) said
+    "ok" with nothing written when the model was down; the connection sync's
+    describe/entities already said "skipped -- AI unavailable" (B-11)."""
+
+    async def test_a_model_known_down_is_not_called_and_the_step_says_so(self, db_session, seeded):
+        client = FakeClient({"overview": "never asked"})
+        client.available = lambda: False
+        run = await sync.run_sync(db_session, seeded["source"].id, seeded["org"].id,
+                                  cache=Cache(), llm_client=client, allow_llm=True)
+        stage = {s["name"]: s for s in run.stages}["infer_semantic"]
+        assert stage["status"] == "skipped"
+        assert stage["detail"]["reason"] == "AI unavailable"
+        assert "semantic_types" in stage["detail"]
+        assert client.prompts == []
+
+    async def test_every_call_failing_is_reported_as_skipped(self, db_session, seeded):
+        class Down(FakeClient):
+            tokens_out = 0
+
+            async def complete_json(self, messages, schema, **kw):
+                self.prompts.append(messages)
+                self.last_error = "ConnectError: unreachable"
+                return None
+        run = await sync.run_sync(db_session, seeded["source"].id, seeded["org"].id,
+                                  cache=Cache(), llm_client=Down(), allow_llm=True)
+        stage = {s["name"]: s for s in run.stages}["infer_semantic"]
+        assert stage["status"] == "skipped"
+        assert stage["detail"]["reason"].startswith("AI unavailable: ConnectError")
