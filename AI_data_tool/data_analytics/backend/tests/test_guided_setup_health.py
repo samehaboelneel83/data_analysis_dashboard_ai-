@@ -5,6 +5,7 @@ import pytest
 
 from app.services.data_quality import quality_report
 from app.services.guided_setup import health
+from app.services.llm import get_client as _real_get_client
 
 
 class FakeClient:
@@ -280,6 +281,23 @@ class TestRoutes:
         await db_session.commit()
         got = (await client.get(f"/api/v1/setup/{src.id}/check", headers=auth_headers["a"])).json()
         assert got["datasets"][0]["used_by"] == {"dashboards": 1}
+
+    async def test_the_step_says_when_the_ai_is_unavailable(self, client, auth_headers, setup, db_session, monkeypatch):
+        """B-11: the check step carries ai.available so the page can say "AI is
+        not available" at once instead of a spinner."""
+        from app.services import llm_endpoints
+        from app.models.models import DataSource
+        src, ds = setup
+        got = (await client.get(f"/api/v1/setup/{src.id}/check", headers=auth_headers["a"])).json()
+        assert got["ai"] == {"available": False, "reason": "off"}      # the connection does not allow it
+        src.allow_llm_sampling = True
+        await db_session.commit()
+        monkeypatch.setattr("app.services.llm.get_client", _real_get_client)
+        monkeypatch.setattr("app.core.config.settings.llm_enabled", True)
+        for e in llm_endpoints.endpoints():
+            llm_endpoints.mark(e.id, False, "ConnectError")
+        got = (await client.get(f"/api/v1/setup/{src.id}/check", headers=auth_headers["a"])).json()
+        assert got["ai"] == {"available": False, "reason": "unavailable"}
 
     async def test_findings_are_offered_to_the_datasets_own_pages(self, client, auth_headers, setup):
         src, ds = setup

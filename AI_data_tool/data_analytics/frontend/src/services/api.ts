@@ -4231,7 +4231,11 @@ export interface SetupProposal {
   refine_failed?: string
 }
 
+/** B-11: whether the AI can help on a guided-setup step right now. */
+export interface SetupAiState { available: boolean; reason: 'off' | 'unavailable' | null }
+
 export interface SetupDatasetsStep {
+  ai?: SetupAiState
   proposals: { pending: boolean; failed: string | null; items: SetupProposal[]; language: string | null; asked: boolean
                /** When the running step started (server UTC). */
                since?: string | null }
@@ -4283,6 +4287,7 @@ export interface SetupFindings {
 }
 
 export interface SetupCheckStep {
+  ai?: SetupAiState
   datasets: { id: number; name: string; mode: string; row_count: number | null
               /** True when the setup made this dataset, so it cleans it by itself. */
               auto_clean?: boolean
@@ -4335,6 +4340,7 @@ export interface SetupDesign {
 }
 
 export interface SetupDashboardStep {
+  ai?: SetupAiState
   designs: { pending: boolean; failed: string | null; items: SetupDesign[]; asked: boolean; report_id: number | null
              /** Designs already made into pages of this analysis's dashboard. */
              used?: string[]; language?: string | null; since?: string | null }

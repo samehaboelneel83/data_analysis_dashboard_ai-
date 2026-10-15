@@ -1008,6 +1008,23 @@ async def _existing_datasets(db: AsyncSession, user: User, source: DataSource) -
     return out[:20]
 
 
+def _ai_state(source: DataSource | None) -> dict:
+    """B-11: whether the AI can help on this step right now, so the page says
+    so at once instead of showing a spinner: off (this connection or the
+    platform does not use it), unavailable (every endpoint was found down
+    moments ago), or available."""
+    from ..core.config import settings
+    if source is None or not source.allow_llm_sampling or not settings.llm_enabled:
+        return {"available": False, "reason": "off"}
+    try:
+        from ..services.llm import get_client
+        if not get_client().available():
+            return {"available": False, "reason": "unavailable"}
+    except Exception:                                       # noqa: BLE001 -- unknown is not "down"
+        pass
+    return {"available": True, "reason": None}
+
+
 async def _dashboards_using(db: AsyncSession, user: User, ids: list[int]) -> dict[int, int]:
     """How many dashboards of the organization read each dataset."""
     if not ids:
@@ -1071,6 +1088,7 @@ async def get_datasets_step(source_id: int, lang: str = "en", flow: int | None =
             "chosen": list(f.dataset_ids or []),
             "can_create": _may_create(user),
             "allow_ai": bool(source.allow_llm_sampling),
+            "ai": _ai_state(source),
             "usual": await _usual_waits(db, user.org_id)}
 
 
@@ -1593,7 +1611,8 @@ async def get_check_step(source_id: int, lang: str = "en", flow: int | None = No
     done = bool(out) and all(d["findings"]["checked"] and not d["findings"]["pending"] for d in out)
     if done and (f.demand or {}).get("sentence") and not (f.demand or {}).get("pending") and not f.designs:
         await _start_designs(db, user, f, lang)
-    return {"datasets": out, "demand": _demand_out(f), "usual": await _usual_waits(db, user.org_id)}
+    return {"datasets": out, "demand": _demand_out(f), "ai": _ai_state(source),
+            "usual": await _usual_waits(db, user.org_id)}
 
 
 @router.post("/{source_id}/check/{dataset_id}/run")
@@ -1932,6 +1951,7 @@ async def get_dashboard_step(source_id: int, lang: str = "en", flow: int | None 
         out["pending"] = True             # the request is being rewritten; the design follows it
     return {"designs": out, "has_data": bool(datasets_), "demand": _demand_out(f),
             "datasets": [{"id": d.id, "name": d.name} for d in datasets_],
+            "ai": _ai_state(source),
             "usual": await _usual_waits(db, user.org_id)}
 
 

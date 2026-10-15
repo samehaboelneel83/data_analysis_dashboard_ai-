@@ -141,6 +141,7 @@ export default function CheckStep({ sourceId, flow, onNext, onBack }: {
       )}
       {data.datasets.map(d => (
         <DatasetCheck key={d.id} d={d} language={language} gaveUp={gaveUp} busy={busy} usual={data.usual?.check}
+          aiOff={data.ai?.available === false}
           fixError={fixError?.datasetId === d.id ? fixError.text : null}
           onRetry={retry} onAgain={() => again(d.id)}
           onFix={(item, how) => fix(d.id, item, how)}
@@ -156,8 +157,9 @@ export default function CheckStep({ sourceId, flow, onNext, onBack }: {
   )
 }
 
-function DatasetCheck({ d, language, gaveUp, busy, usual, fixError, onRetry, onAgain, onFix, onUndo }: {
+function DatasetCheck({ d, language, gaveUp, busy, usual, aiOff, fixError, onRetry, onAgain, onFix, onUndo }: {
   d: CheckedDataset; language: string; gaveUp: boolean; busy: string | null; usual?: number
+  aiOff?: boolean
   fixError?: string | null
   onRetry: () => void; onAgain: () => void
   onFix: (item: SetupFindingItem, how: 'fix' | 'check') => void
@@ -199,9 +201,9 @@ function DatasetCheck({ d, language, gaveUp, busy, usual, fixError, onRetry, onA
           <p className="setup-ai">{t('setup.u.aiSlow')}{' '}
             <button type="button" className="btn btn-sm" onClick={onRetry}>{t('setup.u.checkAgain')}</button></p>
         )}
-        {!f.pending && f.ai_pending && !gaveUp && (
-          <p className="setup-ai setup-ai--pending"><Sparkles size={13} aria-hidden="true" /> {t('setup.k.aiComing')}</p>
-        )}
+        {!f.pending && f.ai_pending && !gaveUp && (aiOff
+          ? <p className="setup-ai">{t('setup.ai.offCheck')}</p>
+          : <p className="setup-ai setup-ai--pending"><Sparkles size={13} aria-hidden="true" /> {t('setup.k.aiComing')}</p>)}
         {!f.pending && f.failed && <p className="setup-ai">{t('setup.c.failed')} {f.failed !== 'failed' ? f.failed : ''}</p>}
         {!f.pending && f.language && f.language !== language && f.health.length > 0 && (
           <p className="setup-ai">{t('setup.langHintCheck')}</p>

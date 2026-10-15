@@ -172,7 +172,10 @@ export default function ChooseDataStep({ sourceId, flow, onDone }: {
           </div>
           <p className="setup-section__sub">{t('setup.d.proposalsSub')}</p>
           <div aria-live="polite">
-            {data.proposals.pending && !gaveUp && (
+            {data.proposals.pending && !gaveUp && data.ai?.available === false && (
+              <p className="setup-ai">{t('setup.ai.offChoose')}</p>
+            )}
+            {data.proposals.pending && !gaveUp && data.ai?.available !== false && (
               <p className="setup-ai setup-ai--pending"><Sparkles size={13} aria-hidden="true" /> {t('setup.d.thinking')}<WaitTime since={data.proposals.since} usual={data.usual?.proposals} /></p>
             )}
             {data.proposals.pending && gaveUp && (
