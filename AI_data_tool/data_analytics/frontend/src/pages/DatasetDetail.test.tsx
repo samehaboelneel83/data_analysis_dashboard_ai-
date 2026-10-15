@@ -435,6 +435,57 @@ describe('DatasetDetail data filters (B-07)', () => {
   })
 })
 
+describe('DatasetDetail edit cells key (B-08)', () => {
+  const sales = (): Dataset => ({ ...importDataset(), row_count: 3,
+    columns: [{ name: 'date', dtype: 'datetime' }, { name: 'id', dtype: 'categorical' }, { name: 'amount', dtype: 'numeric' }] as never })
+  const rows = { columns: ['date', 'id', 'amount'], rows: [['2024-01-01', 'a', 'one'], ['2024-01-01', 'b', 'two'], ['2024-01-02', 'c', 'three']], total: 3 }
+
+  async function openEditor() {
+    renderDetail(29)
+    await screen.findByRole('heading', { name: 'CSV Upload' })
+    fireEvent.click(screen.getByRole('tab', { name: /^Data/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Edit cells/ }))
+    return screen.getByLabelText('Rows identified by') as HTMLSelectElement
+  }
+
+  it('defaults the key to a column unique per row, and marks the others', async () => {
+    const { prepApi } = await import('../services/api')
+    vi.mocked(datasetsApi.get).mockResolvedValue(sales())
+    vi.mocked(analysisApi.get).mockResolvedValue({ categorical: { columns: { id: { n_unique: 3 } } },
+      datetime: { columns: { date: { n_unique: 2 } } } } as never)
+    vi.mocked(dataPreviewApi.query).mockResolvedValue(rows as never)
+    vi.mocked(prepApi.get).mockResolvedValue([])
+    const select = await openEditor()
+    expect(select.value).toBe('id')
+    expect(Array.from(select.options).find(o => o.value === 'date')!.textContent).toMatch(/not unique/)
+  })
+
+  it('asks before an edit keyed on a shared value changes several rows, and says so to the server', async () => {
+    const { prepApi } = await import('../services/api')
+    vi.mocked(datasetsApi.get).mockResolvedValue(sales())
+    vi.mocked(analysisApi.get).mockResolvedValue({ datetime: { columns: { date: { n_unique: 2 } } } } as never)
+    vi.mocked(dataPreviewApi.query).mockResolvedValue(rows as never)
+    vi.mocked(prepApi.get).mockResolvedValue([])
+    vi.mocked(prepApi.set).mockImplementation(async (_id, steps) => steps as never)
+    const select = await openEditor()
+    fireEvent.change(select, { target: { value: 'date' } })
+    vi.mocked(dataPreviewApi.query).mockImplementation(async (_id, filters) => {
+      const hit = rows.rows.filter(r => (filters ?? []).every(f => r[0] === f.value))
+      return { ...rows, rows: hit, total: hit.length } as never
+    })
+    fireEvent.click(screen.getByText('one'))
+    const box = screen.getByRole('textbox', { name: /amount/ })
+    fireEvent.change(box, { target: { value: '9' } })
+    fireEvent.blur(box)
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent(/2 rows/)
+    expect(prepApi.set).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('button', { name: /Change 2 rows/ }))
+    await waitFor(() => expect(prepApi.set).toHaveBeenCalledWith(29, [expect.objectContaining({
+      kind: 'edit_cells', key_column: 'date', allow_many: true })]))
+  })
+})
+
 describe('DatasetDetail source-backed re-import link', () => {
   it('links to the specific connection, not the generic Connections list, when the file is missing', async () => {
     vi.mocked(datasetsApi.get).mockResolvedValue(importDataset())  // data_source_id: 5, no source_table/source_query
@@ -1004,11 +1055,13 @@ describe('editing a cell in the data grid', () => {
     ] as never
     vi.mocked(datasetsApi.get).mockResolvedValue(ds)
     vi.mocked(analysisApi.get).mockRejectedValue(new Error('none'))
-    vi.mocked(dataPreviewApi.query).mockResolvedValue({
-      columns: ['order_id', 'region'],
-      rows: [['A-1', 'Nrth'], ['A-2', 'South']],
-      total: 2,
-    } as never)
+    // Answers like the server: a filter narrows the rows (the edit counts the
+    // rows sharing its key with one, B-08).
+    const all = [['A-1', 'Nrth'], ['A-2', 'South']]
+    vi.mocked(dataPreviewApi.query).mockImplementation(async (_id, filters) => {
+      const rows = all.filter(r => (filters ?? []).every(f => r[f.column === 'order_id' ? 0 : 1] === f.value))
+      return { columns: ['order_id', 'region'], rows, total: rows.length } as never
+    })
   }
 
   async function openDataTab() {

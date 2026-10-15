@@ -1,5 +1,5 @@
 import { sayText } from '../lib/readbackText'
-import { useEffect, useLayoutEffect, useState, useCallback, useRef, useContext } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef, useContext } from 'react'
 import KeyInfluencersResultView from '../components/analysis/KeyInfluencersResult'
 import { pickInfluencerOutcome } from './datasetDetail/influencerOutcome'
 import AggregatesPanel from '../components/dataset/AggregatesPanel'
@@ -18,6 +18,7 @@ import NotebookSnippet from '../components/NotebookSnippet'
 import LoadError from '../components/ui/LoadError'
 import LoadingState from '../components/ui/LoadingState'
 import EmptyState from '../components/ui/EmptyState'
+import { useConfirm } from '../components/ui/ConfirmDialog'
 import { findingKey, pinsApi, reportsApi } from '../services/api'
 import { navArrows, useDirection } from '../contexts/DirectionContext'
 import { useParams, Link, useLocation, useSearchParams, useNavigate } from 'react-router-dom'
@@ -182,6 +183,7 @@ export default function DatasetDetail() {
   // in the pipeline beside every other transform. Merge rules: lib/cellEdits.ts.
   const [editCells,  setEditCells]  = useState(false)
   const [keyColumn,  setKeyColumn]  = useState<string>('')
+  const confirm = useConfirm()
   const [editingAt,  setEditingAt]  = useState<{ row: number; column: string } | null>(null)
   const [prepSteps,  setPrepSteps]  = useState<PrepStep[]>([])
 
@@ -350,6 +352,21 @@ export default function DatasetDetail() {
     }
   }, [ds, dsId, page, filterRows, calcCols, sortBy, sortDir, search])
 
+  /** B-08: which columns the saved profile shows to be unique per row, and
+   *  which it shows are not (several rows share a value). */
+  const { uniqueCols, sharedCols } = useMemo(() => {
+    const unique = new Set<string>(), shared = new Set<string>()
+    const rows = ds?.row_count ?? 0
+    const groups = [analysis?.categorical?.columns, analysis?.datetime?.columns] as (Record<string, { n_unique?: number }> | undefined)[]
+    for (const g of groups) {
+      for (const [name, info] of Object.entries(g ?? {})) {
+        if (typeof info?.n_unique !== 'number' || !rows) continue
+        if (info.n_unique >= rows) unique.add(name); else shared.add(name)
+      }
+    }
+    return { uniqueCols: unique, sharedCols: shared }
+  }, [analysis, ds?.row_count])
+
   /** Turn a typed cell into a saved prep step. The whole pipeline is written
    *  wholesale (the prep contract), so the steps the user already had are read
    *  first and carried through -- dropping them would be a silent data change. */
@@ -368,8 +385,27 @@ export default function DatasetDetail() {
     if (String(before ?? '') === raw) return
     const rowKey = String(row[key] ?? '')
     try {
+      // B-08: an edit finds its row by the key's value; on a key several rows
+      // share it changes every one of them -- counted and confirmed first.
+      let allowMany = false
+      if (!uniqueCols.has(keyColumn)) {
+        const onPage = preview.rows.filter(r => String((r as unknown[])[key] ?? '') === rowKey).length
+        let n = onPage
+        try {
+          const hit = await dataPreviewApi.query(dsId, [{ column: keyColumn, op: 'eq', value: rowKey }], calcCols, 1, 0)
+          n = Math.max(onPage, hit.total)
+        } catch { /* the page's own count is the floor */ }
+        if (n > 1) {
+          const ok = await confirm({
+            title: tr('i2d.dd.manyTitle', { n: localDigits(String(n)) }),
+            body: tr('i2d.dd.manyBody', { n: localDigits(String(n)), column: keyColumn, key: rowKey }),
+            confirmLabel: tr('i2d.dd.manyOk', { n: localDigits(String(n)) }), destructive: false })
+          if (!ok) return
+          allowMany = true
+        }
+      }
       const existing = await prepApi.get(dsId)
-      const next = mergeCellEdit(existing, { keyColumn, column, key: rowKey, value })
+      const next = mergeCellEdit(existing, { keyColumn, column, key: rowKey, value, allowMany })
       await prepApi.set(dsId, next)
       setPrepSteps(next)
       toast.success(tr('i2d.dd.cellSaved', { column, key: rowKey }))
@@ -379,7 +415,7 @@ export default function DatasetDetail() {
         ?.response?.data?.detail
       toast.error(detail ?? (err as Error)?.message ?? tr('i2d.dd.cellFailed'))
     }
-  }, [preview, keyColumn, dsId, loadPreview])
+  }, [preview, keyColumn, dsId, loadPreview, uniqueCols, calcCols, confirm, tr])
 
   // Load preview whenever tab is 'data' and ds is ready
   useEffect(() => {
@@ -1724,7 +1760,10 @@ export default function DatasetDetail() {
                     setEditCells(on)
                     setEditingAt(null)
                     if (on) {
-                      if (!keyColumn) setKeyColumn(preview.columns[0])
+                      // B-08: a key unique per row; else an id-looking column the
+                      // profile does not show to be shared; else none -- chosen.
+                      if (!keyColumn) setKeyColumn(preview.columns.find(c => uniqueCols.has(c))
+                        ?? preview.columns.find(c => /(^id$|_id$|^key$)/i.test(c) && !sharedCols.has(c)) ?? '')
                       prepApi.get(dsId).then(setPrepSteps).catch(() => setPrepSteps([]))
                     }
                   }}>
@@ -1735,11 +1774,13 @@ export default function DatasetDetail() {
                     <label htmlFor="cell-edit-key" style={{ fontSize: 11, color: 'var(--muted)' }}>
                       {tr('i2d.dd.rowsBy')}
                     </label>
-                    <select id="cell-edit-key" value={keyColumn || preview.columns[0]}
+                    <select id="cell-edit-key" value={keyColumn}
                       onChange={e => { setKeyColumn(e.target.value); setEditingAt(null) }}
                       style={{ fontSize: 11, padding: '3px 6px', background: 'var(--surface)',
                         border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)' }}>
-                      {preview.columns.map(c => <option key={c} value={c}>{c}</option>)}
+                      {!keyColumn && <option value="">{tr('i2d.dd.chooseKey')}</option>}
+                      {preview.columns.map(c => <option key={c} value={c}>
+                        {sharedCols.has(c) ? `${c} ${tr('i2d.dd.notUnique')}` : c}</option>)}
                     </select>
                     <span style={{ fontSize: 11, color: 'var(--muted)' }}>
                       {tr('i2d.dd.editNote')}
@@ -1799,7 +1840,7 @@ export default function DatasetDetail() {
                     </thead>
                     <tbody>
                       {preview.rows.map((row, i) => {
-                        const activeKey = keyColumn || preview.columns[0]
+                        const activeKey = keyColumn
                         const keyAt = preview.columns.indexOf(activeKey)
                         const rowKey = String((row as unknown[])[keyAt] ?? '')
                         return (
@@ -1809,7 +1850,7 @@ export default function DatasetDetail() {
                             const column = preview.columns[j]
                             // Never the key column: it is how the edit finds its
                             // row, and the backend refuses that step outright.
-                            const canEdit = editCells && column !== activeKey && rowKey !== ''
+                            const canEdit = editCells && !!activeKey && column !== activeKey && rowKey !== ''
                             const isEditing = editingAt?.row === i && editingAt?.column === column
                             return (
                             <td key={j} className={typeof v === 'number' ? 'dl-data3__num' : undefined} style={{

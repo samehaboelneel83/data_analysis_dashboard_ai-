@@ -107,4 +107,11 @@ describe('editedValues', () => {
     const steps = mergeCellEdit([], { ...edit, keyColumn: 'code', key: 'X', value: 'North' })
     expect(editedValues(steps, 'order_id', 'region').size).toBe(0)
   })
+
+  it('marks a step whose edit was confirmed to change several rows (B-08)', () => {
+    const one = mergeCellEdit([], { keyColumn: 'date', column: 'amount', key: '2024-01-01', value: 9, allowMany: true })
+    expect(one[0]).toMatchObject({ kind: 'edit_cells', allow_many: true })
+    const plain = mergeCellEdit([], { keyColumn: 'id', column: 'amount', key: 'a', value: 9 })
+    expect(plain[0]).not.toHaveProperty('allow_many')
+  })
 })
