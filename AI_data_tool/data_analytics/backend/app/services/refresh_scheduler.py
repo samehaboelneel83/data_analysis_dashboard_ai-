@@ -275,6 +275,10 @@ def schedule_is_due(sched, now: datetime) -> bool:
     (`is_due`) are elapsed-time-based and have no wall-clock to localize."""
     spec = calendar_spec(sched.recipients)
     if spec is not None:
+        if spec.get("paused"):
+            # AD-16: a calendar shown but switched off (the seeded demo):
+            # visible as "weekly ... (paused)", never run.
+            return False
         return is_calendar_due(spec, sched.last_run_at, now, getattr(sched, "timezone", None))
     return is_due(sched.interval_minutes, sched.last_run_at, now)
 

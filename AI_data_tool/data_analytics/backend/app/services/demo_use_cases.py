@@ -696,7 +696,12 @@ async def _seed_monitoring(db: AsyncSession, org_id: int, report: Report,
             report_id=report.id,
             creator_user_id=creator.id,
             interval_minutes=INERT_INTERVAL,   # never due -- see docstring
-            recipients=["demo@example.invalid"],
+            # AD-16: the weekly calendar it describes, PAUSED: the jobs page
+            # reads "weekly (Monday) 09:00 (paused)" instead of "—", and
+            # schedule_is_due() returns False for a paused calendar.
+            recipients=["demo@example.invalid",
+                        {"__calendar__": {"kind": "weekly", "weekday": 0, "hour": 9, "minute": 0,
+                                          "paused": True}}],
             subject="Demo — weekly regional performance",
         ))
 

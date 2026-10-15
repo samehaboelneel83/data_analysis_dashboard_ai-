@@ -2615,8 +2615,8 @@ export interface MonitoringJobRow {
   id: number
   name: string
   interval_minutes: number
-  /** A calendar report schedule ("weekly on Monday at 09:00"). */
-  calendar?: { kind: 'daily' | 'weekly' | 'monthly'; hour: number; minute: number; weekday?: number; monthday?: number } | null
+  /** A calendar report schedule ("weekly on Monday at 09:00"); `paused`: shown, never run. */
+  calendar?: { kind: 'daily' | 'weekly' | 'monthly'; hour: number; minute: number; weekday?: number; monthday?: number; paused?: boolean } | null
   timezone?: string | null
   last_run_at: string | null
   status: string | null

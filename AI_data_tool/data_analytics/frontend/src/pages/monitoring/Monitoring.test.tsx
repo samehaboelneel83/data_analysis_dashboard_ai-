@@ -74,6 +74,19 @@ describe('MonitoringJobs', () => {
     expect(screen.getByRole('link', { name: 'Revenue floor' })).toHaveAttribute('href', '/datasets/4')
   })
 
+  it('says Paused for an unscheduled job and marks a paused calendar (AD-16)', async () => {
+    vi.mocked(monitoringApi.jobs).mockResolvedValue([
+      { kind: 'alert', id: 3, name: 'Demo alert', interval_minutes: 0,
+        last_run_at: null, status: null, error: null, dataset_id: 4 },
+      { kind: 'report_schedule', id: 2, name: 'Demo weekly', interval_minutes: 0, last_run_at: null, status: null,
+        error: null, report_id: 9, calendar: { kind: 'weekly', weekday: 0, hour: 9, minute: 0, paused: true } },
+    ] as never)
+    renderIn(<MonitoringJobs />)
+    await screen.findByText('Demo alert')
+    expect(screen.getByText('Paused (not scheduled)')).toBeInTheDocument()
+    expect(screen.getByText(/weekly .*\(paused\)/i)).toBeInTheDocument()
+  })
+
   it('links a dataflow job to the Dataflows page, opened on it (E12)', async () => {
     // Dataflows run on their schedule and belong in this list; their page
     // is back, so the row opens it on the dataflow.

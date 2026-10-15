@@ -50,16 +50,18 @@ function schedule(j: MonitoringJobRow, t: TranslateFn): string {
   const c = j.calendar
   if (c) {
     const at = `${String(c.hour).padStart(2, '0')}:${String(c.minute).padStart(2, '0')} ${j.timezone || 'UTC'}`
-    if (c.kind === 'weekly') return t('pg.dataPages.jobs.weeklyAt', { day: t(WEEKDAY[c.weekday ?? 0]), at })
-    if (c.kind === 'monthly') return t('pg.dataPages.jobs.monthlyAt', { day: c.monthday ?? 1, at })
-    return t('pg.dataPages.jobs.dailyAt', { at })
+    const when = c.kind === 'weekly' ? t('pg.dataPages.jobs.weeklyAt', { day: t(WEEKDAY[c.weekday ?? 0]), at })
+      : c.kind === 'monthly' ? t('pg.dataPages.jobs.monthlyAt', { day: c.monthday ?? 1, at })
+      : t('pg.dataPages.jobs.dailyAt', { at })
+    // AD-16: a calendar kept but switched off says so.
+    return c.paused ? `${when} ${t('pg.dataPages.jobs.pausedSuffix')}` : when
   }
   return interval(j.interval_minutes, t)
 }
 
 function interval(minutes: number, t: TranslateFn): string {
-  // Some seeded rows carry 0 -- "runs on demand", not "every 0 minutes".
-  if (minutes <= 0) return '—'
+  // Some rows carry 0 -- not scheduled, not "every 0 minutes" (AD-16: said, not "—").
+  if (minutes <= 0) return t('pg.dataPages.jobs.paused')
   if (minutes % 1440 === 0) return minutes === 1440 ? t('pg.dataPages.jobs.daily') : t('pg.dataPages.jobs.everyDays', { n: minutes / 1440 })
   if (minutes % 60 === 0) return minutes === 60 ? t('pg.dataPages.jobs.hourly') : t('pg.dataPages.jobs.everyHours', { n: minutes / 60 })
   return t('pg.dataPages.jobs.everyMinutes', { n: minutes })
