@@ -103,6 +103,10 @@ async def start_run(body: StartRun, db: AsyncSession = Depends(get_db),
     if ds is None or ds.org_id != user.org_id:
         raise HTTPException(404, "Dataset not found")
     await require_dataset_capability(db, user, body.dataset_id, "data")
+    # QA E-08: the run composes a dashboard as its starter (step 6, which
+    # checks again when it runs: the role may change in between).
+    from ..core import role_permissions
+    role_permissions.check(user, "create_dashboard")
     if not ds.filename and not (ds.mode == "directquery" and ds.data_source_id):
         raise HTTPException(400, "This dataset has no data behind it to analyse")
     active = (await db.execute(select(AutomationRun).where(

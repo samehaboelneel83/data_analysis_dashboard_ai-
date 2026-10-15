@@ -4083,7 +4083,9 @@ async def _write_frame_as_dataset_file(db: AsyncSession, org_id: int, out):
 @router.post("/{dataset_id}/materialize", response_model=DatasetOut)
 async def materialize_dataset(
     dataset_id: int, req: MaterializeRequest,
-    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    # QA E-08: a new dataset, whatever it is made from, is "Add data".
+    current_user: User = Depends(require_role_capability("upload_data")),
 ):
     """Run this dataset's pipeline once and save the result as a NEW dataset.
 
@@ -4282,7 +4284,9 @@ async def _build_aggregate_file(db: AsyncSession, current_user: User, ds: Datase
 @router.post("/{dataset_id}/aggregates", response_model=DatasetOut, status_code=201)
 async def create_aggregate(
     dataset_id: int, req: AggregateCreateRequest,
-    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    # QA E-08: a new dataset, whatever it is made from, is "Add data".
+    current_user: User = Depends(require_role_capability("upload_data")),
 ):
     """A scheduled GROUP BY over a DirectQuery dataset, saved as a new dataset.
 

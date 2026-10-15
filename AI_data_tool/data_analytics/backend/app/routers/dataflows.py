@@ -371,6 +371,11 @@ async def run_dataflow(flow_id: int, req: RunRequest,
 
     flow = await _get_flow(db, flow_id, current_user)
     await require_dataflow_capability(db, current_user, flow_id, "edit")
+    if req.output_name:
+        # QA E-08: a new output is a new dataset ("Add data"). Refreshing the
+        # outputs already made is re-running authored work, and stays allowed.
+        from ..core import role_permissions
+        role_permissions.check(current_user, "upload_data")
 
     src = await db.get(Dataset, flow.source_dataset_id) if flow.source_dataset_id else None
     if src is None or src.org_id != current_user.org_id or not (
