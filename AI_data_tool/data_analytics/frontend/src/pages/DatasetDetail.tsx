@@ -285,22 +285,25 @@ export default function DatasetDetail() {
       // one (the backend would 400) — skip the request entirely rather than
       // firing a call that can only fail.
       if (ds.mode === 'directquery') { setLoading(false); return }
-      analysisApi.get(dsId).then(setAnalysis)
+      // AD-06: "no profile yet" is `null` (200), no longer a 404; an error
+      // (a restricted caller still gets 404) is treated the same way.
+      const none = () => {
+        // Once per dataset: the load runs twice (StrictMode in development,
+        // or a reload of the same dataset), both GETs 404 before either
+        // run lands, and `searchParams` still says new=1 after replaceState
+        // -- two scans and two "Analysis complete" toasts (live QA 2026-09-28).
+        if (searchParams.get('new') === '1' && autoAnalysedRef.current !== dsId) {
+          autoAnalysedRef.current = dsId
+          window.history.replaceState(null, '', window.location.pathname)
+          void runAnalysisRef.current?.()
+        }
+      }
+      analysisApi.get(dsId).then(a => { if (a == null) none(); else setAnalysis(a) })
         // E06: straight after an import the profile is run, not left behind a
         // button -- the first thing a person does with new data is look at it.
         // Only then: a normal visit does not trigger a full scan. `new` is
         // dropped from the address so a reload does not scan again.
-        .catch(() => {
-          // Once per dataset: the load runs twice (StrictMode in development,
-          // or a reload of the same dataset), both GETs 404 before either
-          // run lands, and `searchParams` still says new=1 after replaceState
-          // -- two scans and two "Analysis complete" toasts (live QA 2026-09-28).
-          if (searchParams.get('new') === '1' && autoAnalysedRef.current !== dsId) {
-            autoAnalysedRef.current = dsId
-            window.history.replaceState(null, '', window.location.pathname)
-            void runAnalysisRef.current?.()
-          }
-        })
+        .catch(none)
         .finally(() => setLoading(false))
     }).catch(e => { setLoadError(e ?? new Error('failed')); setLoading(false) })
   }, [dsId])
@@ -608,6 +611,18 @@ export default function DatasetDetail() {
     setInsightsBusy(true)
     insightsApi.run(ds.id).then(setInsights).finally(() => setInsightsBusy(false))
   }
+  // AD-06: opening Insights shows the scan at once for file-backed data --
+  // from the hub ("View full scan →") it is the scan just seen, from the
+  // cache. Live data keeps the explicit button: its scan reads up to 250K rows.
+  useEffect(() => {
+    if (!ds || analysisPick !== 'insights' || insights != null || ds.mode === 'directquery') return
+    let live = true
+    const id = ds.id
+    Promise.resolve().then(() => insightsApi.runShared(id))
+      .then(r => { if (live && r) setInsights(r) }).catch(() => {})
+    return () => { live = false }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ds?.id, ds?.mode, analysisPick])
   // Saved checks and alerts: the Rules & alerts tab count, and the Overview's
   // trust card and "Used by" list.
   const [ruleChecks, setRuleChecks] = useState<DataCheck[] | null>(null)

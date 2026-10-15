@@ -21,7 +21,7 @@ vi.mock('../services/api', () => ({
   jobsApi: { get: vi.fn(), cancel: vi.fn() },
   isJobActive: (j: { state: string }) => j.state === 'queued' || j.state === 'running',
   analysisApi: { get: vi.fn(), run: vi.fn(), segment: vi.fn(), keyInfluencers: vi.fn(), associationRules: vi.fn() },
-  insightsApi: { run: vi.fn() },
+  insightsApi: { run: vi.fn(), runShared: vi.fn() },
   // Phase 7.6: the "Use in Python" snippet reads the API origin.
   api: { defaults: { baseURL: 'http://localhost:8000/api/v1' } },
   // Phase 7.3: the header's sensitivity control.
@@ -135,6 +135,17 @@ describe('DatasetDetail insights engine', () => {
     expect(await screen.findByTestId('insights-narrative')).toHaveTextContent('Across 2,000 rows')
     expect(screen.getByTestId('insight-standout')).toHaveTextContent('Software carries 40% of revenue')
     expect(screen.getByTestId('insight-data_quality')).toHaveTextContent('52% missing')
+  })
+
+  it('shows the scan the reader just saw on the hub without a click (AD-06)', async () => {
+    const { insightsApi } = await import('../services/api')
+    vi.mocked(datasetsApi.get).mockResolvedValue(importDataset())
+    vi.mocked(analysisApi.get).mockResolvedValue(null)
+    vi.mocked(insightsApi.runShared).mockResolvedValue({
+      narrative: 'Across 2,000 rows: Software leads.', findings: [] } as never)
+    renderDetail(29, 'analysis#insights')
+    expect(await screen.findByTestId('insights-narrative')).toHaveTextContent('Software leads')
+    expect(insightsApi.run).not.toHaveBeenCalled()
   })
 
   it('offers no "Pin finding": pins were shown nowhere (AD-05)', async () => {

@@ -1263,6 +1263,7 @@ export const aggregatesApi = {
 export const analysisApi = {
   run: (id: number, type = 'full') =>
     api.post(`/datasets/${id}/analysis`, { analysis_type: type }).then(r => r.data),
+  /** The stored profile, or null when there is none yet (AD-06: 200 null, not a 404). */
   get: (id: number) =>
     api.get(`/datasets/${id}/analysis`).then(r => r.data),
   // A2: KMeans segmentation over selected (or all usable) numeric columns.
@@ -2156,6 +2157,10 @@ export const narrateApi = {
 }
 
 const _insightsInFlight = new Map<number, Promise<unknown>>()
+/** AD-06: the last finished scan per dataset, so "View full scan →" from the
+ *  Insights hub shows the scan just seen instead of an empty panel. */
+const _insightsDone = new Map<number, { at: number; result: unknown }>()
+const INSIGHTS_FRESH_MS = 5 * 60_000
 
 export const insightsApi = {
   /** `novelty` is present only when a previous scan exists and the caller is
@@ -2166,11 +2171,22 @@ export const insightsApi = {
                            /** Tested findings only: the test, its population and effect (Phase 7.2). */
                            p_value?: number | null; p_adjusted?: number | null; significant?: boolean | null
                            evidence?: { test: string; n: number; effect: string } | null }[]
-               narrative: string }>(`/datasets/${dsId}/insights`).then(r => r.data),
+               narrative: string }>(`/datasets/${dsId}/insights`).then(r => {
+      _insightsDone.set(dsId, { at: Date.now(), result: r.data })
+      return r.data
+    }),
+  /** The scan finished in the last few minutes for this dataset, if any. */
+  cached(dsId: number) {
+    const hit = _insightsDone.get(dsId)
+    if (!hit || Date.now() - hit.at > INSIGHTS_FRESH_MS) return null
+    return hit.result as Awaited<ReturnType<typeof insightsApi.run>>
+  },
   /** Like run(), but N concurrent callers on one dataset share ONE request --
    *  every Dynamic Pin card on the dashboard evaluates through this, so five
    *  cards over the same dataset cost one scan, not five. */
   runShared(dsId: number) {
+    const done = insightsApi.cached(dsId)
+    if (done) return Promise.resolve(done)
     const hit = _insightsInFlight.get(dsId)
     if (hit) return hit as ReturnType<typeof insightsApi.run>
     const p = insightsApi.run(dsId).finally(() => _insightsInFlight.delete(dsId))
