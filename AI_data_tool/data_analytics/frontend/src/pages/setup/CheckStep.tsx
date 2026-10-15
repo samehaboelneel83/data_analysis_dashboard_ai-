@@ -43,6 +43,8 @@ export default function CheckStep({ sourceId, flow, onNext, onBack }: {
   const [answers, setAnswers] = useState(0)
   const [busy, setBusy] = useState<string | null>(null)
   const [gaveUp, setGaveUp] = useState(false)
+  // A "Fix it" / "Warn me" that failed, shown inline under the findings (B-02).
+  const [fixError, setFixError] = useState<{ datasetId: number; text: string } | null>(null)
   const polls = useRef(0)
 
   const load = useCallback(async () => {
@@ -65,16 +67,22 @@ export default function CheckStep({ sourceId, flow, onNext, onBack }: {
 
   const failure = (e: unknown, fallback: string) => {
     const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
-    toast.error(detail ? detailToText(detail) : fallback)
+    const text = detail ? detailToText(detail) : fallback
+    toast.error(text)
+    return text
   }
 
   async function fix(datasetId: number, item: SetupFindingItem, how: 'fix' | 'check') {
     setBusy(`${item.id}|${how}`)
+    setFixError(null)
     try {
       await setupApi.fix(sourceId, datasetId, item.id, how, language, flow)
       toast.success(how === 'fix' ? t('setup.c.fixed') : t('setup.c.checkSaved'))
       await load()
-    } catch (e) { failure(e, t('setup.c.fixFailed')) } finally { setBusy(null) }
+    } catch (e) {
+      const text = failure(e, t('setup.c.fixFailed'))
+      setFixError({ datasetId, text: text === t('setup.c.fixFailed') ? text : `${t('setup.c.fixFailed')}: ${text}` })
+    } finally { setBusy(null) }
   }
 
   async function undo(datasetId: number, actionId: string | null, redo = false) {
@@ -116,6 +124,7 @@ export default function CheckStep({ sourceId, flow, onNext, onBack }: {
       )}
       {data.datasets.map(d => (
         <DatasetCheck key={d.id} d={d} language={language} gaveUp={gaveUp} busy={busy} usual={data.usual?.check}
+          fixError={fixError?.datasetId === d.id ? fixError.text : null}
           onRetry={retry} onAgain={() => again(d.id)}
           onFix={(item, how) => fix(d.id, item, how)}
           onUndo={(id, redo) => undo(d.id, id, redo)} />
@@ -130,8 +139,9 @@ export default function CheckStep({ sourceId, flow, onNext, onBack }: {
   )
 }
 
-function DatasetCheck({ d, language, gaveUp, busy, usual, onRetry, onAgain, onFix, onUndo }: {
+function DatasetCheck({ d, language, gaveUp, busy, usual, fixError, onRetry, onAgain, onFix, onUndo }: {
   d: CheckedDataset; language: string; gaveUp: boolean; busy: string | null; usual?: number
+  fixError?: string | null
   onRetry: () => void; onAgain: () => void
   onFix: (item: SetupFindingItem, how: 'fix' | 'check') => void
   onUndo: (actionId: string | null, redo?: boolean) => void
@@ -240,6 +250,7 @@ function DatasetCheck({ d, language, gaveUp, busy, usual, onRetry, onAgain, onFi
                 <FindingsSummary findings={{ ...f, insights: [] }} busy={busy} onFix={onFix}
                   healthTitle={t('setup.k.restTitle')} />
               )}
+              {fixError && <p role="alert" className="setup-ai setup-ai--error">{fixError}</p>}
               <p className="dl-health__more"><Link to={`/datasets/${d.id}?tab=rules`}>{t('setup.c.details')}</Link></p>
             </div>
           )}

@@ -177,6 +177,22 @@ class TestRoutes:
         assert seen["steps"][-1]["kind"] == "fill_nulls"
         assert f"{item['id']}|fix" in r["findings"]["fixed"]
 
+    async def test_warn_on_every_refresh_saves_a_warning_check(self, client, auth_headers, setup, db_session):
+        """B-02: "Warn me on every refresh" (how="check") imported DataCheckIn
+        from the wrong module, so it was a 500 every time."""
+        from sqlalchemy import select
+        from app.models.models import DataCheck
+        src, ds = setup
+        f = (await client.get(f"/api/v1/setup/{src.id}/check", headers=auth_headers["a"])).json()["datasets"][0]["findings"]
+        item = next(i for i in f["health"] if (i.get("action") or {}).get("rule"))
+        r = await client.post(f"/api/v1/setup/{src.id}/check/{ds.id}/fix", headers=auth_headers["a"],
+                              json={"item_id": item["id"], "how": "check"})
+        assert r.status_code == 200, r.text
+        assert f"{item['id']}|check" in r.json()["findings"]["fixed"]
+        rows = (await db_session.execute(select(DataCheck).where(DataCheck.dataset_id == ds.id))).scalars().all()
+        assert [(c.kind, c.severity, c.params["expression"]) for c in rows] == \
+            [("rule", "warn", item["action"]["rule"])]
+
     async def test_findings_are_offered_to_the_datasets_own_pages(self, client, auth_headers, setup):
         src, ds = setup
         await client.get(f"/api/v1/setup/{src.id}/check", headers=auth_headers["a"])

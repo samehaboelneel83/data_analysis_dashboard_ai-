@@ -82,6 +82,18 @@ describe('Guided setup — Check & discover', () => {
     await waitFor(() => expect(setupApi.fix).toHaveBeenCalledWith(38, 226, 'empty:note:0', 'check', 'en', 7))
   })
 
+  it('shows a failed fix inline, next to the findings, not only as a toast (B-02)', async () => {
+    vi.mocked(setupApi.check).mockResolvedValue(step())
+    vi.mocked(setupApi.fix).mockRejectedValue({ response: { status: 400, data: {
+      detail: 'A live (DirectQuery) dataset is never refreshed into a file' } } })
+    renderStep()
+    fireEvent.click(await screen.findByRole('button', { name: 'Show details and undo' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Warn me on every refresh' }))
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Could not apply this fix')
+    expect(alert).toHaveTextContent('A live (DirectQuery) dataset is never refreshed into a file')
+  })
+
   it('undoes one automatic fix, or all of them', async () => {
     vi.mocked(setupApi.check).mockResolvedValue(step())
     vi.mocked(setupApi.undoFix).mockResolvedValue({ findings: findings() })

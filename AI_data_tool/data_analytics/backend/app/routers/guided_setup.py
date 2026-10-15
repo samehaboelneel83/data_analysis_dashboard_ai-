@@ -1574,8 +1574,7 @@ async def fix_item(source_id: int, dataset_id: int, body: FixIn, lang: str = "en
         raise HTTPException(404, "Nothing to fix here")
     action = item["action"]
     if body.how == "check":
-        from ..schemas.schemas import DataCheckIn
-        from .datasets import create_data_check
+        from .datasets import DataCheckIn, create_data_check
         rule = action.get("rule")
         if not rule:
             raise HTTPException(400, "This line has no rule to check")
