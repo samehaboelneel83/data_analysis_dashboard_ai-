@@ -516,11 +516,25 @@ async def create_row_policy(body: RowPolicyIn,
     check_org(source, user, "Data source not found")
 
     try:
-        sqlglot.parse_one(body.predicate, dialect=_dialect(source.type),
-                          into=exp.Condition)
+        parsed = sqlglot.parse_one(body.predicate, dialect=_dialect(source.type),
+                                   into=exp.Condition)
     except Exception as exc:
         raise HTTPException(
             422, str(exc).splitlines()[0] if str(exc) else "invalid predicate")
+
+    # Every column the rule reads must exist on that table (QA E-10: a typo was
+    # saved and only failed -- or denied every row -- when someone asked).
+    # USERID()/USEREMAIL()/MYSCOPE() are function calls, not columns.
+    from ..models.models import SourceColumn
+    known = {n for n in (await db.execute(select(SourceColumn.name).where(
+        SourceColumn.source_object_id == obj.id))).scalars().all()}
+    known_ci = {n.lower() for n in known}
+    unknown = sorted({c.name for c in parsed.find_all(exp.Column)
+                      if c.name.lower() not in known_ci})
+    if unknown:
+        cols = ", ".join(sorted(known)) if known else "none known yet -- read the database first"
+        raise HTTPException(
+            422, f"Unknown column {', '.join(repr(u) for u in unknown)} in {obj.name}. Columns: {cols}")
 
     existing = (await db.execute(
         select(ObjectRowPolicy).where(
