@@ -94,6 +94,16 @@ describe('Guided setup — Check & discover', () => {
     expect(alert).toHaveTextContent('A live (DirectQuery) dataset is never refreshed into a file')
   })
 
+  it('shows the plain findings while the AI ideas are still coming, and keeps asking (B-12)', async () => {
+    vi.mocked(setupApi.check).mockResolvedValue(step(findings({ ai_pending: true, insights: [] })))
+    const onNext = renderStep()
+    expect(await screen.findByText(/AI ideas are still coming/)).toBeInTheDocument()
+    expect(screen.getByText(/ready/i)).toBeInTheDocument()
+    // Next is not held back by the AI part.
+    fireEvent.click(screen.getByRole('button', { name: /Next/ }))
+    expect(onNext).toHaveBeenCalled()
+  })
+
   it('undoes one automatic fix, or all of them', async () => {
     vi.mocked(setupApi.check).mockResolvedValue(step())
     vi.mocked(setupApi.undoFix).mockResolvedValue({ findings: findings() })

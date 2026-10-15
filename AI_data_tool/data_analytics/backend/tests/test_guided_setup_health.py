@@ -193,6 +193,28 @@ class TestRoutes:
         assert [(c.kind, c.severity, c.params["expression"]) for c in rows] == \
             [("rule", "warn", item["action"]["rule"])]
 
+    async def test_plain_findings_are_kept_before_the_ai_answers(
+            self, client, auth_headers, setup, db_session, monkeypatch):
+        """B-12: the deterministic findings are written (and shown) first,
+        marked ai_pending, while the slow model calls are still running."""
+        from sqlalchemy import select
+        from app.models.models import SetupFlow
+        src, ds = setup
+        seen = {}
+
+        async def slow_model_rules(*a, **k):
+            flow = (await db_session.execute(select(SetupFlow))).scalars().first()
+            await db_session.refresh(flow)
+            seen["entry"] = dict((flow.findings or {}).get(str(ds.id)) or {})
+            return []
+        monkeypatch.setattr(health, "model_rules", slow_model_rules)
+        done = (await client.get(f"/api/v1/setup/{src.id}/check", headers=auth_headers["a"])).json()
+        mid = seen["entry"]
+        assert mid["ai_pending"] is True and not mid.get("pending")
+        assert any(i["kind"] == "placeholder" for i in mid["health"])
+        f = done["datasets"][0]["findings"]
+        assert f["ai_pending"] is False and not f["pending"]
+
     async def test_findings_are_offered_to_the_datasets_own_pages(self, client, auth_headers, setup):
         src, ds = setup
         await client.get(f"/api/v1/setup/{src.id}/check", headers=auth_headers["a"])

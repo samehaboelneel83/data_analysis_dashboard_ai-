@@ -4879,6 +4879,7 @@ export const en = {
   'setup.w.inDashboard': 'every chart is narrowed to it ({n} of {total} rows)',
   'setup.w.exclude': 'Left out',
   'setup.k.checking': 'Checking the data, fixing what can be fixed safely and looking for what stands out. This can take a minute.',
+  'setup.k.aiComing': 'These are the checks that need no AI. AI ideas are still coming and will appear here.',
   'setup.k.ready': 'Your data is ready — {n} rows.',
   'setup.k.fixedN': '{n, plural, one{We fixed # thing for you:} other{We fixed # things for you:}}',
   'setup.k.byAi': 'found by AI',

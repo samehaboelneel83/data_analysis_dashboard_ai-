@@ -1375,12 +1375,17 @@ def _said_columns(f: SetupFlow, df) -> set[str]:
             if len(str(c)) >= 3 and str(c).replace("_", " ").casefold() in text}
 
 
-async def _check_one(db: AsyncSession, user: User, ds: Dataset, f: SetupFlow, lang: str) -> tuple[dict, dict]:
+async def _check_one(db: AsyncSession, user: User, ds: Dataset, f: SetupFlow, lang: str,
+                     on_plain=None) -> tuple[dict, dict]:
     """(findings, cleaning) for one dataset, read as `user`.
 
     The check, then the automatic fixes for what it found (only on a dataset
     this flow made; cleaning.py), then the insights -- on the cleaned rows, so
-    what the person reads and what the dashboard draws are the same data."""
+    what the person reads and what the dashboard draws are the same data.
+
+    B-12: `on_plain(result)` is awaited with the plain (no-model) findings as
+    soon as they exist, before the slow model calls, so they can be shown
+    while the AI's ideas are still coming."""
     import asyncio
     from ..core.capability import require_dataset_read
     from ..services import alerts
@@ -1406,6 +1411,12 @@ async def _check_one(db: AsyncSession, user: User, ds: Dataset, f: SetupFlow, la
     items = health.column_items(report, df, lang, classes)
     items += health.generic_rules(df, lang, skip={i["column"] for i in items if i["kind"] == "placeholder"},
                                   column_meta=classes)
+    if on_plain is not None:
+        try:
+            await on_plain({"health": list(items) or [health.good_item(df, lang)], "insights": [],
+                            "rows": int(len(df)), "columns": int(len(df.columns))})
+        except Exception:                                   # noqa: BLE001 -- a preview, never the check
+            logger.exception("guided setup: could not keep the plain findings of dataset %s", ds.id)
     try:
         # A rule that only re-finds what a plain check already found (the same
         # rows, one of the same columns) is said once.
@@ -1470,8 +1481,19 @@ async def write_findings(db: AsyncSession, flow_id: int, dataset_id: int, lang: 
     if user is None:
         return
     cleaned = None
+
+    async def plain(result: dict) -> None:
+        """The plain findings, kept at once with ai_pending (B-12)."""
+        await db.refresh(f)
+        state = dict(f.findings or {})
+        entry = dict(state.get(str(dataset_id)) or {})
+        if entry.get("attempt") != attempt:
+            return
+        state[str(dataset_id)] = {**entry, **result, "pending": False, "ai_pending": True, "failed": None}
+        f.findings = state
+        await db.commit()
     try:
-        (result, cleaned), failed = await _check_one(db, user, ds, f, lang), None
+        (result, cleaned), failed = await _check_one(db, user, ds, f, lang, on_plain=plain), None
     except HTTPException as e:
         result, failed = {}, str(e.detail)
     except Exception:                                       # noqa: BLE001
@@ -1484,8 +1506,10 @@ async def write_findings(db: AsyncSession, flow_id: int, dataset_id: int, lang: 
         # Kept even when a newer check replaced this one: the prep steps exist.
         f.cleaning = {**dict(f.cleaning or {}), str(dataset_id): cleaned}
     if entry.get("attempt") == attempt:
+        # Fixes made while the AI part was still running are kept (B-12).
         state[str(dataset_id)] = {"attempt": attempt, "lang": lang, **result, "failed": failed,
-                                  "fixed": [], "at": datetime.utcnow().isoformat(), "took": _took(entry.get("at"))}
+                                  "fixed": list(entry.get("fixed") or []) if entry.get("ai_pending") else [],
+                                  "at": datetime.utcnow().isoformat(), "took": _took(entry.get("at"))}
         f.findings = state
     await db.commit()
 
@@ -1510,9 +1534,11 @@ async def _start_check(db: AsyncSession, user: User, f: SetupFlow, dataset_id: i
 
 def _finding_out(entry: dict, cleaned: dict | None = None) -> dict:
     from ..services.guided_setup import cleaning
-    stale = entry.get("pending") and _pending_is_stale(entry)
+    stale = (entry.get("pending") or entry.get("ai_pending")) and _pending_is_stale(entry)
     health_items = entry.get("health") or []
     return {"pending": bool(entry.get("pending")) and not stale, "failed": entry.get("failed"),
+            # B-12: the plain findings are in; the AI's ideas are still coming.
+            "ai_pending": bool(entry.get("ai_pending")) and not stale,
             "health": health_items, "insights": entry.get("insights") or [],
             "rows": entry.get("rows"), "columns": entry.get("columns"),
             "fixed": entry.get("fixed") or [], "language": entry.get("lang"), "checked": bool(entry),

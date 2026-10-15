@@ -4266,6 +4266,8 @@ export interface SetupFindingItem {
 
 export interface SetupFindings {
   pending: boolean
+  /** B-12: the plain findings are in; the AI's ideas are still being written. */
+  ai_pending?: boolean
   failed: string | null
   health: SetupFindingItem[]
   insights: SetupFindingItem[]

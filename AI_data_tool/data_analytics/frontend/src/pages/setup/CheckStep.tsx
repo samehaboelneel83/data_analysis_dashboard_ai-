@@ -57,7 +57,8 @@ export default function CheckStep({ sourceId, flow, onNext, onBack }: {
   useEffect(() => { polls.current = 0; load() }, [load])
 
   const checking = !!data?.datasets.some(d => d.findings.pending)
-  const waiting = checking || !!data?.demand?.pending
+  // B-12: keep asking while the AI part of a check is still coming.
+  const waiting = checking || !!data?.demand?.pending || !!data?.datasets.some(d => d.findings.ai_pending)
   useEffect(() => {
     if (!waiting) return
     if (polls.current >= POLL_LIMIT) { setGaveUp(true); return }
@@ -181,6 +182,9 @@ function DatasetCheck({ d, language, gaveUp, busy, usual, fixError, onRetry, onA
         {f.pending && gaveUp && (
           <p className="setup-ai">{t('setup.u.aiSlow')}{' '}
             <button type="button" className="btn btn-sm" onClick={onRetry}>{t('setup.u.checkAgain')}</button></p>
+        )}
+        {!f.pending && f.ai_pending && !gaveUp && (
+          <p className="setup-ai setup-ai--pending"><Sparkles size={13} aria-hidden="true" /> {t('setup.k.aiComing')}</p>
         )}
         {!f.pending && f.failed && <p className="setup-ai">{t('setup.c.failed')} {f.failed !== 'failed' ? f.failed : ''}</p>}
         {!f.pending && f.language && f.language !== language && f.health.length > 0 && (
