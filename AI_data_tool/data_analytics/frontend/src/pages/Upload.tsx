@@ -9,6 +9,7 @@ import { datasetsApi } from '../services/api'
 import type { BatchUploadItem, Dataset } from '../services/api'
 import { formatTimeAgo, useT } from '../i18n'
 import { localDigits } from '../lib/arabicFormats'
+import { structuredDetail } from '../lib/friendlyError'
 import { kindOf, nameFromFile, readPreview, readable, type ColType, type Kind, type Preview } from './upload/readFile'
 import './upload/upload.css'
 
@@ -159,7 +160,11 @@ export default function Upload() {
       setFailures(bad)
       setStage(bad.length ? 'failed' : 'done')
     } catch (e: any) {
-      const detail = e?.response?.data?.detail
+      // The API interceptor turns an object `detail` into a sentence and keeps
+      // the object as `detail_raw`: the sheet list and per-file items are read
+      // from there (B-06), the sentence is only the fallback message.
+      const detail = structuredDetail<{ items?: BatchUploadItem[]; sheets?: string[]; message?: string }>(e)
+        ?? e?.response?.data?.detail
       if (detail?.items) {
         setFailures(detail.items.filter((i: BatchUploadItem) => i.status === 'error')); setMade([])
         setStage('failed')
@@ -234,6 +239,18 @@ export default function Upload() {
                   <h2 id="dl-up-files">{t('up2.files')} <span className="dl-up-n" dir="ltr">{localDigits(String(files.length))}</span></h2>
                   <button type="button" className="btn btn-ghost btn-sm" onClick={() => inputRef.current?.click()}><Plus size={15} aria-hidden /> {t('up2.addMore')}</button>
                 </header>
+                {sheets.length > 0 && (
+                  <div className="dl-up-sheet">
+                    <p className="dl-up-note is-warn" role="status">{t('up2.sheetAsk')}</p>
+                    <label className="dl-field">
+                      <span className="dl-field__label">{t('up2.sheet')}</span>
+                      <select className="dl-field__input" value={sheet} onChange={e => setSheet(e.target.value)}>
+                        {sheets.map(s => <option key={s} value={s}>{s}</option>)}
+                        <option value={ALL_SHEETS}>{t('up2.allSheets')}</option>
+                      </select>
+                    </label>
+                  </div>
+                )}
                 <ul className="dl-up-files">
                   {files.map((f, i) => (
                     <li key={f.file.name + f.file.size} className={many && i === active ? 'is-on' : undefined}>
@@ -278,18 +295,6 @@ export default function Upload() {
                   <p className="dl-up-note">{t('up2.eachNamed', { example: `${name || nameFromFile(files[0].file.name)} — ${stemOf(files[0].file)}` })}</p>
                 )}
                 {hasAccess && <p className="dl-up-note">{t('up2.access')}</p>}
-                {sheets.length > 0 && (
-                  <div className="dl-up-sheet">
-                    <p className="dl-up-note is-warn" role="status">{t('up2.sheetAsk')}</p>
-                    <label className="dl-field">
-                      <span className="dl-field__label">{t('up2.sheet')}</span>
-                      <select className="dl-field__input" value={sheet} onChange={e => setSheet(e.target.value)}>
-                        {sheets.map(s => <option key={s} value={s}>{s}</option>)}
-                        <option value={ALL_SHEETS}>{t('up2.allSheets')}</option>
-                      </select>
-                    </label>
-                  </div>
-                )}
               </section>
 
               <section className="dl-up-card" aria-labelledby="dl-up-pv">

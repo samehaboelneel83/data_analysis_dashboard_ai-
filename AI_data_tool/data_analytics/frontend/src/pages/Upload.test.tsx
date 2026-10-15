@@ -215,6 +215,35 @@ describe('when it fails', () => {
     expect(single()).toHaveBeenLastCalledWith(expect.any(File), 'Book', '', 'Feb', expect.any(Function))
   })
 
+  it('a workbook refusal that went through the real interceptor still shows the sheet picker first (B-06)', async () => {
+    const { sanitizeErrorDetail } = await import('../lib/friendlyError')
+    const err = { response: { status: 400, data: { detail: { message: 'The workbook has 2 sheets', sheets: ['Sales', 'Costs'] } } } }
+    sanitizeErrorDetail(err)
+    expect(typeof err.response.data.detail).toBe('string')
+    single().mockRejectedValueOnce(err)
+    show()
+    await pick([new File(['x'], 'two_sheets.xlsx')])
+    importNow(); await settle()
+    const select = screen.getByRole('combobox', { name: 'Sheet' })
+    expect(within(select).getAllByRole('option').map(o => o.textContent)).toEqual(['Sales', 'Costs', 'All sheets: one dataset each'])
+    // At the top of the review card, before the file list -- not under the fold.
+    const card = select.closest('section')!
+    expect(card.querySelector('.dl-up-sheet')!.compareDocumentPosition(card.querySelector('.dl-up-files')!)
+      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('a batch refusal with per-file items that went through the interceptor lists the failures (B-06)', async () => {
+    const { sanitizeErrorDetail } = await import('../lib/friendlyError')
+    const err = { response: { status: 400, data: { detail: { items: [
+      { filename: 'b.csv', status: 'error', error: 'line 3 has 7 fields' }] } } } }
+    sanitizeErrorDetail(err)
+    batch().mockRejectedValueOnce(err)
+    show()
+    await pick([file('a.csv'), file('b.csv')])
+    importNow(); await settle()
+    expect(screen.getByText('line 3 has 7 fields')).toBeInTheDocument()
+  })
+
   it('"All sheets" sends the one file to the batch', async () => {
     single().mockRejectedValueOnce({ response: { data: { detail: { message: 'x', sheets: ['Jan', 'Feb'] } } } })
     show()
