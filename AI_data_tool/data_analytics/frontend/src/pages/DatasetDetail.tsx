@@ -18,7 +18,7 @@ import NotebookSnippet from '../components/NotebookSnippet'
 import LoadError from '../components/ui/LoadError'
 import LoadingState from '../components/ui/LoadingState'
 import EmptyState from '../components/ui/EmptyState'
-import { reportsApi } from '../services/api'
+import { allowAiApi, reportsApi } from '../services/api'
 import { navArrows, useDirection } from '../contexts/DirectionContext'
 import { useParams, Link, useLocation, useSearchParams, useNavigate } from 'react-router-dom'
 import { useCrumbTitle } from '../lib/crumb'
@@ -613,6 +613,18 @@ export default function DatasetDetail() {
     setInsightsBusy(true)
     insightsApi.run(ds.id).then(setInsights).finally(() => setInsightsBusy(false))
   }
+  // AD-10: with AI not allowed for this data, "Ask about this data" says it
+  // answers with the built-in analyses only.
+  const [aiOff, setAiOff] = useState(false)
+  useEffect(() => {
+    setAiOff(false)
+    if (!ds) return
+    let live = true
+    const id = ds.id
+    Promise.resolve().then(() => allowAiApi.get(id))
+      .then(r => { if (live) setAiOff(r?.effective === false) }).catch(() => {})
+    return () => { live = false }
+  }, [ds?.id])
   // AD-06: opening Insights shows the scan at once for file-backed data --
   // from the hub ("View full scan →") it is the scan just seen, from the
   // cache. Live data keeps the explicit button: its scan reads up to 250K rows.
@@ -940,8 +952,8 @@ export default function DatasetDetail() {
             )}
           </div>
         )}
-          <Link to={`/ask?dataset=${dsId}`} className="btn btn-sm" title={tr('dataset.askTitle')}>
-            <Bot size={14} aria-hidden /> {tr('ov3.askAbout')}
+          <Link to={`/ask?dataset=${dsId}`} className="btn btn-sm" title={aiOff ? tr('dataset.askTitleNoAi') : tr('dataset.askTitle')}>
+            <Bot size={14} aria-hidden /> {aiOff ? tr('ov3.askAboutNoAi') : tr('ov3.askAbout')}
           </Link>
           {ds.mode !== 'directquery' && <NotebookSnippet datasetId={ds.id} datasetName={ds.name} />}
           {isAdmin && (

@@ -4,7 +4,7 @@ import { BarChart3, Bot, Code2, History, MessageSquareText, Sparkles } from 'luc
 import EmptyState from '../components/ui/EmptyState'
 import ChatPane from '../components/chat/ChatPane'
 import Composer from '../components/chat/Composer'
-import { agentApi, datasetsApi, dataSourcesApi } from '../services/api'
+import { agentApi, allowAiApi, datasetsApi, dataSourcesApi } from '../services/api'
 import type { AgentConversation, Dataset, DatasetColumn } from '../services/api'
 import { useT } from '../i18n'
 import AskHero from './ask/AskHero'
@@ -241,6 +241,20 @@ export default function AskAI() {
     signalRobot((e.type !== 'blur' && document.activeElement === box) || box.value ? 'compose-on' : 'compose-off')
   }
 
+  // AD-10: the dataset's "Allow AI" answer, read up front so the person learns
+  // before asking -- not from the first answer -- that only the built-in
+  // analyses will answer. The suggestions stay: the no-AI path answers them.
+  const [aiOff, setAiOff] = useState(false)
+  useEffect(() => {
+    setAiOff(false)
+    if (datasetId == null) return
+    let live = true
+    Promise.resolve().then(() => allowAiApi.get(datasetId))
+      .then(r => { if (live) setAiOff(r?.effective === false) })
+      .catch(() => {})
+    return () => { live = false }
+  }, [datasetId])
+
   const scoped = sourceId != null || datasetId != null
   // The pane copies the question into its box when it mounts; after that it is
   // the pane's, so a later scope change does not put it back.
@@ -351,6 +365,9 @@ export default function AskAI() {
           </button>
         </div>
         <div className="dl-ask__pane">
+          {aiOff && (
+            <p role="status" data-testid="ask-ai-off" className="dl-chat__note">{t('ask2.aiOff')}</p>
+          )}
           {selected !== undefined && (() => {
             const startView = (ask: (q: string) => void, busy: boolean, reason?: string) => (
               <AskHero id="dl-ask-picked" small title={t('ask2.picked.title')}

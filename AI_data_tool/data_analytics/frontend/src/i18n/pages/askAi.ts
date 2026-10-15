@@ -44,6 +44,7 @@ export const en = {
   // Dataset picked
   'ask2.ctx.asking': 'Asking about',
   'ask2.picked.title': 'What would you like to know?',
+  'ask2.aiOff': 'AI is off for this dataset — answers use the built-in analyses only (no AI).',
   'ask2.picked.sub': 'Ask in plain language, or start from a suggestion based on the columns in {name}.',
   'ask2.picked.subSource': 'Ask in plain language, or start from a suggestion about {name}.',
   'ask2.sug.aria': 'Suggested questions',
@@ -128,6 +129,7 @@ export const ar: Record<keyof typeof en, string> = {
   'ask2.pick.change': 'تغيير البيانات: {name}',
   'ask2.ctx.asking': 'تسأل عن',
   'ask2.picked.title': 'ماذا تريد أن تعرف؟',
+  'ask2.aiOff': 'الذكاء الاصطناعي متوقف لهذه البيانات — تعتمد الإجابات على التحليلات المدمجة فقط (دون ذكاء اصطناعي).',
   'ask2.picked.sub': 'اسأل بلغتك اليومية، أو ابدأ من اقتراح مبني على أعمدة {name}.',
   'ask2.picked.subSource': 'اسأل بلغتك اليومية، أو ابدأ من اقتراح عن {name}.',
   'ask2.sug.aria': 'أسئلة مقترحة',
