@@ -126,6 +126,22 @@ export function LegendWithTitle(
   )
 }
 
+/** Aggregations that COUNT rows or values: their result is a number of
+ *  things, never an amount of the measure (F-12). */
+const COUNTS = new Set(['count', 'countd', 'count_distinct', 'distinct', 'nunique'])
+export function isCountAggregation(aggregation: unknown): boolean {
+  return typeof aggregation === 'string' && COUNTS.has(aggregation)
+}
+
+/** The format a value takes after `aggregation`: a count of revenue rows is
+ *  "2,000", not "$ 2,000" -- the measure's own format (currency, percent,
+ *  prefix, units) describes the measure, not how many there were. */
+export function formatForAggregation(fmt: CalcColumnFormat | undefined | null,
+                                     aggregation: unknown): CalcColumnFormat | undefined {
+  if (isCountAggregation(aggregation)) return { type: 'integer' }
+  return fmt ?? undefined
+}
+
 export function fmtStr(value: unknown, fmt?: CalcColumnFormat | null): string {
   // Phase 7.5: the reader's digits (١٢٣ or 123) on every formatted number.
   return localDigits(fmtStrLatin(value, fmt))
