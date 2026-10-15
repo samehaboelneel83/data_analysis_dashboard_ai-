@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, Float, BigInteger, DateTime, ForeignKey, JSON, Boolean, LargeBinary, UniqueConstraint, text
+from sqlalchemy import Column, Integer, String, Text, Float, BigInteger, DateTime, ForeignKey, JSON, Boolean, LargeBinary, UniqueConstraint, Index, func, text
 from sqlalchemy.orm import relationship
 from ..core.database import Base
 
@@ -615,6 +615,11 @@ class User(Base):
 
     organization = relationship("Organization", back_populates="users")
     role         = relationship("Role", back_populates="users")
+
+
+#: One account per address whatever its letter case (migration 0069): a
+#: case-variant of a platform-admin address must never be a second account.
+Index("ux_users_email_lower", func.lower(User.email), unique=True)
 
 
 class OrgUnit(Base):
