@@ -57,10 +57,12 @@ class _SizeBudget:
 _VISIBLE_ROWS_CACHE: dict[tuple, int] = {}
 
 
-async def _visible_row_count(filename: str, rls_expr: str) -> int:
+async def _visible_row_count(filename: str, rls_expr: str, denied: set[str]) -> int:
     """Rows of an uploaded file a row rule leaves, cached per file version and
     expression (the dataset list asks for every dataset at once). Fails closed:
-    a rule that cannot be evaluated leaves 0 rows, as it does everywhere else."""
+    a rule that cannot be evaluated leaves 0 rows, as it does everywhere else.
+    Only a count leaves this frame, but it is secured like every other base
+    frame (row rule, then the reader's denied columns dropped)."""
     import os
     try:
         st = os.stat(filename)
@@ -73,7 +75,8 @@ async def _visible_row_count(filename: str, rls_expr: str) -> int:
     def _count() -> int:
         from ..services.ingest import load_file
         from ..services.widget_data import apply_rls_filter
-        return int(len(apply_rls_filter(load_file(filename), rls_expr)))
+        frame = apply_rls_filter(load_file(filename), rls_expr)
+        return int(len(frame.drop(columns=[c for c in denied if c in frame.columns])))
     try:
         n = await asyncio.to_thread(_count)
     except Exception:                                        # noqa: BLE001
@@ -114,7 +117,7 @@ async def _without_denied_columns(db: AsyncSession, current_user: User, ds: Data
     if rls_expr is not None:
         item.row_count_restricted = True
         if ds.mode != "directquery" and ds.filename:
-            item.row_count = await _visible_row_count(ds.filename, rls_expr)
+            item.row_count = await _visible_row_count(ds.filename, rls_expr, denied)
     # Columns the prep pipeline creates (a partition, a split) are real to
     # every widget but absent from the uploaded file's column list; list them
     # so the pickers can offer them. Negative ids: they have no stored row.
