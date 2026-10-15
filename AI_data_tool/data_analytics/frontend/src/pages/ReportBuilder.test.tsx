@@ -1,3 +1,4 @@
+import toast from 'react-hot-toast'
 import { sanitizeErrorDetail } from '../lib/friendlyError'
 import { describe, it, expect, vi, afterEach, beforeEach, beforeAll } from 'vitest'
 import { render, screen, fireEvent, within, waitFor, act } from '@testing-library/react'
@@ -2338,6 +2339,21 @@ describe('duplicating a widget on the page', () => {
     await waitFor(() => expect(reportsApi.addWidget).toHaveBeenCalled())
     const [, , body] = vi.mocked(reportsApi.addWidget).mock.calls[0]
     expect((body as { title: string }).title).toMatch(/copy/i)
+  })
+
+  it('C-12: the "Duplicated" toast offers Undo, which removes the copy', async () => {
+    const spy = vi.spyOn(toast, 'success')
+    vi.mocked(reportsApi.deleteWidget).mockClear().mockResolvedValue(undefined as any)
+    try {
+      await builderWithWidget()
+      fireEvent.click(await screen.findByRole('button', { name: /More actions for widget Sales by Region/ }))
+      fireEvent.click(await screen.findByRole('menuitem', { name: /duplicate widget/i }))
+      await waitFor(() => expect(spy.mock.calls.some(c => typeof c[0] === 'function')).toBe(true))
+      const render_ = spy.mock.calls.find(c => typeof c[0] === 'function')![0] as (t: { id: string }) => Parameters<typeof render>[0]
+      const { container } = render(render_({ id: 'x' }))
+      fireEvent.click(within(container).getByRole('button', { name: 'Undo' }))
+      await waitFor(() => expect(reportsApi.deleteWidget).toHaveBeenCalledWith(1, 100, 77))
+    } finally { spy.mockRestore() }
   })
 
   it('puts the copy below the original rather than on top of it', async () => {

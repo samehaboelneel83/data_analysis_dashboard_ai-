@@ -246,10 +246,14 @@
 .dl-bd-group__bar b { font-size: 12.5px; margin-inline-end: 6px; }
 .dl-bd-group__bar button { width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 7px; background: none; color: var(--muted); cursor: pointer; }
 .dl-bd-group__bar button:hover { background: var(--surface2); color: var(--text); }
-.dl-bd-wt { position: absolute; top: -22px; left: 50%; transform: translateX(-50%); z-index: 10; display: flex; gap: 1px; padding: 2px; border-radius: 9px;
-  background: var(--surface); border: 1px solid var(--border); box-shadow: var(--dl-shadow-overlay); opacity: 0; pointer-events: none; transition: opacity var(--dl-dur); }
-[data-widget-id]:hover > .dl-bd-wt, [data-widget-id]:focus-within > .dl-bd-wt { opacity: 1; pointer-events: auto; }
-@media (hover: none) { .dl-bd-wt { opacity: 1; pointer-events: auto; } }
+/* C-12: inside the tile and armed after a short hover -- see .dl-vw-wt. */
+.dl-bd-wt { position: absolute; top: 4px; left: 50%; transform: translateX(-50%); z-index: 10; display: flex; gap: 1px; padding: 2px; border-radius: 9px;
+  background: var(--surface); border: 1px solid var(--border); box-shadow: var(--dl-shadow-overlay); opacity: 0; pointer-events: none; visibility: hidden;
+  transition: opacity var(--dl-dur), visibility 0s linear var(--dl-dur); }
+[data-widget-id]:hover > .dl-bd-wt, [data-widget-id]:focus-within > .dl-bd-wt { opacity: 1; pointer-events: auto; visibility: visible;
+  transition: opacity var(--dl-dur) .15s, visibility 0s linear .15s; }
+[data-widget-id]:focus-within > .dl-bd-wt { transition: none; }
+@media (hover: none) { .dl-bd-wt { opacity: 1; pointer-events: auto; visibility: visible; } }
 .dl-bd-wt button { width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; padding: 0; }
 .dl-bd-wt button:hover { background: var(--surface2); color: var(--text); }
 .dl-bd-empty { position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: 4; display: flex; align-items: center; gap: 8px; padding: 6px 10px;

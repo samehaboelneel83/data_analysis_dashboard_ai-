@@ -2028,7 +2028,14 @@ export default function ReportBuilder() {
       setSelectedW(copy)
       setTimeout(() => document.querySelector(`[data-widget-id="${copy.id}"]`)
         ?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }), 60)
-      toast.success(tr('bc.shell.t.duplicated'))
+      // C-12: a copy made by a stray click is one press away from gone.
+      toast.success(tt => (
+        <span className="dl-toast-undo">
+          {tr('bc.shell.t.duplicated')}
+          <button type="button" className="btn btn-ghost btn-sm"
+            onClick={() => { toast.dismiss(tt.id); void runUndoRef.current() }}>{tr('bd.keys.undo')}</button>
+        </span>
+      ), { duration: 8000 })
     } catch {
       toast.error(tr('bc.shell.t.duplicateFailed'))
     } finally {
