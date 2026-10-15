@@ -96,6 +96,23 @@ describe('PlatformOrgs', () => {
     }))
   })
 
+  it('refuses a negative or fractional quota inline, without calling the API (QA E-06)', async () => {
+    vi.mocked(platformApi.setQuota).mockClear()
+    render(<PlatformOrgs />)
+    const editButtons = await screen.findAllByRole('button', { name: 'Edit quota' })
+    fireEvent.click(editButtons[1])
+    const queries = screen.getByLabelText('Max queries per day for Child Co')
+    expect(queries).toHaveAttribute('type', 'number')
+    expect(queries).toHaveAttribute('min', '0')
+    for (const bad of ['-3', '1.5']) {
+      fireEvent.change(queries, { target: { value: bad } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save quota' }))
+      expect(await screen.findByText('Enter a whole number of 0 or more, or leave it empty for unlimited')).toBeInTheDocument()
+      expect(queries).toHaveAttribute('aria-invalid', 'true')
+    }
+    expect(platformApi.setQuota).not.toHaveBeenCalled()
+  })
+
   it('sets an AI token budget (E11)', async () => {
     render(<PlatformOrgs />)
     fireEvent.click((await screen.findAllByRole('button', { name: 'Edit quota' }))[0])   // Parent Co

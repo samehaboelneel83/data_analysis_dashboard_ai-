@@ -79,6 +79,7 @@ export default function PlatformOrgs() {
 
   const [editingQuotaId, setEditingQuotaId] = useState<number | null>(null)
   const [quotaDraft, setQuotaDraft] = useState<Record<string, string>>({})
+  const [quotaErr, setQuotaErr] = useState<Set<string>>(new Set())
 
   const startEditQuota = (org: PlatformOrg) => {
     setEditingQuotaId(org.id)
@@ -106,7 +107,19 @@ export default function PlatformOrgs() {
     }
   }
 
+  const quotaInputProps = (field: string) => ({
+    type: 'number', min: 0, step: 1, inputMode: 'numeric' as const,
+    'aria-invalid': quotaErr.has(field) ? true : undefined,
+    'aria-describedby': quotaErr.has(field) ? `quota-err-${field}` : undefined,
+  })
+
   const saveQuota = async (org: PlatformOrg) => {
+    // Empty = unlimited; otherwise a whole number >= 0 (QA E-06: -3 was saved).
+    const bad = Object.entries(quotaDraft)
+      .filter(([, v]) => (v ?? '').trim() !== '' && !/^\d+$/.test(v.trim()))
+      .map(([k]) => k)
+    setQuotaErr(new Set(bad))
+    if (bad.length) return
     const toNullableInt = (v: string) => (v.trim() === '' ? null : Number(v))
     const body: OrgQuota = {
       max_queries_per_day: toNullableInt(quotaDraft.max_queries_per_day ?? ''),
@@ -258,37 +271,49 @@ export default function PlatformOrgs() {
                   {t('pg.adminPlatform.orgs.q.queries')}
                   <input aria-label={t('pg.adminPlatform.orgs.q.queriesFor', { name: o.name })} placeholder={t('pg.adminPlatform.orgs.unlimited')}
                     value={quotaDraft.max_queries_per_day ?? ''}
-                    onChange={e => setQuotaDraft(d => ({ ...d, max_queries_per_day: e.target.value }))} {...inp} />
+                    onChange={e => { setQuotaDraft(d => ({ ...d, max_queries_per_day: e.target.value })); setQuotaErr(new Set()) }}
+                    {...quotaInputProps('max_queries_per_day')} {...inp} />
+                  {quotaErr.has('max_queries_per_day') && <span id="quota-err-max_queries_per_day" role="alert" style={{ color: 'var(--danger)' }}>{t('pg.adminPlatform.orgs.quotaInvalid')}</span>}
                 </label>
                 <label style={{ fontSize: 11, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 3 }}>
                   {t('pg.adminPlatform.orgs.q.asks')}
                   <input aria-label={t('pg.adminPlatform.orgs.q.asksFor', { name: o.name })} placeholder={t('pg.adminPlatform.orgs.unlimited')}
                     value={quotaDraft.max_agent_asks_per_day ?? ''}
-                    onChange={e => setQuotaDraft(d => ({ ...d, max_agent_asks_per_day: e.target.value }))} {...inp} />
+                    onChange={e => { setQuotaDraft(d => ({ ...d, max_agent_asks_per_day: e.target.value })); setQuotaErr(new Set()) }}
+                    {...quotaInputProps('max_agent_asks_per_day')} {...inp} />
+                  {quotaErr.has('max_agent_asks_per_day') && <span id="quota-err-max_agent_asks_per_day" role="alert" style={{ color: 'var(--danger)' }}>{t('pg.adminPlatform.orgs.quotaInvalid')}</span>}
                 </label>
                 <label style={{ fontSize: 11, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 3 }}>
                   {t('pg.adminPlatform.orgs.q.storage')}
                   <input aria-label={t('pg.adminPlatform.orgs.q.storageFor', { name: o.name })} placeholder={t('pg.adminPlatform.orgs.unlimited')}
                     value={quotaDraft.max_storage_mb ?? ''}
-                    onChange={e => setQuotaDraft(d => ({ ...d, max_storage_mb: e.target.value }))} {...inp} />
+                    onChange={e => { setQuotaDraft(d => ({ ...d, max_storage_mb: e.target.value })); setQuotaErr(new Set()) }}
+                    {...quotaInputProps('max_storage_mb')} {...inp} />
+                  {quotaErr.has('max_storage_mb') && <span id="quota-err-max_storage_mb" role="alert" style={{ color: 'var(--danger)' }}>{t('pg.adminPlatform.orgs.quotaInvalid')}</span>}
                 </label>
                 <label style={{ fontSize: 11, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 3 }}>
                   {t('pg.adminPlatform.orgs.q.concurrent')}
                   <input aria-label={t('pg.adminPlatform.orgs.q.concurrentFor', { name: o.name })} placeholder={t('pg.adminPlatform.orgs.unlimited')}
                     value={quotaDraft.max_concurrent_asks ?? ''}
-                    onChange={e => setQuotaDraft(d => ({ ...d, max_concurrent_asks: e.target.value }))} {...inp} />
+                    onChange={e => { setQuotaDraft(d => ({ ...d, max_concurrent_asks: e.target.value })); setQuotaErr(new Set()) }}
+                    {...quotaInputProps('max_concurrent_asks')} {...inp} />
+                  {quotaErr.has('max_concurrent_asks') && <span id="quota-err-max_concurrent_asks" role="alert" style={{ color: 'var(--danger)' }}>{t('pg.adminPlatform.orgs.quotaInvalid')}</span>}
                 </label>
                 <label style={{ fontSize: 11, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 3 }}>
                   {t('pg.adminPlatform.orgs.q.tokensDay')}
-                  <input aria-label={t('pg.adminPlatform.orgs.q.tokensDayFor', { name: o.name })} placeholder={t('pg.adminPlatform.orgs.unlimited')} inputMode="numeric"
+                  <input aria-label={t('pg.adminPlatform.orgs.q.tokensDayFor', { name: o.name })} placeholder={t('pg.adminPlatform.orgs.unlimited')}
                     value={quotaDraft.max_ai_tokens_per_day ?? ''}
-                    onChange={e => setQuotaDraft(d => ({ ...d, max_ai_tokens_per_day: e.target.value }))} {...inp} />
+                    onChange={e => { setQuotaDraft(d => ({ ...d, max_ai_tokens_per_day: e.target.value })); setQuotaErr(new Set()) }}
+                    {...quotaInputProps('max_ai_tokens_per_day')} {...inp} />
+                  {quotaErr.has('max_ai_tokens_per_day') && <span id="quota-err-max_ai_tokens_per_day" role="alert" style={{ color: 'var(--danger)' }}>{t('pg.adminPlatform.orgs.quotaInvalid')}</span>}
                 </label>
                 <label style={{ fontSize: 11, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 3 }}>
                   {t('pg.adminPlatform.orgs.q.tokensMonth')}
-                  <input aria-label={t('pg.adminPlatform.orgs.q.tokensMonthFor', { name: o.name })} placeholder={t('pg.adminPlatform.orgs.unlimited')} inputMode="numeric"
+                  <input aria-label={t('pg.adminPlatform.orgs.q.tokensMonthFor', { name: o.name })} placeholder={t('pg.adminPlatform.orgs.unlimited')}
                     value={quotaDraft.max_ai_tokens_per_month ?? ''}
-                    onChange={e => setQuotaDraft(d => ({ ...d, max_ai_tokens_per_month: e.target.value }))} {...inp} />
+                    onChange={e => { setQuotaDraft(d => ({ ...d, max_ai_tokens_per_month: e.target.value })); setQuotaErr(new Set()) }}
+                    {...quotaInputProps('max_ai_tokens_per_month')} {...inp} />
+                  {quotaErr.has('max_ai_tokens_per_month') && <span id="quota-err-max_ai_tokens_per_month" role="alert" style={{ color: 'var(--danger)' }}>{t('pg.adminPlatform.orgs.quotaInvalid')}</span>}
                 </label>
                 <button className="btn btn-primary btn-sm" onClick={() => saveQuota(o)}>{t('pg.adminPlatform.orgs.saveQuota')}</button>
                 <button className="btn btn-sm" onClick={() => setEditingQuotaId(null)}>{t('pg.adminPlatform.cancel')}</button>

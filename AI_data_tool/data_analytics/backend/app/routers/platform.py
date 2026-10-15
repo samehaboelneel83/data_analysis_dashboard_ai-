@@ -111,10 +111,12 @@ async def list_orgs(db: AsyncSession = Depends(get_db),
 
 
 class OrgQuotaSet(BaseModel):
-    max_queries_per_day: int | None = None
-    max_agent_asks_per_day: int | None = None
-    max_storage_mb: int | None = None
-    max_concurrent_asks: int | None = None
+    # None = unlimited, 0 = none allowed; a negative limit is refused (QA E-06:
+    # -3 queries/day was saved and blocked every query).
+    max_queries_per_day: int | None = Field(default=None, ge=0)
+    max_agent_asks_per_day: int | None = Field(default=None, ge=0)
+    max_storage_mb: int | None = Field(default=None, ge=0)
+    max_concurrent_asks: int | None = Field(default=None, ge=0)
     max_ai_tokens_per_day: int | None = Field(default=None, ge=0)
     max_ai_tokens_per_month: int | None = Field(default=None, ge=0)
 
