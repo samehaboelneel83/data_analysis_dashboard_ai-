@@ -97,7 +97,7 @@ datalytics/
 ├── docker-compose.yml
 ├── .env.example
 ├── postgres/
-│   └── init.sql              schema + indexes
+│   └── init.sql              legacy, not loaded: the backend builds the schema with Alembic on startup
 ├── backend/
 │   ├── Dockerfile
 │   ├── requirements.txt

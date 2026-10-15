@@ -1,10 +1,13 @@
-"""A database first built from postgres/init.sql must reach the ORM schema.
+"""A database whose tables predate Alembic must still reach the ORM schema.
 
-docker-compose mounts postgres/init.sql into docker-entrypoint-initdb.d, so on a
-fresh volume Postgres creates the app tables BEFORE the backend ever boots.
-app.main._run_alembic then sees "app tables, no alembic_version" and stamps
-HEAD without running any revision -- it trusts create_all + _migrate to bring
-the schema to head-equivalence in the same boot.
+Such a database has app tables but no `alembic_version`: one first built from
+postgres/init.sql (docker-compose mounted it into docker-entrypoint-initdb.d
+until commit 5ffbb917, so older volumes are like this), or any database that
+existed before Alembic was adopted. app.main._run_alembic then STAMPS head
+without running a revision, and trusts create_all + _migrate to bring the
+schema to head-equivalence in the same boot -- and on every boot after, since
+the stamp is permanent. A fresh install no longer takes this path (an empty
+database gets `upgrade head`), but these databases still do.
 
 create_all only adds missing TABLES. So for every table init.sql creates, each
 ORM column has to come from init.sql itself or from an ALTER ... ADD COLUMN in
@@ -91,12 +94,6 @@ def test_init_sql_parses_into_known_tables():
     assert len(shared) >= 5, f"expected init.sql to share many tables with the ORM, got {sorted(shared)}"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known bug (QA 2026-10-14): 8 Alembic-only columns are missing from "
-    "init.sql and _migrate. Remove this marker in the same change that fixes it; "
-    "strict=True makes the suite fail as soon as the gap is closed, as a reminder.",
-)
 async def test_every_orm_column_reachable_from_init_sql_path():
     tables = _init_sql_tables()
     added = await _migrate_added_columns()
@@ -118,3 +115,35 @@ async def test_every_orm_column_reachable_from_init_sql_path():
         "_migrate (or the column to init.sql) for each:\n  "
         + "\n  ".join(missing)
     )
+
+
+_INDEX = re.compile(
+    r"CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?\w+\s+ON\s+\"?(\w+)\"?\s*\(([^)]*)\)",
+    re.IGNORECASE,
+)
+
+
+async def test_migrate_never_indexes_a_column_before_adding_it():
+    """`_migrate` runs its statements in order on a pre-Alembic database. An
+    index on a column that a LATER statement adds fails ("column does not
+    exist") and aborts startup: the backend exited on an init.sql-built
+    database because `ix_reports_org_published` came before the ALTER that
+    adds `reports.published` (2026-10-15). A fresh install never noticed --
+    Alembic had already made the column."""
+    conn = _RecordingConn()
+    await _migrate(conn)
+    added_at = {}
+    for i, stmt in enumerate(conn.statements):
+        for table, col in _ADD_COL.findall(stmt):
+            added_at.setdefault((table.lower(), col.lower()), i)
+
+    wrong = []
+    for i, stmt in enumerate(conn.statements):
+        for table, cols in _INDEX.findall(stmt):
+            for col in cols.split(","):
+                name = col.strip().split()[0].strip('"').lower() if col.strip() else ""
+                j = added_at.get((table.lower(), name))
+                if j is not None and j > i:
+                    wrong.append(f"{stmt!r} runs before {conn.statements[j]!r}")
+    assert not wrong, "Index created before its column exists:\n  " + "\n  ".join(wrong)
+

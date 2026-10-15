@@ -125,7 +125,6 @@ async def _migrate(conn):
         "ALTER TABLE reports ADD COLUMN IF NOT EXISTS review_note VARCHAR(500)",
         "CREATE INDEX IF NOT EXISTS ix_reports_category ON reports (category)",
         "CREATE INDEX IF NOT EXISTS ix_reports_archived_at ON reports (archived_at)",
-        "CREATE INDEX IF NOT EXISTS ix_reports_org_published ON reports (org_id, published)",
         "ALTER TABLE report_user_grants ALTER COLUMN user_id DROP NOT NULL",
         "ALTER TABLE report_user_grants ADD COLUMN IF NOT EXISTS role_id INTEGER REFERENCES roles(id) ON DELETE CASCADE",
         "ALTER TABLE report_user_grants ADD COLUMN IF NOT EXISTS org_unit_id INTEGER REFERENCES org_units(id) ON DELETE CASCADE",
@@ -209,6 +208,10 @@ async def _migrate(conn):
         # grandfathered. report_user_grants is a NEW table -- create_all makes
         # it on startup; no ALTER needed.
         "ALTER TABLE reports ADD COLUMN IF NOT EXISTS published BOOLEAN NOT NULL DEFAULT FALSE",
+        # After the column it indexes: on a database whose `reports` predates
+        # `published` (stamped at head, see _run_alembic) indexing first made
+        # startup fail with "column published does not exist".
+        "CREATE INDEX IF NOT EXISTS ix_reports_org_published ON reports (org_id, published)",
         "ALTER TABLE workspace_nodes ADD COLUMN IF NOT EXISTS published BOOLEAN NOT NULL DEFAULT FALSE",
         # Dataset-mode memory scoping: sorted dataset ids joined with commas
         # (e.g. "3,17"), NULL for source-mode rows -- see QueryExample.dataset_key.
@@ -264,6 +267,29 @@ async def _migrate(conn):
                WHERE u.org_id = data_sources.org_id AND r.is_org_admin = true
                ORDER BY u.id LIMIT 1)
            WHERE created_by IS NULL AND org_id IS NOT NULL""",
+        # Columns only an Alembic revision added. A database stamped at head
+        # without running revisions (one first built from postgres/init.sql,
+        # or adopted before Alembic -- see _run_alembic) never got them, and
+        # "Load demo content" 500'd on the first query that read one. Same
+        # types, defaults, keys and index names as the revisions; last in the
+        # list so the tables their keys point at exist (create_all ran first).
+        # 0026_page_background
+        "ALTER TABLE report_pages ADD COLUMN IF NOT EXISTS background_url VARCHAR(1000)",
+        # 0029_aggregate_datasets
+        "ALTER TABLE datasets ADD COLUMN IF NOT EXISTS aggregate_of_dataset_id INTEGER REFERENCES datasets(id) ON DELETE CASCADE",
+        "CREATE INDEX IF NOT EXISTS ix_datasets_aggregate_of_dataset_id ON datasets (aggregate_of_dataset_id)",
+        "ALTER TABLE datasets ADD COLUMN IF NOT EXISTS aggregate_spec JSON",
+        # 0031_report_origin
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS origin VARCHAR(20) NOT NULL DEFAULT 'user'",
+        "CREATE INDEX IF NOT EXISTS ix_reports_origin ON reports (origin)",
+        # 0032_automation_run_record
+        "ALTER TABLE analysis_results ADD COLUMN IF NOT EXISTS run_id INTEGER REFERENCES automation_runs(id) ON DELETE SET NULL",
+        "CREATE INDEX IF NOT EXISTS ix_analysis_results_run_id ON analysis_results (run_id)",
+        "ALTER TABLE analysis_results ADD COLUMN IF NOT EXISTS params JSON",
+        "ALTER TABLE analysis_results ADD COLUMN IF NOT EXISTS created_by INTEGER REFERENCES users(id) ON DELETE SET NULL",
+        # 0033_dataset_column_provenance
+        "ALTER TABLE dataset_columns ADD COLUMN IF NOT EXISTS source_column_id INTEGER REFERENCES source_columns(id) ON DELETE SET NULL",
+        "CREATE INDEX IF NOT EXISTS ix_dataset_columns_source_column_id ON dataset_columns (source_column_id)",
     ]
     for s in stmts:
         await conn.execute(text(s))
