@@ -138,6 +138,12 @@ export default function AskAI() {
         const cols: Record<number, DatasetColumn[]> = {}
         for (const d of usable) if (Array.isArray(d.columns) && d.columns.length) cols[d.id] = d.columns
         setColumnsById(cols)
+        // AD-11: the list already carries each dataset's stored classes; the
+        // per-dataset read below is skipped when columns are known, so without
+        // this the suggestions never saw a "level" or a "code".
+        const classes: Record<number, ColumnClasses> = {}
+        for (const d of usable) if (d.column_meta) classes[d.id] = d.column_meta as ColumnClasses
+        setClassesById(m => ({ ...classes, ...m }))
       })
       // A failed dataset list must not read as "no data yet" -- an error
       // dressed as an empty state is the defect, not a degradation.

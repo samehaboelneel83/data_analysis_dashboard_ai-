@@ -34,6 +34,28 @@ export type ColumnClasses = Record<string, { number?: string; role?: string } | 
 
 const ADDS_UP = new Set(['amount', 'count'])
 
+/* AD-11: when nothing is stored for a column, its NAME decides, by the same
+ * rules the server's semantic guard uses (services/semantic_guard.py
+ * _COORD_WORDS / _INTENSIVE_WORDS), plus body measures. A coordinate is never
+ * a measure; a rate, share, level or body measure is averaged, never totalled. */
+const COORD_WORDS = ['lat', 'latitude', 'lon', 'lng', 'long', 'longitude', 'خط_العرض', 'خط_الطول']
+const INTENSIVE_WORDS = ['price', 'unit_price', 'unit_cost', 'rate', 'ratio', 'percent', 'percentage', 'pct', 'share',
+  'avg', 'average', 'mean', 'median', 'age', 'score', 'grade', 'rating', 'temperature', 'temp', 'speed', 'margin',
+  'probability', 'prob', 'index', 'level', 'height', 'weight', 'bmi',
+  'سعر', 'السعر', 'نسبة', 'النسبة', 'معدل', 'المعدل', 'متوسط', 'المتوسط', 'عمر', 'العمر', 'درجة', 'الدرجة', 'تقييم', 'التقييم']
+function nameHas(name: string, words: string[]): boolean {
+  const low = name.trim().toLowerCase().replace(/[\s\-.]+/g, '_')
+  return words.some(w => low === w || low.endsWith('_' + w) || low.startsWith(w + '_') || low.includes('_' + w + '_'))
+}
+/** The kind of number a column holds: the stored class first, else its name. */
+function numberKind(c: string, classes?: ColumnClasses): string | undefined {
+  const stored = classes?.[c]?.number
+  if (stored) return stored
+  if (nameHas(c, COORD_WORDS)) return 'coordinate'
+  if (nameHas(c, INTENSIVE_WORDS) || /(^|_)per(_|$)/i.test(c)) return 'level'
+  return undefined
+}
+
 /** Which picture a suggestion card shows (SuggestionGrid maps it to an icon). */
 export type SuggestionIcon = 'total' | 'top' | 'trend' | 'average' | 'highest' | 'count' | 'rows' | 'summary' | 'columns' | 'tables'
 
@@ -52,8 +74,8 @@ export interface SuggestionCard { text: string; icon: SuggestionIcon; columns: s
 export function datasetSuggestionCards(
   columns: Pick<DatasetColumn, 'name' | 'dtype'>[] | undefined, t: Translate, classes?: ColumnClasses,
 ): SuggestionCard[] {
-  const kind = (c: string) => classes?.[c]?.number
-  const isCode = (c: string) => kind(c) === 'code' || classes?.[c]?.role === 'identifier'
+  const kind = (c: string) => numberKind(c, classes)
+  const isCode = (c: string) => kind(c) === 'code' || kind(c) === 'coordinate' || classes?.[c]?.role === 'identifier'
   const sorted = classify(columns ?? [])
   const numeric = sorted.numeric.filter(c => !isCode(c))
   // An amount first: what a "total" is about.
