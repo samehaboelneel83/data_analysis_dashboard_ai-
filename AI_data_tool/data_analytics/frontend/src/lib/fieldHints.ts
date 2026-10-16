@@ -101,6 +101,28 @@ export function hintTitle(hint: FieldHint | undefined): string {
 /** C-09: each numeric field's observed min/max from the analysis profile
  *  (`numeric.columns[col].min/max`), for checks such as "can this be a
  *  longitude". Fields without both numbers are left out. */
+/** UAT-9: the numeric columns that hold true/false -- a boolean stored as a
+ *  number (detect_types files a bool under "numeric") or a 0/1 flag: 0 and 1
+ *  at both ends, and every profiled percentile 0 or 1. A rate spread between
+ *  0 and 1 has fractional percentiles and is left alone. */
+export function trueFalseColumns(analysis: any): string[] {
+  const out: string[] = []
+  const binary = (v: unknown) => v === 0 || v === 1 || v === true || v === false
+  for (const [col, stats] of Object.entries<any>(analysis?.numeric?.columns ?? {})) {
+    if (!stats || Number(stats.min) !== 0 || Number(stats.max) !== 1) continue
+    if (['p5', 'p25', 'median', 'p75', 'p95'].every(k => binary(stats[k]))) out.push(col)
+  }
+  return out
+}
+
+/** The formats widgets draw with: the dataset's own, plus a true/false
+ *  marker for each such column that has none (an author's format wins). */
+export function withTrueFalseFormats<F extends object>(formats: Record<string, F>, analysis: any): Record<string, F> {
+  const cols = trueFalseColumns(analysis).filter(c => !formats[c])
+  if (cols.length === 0) return formats
+  return { ...formats, ...Object.fromEntries(cols.map(c => [c, { type: 'none', true_false: true } as unknown as F])) }
+}
+
 export function numericRanges(analysis: any): Record<string, { min: number; max: number }> {
   const out: Record<string, { min: number; max: number }> = {}
   for (const [col, stats] of Object.entries<any>(analysis?.numeric?.columns ?? {})) {
