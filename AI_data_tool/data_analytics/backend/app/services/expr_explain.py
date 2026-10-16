@@ -25,7 +25,7 @@ KNOWN_FUNCTIONS = (
     "abs round min max int float str len pow log sqrt exp floor ceil IF SWITCH isnull "
     "SENTIMENT SENTIMENT_LABEL UPPER LOWER TRIM LEN REVERSE LEFT RIGHT SUBSTRING CONCAT "
     "REPLACE FIND CONTAINS STARTSWITH ENDSWITH SPLIT YEAR QUARTER MONTH DAY WEEKDAY "
-    "DAYOFYEAR MONTHNAME DAYNAME DATE DATEADD DATEDIFF TODAY NOW "
+    "DAYOFYEAR MONTHNAME DAYNAME DATE DATEADD DATEDIFF TODAY NOW TODATE TONUMBER VALUE "
     # measures
     "SUM AVG MEDIAN COUNT COUNTD STDEV VARIANCE MIN MAX TOTAL BYGROUP SCOPE ISINSCOPE CALC"
 ).split()
@@ -63,6 +63,10 @@ def explain(raw: str, expression: str, columns: list[str]) -> dict:
     m = re.search(r"(\w+)\(\) missing (\d+) required positional argument", raw)
     if m:
         return {"code": "missing_value", "function": m.group(1), "missing": int(m.group(2))}
+
+    m = re.search(r"Text can't be used in arithmetic \(([^)]+)\)", raw)
+    if m:
+        return {"code": "text_math", "operator": m.group(1)}
 
     m = re.search(r"unsupported operand type\(s\) for ([^:]+): '(\w+)' and '(\w+)'", raw)
     if m or "can only concatenate str" in raw or "can't multiply sequence" in raw:
