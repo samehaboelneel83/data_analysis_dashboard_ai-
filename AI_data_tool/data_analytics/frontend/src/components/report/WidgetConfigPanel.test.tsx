@@ -1861,7 +1861,8 @@ describe('C-11: a percentage given a role is averaged, never summed', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Assign data$/ }))
     const roles = screen.getByRole('dialog', { name: /^Assign data/ })
     // The second "Add Line" is the right axis (labels drop their parenthesis).
-    fireEvent.click(within(roles).getAllByRole('button', { name: 'Add Line' })[1])
+    // UAT-8: the full left-axis Line now offers "Change"; the right axis is the last "Add Line".
+    fireEvent.click(within(roles).getAllByRole('button', { name: 'Add Line' }).at(-1)!)
     const fields = screen.getByRole('dialog', { name: 'Add Line' })
     fireEvent.click(within(fields).getAllByRole('option').find(o => (o.textContent ?? '').includes('margin_pct'))!)
     act(() => { vi.advanceTimersByTime(700) })

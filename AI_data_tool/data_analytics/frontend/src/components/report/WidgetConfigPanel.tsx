@@ -925,10 +925,15 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
   // distinct of order_id"). Offered only where the widget's shaper counts any
   // column (COUNT_MEASURE_WIDGETS) -- never in a map's coordinates (C-09) or
   // any other numeric role -- and only with the counting aggregations.
+  const NUMBER_DTYPE = /^(numeric|number|float|double|decimal|int|integer|bigint|smallint|real|money)/i
   const countsText = COUNT_MEASURE_WIDGETS.has(wt) && !isModel
   const isCountedField = (name: string | undefined): boolean => {
     const c = name ? effectiveCols.find(col => col.name === name) : undefined
-    return !!c && !isMeasureCol(c) && c.dtype !== 'boolean' && c.dtype !== 'bool'
+    // Only a field that is clearly NOT a number is counted: dtype spellings
+    // such as 'float' / 'int' / 'integer' are numbers too, and a number keeps
+    // every aggregation (sum, average, % share...).
+    return !!c && !isMeasureCol(c) && !NUMBER_DTYPE.test(String(c.dtype ?? ''))
+      && c.dtype !== 'boolean' && c.dtype !== 'bool'
   }
   const countedOptions = (): { value: string; label: string; group?: string }[] => countsText
     ? effectiveCols.filter(c => isCountedField(c.name)).map(c => ({ value: c.name, label: c.name, group: 'Counted' }))
