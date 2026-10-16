@@ -148,6 +148,44 @@ async def test_sharing_with_a_person_a_role_and_a_team_and_taking_it_back(client
     assert (await client.post(f"{API}/reports/{rid}/grants", json={"email": people["other_org"].email}, headers=hdr(a))).status_code == 404
 
 
+async def test_a_team_share_is_listed_under_my_team_even_when_the_reader_is_also_named(client, db_session, people):
+    """F-05: the personal share decides the rights, but the dashboard was still
+    shared with the reader's team -- My team must list it (also for a member
+    of a team below the one named)."""
+    a, org = people["author"], people["org"]
+    _, member_ = await member(db_session, org.id, "teammate")
+    _, in_child = await member(db_session, org.id, "teammate-child")
+    unit = OrgUnit(org_id=org.id, name="QA F Team", match_value="QA F Team")
+    db_session.add(unit)
+    await db_session.flush()
+    child = OrgUnit(org_id=org.id, name="QA F Sub", match_value="QA F Sub", parent_id=unit.id)
+    db_session.add(child)
+    await db_session.flush()
+    db_session.add_all([UserOrgUnit(user_id=member_.id, org_unit_id=unit.id),
+                        UserOrgUnit(user_id=in_child.id, org_unit_id=child.id)])
+    await db_session.commit()
+    rid, _, _ = await dashboard(client, a)
+    for body in ({"email": member_.email, "level": "view"}, {"org_unit_id": unit.id, "level": "view"}):
+        assert (await client.post(f"{API}/reports/{rid}/grants", json=body, headers=hdr(a))).status_code == 201
+    for u in (member_, in_child):
+        team = (await client.get(f"{API}/portal/catalog?section=team", headers=hdr(u))).json()
+        assert [i["id"] for i in team["items"]] == [rid] and team["counts"]["team"] == 1, u.email
+    # Named personally, it is ALSO under Shared with me, and "how it reached you" is still the personal share.
+    shared = (await client.get(f"{API}/portal/catalog?section=shared", headers=hdr(member_))).json()
+    assert [i["id"] for i in shared["items"]] == [rid] and shared["items"][0]["via"] == "user"
+    # Someone outside the team: not under My team.
+    assert (await client.get(f"{API}/portal/catalog?section=team", headers=hdr(people["reader"]))).json()["total"] == 0
+
+
+async def test_a_share_that_names_no_level_gives_view(client, people):
+    """F-06: least privilege on the server too -- an unsaid level is view."""
+    a, r = people["author"], people["reader"]
+    rid, _, _ = await dashboard(client, a)
+    got = await client.post(f"{API}/reports/{rid}/grants", json={"email": r.email}, headers=hdr(a))
+    assert got.status_code == 201 and got.json()["level"] == "view"
+    assert (await client.get(f"{API}/reports/{rid}", headers=hdr(r))).json()["my_capability"] == "view"
+
+
 async def test_an_expired_share_gives_nothing(client, db_session, people):
     a, r = people["author"], people["reader"]
     rid, _, _ = await dashboard(client, a)
@@ -211,6 +249,34 @@ async def test_downloads_can_be_refused_while_viewing_stays_allowed(client, db_s
     assert {e.user_email for e in seen} >= {r.email, s.email} and all(e.entity_id == rid for e in seen)
 
 
+async def test_the_print_view_is_a_download_and_is_refused_with_downloads(client, db_session, people):
+    """F-02: Print / Save as PDF and PowerPoint are built from the print view,
+    so the print view is gated like every other download."""
+    a, r = people["author"], people["reader"]
+    rid, _, _ = await dashboard(client, a)
+    await publish(client, a, rid)
+    assert (await client.get(f"{API}/reports/{rid}", params={"view": "print"}, headers=hdr(r))).status_code == 200
+    await client.post(f"{API}/reports/{rid}/grants", json={"email": r.email, "level": "view", "can_export": False}, headers=hdr(a))
+    assert (await client.get(f"{API}/reports/{rid}", headers=hdr(r))).status_code == 200          # viewing stays
+    got = await client.get(f"{API}/reports/{rid}", params={"view": "print"}, headers=hdr(r))
+    assert got.status_code == 403 and "download" in got.json()["detail"].lower()
+    assert (await client.get(f"{API}/reports/{rid}", params={"view": "print"}, headers=hdr(a))).status_code == 200
+    # Every viewer switched off; the author (an editor) still prints.
+    await client.patch(f"{API}/reports/{rid}/publication", json={"viewers_may_export": False}, headers=hdr(a))
+    assert (await client.get(f"{API}/reports/{rid}", params={"view": "print"}, headers=hdr(people["stranger"]))).status_code == 403
+    assert (await client.get(f"{API}/reports/{rid}", params={"view": "print"}, headers=hdr(a))).status_code == 200
+    actions = [e.action for e in (await db_session.execute(
+        select(AuditLogEntry).where(AuditLogEntry.entity_id == rid))).scalars().all()]
+    assert "report.export_denied" in actions and "report.export" in actions
+
+
+async def test_guest_links_and_embeds_offer_no_download_route(client, people):
+    """F-02 regression guard: the public surfaces have no export routes at all."""
+    for path in ("/shared/tok/pdf", "/shared/tok/xlsx", "/shared/tok/export", "/embed/report/pdf", "/embed/export"):
+        got = await client.get(API + path)
+        assert got.status_code in (404, 405), path
+
+
 # 9 ─ lifecycle: release, rollback, archive, restore, owner ──────────────────
 
 async def test_readers_see_the_release_until_the_next_and_can_be_taken_back_to_an_earlier_one(client, people):
@@ -251,9 +317,17 @@ async def test_archiving_closes_everything_and_restoring_brings_it_back(client, 
         assert (await client.get(f"{API}/reports/{rid}", headers=hdr(u))).status_code == 200
     assert (await client.get(f"{API}/portal/catalog?section=archived", headers=hdr(a))).json()["total"] == 1
     assert (await client.post(f"{API}/reports/{rid}/publish", json={"published": True}, headers=hdr(a))).status_code in (200, 409)
-    assert (await client.post(f"{API}/reports/{rid}/restore", headers=hdr(a))).json()["state"] == "published"
+    # F-04: it comes back as a DRAFT -- readers do not get it again until it is published again.
+    assert (await client.post(f"{API}/reports/{rid}/restore", headers=hdr(a))).json()["state"] == "draft"
+    assert (await client.get(f"{API}/reports/{rid}/publication", headers=hdr(a))).json()["state"] == "draft"
+    assert (await client.get(f"{API}/reports/{rid}", headers=hdr(people["stranger"]))).status_code == 404  # reached it only by publication
     assert (await client.get(f"{API}/reports/{rid}", headers=hdr(r))).status_code == 200       # shares and links came back as they were
     assert (await client.get(f"{API}/shared/{token}")).status_code == 200
+    restored = (await db_session.execute(select(AuditLogEntry).where(
+        AuditLogEntry.action == "report.restore", AuditLogEntry.entity_id == rid))).scalars().all()
+    assert restored and "draft" in (restored[-1].detail or "")
+    await publish(client, a, rid)
+    assert (await client.get(f"{API}/reports/{rid}", headers=hdr(people["stranger"]))).status_code == 200
     # Unpublishing leaves the named share and takes the rest of the organisation out.
     await publish(client, a, rid, on=False)
     assert (await client.get(f"{API}/reports/{rid}", headers=hdr(r))).status_code == 200
@@ -372,6 +446,28 @@ async def test_a_download_of_one_chart_is_refused_with_the_dashboards_downloads(
     body = {"widget_type": "bar", "config": w["cfg"], "report_id": w["rid"], "calculated_columns": [], "parameters": {}}
     assert (await client.post(f"{API}/datasets/{w['ds'].id}/widget-data/export?format=csv", json=body, headers=hdr(w["north"]))).status_code == 403
     assert await rows_for(client, w, w["north"]) == {"North": 55}                # still viewable
+
+
+async def test_a_chart_download_without_its_dashboard_cannot_slip_past_the_dashboards_downloads(client, people, two_teams):
+    """F-02: the widget menu used to send no report_id, so the dashboard's
+    "no downloads" was never consulted. A dataset the reader reaches only
+    through a dashboard is downloadable only through that dashboard."""
+    w = two_teams
+    await client.patch(f"{API}/reports/{w['rid']}/publication", json={"viewers_may_export": False}, headers=hdr(people["author"]))
+    body = {"widget_type": "bar", "config": w["cfg"], "calculated_columns": [], "parameters": {}}
+    url = f"{API}/datasets/{w['ds'].id}/widget-data/export?format=csv"
+    refused = await client.post(url, json=body, headers=hdr(w["north"]))
+    assert refused.status_code == 403 and "dashboard" in refused.json()["detail"].lower()
+    # Naming a dashboard that does not draw on this dataset does not help either.
+    other, _, _ = await dashboard(client, people["author"], "Other")
+    await publish(client, people["author"], other)
+    assert (await client.post(url, json={**body, "report_id": other}, headers=hdr(w["north"]))).status_code == 403
+    # The owner of the data still may, with or without the dashboard.
+    assert (await client.post(url, json=body, headers=hdr(people["author"]))).status_code == 200
+    # Downloads on again: through the dashboard it works, without it still not (the data is not theirs).
+    await client.patch(f"{API}/reports/{w['rid']}/publication", json={"viewers_may_export": True}, headers=hdr(people["author"]))
+    assert (await client.post(url, json={**body, "report_id": w["rid"]}, headers=hdr(w["north"]))).status_code == 200
+    assert (await client.post(url, json=body, headers=hdr(w["north"]))).status_code == 403
 
 
 # 11 ─ scheduled delivery ────────────────────────────────────────────────────

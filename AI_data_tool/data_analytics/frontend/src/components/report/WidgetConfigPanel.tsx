@@ -26,7 +26,7 @@ import { AGGREGATIONS, DUAL_MEASURE_WIDGETS, MULTI_MEASURE_WIDGETS, PIVOT_WIDGET
 import { dtypeShort } from '../../lib/dtypeName'
 import { useT } from '../../i18n'
 import { ASSIGN_DATA_EVENT, ADD_DATASET_EVENT, emptyPickerReason } from './WidgetPlaceholder'
-import { fieldUse, semanticAggregationWarning, nonAdditiveKind, SAFE_AGGREGATION } from '../../lib/semanticGuard'
+import { fieldUse, semanticAggregationWarning, nonAdditiveKind, SAFE_AGGREGATION, defaultSummary } from '../../lib/semanticGuard'
 import { savePending, clearPending } from '../../lib/pendingEdits'
 import type { DatasetColumn, Dataset } from '../../services/api'
 import InteractionSettings from './InteractionSettings'
@@ -43,7 +43,7 @@ import {
   CUSTOM_SHAPE_WIDGET_TYPES, RUNNING_OPTIONS, readCssVarColor,
   seedRoleValues, seedMultiRoleValues, widgetIcon,
 } from './widgetConfigPanel/helpers'
-import ModelSettings, { type ModelOpts, modelOptsConfig, seedModelOpts } from './ModelSettings'
+import ModelSettings, { MODEL_DISPLAY_SPLIT, type ModelOpts, modelOptsConfig, seedModelOpts } from './ModelSettings'
 
 interface Props {
   widget: Widget
@@ -66,6 +66,10 @@ interface Props {
    *  the role pickers -- "region · 4 values" is what tells a bar chart from a
    *  mistake before it is drawn. Optional: absent, the pickers show no counts. */
   distinctCounts?: Record<string, number>
+  /** C-09: each numeric field's observed min/max (the builder's field
+   *  analysis), so the Latitude / Longitude pickers can flag numbers that
+   *  cannot be a coordinate. Optional: absent, nothing is flagged. */
+  valueRanges?: Record<string, { min: number; max: number }>
   onUpdate: (config: Record<string, unknown>, title: string) => void
   /** The builder's Format / Data / Interactions (redesign 7e3): shows only
    *  that section's tabs, and "All" means all of it. Absent, the panel is
@@ -108,7 +112,7 @@ function extraKeyFor(wt: string, role: string, roleValues: Record<string, string
 const seedExtras = (cfg: Record<string, unknown>): Record<string, string[]> =>
   Object.fromEntries(Object.values(EXTRA_KEY_OF).map(k => [k, stringList(cfg[k])]))
 
-function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages, hierarchy, onHierarchyRefresh, bookmarks, ruleErrors, geography, distinctCounts, onUpdate, section, onSection }: Props) {
+function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages, hierarchy, onHierarchyRefresh, bookmarks, ruleErrors, geography, distinctCounts, valueRanges, onUpdate, section, onSection }: Props) {
   // E03: in the shape the panel edits -- a legacy `roles` dict flattened,
   // `agg` renamed (widgetConfigPanel/configShape.ts). Keyed on the stored
   // object, so it is recomputed when the widget or its config changes.
@@ -389,7 +393,6 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
   const [hierIdCol,     setHierIdCol]     = useState<string>((cfg.id_col as string) ?? '')
   const [hierParentCol, setHierParentCol] = useState<string>((cfg.parent_col as string) ?? '')
   const [hierLabelCol,  setHierLabelCol]  = useState<string>((cfg.label_col as string) ?? '')
-  const [facetBy,       setFacetBy]       = useState<string>((cfg.facet_by as string) ?? '')
   const [facetInner,    setFacetInner]    = useState<string>((cfg.inner_widget_type as string) ?? 'bar')
   const [facetLimit,    setFacetLimit]    = useState<string>(String(cfg.facet_limit ?? FACET_MAX_PANELS))
   const [forecastPeriods, setForecastPeriods] = useState<string>(
@@ -658,7 +661,7 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
         }
       }
       if (wt === 'small_multiples') {
-        if (facetBy) config.facet_by = facetBy
+        // C-23: facet_by is the 'facet' role now, written with the other roles.
         config.inner_widget_type = facetInner
         const lim = Number(facetLimit)
         if (lim > 0) config.facet_limit = Math.min(lim, FACET_MAX_PANELS)
@@ -892,7 +895,7 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
     // panel BUILD the config and never re-emit it -- the controls would
     // appear to work and save nothing.
     hierMode, hierLevels, hierIdCol, hierParentCol, hierLabelCol,
-    facetBy, facetInner, facetLimit, forecastPeriods,
+    facetInner, facetLimit, forecastPeriods,
     // Stringified because it is an array of objects: by identity it changes on
     // every keystroke that rebuilds the list, and by omission it never changes
     // at all -- which is the failure the comment above describes, and the one
@@ -1105,7 +1108,7 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
   // equals the set that exists -- so a group added later with no home here
   // fails the suite rather than quietly becoming unreachable.
   const TAB_OF_GROUP: Record<string, string> = {
-    'Appearance': 'Options', 'Formatting': 'Options', 'Sort & limit': 'Options',
+    'Appearance': 'Options', 'Formatting': 'Options', 'Sort & limit': 'Options', 'Model display': 'Options',
     'Data & aggregation': 'Data',
     // Both repeat or play the same chart over another field -- a data
     // arrangement, like the aggregation beside them.
@@ -1148,6 +1151,7 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
 const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Multi-column sort', 'Row limit', 'Auto-reload', 'Custom order', 'Filter aggregated values', 'Rank', 'Quick calculation', 'Suppress small groups', 'Bins', 'Baseline', 'Fit Line', 'Target value', 'Gauge shape', 'Animation value']
   const FORMATTING_SEARCH_TERMS   = ['X axis label', 'Y axis label', 'Category label angle', 'Value label angle', 'Tick size', 'Tick colour', 'Show axis line', 'Show tick marks', 'Y axis scale', 'Y axis min', 'Y axis max', 'Show gridlines', 'Gridline style', 'Gridline colour', 'Wall colour', 'Show legend', 'Legend position', 'Overview axis', 'Show data labels', 'Distinguish groups by pattern', 'Show as table', 'Show totals', 'Show row subtotals', 'Row numbers', 'Row lines', 'Banded rows', 'Condensed', 'Row trend sparkline']
   const APPEARANCE_SEARCH_TERMS   = ['Background', 'Border colour', 'Border width', 'Corner radius', 'Padding', 'Skin', 'Widget description']
+  const MODEL_DISPLAY_SEARCH_TERMS = ['Drawn as', 'Bubbles', 'Bars', 'Higher', 'Lower', 'Influencers', 'Decimals', 'Details']
   const ACTIONS_SEARCH_TERMS      = ['Button action', 'Navigate to page', 'Apply bookmark', 'Open external URL', 'Go to another report', 'Set a parameter', 'Target page', 'Target URL', 'Target report ID', 'Parameter name', 'Value to set', 'Target bookmark']
   const RULES_SEARCH_TERMS        = ['rule', 'condition', 'threshold', 'bands']
   const INTERACTIONS_SEARCH_TERMS = ['cross-filter', 'drillthrough', 'tooltip', 'sync']
@@ -1201,6 +1205,17 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
     if (rf.role === 'category') { pickCategory(values[0] ?? ''); return }
     if (rf.role === 'category2') { pickColumns(values[0] ?? ''); return }
     setRole(rf.role, values[0] ?? '')
+    // C-11: a measure starts on the summary that means something for it -- a
+    // percentage or rate is averaged, never summed (a right axis read 12,000%).
+    // Only over the defaults: an aggregation the author picked is kept.
+    const col = values[0]
+    if (col && rf.role === 'measure') {
+      const s = defaultSummary(col)
+      if ((agg === 'sum' && s !== 'sum') || (!roleValues.measure && agg === 'count')) setAgg(s)
+    } else if (col && rf.role === 'measure2' && !agg2) {
+      const s = defaultSummary(col)
+      if (s !== agg) setAgg2(s)
+    }
   }
   const assignedFields: Record<string, string[]> = Object.fromEntries(roleSpecs.map(rf => [rf.role, fieldsOf(rf)]))
   // QA6 B4: the Fields panel's rule (fieldUse), so "year" is a category here too.
@@ -1213,6 +1228,18 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
   const objectLabel = (w: { title?: string | null; widget_type: string; id: number }) =>
     w.title || `${w.widget_type.charAt(0).toUpperCase()}${w.widget_type.slice(1).replace(/_/g, ' ')} ${w.id}`
   const openAssign = (role: string | null) => { setAssignRole(role); setAssignOpen(true) }
+  // C-27: a field dropped on a role from the Fields panel -- taken only when the
+  // role's own picker would offer it (the same rule, roleChoices), so a text
+  // field dropped on Latitude is refused rather than saved.
+  const dropFieldOnRole = (role: string, column: string): boolean => {
+    const rf = roleSpecs.find(r => r.role === role)
+    if (!rf || addBlocked(role)) return false
+    const current = fieldsOf(rf)
+    if (current.includes(column)) return true
+    if (!roleChoices(rf, current).some(c => c.value === column)) return false
+    setFields(rf, rf.multi ? [...current, column] : [column])
+    return true
+  }
   const removeField = (role: string, f: string) => {
     const rf = roleSpecs.find(r => r.role === role)
     if (!rf) return
@@ -1299,7 +1326,31 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
         <span aria-hidden style={{ fontSize:17, lineHeight:1 }}>+</span> {L("Assign data")}
       </button>
       <DataRolesList specs={roleSpecs} values={assignedFields} kindOf={fieldKind} displayName={displayName}
-        onAdd={role => setAddRole(role)} onRemove={removeField} renderDetails={fieldDetails} addBlocked={addBlocked} />
+        onAdd={role => setAddRole(role)} onRemove={removeField} renderDetails={fieldDetails} addBlocked={addBlocked}
+        onDropField={dropFieldOnRole} />
+      {/* C-10: which of a point/bubble map's two modes is in force. */}
+      {(wt === 'map_points' || wt === 'map_bubbles') && (roleValues.category || roleValues.lat || roleValues.lon) && (
+        <div data-testid="map-mode-hint" style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
+          {tt(roleValues.lat && roleValues.lon ? 'cr.mapModeCoords' : roleValues.lat || roleValues.lon ? 'cr.mapModeHalf' : 'cr.mapModeCountry')}
+        </div>
+      )}
+      {/* C-09: a coordinate role holding numbers that cannot be one. */}
+      {(() => {
+        const bad = (['lat', 'lon', 'lat2', 'lon2'] as const).filter(r => roleSpecs.some(s => s.role === r)
+          && roleValues[r] && coordOutOfRange(roleValues[r], coordRoleAxis(r)!, valueRanges))
+        return bad.length > 0 && (
+          <div data-testid="coord-range-warning" role="status" style={{ fontSize: 11, color: 'var(--warning, #b26a00)', marginTop: 6 }}>
+            {bad.map(r => tt('cr.coordOutOfRange', { field: roleValues[r], role: L(roleSpecs.find(s => s.role === r)?.label ?? r) })).join(' ')}
+          </div>
+        )
+      })()}
+      {/* C-06: a word cloud sizes WORDS; a numeric column as its text draws
+          numbers as words (and "Word text" accepts any column). Said here. */}
+      {wt === 'word_cloud' && roleValues.category && fieldKind(roleValues.category) === 'measure' && (
+        <div role="note" data-testid="word-text-numeric" style={{ fontSize: 11, color: 'var(--danger, #c0392b)', marginTop: 6 }}>
+          {tt('cr.wordTextNumeric', { field: roleValues.category })}
+        </div>
+      )}
     </div>
   )
   // Which fields a role may be given -- the ONE rule both the dialog's pickers
@@ -1318,10 +1369,26 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
     }
     const kind = roleAccepts(rf.role)
     const chosen = selected[0]
+    // C-09: a coordinate role lists coordinate fields first (the matching
+    // axis on top) under Geography, and flags a number whose observed values
+    // cannot be that coordinate.
+    const axis = coordRoleAxis(rf.role)
+    if (axis) {
+      const opts = measureOptions([chosen]).map(o => ({ ...o,
+        label: coordOutOfRange(o.value, axis, valueRanges) ? L('{name} (values out of range)', { name: o.label }) : o.label }))
+      const rank = (v: string) => { const a = coordAxisOf(v); return a === axis ? 0 : a ? 1 : 2 }
+      const ordered = opts.map((o, i) => ({ o, i })).sort((x, y) => rank(x.o.value) - rank(y.o.value) || x.i - y.i)
+        .map(({ o }) => ({ ...o, group: coordAxisOf(o.value) ? 'Geography' : 'Numbers' }))
+      return (chosen && !ordered.some(o => o.value === chosen))
+        ? [...ordered, { value: chosen, label: L('{name} (current)', { name: chosen }) }]
+        : ordered
+    }
     const narrowed =
       kind === 'numeric'  ? measureOptions([chosen])
     : kind === 'datetime' ? colOptions.filter(o =>
         effectiveCols.find(c => c.name === o.value)?.dtype === 'datetime')
+    : kind === 'category' ? colOptions.filter(o =>
+        effectiveCols.find(c => c.name === o.value)?.dtype !== 'numeric')
     : colOptions
     return (chosen && !narrowed.some(o => o.value === chosen))
       ? [...narrowed, { value: chosen, label: L('{name} (current)', { name: chosen }) }]
@@ -1779,9 +1846,20 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               sit with its roles: together they ARE the model specification. */}
           {isModel && (
             <ModelSettings widget={widget} pages={pages} value={modelOpts} onChange={setModelOpts}
-              datasetId={Number(datasetId) || primaryDatasetId || null} />
+              datasetId={Number(datasetId) || primaryDatasetId || null}
+              part={MODEL_DISPLAY_SPLIT.has(wt) ? 'spec' : 'all'} />
           )}
           </ExpandableGroup>
+
+          {/* F-16: how a model's result is drawn sits with the other display
+              options (Format), not only inside its specification. */}
+          {MODEL_DISPLAY_SPLIT.has(wt) && (
+            <ExpandableGroup id="model-display" title="Model display" defaultOpen // i18n-ok: ExpandableGroup translates its title
+              searchTerms={MODEL_DISPLAY_SEARCH_TERMS} {...groupFilterProps('Model display', MODEL_DISPLAY_SEARCH_TERMS)}>
+              <ModelSettings widget={widget} pages={pages} value={modelOpts} onChange={setModelOpts}
+                datasetId={Number(datasetId) || primaryDatasetId || null} part="display" />
+            </ExpandableGroup>
+          )}
 
           {!isModel && (<>
           <ExpandableGroup id="data" title="Data & aggregation" defaultOpen // i18n-ok: ExpandableGroup translates its title
@@ -1943,7 +2021,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 <label htmlFor="facet-by" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)' }}>
                   {L("Facet by")}
                 </label>
-                <select id="facet-by" value={facetBy} onChange={e => setFacetBy(e.target.value)}
+                <select id="facet-by" value={roleValues.facet ?? ''} onChange={e => setRole('facet', e.target.value)}
                   style={{ width:'100%' }}>
                   <option value="">{L("— choose a column —")}</option>
                   {effectiveCols.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
@@ -2938,7 +3016,8 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
         <AssignDataDialog objectName={objectLabel({ title, widget_type: wt, id: widget.id })}
           focusRole={assignRole} onClose={() => setAssignOpen(false)}>
           <DataRolesList specs={roleSpecs} values={assignedFields} kindOf={fieldKind} displayName={displayName}
-            onAdd={role => setAddRole(role)} onRemove={removeField} addBlocked={addBlocked} />
+            onAdd={role => setAddRole(role)} onRemove={removeField} addBlocked={addBlocked}
+            onDropField={dropFieldOnRole} />
         </AssignDataDialog>
       )}
       {addRole && (() => {
@@ -2992,13 +3071,30 @@ function panelPropsEqual(a: Props, b: Props): boolean {
     // saver would write to the wrong widget or page.
     if (k === 'onHierarchyRefresh' && typeof va === 'function' && typeof vb === 'function') continue
     if (k === 'columns') { if (sameColumns(va as Props['columns'], vb as Props['columns'])) continue; return false }
-    if (k === 'distinctCounts' || k === 'ruleErrors') {
+    if (k === 'distinctCounts' || k === 'ruleErrors' || k === 'valueRanges') {
       if (JSON.stringify(va ?? null) === JSON.stringify(vb ?? null)) continue
       return false
     }
     return false
   }
   return true
+}
+
+/** C-09: which coordinate a role takes ('lat' / 'lon'), or null. */
+function coordRoleAxis(role: string): 'lat' | 'lon' | null {
+  return role === 'lat' || role === 'lat2' ? 'lat' : role === 'lon' || role === 'lon2' ? 'lon' : null
+}
+/** C-09: which coordinate a field's name says it holds, or null. */
+function coordAxisOf(column: string): 'lat' | 'lon' | null {
+  if (nonAdditiveKind(column) !== 'coordinate') return null
+  return /(^|[^a-z])(lat|latitude)([^a-z]|$)|خط_العرض/i.test(column) ? 'lat' : 'lon'
+}
+/** C-09: the field's observed values fall outside what the coordinate allows. */
+function coordOutOfRange(column: string, axis: 'lat' | 'lon',
+                         ranges: Record<string, { min: number; max: number }> | undefined): boolean {
+  const r = ranges?.[column]
+  const lim = axis === 'lat' ? 90 : 180
+  return !!r && (r.min < -lim || r.max > lim)
 }
 
 export default memo(WidgetConfigPanel, panelPropsEqual)

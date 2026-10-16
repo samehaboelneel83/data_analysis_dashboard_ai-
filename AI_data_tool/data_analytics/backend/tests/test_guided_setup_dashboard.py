@@ -57,6 +57,33 @@ class TestRoutes:
         assert calls == [("demand", []), ("design", DEMAND["sentence"], 3)]
         assert first["has_data"] is True and again["demand"]["sentence"] == DEMAND["sentence"]
 
+    async def test_the_plain_design_keeps_the_derived_fields_its_widgets_use(
+            self, client, auth_headers, setup, monkeypatch):
+        """B-05: with no model the plain design (suggest_dashboards) is used;
+        the derived measures and calculated columns its widgets name must be
+        stored with each page, or the built dashboard shows "'late_pct' is not
+        a column or measure on this dataset"."""
+        from app.services.guided_setup import answer
+        src, ds, calls = setup
+
+        async def no_design(*a, **k):
+            return {"proposals": [], "reason": "no model"}
+        monkeypatch.setattr(answer, "design", no_design)
+        derived = {"measures": [{"name": "late_pct", "expression": "sum(late) / sum(n)"}],
+                   "calculated_columns": [{"name": "days_late", "expression": "x", "dtype": "numeric"}]}
+
+        async def plain(dataset_id, body, db, user, _x):
+            assert body.goal is None
+            return {"proposals": [{"title": "Plain", "rationale": "r", "widgets": [
+                {"widget_type": "kpi", "title": "Late %", "config": {"measure": "late_pct"}},
+                {"widget_type": "bar", "title": "Days late", "config": {"y": "days_late"}}]}],
+                "derived": derived}
+        monkeypatch.setattr("app.routers.datasets.suggest_dashboards", plain)
+        got = (await client.get(f"/api/v1/setup/{src.id}/dashboard", headers=auth_headers["a"])).json()
+        items = got["designs"]["items"]
+        assert [i["proposal"]["title"] for i in items] == ["Plain"]
+        assert items[0]["derived"] == derived
+
     async def test_a_change_touches_only_that_page(self, client, auth_headers, setup):
         src, ds, calls = setup
         body = (await client.get(f"/api/v1/setup/{src.id}/dashboard", headers=auth_headers["a"])).json()

@@ -162,26 +162,39 @@ function SavedModelPicker({ datasetId, value, onChange }: {
   )
 }
 
-export default function ModelSettings({ widget, pages, value, onChange, datasetId = null }: {
+/** Model types whose settings split into a specification (Fields) and how
+ *  the result is drawn (Format): F-16, Key influencers. */
+export const MODEL_DISPLAY_SPLIT = new Set(['model_influencers'])
+
+export default function ModelSettings({ widget, pages, value, onChange, datasetId = null, part = 'all' }: {
   widget: Widget
   pages?: ReportPage[]
   value: ModelOpts
   onChange: (next: ModelOpts) => void
   /** The dataset the widget reads (its own, else the report's). */
   datasetId?: number | null
+  /** F-16: 'spec' = what the model is (Fields); 'display' = how it is drawn
+   *  (the Format tab). 'all' = both, as before. */
+  part?: 'all' | 'spec' | 'display'
 }) {
   const t = useT()
   const wt = widget.widget_type
   if (wt === 'model_score') return <SavedModelPicker datasetId={datasetId} value={value} onChange={onChange} />
   if (wt === 'model_influencers') {
     // Which value of the outcome to explain; blank = the rarest one.
-    return (
-      <div style={{ marginBottom: 12 }}>
+    const spec = (
+      <>
         <label htmlFor="model-event" style={lbl}>{t('pg.modelsMaps.ms.event')}</label>
         <input id="model-event" value={value.event_value ?? ''} placeholder={t('mdl.infl.eventBlank')}
           onChange={e => onChange({ ...value, event_value: e.target.value || undefined })} style={{ width: '100%' }} />
+      </>
+    )
+    if (part === 'spec') return <div style={{ marginBottom: 12 }}>{spec}</div>
+    return (
+      <div style={{ marginBottom: 12 }}>
+        {part === 'all' && spec}
         {/* How the influencers are drawn: display only, the figures are the same. */}
-        <label htmlFor="infl-style" style={{ ...lbl, marginTop: 10 }}>{t('mdl.infl.o.style')}</label>
+        <label htmlFor="infl-style" style={{ ...lbl, marginTop: part === 'all' ? 10 : 0 }}>{t('mdl.infl.o.style')}</label>
         <select id="infl-style" value={value.influencer_style ?? 'bars'} style={{ width: '100%' }}
           onChange={e => onChange({ ...value, influencer_style: e.target.value as 'bars' | 'bubbles' })}>
           <option value="bars">{t('mdl.infl.o.bars')}</option>

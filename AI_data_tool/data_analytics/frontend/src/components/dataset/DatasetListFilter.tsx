@@ -29,6 +29,21 @@ export function useCleanDatasets<T extends Pick<Dataset, 'name' | 'column_meta'>
   return { ...effective, view, setView, showTest, setShowTest, userId }
 }
 
+/**
+ * AD-08: the picker's options, plus the selected dataset when the filters
+ * hide it -- marked `hiddenByFilter`. A controlled <select> whose value is
+ * not among its options SHOWS the first option while state keeps the old id,
+ * so a filter chip appeared to switch the dataset. Never auto-picks one.
+ */
+export function withSelected<T extends { id: number }>(options: T[], all: T[], selected: number | string | null | undefined):
+  (T & { hiddenByFilter?: boolean })[] {
+  if (selected == null || selected === '') return options
+  const id = Number(selected)
+  if (options.some(o => o.id === id)) return options
+  const item = all.find(o => o.id === id)
+  return item ? [...options, { ...item, hiddenByFilter: true }] : options
+}
+
 export default function DatasetListFilter({ state }: { state: ReturnType<typeof useCleanDatasets> }) {
   const t = useT()
   const { view, setView, certified, mine, hiddenTest, showTest, setShowTest } = state

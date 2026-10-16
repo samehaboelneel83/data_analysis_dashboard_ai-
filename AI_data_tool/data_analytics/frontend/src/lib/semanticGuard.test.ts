@@ -117,3 +117,13 @@ describe('the stored classification outranks the name', () => {
     expect(g.isOutcome('is_late', meta)).toBe(true)
   })
 })
+
+describe('C-18: a year recorded as a code', () => {
+  it('is not an identifier, but a real id code still is', async () => {
+    const g = await import('./semanticGuard')
+    expect(g.isIdentifier('year', { year: { number: 'code' } } as never)).toBe(false)
+    expect(g.isIdentifier('fiscal_year', { fiscal_year: { number: 'code' } } as never)).toBe(false)
+    expect(g.isIdentifier('store_code', { store_code: { number: 'code' } } as never)).toBe(true)
+    expect(g.isIdentifier('year', { year: { role: 'identifier' } } as never)).toBe(true)
+  })
+})

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { formatTimeAgo, useT } from '../i18n'
-import { dataflowsApi, datasetsApi, type Dataflow, type DataflowSnapshot, type Dataset, type DatasetColumn, type PrepStep } from '../services/api'
+import { dataflowsApi, datasetsApi, exportPolicyApi, type Dataflow, type DataflowSnapshot, type Dataset, type DatasetColumn, type PrepStep } from '../services/api'
 import PrepPipelinePanel from '../components/report/PrepPipelinePanel'
 import LoadError from '../components/ui/LoadError'
 import LoadingState from '../components/ui/LoadingState'
@@ -43,6 +43,10 @@ export default function Dataflows() {
   const [newName, setNewName] = useState('')
   const [newSource, setNewSource] = useState('')
   const [busy, setBusy] = useState(false)
+  // B-09: why a dataflow cannot be made, said under the form (not only a toast).
+  const [createError, setCreateError] = useState<string | null>(null)
+  // B-09: the chosen source has row/column security rules -- it cannot feed a dataflow.
+  const [srcGoverned, setSrcGoverned] = useState(false)
   // 4.6: "Monthly snapshot" -- a history from a source that only shows today.
   const [kind, setKind] = useState<'transform' | 'snapshot'>('transform')
   const [srcCols, setSrcCols] = useState<string[]>([])
@@ -54,8 +58,14 @@ export default function Dataflows() {
   const [bfTo, setBfTo] = useState('')
   const [bfStart, setBfStart] = useState(`${new Date().getFullYear() - 1}-01-01`)
   useEffect(() => {
+    setCreateError(null)
+    setSrcGoverned(false)
     if (!newSource) { setSrcCols([]); return }
     let live = true
+    // Admin-only on the server; for anyone else the create call still says why.
+    exportPolicyApi.get(Number(newSource))
+      .then(p => { if (live) setSrcGoverned(!!p?.has_security_rules) })
+      .catch(() => { /* not known: the server still refuses with its reason */ })
     datasetsApi.get(Number(newSource)).then(d => {
       if (!live) return
       const cols = (d.columns ?? []).map(c => c.name)
@@ -85,6 +95,7 @@ export default function Dataflows() {
   const create = async () => {
     if (!newName.trim() || !newSource) return
     setBusy(true)
+    setCreateError(null)
     try {
       const snapshot: DataflowSnapshot | null = kind === 'snapshot' ? {
         every: 'month', group_by: snapGroup ? [snapGroup] : [],
@@ -97,7 +108,9 @@ export default function Dataflows() {
       setFlows(fs => [flow, ...fs])
       open(flow.id)
     } catch (e) {
-      toast.error(detail(e, t('flows.createFailed')))
+      const said = detail(e, t('flows.createFailed'))
+      toast.error(said)
+      setCreateError(said)
     } finally { setBusy(false) }
   }
 
@@ -138,9 +151,11 @@ export default function Dataflows() {
             <label><input type="radio" name="flow-kind" checked={kind === 'transform'} onChange={() => setKind('transform')} /> {t('flows.kindTransform')}</label>
             <label><input type="radio" name="flow-kind" checked={kind === 'snapshot'} onChange={() => setKind('snapshot')} /> {t('flows.kindSnapshot')}</label>
           </fieldset>
-          <button className="btn btn-primary btn-sm" disabled={busy || !newName.trim() || !newSource}
+          <button className="btn btn-primary btn-sm" disabled={busy || !newName.trim() || !newSource || srcGoverned}
             onClick={() => void create()}>{t('flows.create')}</button>
         </div>
+        {srcGoverned && <p role="status" style={{ margin: '8px 0 0', fontSize: 12.5, color: 'var(--muted)' }}>{t('flows.governed')}</p>}
+        {createError && <p role="alert" style={{ margin: '8px 0 0', fontSize: 12.5, color: 'var(--danger)' }}>{createError}</p>}
         {kind === 'snapshot' && (
           <div data-testid="snapshot-form" style={{ marginTop: 12, display: 'grid', gap: 8, fontSize: 13 }}>
             <p style={{ margin: 0, color: 'var(--muted)', fontSize: 12.5 }}>{t('flows.snapshotLead')}</p>

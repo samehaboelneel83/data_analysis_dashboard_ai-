@@ -13,3 +13,18 @@ describe('Home quick actions (QA V10)', () => {
     expect(r).toMatch(/line-clamp:\s*2/)
   })
 })
+
+describe('Home stat cards on a phone (AD-15)', () => {
+  it('lay out 2 x 2 under 600 px, after the 4-across rule for 1100 px', () => {
+    const at1100 = css.indexOf('@media (max-width: 1100px)')
+    const m = /@media \(max-width: 600px\)\s*\{[^@]*?\.hm-stats\s*\{([^}]*)\}/.exec(css)
+    expect(m?.[1] ?? '').toMatch(/grid-template-columns:\s*repeat\(2,/)
+    expect(m!.index).toBeGreaterThan(at1100)
+  })
+
+  it('a stat subtitle wraps to two lines instead of clipping', () => {
+    const r = css.match(/\.hm-st \.s > span:last-child\s*\{([^}]*)\}/)?.[1] ?? ''
+    expect(r).not.toMatch(/white-space:\s*nowrap/)
+    expect(r).toMatch(/line-clamp:\s*2/)
+  })
+})

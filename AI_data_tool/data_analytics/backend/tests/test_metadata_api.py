@@ -663,3 +663,58 @@ class TestEntities:
             headers=auth_headers["a"],
         )
         assert r.status_code == 404
+
+
+class TestCancelSync:
+    """B-04: a stuck sync can be cancelled; the source is then syncable again."""
+
+    async def _running(self, db_session, seeded):
+        from app.models.models import SyncRun
+        run = SyncRun(data_source_id=seeded["src_a"].id, org_id=seeded["src_a"].org_id,
+                      trigger="manual", status="running", stages=[])
+        db_session.add(run)
+        await db_session.commit()
+        return run
+
+    async def test_cancel_stops_the_task_and_frees_the_source(self, client, auth_headers, seeded, db_session):
+        import asyncio
+        from app.services.metadata import sync
+        run = await self._running(db_session, seeded)
+        task = asyncio.create_task(asyncio.sleep(30))
+        sync.RUNNING_TASKS[run.id] = task
+        try:
+            r = await client.post(f"/api/v1/data-sources/{seeded['src_a'].id}/sync/{run.id}/cancel",
+                                  headers=auth_headers["a"])
+            assert r.status_code == 200, r.text
+            assert r.json()["status"] == "failed" and r.json()["error"].startswith("Cancelled by")
+            await asyncio.sleep(0)
+            assert task.cancelled()
+            await db_session.refresh(run)
+            assert run.status == "failed" and run.finished_at is not None
+            assert await sync.find_active_run(db_session, seeded["src_a"].id) is None
+        finally:
+            sync.RUNNING_TASKS.pop(run.id, None)
+            task.cancel()
+
+    async def test_a_finished_run_cannot_be_cancelled(self, client, auth_headers, seeded, db_session):
+        run = await self._running(db_session, seeded)
+        run.status = "ok"
+        await db_session.commit()
+        r = await client.post(f"/api/v1/data-sources/{seeded['src_a'].id}/sync/{run.id}/cancel",
+                              headers=auth_headers["a"])
+        assert r.status_code == 409
+
+    async def test_another_orgs_run_is_404(self, client, auth_headers, seeded, db_session):
+        run = await self._running(db_session, seeded)
+        r = await client.post(f"/api/v1/data-sources/{seeded['src_a'].id}/sync/{run.id}/cancel",
+                              headers=auth_headers["b"])
+        assert r.status_code == 404
+
+    async def test_cancel_requires_admin(self, client, auth_headers, seeded, db_session, two_orgs):
+        run = await self._running(db_session, seeded)
+        role = await db_session.get(Role, two_orgs["a"]["user"].role_id)
+        role.is_org_admin = False
+        await db_session.commit()
+        r = await client.post(f"/api/v1/data-sources/{seeded['src_a'].id}/sync/{run.id}/cancel",
+                              headers=auth_headers["a"])
+        assert r.status_code == 403

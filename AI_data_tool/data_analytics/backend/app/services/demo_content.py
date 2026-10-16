@@ -55,6 +55,7 @@ from ..models.models import (
 )
 from .analytics import detect_types, load_file
 from .frame_cache import write_parquet_sidecar
+from .widget_roles import migrate_widget_config
 from .connections import preview_table
 from .engines import dispose_engine
 
@@ -1108,7 +1109,9 @@ async def seed_demo_reports(
                 page_id=page.id,
                 widget_type=widget_type,
                 title=title,
-                config={**config, DEMO_META_KEY: DEMO_MARKER},
+                # C-03: in the shape the builder edits and checks (flat role
+                # keys, not a nested `roles` dict), so no tile reads as unfinished.
+                config={**migrate_widget_config(config), DEMO_META_KEY: DEMO_MARKER},
                 layout=packer.place(w, h),
             ))
 

@@ -36,7 +36,8 @@ describe('LlmPicker', () => {
     fireEvent.click(await screen.findByRole('button', { name: /AI model/ }))
     const items = screen.getAllByRole('menuitemradio')
     expect(items.map(i => i.textContent)).toEqual([
-      expect.stringContaining('Auto'), expect.stringContaining('Server A'), expect.stringContaining('Server B')])
+      expect.stringContaining('Auto'), expect.stringContaining('Server A'), expect.stringContaining('Server B'),
+      expect.stringContaining('Off — no AI')])
     expect(items[1].querySelector('[data-light="down"]')).not.toBeNull()
     expect(items[2].querySelector('[data-light="up"]')).not.toBeNull()
     expect(items[0]).toHaveTextContent('Using Server B')
@@ -60,6 +61,33 @@ describe('LlmPicker', () => {
     render(<MemoryRouter><LlmPicker /></MemoryRouter>)
     await screen.findByRole('button', { name: /Server A/ })
     expect(api.getLlmChoice()).toBeNull()
+  })
+})
+
+describe('Off — no AI (F-11)', () => {
+  it('is a choice in the menu: picking it is remembered like any pick, and the chip says AI off', async () => {
+    const spy = vi.spyOn(api, 'setLlmChoice')
+    render(<MemoryRouter><LlmPicker /></MemoryRouter>)
+    fireEvent.click(await screen.findByRole('button', { name: /AI model/ }))
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /Off — no AI/ }))
+    expect(spy).toHaveBeenCalledWith('off')
+    expect(api.getLlmChoice()).toBe('off')
+    const chip = await screen.findByRole('button', { name: /AI off/ })
+    expect(chip.querySelector('[data-light="off"]')).not.toBeNull()
+    spy.mockRestore()
+  })
+
+  it('survives a reload: "off" is not forgotten as an unknown endpoint', async () => {
+    api.setLlmChoice('off')
+    render(<MemoryRouter><LlmPicker /></MemoryRouter>)
+    await screen.findByRole('button', { name: /AI off/ })
+    await waitFor(() => expect(api.llmApi.endpoints).toHaveBeenCalled())
+    expect(api.getLlmChoice()).toBe('off')
+  })
+
+  it('the helpers read it as off', () => {
+    expect(effectiveChoice(DATA, 'off')).toBe('off')
+    expect(choiceLight(DATA, 'off')).toBe('off')
   })
 })
 

@@ -170,6 +170,30 @@ describe('importing', () => {
   })
 })
 
+describe('a file type that cannot be imported (B-22)', () => {
+  it('is turned away when it is added, and Import ignores it', async () => {
+    show()
+    const input = screen.getByTestId('upload-input') as HTMLInputElement
+    expect(input.accept).not.toMatch(/\.txt|\.tsv/)
+    Object.defineProperty(input, 'files', { value: [new File(['x'], 'notes.txt'), file('sales.csv')], configurable: true })
+    fireEvent.change(input)
+    expect(await screen.findByRole('alert')).toHaveTextContent('notes.txt')
+    expect(screen.queryByText('notes.txt', { selector: '.dl-up-files__nm' })).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Import/ })).toBeEnabled())
+    importNow(); await settle()
+    expect(single()).toHaveBeenCalledWith(expect.objectContaining({ name: 'sales.csv' }), 'Sales', '', undefined, expect.any(Function))
+  })
+
+  it('alone, it never leaves the first step', async () => {
+    show()
+    const input = screen.getByTestId('upload-input') as HTMLInputElement
+    Object.defineProperty(input, 'files', { value: [new File(['x'], 'notes.txt')], configurable: true })
+    fireEvent.change(input)
+    expect(await screen.findByRole('alert')).toHaveTextContent('notes.txt')
+    expect(screen.queryByRole('button', { name: /^Import/ })).not.toBeInTheDocument()
+  })
+})
+
 describe('when it fails', () => {
   it('keeps the per-file errors of a partial batch on screen', async () => {
     batch().mockResolvedValue({ items: [{ source_filename: 'a.csv', status: 'created', dataset: { id: 1, name: 'a' }, error: null },
@@ -215,6 +239,35 @@ describe('when it fails', () => {
     expect(single()).toHaveBeenLastCalledWith(expect.any(File), 'Book', '', 'Feb', expect.any(Function))
   })
 
+  it('a workbook refusal that went through the real interceptor still shows the sheet picker first (B-06)', async () => {
+    const { sanitizeErrorDetail } = await import('../lib/friendlyError')
+    const err = { response: { status: 400, data: { detail: { message: 'The workbook has 2 sheets', sheets: ['Sales', 'Costs'] } } } }
+    sanitizeErrorDetail(err)
+    expect(typeof err.response.data.detail).toBe('string')
+    single().mockRejectedValueOnce(err)
+    show()
+    await pick([new File(['x'], 'two_sheets.xlsx')])
+    importNow(); await settle()
+    const select = screen.getByRole('combobox', { name: 'Sheet' })
+    expect(within(select).getAllByRole('option').map(o => o.textContent)).toEqual(['Sales', 'Costs', 'All sheets: one dataset each'])
+    // At the top of the review card, before the file list -- not under the fold.
+    const card = select.closest('section')!
+    expect(card.querySelector('.dl-up-sheet')!.compareDocumentPosition(card.querySelector('.dl-up-files')!)
+      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('a batch refusal with per-file items that went through the interceptor lists the failures (B-06)', async () => {
+    const { sanitizeErrorDetail } = await import('../lib/friendlyError')
+    const err = { response: { status: 400, data: { detail: { items: [
+      { filename: 'b.csv', status: 'error', error: 'line 3 has 7 fields' }] } } } }
+    sanitizeErrorDetail(err)
+    batch().mockRejectedValueOnce(err)
+    show()
+    await pick([file('a.csv'), file('b.csv')])
+    importNow(); await settle()
+    expect(screen.getByText('line 3 has 7 fields')).toBeInTheDocument()
+  })
+
   it('"All sheets" sends the one file to the batch', async () => {
     single().mockRejectedValueOnce({ response: { data: { detail: { message: 'x', sheets: ['Jan', 'Feb'] } } } })
     show()
@@ -241,4 +294,27 @@ describe('batchBaseName', () => {
   it('trims a trailing separator off the shared prefix', () => expect(batchBaseName([f('sales_q1.csv'), f('sales_q2.csv')])).toBe('sales_q'))
   it('falls back to the first stem when the files share nothing', () => expect(batchBaseName([f('alpha.csv'), f('beta.csv')])).toBe('alpha'))
   it("keeps a single file's own stem", () => expect(batchBaseName([f('report.final.csv')])).toBe('report.final'))
+})
+
+describe('role permissions (QA E-08)', () => {
+  it('a role without "Upload data" sees why, and no drop zone or import', async () => {
+    const { AuthContext } = await import('../contexts/AuthContext')
+    const user = { id: 1, email: 'v@x.io', is_active: true, organization: { id: 1, name: 'O' },
+      role: { id: 2, name: 'Viewer', is_org_admin: false, permissions: { upload_data: false } } }
+    render(<AuthContext.Provider value={{ user, loading: false, login: vi.fn(), logout: vi.fn() } as never}>
+      <MemoryRouter><Upload /></MemoryRouter></AuthContext.Provider>)
+    expect(screen.getByTestId('upload-not-allowed')).toHaveTextContent('Your role does not allow this')
+    expect(screen.queryByTestId('upload-input')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Browse files' })).not.toBeInTheDocument()
+  })
+
+  it('an org admin uploads whatever is stored', async () => {
+    const { AuthContext } = await import('../contexts/AuthContext')
+    const user = { id: 1, email: 'a@x.io', is_active: true, organization: { id: 1, name: 'O' },
+      role: { id: 1, name: 'Admin', is_org_admin: true, permissions: { upload_data: false } } }
+    render(<AuthContext.Provider value={{ user, loading: false, login: vi.fn(), logout: vi.fn() } as never}>
+      <MemoryRouter><Upload /></MemoryRouter></AuthContext.Provider>)
+    expect(screen.getByRole('button', { name: 'Browse files' })).toBeInTheDocument()
+    await settle()
+  })
 })

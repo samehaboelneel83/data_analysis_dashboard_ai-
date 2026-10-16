@@ -84,9 +84,12 @@ interface Props {
   datasetId: number
   columns: DatasetColumn[]
   onChanged: (measures: MeasureDef[]) => void
+  /** False when this reader may not change the data model (DatasetOut.can_model):
+   *  the measures are listed, without add/edit/delete/restore (QA E-13). */
+  canModel?: boolean
 }
 
-export default function MeasuresPanel({ datasetId, columns, onChanged }: Props) {
+export default function MeasuresPanel({ datasetId, columns, onChanged, canModel = true }: Props) {
   const confirm = useConfirm()
   const t = useT()
   const [measures, setMeasures] = useState<MeasureDef[]>([])
@@ -194,10 +197,10 @@ export default function MeasuresPanel({ datasetId, columns, onChanged }: Props) 
         <div style={{ flex: 1, fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
           {t('pg.panelsA.ms.title')}
         </div>
-        <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
+        {canModel && <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
           onClick={() => { setEditing({ ...BLANK }); setPreview(null); setError(null); setMode('pick'); setTemplate(null); setNameTouched(false) }}>
           {t('pg.panelsA.ms.add')}
-        </button>
+        </button>}
       </div>
 
       <p style={{ fontSize: 10.5, color: 'var(--muted)', margin: '0 0 8px', lineHeight: 1.45 }}>
@@ -234,12 +237,14 @@ export default function MeasuresPanel({ datasetId, columns, onChanged }: Props) 
               <bdi dir="ltr">{m.expression}</bdi>
             </div>
           </div>
+          {canModel && <>
           <button title={t('pg.panelsA.editNamed', { name: m.name })} aria-label={t('pg.panelsA.editNamed', { name: m.name })}
             onClick={() => { setEditing({ ...m }); setPreview(null); setError(null); setMode('formula'); setNameTouched(true) }}
             style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 11 }}>✎</button>
           <button title={t('pg.panelsA.deleteNamed', { name: m.name })} aria-label={t('pg.panelsA.deleteNamed', { name: m.name })}
             onClick={() => remove(m.name)}
             style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>×</button>
+          </>}
         </div>
         {historyOf === m.name && (
           <ul aria-label={t('pg.panelsA.ms.historyAria', { name: m.name })}
@@ -250,9 +255,9 @@ export default function MeasuresPanel({ datasetId, columns, onChanged }: Props) 
                 <span style={{ flex: 1, minWidth: 0, fontFamily: 'var(--mono)', overflow: 'hidden',
                   textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={h.expression} dir="ltr">{h.expression}</span>
                 {h.saved_at && <span style={{ color: 'var(--muted)' }}>{h.saved_at.slice(0, 10)}</span>}
-                <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 10, padding: '0 6px' }}
+                {canModel && <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 10, padding: '0 6px' }}
                   aria-label={t('pg.panelsA.ms.restoreAria', { v: h.version, name: m.name })}
-                  onClick={() => void restore(m.name, h.version)}>{t('pg.panelsA.ms.restore')}</button>
+                  onClick={() => void restore(m.name, h.version)}>{t('pg.panelsA.ms.restore')}</button>}
               </li>
             ))}
           </ul>

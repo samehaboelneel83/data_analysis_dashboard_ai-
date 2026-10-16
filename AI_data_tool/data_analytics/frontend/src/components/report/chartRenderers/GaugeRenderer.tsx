@@ -13,6 +13,13 @@ import type { ChartRendererProps } from './types'
  * All read the same shaped result; display-rule fill (interval bands over
  * `value`) overrides the attainment colour in every shape.
  */
+/** The arc gauge's figure: at most 22px, at least 12px, and no wider than the
+ *  tile (~0.62em per tabular digit) -- the same rule as the KPI figure. */
+function gaugeFigureSize(text: string): string {
+  const chars = Math.max(text.length, 1)
+  return `max(12px, min(22px, calc(100cqi / ${(chars * 0.62).toFixed(2)})))`
+}
+
 export default function GaugeRenderer({ data, measureFmt, ruleStyles, cfg }: ChartRendererProps) {
   const t9 = useT()
   const value: number | null = data?.value ?? null
@@ -117,15 +124,19 @@ export default function GaugeRenderer({ data, measureFmt, ruleStyles, cfg }: Cha
 
   const chartData = [{ name: 'value', value: pct, fill }]
   return (
-    <div style={{ height: '100%', width: '100%', position: 'relative' }}>
+    <div style={{ height: '100%', width: '100%', position: 'relative', containerType: 'inline-size' }}>
       <ResponsiveContainer width="100%" height="100%">
         <RadialBarChart data={chartData} cx="50%" cy="55%" innerRadius="65%" outerRadius="100%" startAngle={180} endAngle={0} barSize={18}>
           <PolarAngleAxis type="number" domain={[0, 100]} angleAxisId={0} tick={false} />
           <RadialBar background dataKey="value" cornerRadius={9} isAnimationActive={false} />
         </RadialBarChart>
       </ResponsiveContainer>
-      <div style={{ position: 'absolute', top: '55%', left: '50%', transform: 'translate(-50%, -20%)', textAlign: 'center', pointerEvents: 'none' }}>
-        <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)' }}>{fmtStr(value, measureFmt)}</div>
+      {/* C-13: one line, sized by the tile's width ("$ 8,632,597" wrapped and was
+          clipped at the bottom), and never below the tile's bottom edge. */}
+      <div style={{ position: 'absolute', top: '55%', left: '50%', transform: 'translate(-50%, -20%)', textAlign: 'center', pointerEvents: 'none',
+        maxWidth: '96%', maxHeight: 'calc(45% - 4px)', overflow: 'hidden' }}>
+        <div data-testid="gauge-value" style={{ fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap',
+          fontSize: gaugeFigureSize(fmtStr(value, measureFmt)) }}>{fmtStr(value, measureFmt)}</div>
         {target != null && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{t9('wb.of')} {fmtStr(target, measureFmt)}</div>}
       </div>
     </div>

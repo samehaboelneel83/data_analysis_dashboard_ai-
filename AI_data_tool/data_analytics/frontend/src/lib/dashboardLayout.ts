@@ -52,8 +52,16 @@ export function minSize(type: string): { w: number; h: number } {
   if (fam === 'kpi') return { w: 3, h: 2 }
   if (fam === 'chrome') return { w: 2, h: 2 }
   if (fam === 'wide') return type.startsWith('map') || type === 'network' ? { w: 6, h: 5 } : { w: 6, h: 4 }
+  // C-22: two value axes (and their titles), or a grid of panels, need half
+  // the page: at 4 columns the plot of a dual-axis bar collapsed to ~30px.
+  if (MIN_W_6.has(type)) return { w: 6, h: 4 }
   return { w: 4, h: 4 }
 }
+
+const MIN_W_6 = new Set([
+  'dual_axis_bar', 'dual_axis_line', 'dual_axis_bar_line', 'dual_axis_time_series',
+  'comparative_time_series', 'small_multiples', 'forecast',
+])
 
 export function overlaps(a: GridLayout, b: GridLayout): boolean {
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
@@ -162,6 +170,12 @@ function placeHeroAndSide(
     return { y: y + layouts[hero].h, rest: [] }
   }
   const side = charts[1]
+  if (minSize(types[side]).w > 4) {
+    // C-22: a chart that cannot live in the 4-column side slot goes to the
+    // next row (two per row) instead of being clamped over the hero.
+    layouts[hero] = clampLayout(types[hero], { x: 0, y, w: 12, h: 6 })
+    return { y: y + layouts[hero].h, rest: charts.slice(1) }
+  }
   layouts[hero] = clampLayout(types[hero], { x: 0, y, w: 8, h: 6 })
   layouts[side] = clampLayout(types[side], { x: 8, y, w: 4, h: 6 })
   const rowH = Math.max(layouts[hero].h, layouts[side].h)

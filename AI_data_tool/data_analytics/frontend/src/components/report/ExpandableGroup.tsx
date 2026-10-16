@@ -22,6 +22,7 @@ const TITLE_KEY: Record<string, MessageKey> = {
   'Identity': 'group.identity',
   'Interactions': 'group.interactions',
   'Lattice (small multiples)': 'group.lattice_small_multiples',
+  'Model display': 'group.model_display',
   'Layout': 'group.layout',
   'Prompt': 'group.prompt',
   'Ranking': 'group.ranking',

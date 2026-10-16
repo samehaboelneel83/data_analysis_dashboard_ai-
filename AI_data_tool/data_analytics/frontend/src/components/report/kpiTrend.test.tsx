@@ -88,3 +88,23 @@ describe('KPI of a change over the period (change_over)', () => {
     expect(screen.getByTestId('kpi-period-change').textContent).toBe('42.75 → 76.89 (2023-01-02 – 2023-12-11)')
   })
 })
+
+describe('a KPI that counts rows (F-12)', () => {
+  const money = { revenue: { type: 'currency', symbol: '$', decimals: 0 } } as never
+  const tile = (aggregation: string) => render(<WidgetBody
+    widget={{ id: 1, page_id: 1, widget_type: 'kpi', title: 'Rows', config: { measure: 'revenue', aggregation },
+      layout: { x: 0, y: 0, w: 3, h: 3 } } as never}
+    data={{ type: 'scalar', rows: [{ name: 'revenue', value: 2000 }] } as never}
+    localSelected={null} onClickPoint={() => {}} broadcasts={false} allFormats={money} />)
+
+  it('shows a count as a plain number, not in the measure\'s currency', () => {
+    const { container } = tile('count')
+    expect(container.textContent).toContain('2,000')
+    expect(container.textContent).not.toContain('$')
+  })
+
+  it('still shows a sum in the measure\'s format', () => {
+    const { container } = tile('sum')
+    expect(container.textContent).toContain('$')
+  })
+})

@@ -1,4 +1,4 @@
-import { ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LabelList, Brush } from 'recharts'
+import { ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LabelList, Brush, ReferenceLine } from 'recharts'
 import { TT, fmtStr, seriesDash, seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
 import { useChartViewport } from './useChartViewport'
@@ -27,6 +27,12 @@ export default function DualAxisTimeSeriesRenderer({ rows, cfg, rtl, measureFmt,
   // The second series is named like the first -- "sum(RATED_AMOUNT)" beside
   // "count(RATED_AMOUNT)", not the bare column.
   const name2 = titles.measure2 ?? (cfg.measure2 as string | undefined) ?? 'value2'
+  // C-25: values below zero are real data (refunds in the demo sales), not an
+  // artefact of the scale. Say where zero is, and draw straight segments: a
+  // smoothed curve overshoots between points and dips below the data.
+  const below1 = rows.some((r: any) => typeof r?.value === 'number' && r.value < 0)
+  const below2 = hasSecond && rows.some((r: any) => typeof r?.value2 === 'number' && r.value2 < 0)
+  const curve = below1 || below2 ? 'linear' : 'monotone'
   return (
     <ResponsiveContainer width="100%" height="100%">
       <ComposedChart data={rows} margin={chartMargin(rtl, { top: 4, right: 8, bottom: 20, left: 0 })}
@@ -45,12 +51,14 @@ export default function DualAxisTimeSeriesRenderer({ rows, cfg, rtl, measureFmt,
         {hasSecond && <YAxis yAxisId="right" {...yAxisProps(cfg, rtl, measure2Fmt, rows.map((r: any) => r.value2), undefined, { height: plotH, title: cfg.y2_axis_label ?? titles.measure2 ?? '' })} orientation={rtl ? 'left' : 'right'} tickFormatter={valueTick(cfg, measure2Fmt)} />}
         <Tooltip contentStyle={TT} formatter={(v: unknown, name: string) => [fmtStr(v, name === name2 ? measure2Fmt : measureFmt), name]} />
         {legend && <Legend {...legend} wrapperStyle={{ fontSize: 11, ...(rtl ? { direction: 'ltr' as const } : {}) }} />}
-        <Line yAxisId="left" type="monotone" dataKey="value" name={seriesName(cfg)} stroke={seriesColor(0)} strokeWidth={2} strokeDasharray={seriesDash(0, cfg.series_patterns)} dot={false}>
+        <Line yAxisId="left" type={curve} dataKey="value" name={seriesName(cfg)} stroke={seriesColor(0)} strokeWidth={2} strokeDasharray={seriesDash(0, cfg.series_patterns)} dot={false}>
           {labels1 && <LabelList {...labels1} />}
         </Line>
-        {hasSecond && (<Line yAxisId="right" type="monotone" dataKey="value2" name={name2} stroke={seriesColor(1)} strokeWidth={2} strokeDasharray={seriesDash(1, cfg.series_patterns)} dot={false}>
+        {hasSecond && (<Line yAxisId="right" type={curve} dataKey="value2" name={name2} stroke={seriesColor(1)} strokeWidth={2} strokeDasharray={seriesDash(1, cfg.series_patterns)} dot={false}>
           {labels2 && <LabelList {...labels2} />}
         </Line>)}
+        {below1 && <ReferenceLine yAxisId="left" y={0} stroke="var(--muted)" strokeDasharray="3 3" />}
+        {below2 && <ReferenceLine yAxisId="right" y={0} stroke="var(--muted)" strokeDasharray="3 3" />}
         {view.brush && <Brush {...view.brush} />}
       </ComposedChart>
     </ResponsiveContainer>

@@ -4,7 +4,7 @@ import {
   ArrowDownUp, ArrowRight, ChevronDown, Database, Download, Folder, FolderInput, FolderOpen, FolderPlus, LayoutDashboard,
   LayoutGrid, LayoutTemplate, Link2, List, Pencil, Plus, Search, SearchX, Share2, Sparkles, SquareDashedBottom, Trash2, X,
   Globe, GlobeLock, Users, Clock,
-  PencilRuler,
+  PencilRuler, Copy,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import LoadError from '../components/ui/LoadError'
@@ -32,6 +32,7 @@ import { DashCard, DashRow } from './reports/DashCard'
 import { MoveDialog, NewDashboardDialog, type NewChoice, type NewMode } from './reports/dialogs'
 import Thumb from './home/Thumb'
 import { nextUntitledName } from '../lib/untitledName'
+import { useRoleAllows } from '../lib/rolePermissions'
 import './home/home.css'
 import './reports/dashboards.css'
 export { nextUntitledName }
@@ -44,7 +45,7 @@ export { nextUntitledName }
  * Placement, folder management and "Shared with me" come from the workspace
  * tree; the tree failing fails only them. What the design shows but the
  * backend cannot answer is left out, not stubbed: favourites, owner names,
- * view counts, Duplicate, stored AI proposals, a "Shared" status
+ * view counts, stored AI proposals, a "Shared" status
  * (PLAN.md, Backend follow-ups). Kept from v1: subfolders, folder rename and
  * delete, the move confirmation, Publish / Unpublish, delete confirmation,
  * the dataset chip rule and Suggest dashboards' goal text.
@@ -66,6 +67,8 @@ export default function Reports() {
   const confirm = useConfirm()
   const prompt = usePrompt()
   const isAdmin = !!useContext(AuthContext)?.user?.role?.is_org_admin
+  // QA E-08: the role may not create dashboards (the server refuses it too).
+  const canCreate = useRoleAllows('create_dashboard')
 
   const [reports, setReports] = useState<ReportSummary[]>([])
   const [datasets, setDatasets] = useState<DatasetSummary[] | null>(null)
@@ -299,6 +302,14 @@ export default function Reports() {
       toast.error(detail(e, t('dsh.toast.publishFailed')))
     }
   }
+  // C-20: Save as copy -- a private draft that opens in Edit.
+  const duplicate = async (r: ReportSummary) => {
+    try {
+      const copy = await reportsApi.duplicate(r.id)
+      toast.success(t('dsh.toast.duplicated', { name: copy.name }))
+      openReport(`/reports/${copy.id}?edit=1`)
+    } catch (e) { toast.error(detail(e, t('dsh.toast.duplicateFailed'))) }
+  }
   const copyLink = async (r: ReportSummary) => {
     try { await navigator.clipboard.writeText(`${window.location.origin}/reports/${r.id}`); toast.success(t('dsh.toast.copied')) }
     catch { toast.error(t('dsh.toast.copyFailed')) }
@@ -316,6 +327,7 @@ export default function Reports() {
       { key: 'link', label: t('dsh.copyLink'), icon: <Link2 size={14} />, onSelect: () => void copyLink(r) },
       ...(edit && tree ? [{ key: 'move', label: t('dsh.moveDots'), icon: <FolderInput size={14} />, onSelect: () => setMoving([r]) }] : []),
       ...(edit ? [{ key: 'rename', label: t('dsh.rename'), icon: <Pencil size={14} />, onSelect: () => void rename(r) }] : []),
+      ...(edit ? [{ key: 'duplicate', label: t('dsh.duplicate'), icon: <Copy size={14} />, onSelect: () => void duplicate(r) }] : []),
       ...(canAdminister(r) ? [{ key: 'publish', label: t(r.published ? 'dsh.unpublish' : 'dsh.publish'),
         icon: r.published ? <GlobeLock size={14} /> : <Globe size={14} />, onSelect: () => void publish(r) }] : []),
       { key: 'pdf', label: t('dsh.exportPdf'), icon: <Download size={14} />, onSelect: () => void exportPdf(r) },
@@ -495,7 +507,7 @@ export default function Reports() {
             <p>{t('dsh.nomatch.text')}</p>
             <div className="dsh-acts">
               <button type="button" className="btn btn-ghost dsh-btn-line" onClick={clearFilters}><X size={14} aria-hidden />{t('dsh.clearSearch')}</button>
-              <button type="button" className="btn btn-primary" onClick={() => openNew('ai')}><Sparkles size={14} aria-hidden />{t('dsh.nomatch.ai')}</button>
+              {canCreate && <button type="button" className="btn btn-primary" onClick={() => openNew('ai')}><Sparkles size={14} aria-hidden />{t('dsh.nomatch.ai')}</button>}
             </div>
             {near.length > 0 && (
               <div className="dsh-near">
@@ -530,7 +542,7 @@ export default function Reports() {
           <div className="dsh-empty" data-testid="dash-folder-empty">
             <span className="ic" aria-hidden><FolderOpen size={26} /></span>
             <h2>{t('dsh.folderEmpty')}</h2><p>{t('dsh.folderEmptyText')}</p>
-            <div className="dsh-acts"><button type="button" className="btn btn-primary" onClick={() => openNew('blank', id)}><Plus size={14} aria-hidden />{t('dsh.newHere')}</button></div>
+            {canCreate && <div className="dsh-acts"><button type="button" className="btn btn-primary" onClick={() => openNew('blank', id)}><Plus size={14} aria-hidden />{t('dsh.newHere')}</button></div>}
           </div>
         )
       }
@@ -628,9 +640,11 @@ export default function Reports() {
                   <FolderPlus size={15} aria-hidden />{t('folders.newTop')}
                 </button>
               )}
-              <button type="button" className="btn btn-primary" onClick={() => openNew()} disabled={creating}>
-                <Plus size={15} aria-hidden />{t('dashboards.new')}
-              </button>
+              {canCreate && (
+                <button type="button" className="btn btn-primary" onClick={() => openNew()} disabled={creating}>
+                  <Plus size={15} aria-hidden />{t('dashboards.new')}
+                </button>
+              )}
             </div>
           </div>
 

@@ -57,3 +57,41 @@ describe('a hierarchy widget takes fields as its levels (QA6 B2)', () => {
     expect(roleForField(sunburst, { id_col: 'id', parent_col: 'parent' }, 'region', false)).toBeNull()
   })
 })
+
+describe('C-09: map roles take fields of the matching kind', () => {
+  const pts = ROLE_SPECS.map_points
+  it('latitude, longitude, a city and a measure each land in their own role', () => {
+    let cfg: Record<string, unknown> = {}
+    const place = (col: string, numeric: boolean) => {
+      const rf = roleForField(pts, cfg, col, numeric)
+      if (rf) cfg = { ...cfg, [rf.role === 'category' ? 'dimension' : rf.role]: col }
+      return rf?.role
+    }
+    // Coordinates are not "measures" in the field list (numeric=false there).
+    expect(place('origin_lat', false)).toBe('lat')
+    expect(place('origin_lon', false)).toBe('lon')
+    expect(place('from_city', false)).toBe('category')
+    expect(place('shipments', true)).toBe('measure')
+  })
+  it('a measure is never clicked into Latitude or Longitude', () => {
+    expect(roleForField(pts, {}, 'shipments', true)?.role).toBe('measure')
+    expect(roleForField(pts, { measure: 'units' }, 'shipments', true)).toBeNull()
+  })
+  it('a text field never goes into Latitude or Longitude', () => {
+    expect(roleForField(pts, { dimension: 'country' }, 'from_city', false)).toBeNull()
+  })
+  it('a second pair of coordinates fills lat2 / lon2 on a route map', () => {
+    const lines = ROLE_SPECS.map_lines
+    if (!lines?.some(rf => rf.role === 'lat2')) return
+    expect(roleForField(lines, { lat: 'origin_lat', lon: 'origin_lon' }, 'dest_lat', false)?.role).toBe('lat2')
+    expect(roleForField(lines, { lat: 'origin_lat', lon: 'origin_lon' }, 'dest_lon', false)?.role).toBe('lon2')
+  })
+})
+
+describe('C-23: roleAccepts', () => {
+  it('a facet takes a category (text or date), not a number', async () => {
+    const { roleAccepts } = await import('../types/report')
+    expect(roleAccepts('facet')).toBe('category')
+    expect(roleAccepts('category')).toBe('any')
+  })
+})

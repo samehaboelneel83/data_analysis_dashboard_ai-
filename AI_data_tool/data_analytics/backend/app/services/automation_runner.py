@@ -62,6 +62,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import selectinload
 
 from ..models.models import AutomationRun, AutomationStep, User
+from .ai_deadline import AiStepTimeout, ai_step
 from .notifications import notify
 from .refresh_scheduler import _as_utc_naive, backoff_minutes
 
@@ -90,6 +91,27 @@ TERMINAL_RUN_STATUSES = ("done", "cancelled")
 #: scanned an unbounded backlog looking for one eligible step would itself
 #: become the stall it is trying to avoid.
 MAX_RUNS_SCANNED_PER_TICK = 50
+
+#: Plain words for the seven steps: the run page and the bell say them.
+STEP_LABELS = {
+    "profile": "Profile the data", "describe": "Describe the columns",
+    "scan": "Scan for findings", "propose": "Propose a dashboard",
+    "review": "Review the proposal", "compose": "Build the report",
+    "notify": "Tell you",
+}
+
+#: AD-03: the longest each step may run before it is failed with a reason.
+#: Nothing bounded a step before, so a hung one "ran" for as long as the
+#: process lived. Generous: the profile and scan read every row.
+STEP_TIMEOUT_S: dict[str, float] = {
+    "profile": 600, "describe": 180, "scan": 600, "propose": 300,
+    "review": 120, "compose": 180, "notify": 60,
+}
+DEFAULT_STEP_TIMEOUT_S = 600
+#: Extra time past a step's budget before the periodic reaper calls it dead:
+#: the in-process deadline should fire first; the reaper is for a worker that
+#: hung outside it or died.
+REAP_GRACE_S = 120
 
 #: Errors are truncated to the same width `record_failure` uses, so an
 #: operator reading either table sees the same shape of message.
@@ -573,6 +595,12 @@ def describe_run(run: AutomationRun) -> tuple[str, str | None]:
     A held run has no report yet, so it links to its own page, where the
     decision is made (E12: runs have one now, /automation?run=<id>).
     """
+    if run.status == "failed":
+        return ("Your automated analysis stopped. Open it to retry or cancel.",
+                f"/automation?run={run.id}")
+    if run.status == "cancelled" and not run.result_report_id:
+        why = f" ({run.error})" if run.error else ""
+        return (f"Your automated analysis was cancelled{why}.", f"/automation?run={run.id}")
     accepted = run.widgets_accepted or 0
     rejected = run.widgets_rejected or 0
     link = f"/reports/{run.result_report_id}" if run.result_report_id else None
@@ -608,6 +636,19 @@ async def notify_run(session, run: AutomationRun) -> None:
     """
     text, link = describe_run(run)
     await notify(session, run.org_id, run.created_by, "automation", text, link)
+
+
+async def notify_failure(session, run: AutomationRun, step: AutomationStep) -> None:
+    """AD-03: tell the creator a run stopped, at which step and why. Does not
+    commit. Skipped when the creator is gone (there is nobody to tell)."""
+    if run.created_by is None or await session.get(User, run.created_by) is None:
+        return
+    label = STEP_LABELS.get(step.name, step.name)
+    why = (step.error or "unknown error").rstrip(".")
+    text = (f"Your automated analysis stopped at {label}: {why}. "
+            f"Open it to retry or cancel.")
+    await notify(session, run.org_id, run.created_by, "automation", text,
+                 f"/automation?run={run.id}")
 
 
 # ── reading the step before you ──────────────────────────────────────────────
@@ -1460,6 +1501,12 @@ async def _compose_step(ctx: StepContext, session) -> str:
         raise StepRefused("creator is no longer available")
     if not await can_read_dataset(session, user, ds.id):
         raise StepRefused("dataset not found for this creator")
+    # QA E-08: the dashboard is the creator's, so their role must still be
+    # allowed to create one now -- it may have changed since the run started.
+    from ..core.role_permissions import user_may
+    why = await user_may(session, ctx.user_id, "create_dashboard")
+    if why:
+        raise StepRefused(why)
 
     previous = await _previous_output_ref(session, ctx, "review")
     try:
@@ -1691,9 +1738,15 @@ async def _fail(session, run: AutomationRun, step: AutomationStep,
     step.error = (error or "unknown error")[:MAX_ERROR_CHARS]
     step.attempts = (step.attempts or 0) + 1
     step.next_attempt_at = now + timedelta(minutes=backoff_minutes(step.attempts))
-    step.finished_at = now
+    # The moment the step ENDED, not the tick's start (`now`): the run page's
+    # "Finished" column showed start times.
+    step.finished_at = datetime.utcnow()
     if not await _cancelled_meanwhile(session, run):
         run.status = "failed"
+        if step.attempts == 1:
+            # The first failure is news; every later retry of the same step
+            # would only repeat it (retries back off up to hourly, forever).
+            await notify_failure(session, run, step)
     await session.commit()
     log.warning("automation run %s step %s failed (attempt %s), next try in "
                 "%s min: %s", run.id, step.name, step.attempts,
@@ -1727,7 +1780,7 @@ async def _succeed(session, run: AutomationRun, step: AutomationStep,
     #: step needed three tries is worth knowing afterwards.
     step.error = None
     step.next_attempt_at = None
-    step.finished_at = now
+    step.finished_at = datetime.utcnow()
 
     remaining = [s for s in steps if s is not step and not s.output_ref]
     if await _cancelled_meanwhile(session, run):
@@ -1847,9 +1900,14 @@ async def tick(session, now: datetime | None = None) -> bool:
                 # itself -- see StepSpec. The runner cannot impose that for
                 # it, because a step that needs a session cannot run in a
                 # thread at all.
-                output_ref = await spec.run(ctx, session)
+                # AD-03: one deadline per step, so a hung step fails with a
+                # sentence instead of "running" for as long as the process lives.
+                output_ref = await ai_step(
+                    spec.run(ctx, session),
+                    seconds=STEP_TIMEOUT_S.get(pending.name, DEFAULT_STEP_TIMEOUT_S),
+                    what=STEP_LABELS.get(pending.name, pending.name))
             except Exception as exc:  # noqa: BLE001 -- every failure is recorded
-                reason = (str(exc) if isinstance(exc, StepRefused)
+                reason = (str(exc) if isinstance(exc, (StepRefused, AiStepTimeout))
                           else f"{type(exc).__name__}: {exc}")
                 # A step that reached the database opened a transaction, and
                 # rolling it back EXPIRES every instance in this session. The
@@ -1901,8 +1959,19 @@ async def run_automation_loop(session_factory) -> None:
     step does its heavy work in a thread (see StepSpec), so a running step
     does not hold up dataset refreshes, and the per-run advisory lock inside
     `tick` still guarantees one worker per run."""
+    import time
+    last_reap = 0.0
     while True:
         did = False
+        if time.monotonic() - last_reap >= REAP_EVERY_SECONDS:
+            last_reap = time.monotonic()
+            try:
+                async with session_factory() as session:
+                    await reap_stale_running_steps(session, datetime.utcnow())
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 -- the tick still runs
+                log.warning("Automation stale-step reaper failed: %s", exc)
         try:
             async with session_factory() as session:
                 did = await tick(session)
@@ -1911,6 +1980,47 @@ async def run_automation_loop(session_factory) -> None:
         except Exception as exc:  # noqa: BLE001 -- never-die, same contract
             log.warning("Automation runner tick failed: %s", exc)
         await asyncio.sleep(BETWEEN_STEPS_SECONDS if did else IDLE_SECONDS)
+
+
+#: AD-03: how often the loop looks for steps that stopped responding.
+REAP_EVERY_SECONDS = 60
+
+
+async def reap_stale_running_steps(session, now: datetime) -> int:
+    """Fail steps still `running` long past their budget (AD-03).
+
+    The startup reaper only runs once; while the process lives, a step whose
+    worker hung outside its deadline (or whose process died while another
+    one carries on) would say `running` forever. Same body as the startup
+    reaper, with an age test so a step inside its budget is left alone."""
+    rows = (await session.execute(
+        select(AutomationStep).where(AutomationStep.status == "running")
+    )).scalars().all()
+    reaped = 0
+    for step in rows:
+        budget = STEP_TIMEOUT_S.get(step.name, DEFAULT_STEP_TIMEOUT_S) + REAP_GRACE_S
+        started = _as_utc_naive(step.started_at) if step.started_at else None
+        if started is None or started > _as_utc_naive(now) - timedelta(seconds=budget):
+            continue
+        if step.output_ref:
+            step.status = "ok"          # it finished; only the commit was lost
+            continue
+        step.status = "failed"
+        step.error = "Stopped responding"
+        step.attempts = (step.attempts or 0) + 1
+        step.next_attempt_at = now + timedelta(minutes=backoff_minutes(step.attempts))
+        step.finished_at = now
+        run = await session.get(AutomationRun, step.run_id)
+        if run is not None and run.status not in TERMINAL_RUN_STATUSES:
+            run.status = "failed"
+            if step.attempts == 1:
+                await notify_failure(session, run, step)
+        reaped += 1
+    if rows:
+        await session.commit()
+    if reaped:
+        log.warning("Reaped %s automation step(s) that stopped responding", reaped)
+    return reaped
 
 
 # ── restart recovery ─────────────────────────────────────────────────────────

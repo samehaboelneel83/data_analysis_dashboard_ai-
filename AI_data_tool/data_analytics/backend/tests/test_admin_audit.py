@@ -183,3 +183,64 @@ async def test_the_dataset_list_names_each_sensitivity_label(client, db_session,
     assert rows["plain"] is None
     assert rows["internal"] == "Internal"
     assert rows["from hr"] == "Confidential"          # the connection's floor wins over its own Public
+
+
+# ── E-09: Ask AI connection rules and custom connector presets are audited ──
+
+async def _audit_rows(db_session, org_id, prefix):
+    rows = (await db_session.execute(select(AdminAudit).where(
+        AdminAudit.org_id == org_id).order_by(AdminAudit.id))).scalars().all()
+    return [r for r in rows if r.action.startswith(prefix)]
+
+
+async def test_connection_rule_create_and_delete_write_audit_rows(client, db_session, two_orgs, auth_headers):
+    from app.models.models import DataSource, Role, SourceColumn, SourceObject
+    org = two_orgs["a"]["org"]
+    src = DataSource(name="wh-a", type="postgresql", org_id=org.id)
+    role = Role(org_id=org.id, name="Student", is_org_admin=False)
+    db_session.add_all([src, role])
+    await db_session.flush()
+    obj = SourceObject(data_source_id=src.id, org_id=org.id, schema_name="public", name="grades", kind="table")
+    db_session.add(obj)
+    await db_session.flush()
+    db_session.add(SourceColumn(source_object_id=obj.id, name="userid", position=0, dtype="integer"))
+    await db_session.commit()
+
+    created = await client.post("/api/v1/agent/row-policies", headers=auth_headers["a"], json={
+        "source_object_id": obj.id, "role_id": role.id, "predicate": "userid = USERID()"})
+    assert created.status_code == 200, created.text
+    deleted = await client.delete(f"/api/v1/agent/row-policies/{created.json()['id']}", headers=auth_headers["a"])
+    assert deleted.status_code == 204
+
+    rows = await _audit_rows(db_session, org.id, "connection_rule.")
+    assert [r.action for r in rows] == ["connection_rule.create", "connection_rule.delete"]
+    for r in rows:
+        assert r.target == "table:grades"
+        assert r.detail == "role:Student userid = USERID()"
+        assert r.actor_email == "admin-a@example.com"
+
+
+async def test_custom_connector_crud_writes_audit_rows(client, db_session, two_orgs, auth_headers):
+    org = two_orgs["a"]["org"]
+    secret = "s3cr3t-Value-Never-Logged"
+    created = await client.post("/api/v1/custom-connectors", headers=auth_headers["a"], json={
+        "key": "acme-pg", "label": "Acme Postgres", "base_type": "postgresql",
+        "base_config": {"host": "acme-prod.internal", "port": 5432, "password": secret},
+        "locked_fields": ["host"]})
+    assert created.status_code == 200, created.text
+    cc_id = created.json()["id"]
+    updated = await client.put(f"/api/v1/custom-connectors/{cc_id}", headers=auth_headers["a"], json={
+        "label": "Acme PG", "locked_fields": ["host", "port"]})
+    assert updated.status_code == 200, updated.text
+    deleted = await client.delete(f"/api/v1/custom-connectors/{cc_id}", headers=auth_headers["a"])
+    assert deleted.status_code == 204
+
+    rows = await _audit_rows(db_session, org.id, "custom_connector.")
+    assert [r.action for r in rows] == ["custom_connector.create", "custom_connector.update",
+                                        "custom_connector.delete"]
+    assert all(r.target == "connector:acme-pg" for r in rows)
+    assert rows[0].detail == "base_type:postgresql; locked:host"
+    assert rows[1].detail == "base_type:postgresql; locked:host, port"
+    for r in rows:
+        # Never a config value, let alone a secret.
+        assert secret not in (r.detail or "") and "acme-prod.internal" not in (r.detail or "")

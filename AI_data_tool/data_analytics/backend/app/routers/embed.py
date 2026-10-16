@@ -58,10 +58,12 @@ from ..core.database import get_db
 from ..core.org_scope import check_org
 from ..core.security import ALGORITHM, create_embed_session_token, decode_embed_session_token
 from ..dependencies import get_current_user
-from ..models.models import EmbedConfig, Report, User
+from ..models.models import Dataset, EmbedConfig, Report, User
 from ..schemas.schemas import WidgetDataRequest
 from ..services.audit import record as audit
 from ..services.secrets import decrypt_value, encrypt_value
+from .boundary_sets import published_boundary_set, referenced_boundary_set_ids
+from .map_settings import org_map_settings
 
 router = APIRouter(tags=["embed"])
 
@@ -334,6 +336,9 @@ async def embed_report(token: str, request: Request, response: Response, db: Asy
         "geography": _published_geography(ds) if ds else {},
         "calculated_columns": (ds.calculated_columns or []) if ds else [],
         "pages": pages,
+        # The embed has no user session: without this, every map asked the
+        # signed-in /map-settings route, got 401 and sent the iframe to /login.
+        "map_settings": await org_map_settings(db, report.org_id),
         "embed_session_token": session_token,
         **(await published_relationships(db, report, pages, creator)),
     }
@@ -349,6 +354,34 @@ async def _embed_sensitivity(db: AsyncSession, report: Report) -> str | None:
         why = f" ({reasons[0]})" if reasons else ""
         raise HTTPException(403, f"This report is Restricted{why}; it cannot be embedded.")
     return label
+
+
+@router.get("/embed/boundary-sets/{set_id}")
+async def embed_boundary_set(set_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """The shapes a map in this embedded report draws with -- the embed
+    counterpart of the signed-in `GET /boundary-sets/{id}`. Same credential as
+    `embed_widget_data` (the embed SESSION token only, never a user's own), the
+    same Restricted gate, and only a set the embedded report itself references."""
+    auth = request.headers.get("authorization", "")
+    if not auth.lower().startswith("bearer "):
+        raise HTTPException(401, "Missing embed session token")
+    claims = decode_embed_session_token(auth[7:])
+    if claims is None:
+        raise HTTPException(401, "Invalid or expired embed session")
+    cfg = await _load_config_or_404(db, claims.get("cfg"))
+    report = await db.get(Report, cfg.report_id)
+    if report is None or report.org_id != cfg.org_id:
+        raise HTTPException(404, _INVALID)
+    creator = await _load_creator_or_404(db, cfg)
+    await _embed_sensitivity(db, report)
+
+    from .shared import distributed_fields, visible_pages_for_creator
+    pages = await visible_pages_for_creator(db, report, creator)
+    fields = await distributed_fields(db, report)
+    ds = await db.get(Dataset, fields["dataset_id"]) if fields["dataset_id"] else None
+    geography = _published_geography(ds) if ds else {}
+    return await published_boundary_set(db, set_id, report.org_id,
+                                        referenced_boundary_set_ids(pages, geography))
 
 
 @router.post("/embed/widget-data/{widget_id}")

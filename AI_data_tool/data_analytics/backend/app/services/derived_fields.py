@@ -37,6 +37,31 @@ _GENERIC = {"total", "sum", "count", "num", "number", "n", "all", "value", "amou
 _PROMISE = ("estimated", "expected", "due", "deadline", "limit", "promised", "planned", "target")
 MAX_DURATIONS = 3
 MAX_RATES = 3
+#: B-36: words that say what UNIT a number is in (compared after _words, which
+#: drops a plural "s"). A rate needs both sides in the same unit -- "delivery
+#: attempts" (a count) as a share of "delivery fee EGP" (money) shares the word
+#: "delivery" and means nothing.
+_UNIT_WORDS = {
+    "money": {"fee", "fees", "price", "cost", "costs", "revenue", "sales", "amount", "value", "paid", "charge"},
+    "count": {"attempts", "attempt", "count", "counts", "orders", "items", "visits", "calls", "units", "qty",
+              "quantity", "number", "num", "times"},
+    "weight": {"kg", "kgs", "g", "gram", "grams", "lb", "lbs", "weight", "ton", "tons", "tonnes"},
+    "length": {"km", "m", "cm", "mm", "mi", "miles", "distance"},
+    "time": {"days", "hours", "minutes", "seconds", "mins", "secs", "duration"},
+}
+_KIND_UNIT = {"amount": "money", "count": "count", "duration": "time"}
+
+
+def _unit_of(col: str, column_meta: dict | None) -> str | None:
+    """The unit of a number: its classification when it has one, else its name."""
+    from .semantic_guard import recorded_number
+    kind = recorded_number(col, column_meta)
+    if kind in _KIND_UNIT:
+        return _KIND_UNIT[kind]
+    words = _words(col)
+    found = [u for u, ws in _UNIT_WORDS.items() if words & {w for x in ws for w in _words(x)}]
+    # A money word wins over a count word ("order value"): money is the stronger signal.
+    return "money" if "money" in found else (found[0] if found else None)
 
 
 def _words(name: str) -> set[str]:
@@ -85,8 +110,11 @@ def rate_measures(df: pd.DataFrame, nums: list[str], taken: set[str],
             if not 0.0001 <= share <= 0.95:
                 continue
             # They count the same thing: a shared noun ("orders"), the whole
-            # named as a total of it.
+            # named as a total of it -- and in the same unit (B-36).
             if not ((_words(part) - _GENERIC) & (_words(whole) - _GENERIC)):
+                continue
+            u_part, u_whole = _unit_of(part, column_meta), _unit_of(whole, column_meta)
+            if u_part and u_whole and u_part != u_whole:
                 continue
             name = f"{part}_pct_of_{whole}"
             if name in taken:

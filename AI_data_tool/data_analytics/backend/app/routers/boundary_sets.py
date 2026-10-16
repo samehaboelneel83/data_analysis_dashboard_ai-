@@ -127,6 +127,37 @@ async def get_boundary_set(set_id: int, db: AsyncSession = Depends(get_db),
     return {**_summary(bs), "geometry": bs.geometry}
 
 
+def referenced_boundary_set_ids(pages: list[dict], geography: dict) -> set[int]:
+    """Every boundary set a published report can ask to draw with.
+
+    The same three places the map renderers read a set id from: a column's
+    geography classification (published as `geography`), a map widget's
+    `config.boundary_set_id`, and a layer's `boundary_set_id` in a layered map.
+    Guest links and embeds serve a set only if it is in here, so a public link
+    is never a way to read the rest of the org's boundary files."""
+    ids = {v for v in (geography or {}).values() if isinstance(v, int)}
+    for page in pages or []:
+        for widget in page.get("widgets") or []:
+            config = widget.get("config") or {}
+            if isinstance(config.get("boundary_set_id"), int):
+                ids.add(config["boundary_set_id"])
+            for layer in config.get("layers") or []:
+                if isinstance(layer, dict) and isinstance(layer.get("boundary_set_id"), int):
+                    ids.add(layer["boundary_set_id"])
+    return ids
+
+
+async def published_boundary_set(db: AsyncSession, set_id: int, org_id: int, allowed: set[int]) -> dict:
+    """A boundary set for a viewer with no session: only one the report itself
+    references (`allowed`), and only from the report's own org. Anything else
+    is the same 404 a nonexistent id gets, so the route cannot be used to probe
+    which ids exist."""
+    bs = await db.get(BoundarySet, set_id) if set_id in allowed else None
+    if bs is None or bs.org_id != org_id:
+        raise HTTPException(404, "Boundary set not found")
+    return {**_summary(bs), "geometry": bs.geometry}
+
+
 @router.post("", status_code=201)
 async def create_boundary_set(body: dict, db: AsyncSession = Depends(get_db),
                               current_user: User = Depends(get_current_user)):

@@ -10,6 +10,7 @@ import { pageVisibilityApi } from '../../services/api'
 import ExpandableGroup from './ExpandableGroup'
 import DashboardStylePanel from './DashboardStylePanel'
 import type { DashboardStyle } from '../../lib/dashboardStyle'
+import { PAGE_PRESETS, PAGE_DIM_MIN, PAGE_DIM_MAX, pageSizeChoice, parsePageDim, type PageSizeChoice } from '../../lib/pageSize'
 
 interface Props {
   reportId?: number
@@ -125,7 +126,11 @@ export default function PagePropertiesPanel({ reportId, page, columns, onUpdate,
   const [pageType,      setPageType]      = useState<PageType>(page.page_type ?? 'normal')
   const [promptColumn,  setPromptColumn]  = useState(page.prompt_column ?? '')
   const [promptLabel,   setPromptLabel]   = useState(page.prompt_label ?? '')
-  const [pageSize,      setPageSize]      = useState(page.page_size ?? '16:9')
+  // C-21: what the page is drawn at. A page with no stored size flows ("Fit
+  // to width") whatever its page_size says -- see lib/pageSize.
+  const [pageSize,      setPageSize]      = useState<PageSizeChoice>(pageSizeChoice(page))
+  const [customW,       setCustomW]       = useState(String(page.custom_width ?? PAGE_PRESETS['16:9'].w))
+  const [customH,       setCustomH]       = useState(String(page.custom_height ?? PAGE_PRESETS['16:9'].h))
   /** A picture the page's objects sit on. An object set to a transparent
    *  background then lets it through -- that pair is how a chart, a headline
    *  number and a line plot end up floating on a photograph. */
@@ -142,7 +147,9 @@ export default function PagePropertiesPanel({ reportId, page, columns, onUpdate,
     setPageType(page.page_type ?? 'normal')
     setPromptColumn(page.prompt_column ?? '')
     setPromptLabel(page.prompt_label ?? '')
-    setPageSize(page.page_size ?? '16:9')
+    setPageSize(pageSizeChoice(page))
+    setCustomW(String(page.custom_width ?? PAGE_PRESETS['16:9'].w))
+    setCustomH(String(page.custom_height ?? PAGE_PRESETS['16:9'].h))
     setBackgroundUrl(page.background_url ?? '')
     setInteractionMode(page.mobile_layout?.interaction_mode ?? 'manual')
   }, [page.id])
@@ -158,8 +165,16 @@ export default function PagePropertiesPanel({ reportId, page, columns, onUpdate,
     setName(page.name)
   }, [page.name])
 
+  const customWNum = parsePageDim(customW)
+  const customHNum = parsePageDim(customH)
+  const customInvalid = pageSize === 'custom' && (customWNum === null || customHNum === null)
   useEffect(() => {
     if (!mounted.current) { mounted.current = true; return }
+    // A half-typed or out-of-range custom size is not saved (the field says why).
+    if (customInvalid) return
+    const size = pageSize === 'fit' ? {}
+      : pageSize === 'custom' ? { custom_width: customWNum!, custom_height: customHNum! }
+      : { custom_width: PAGE_PRESETS[pageSize].w, custom_height: PAGE_PRESETS[pageSize].h }
     const timer = setTimeout(() => { sentName.current = name || page.name; onUpdate({
       name:          name || page.name,
       title:         title || undefined,
@@ -167,6 +182,7 @@ export default function PagePropertiesPanel({ reportId, page, columns, onUpdate,
       prompt_column: promptColumn || undefined,
       prompt_label:  promptLabel || undefined,
       page_size:     pageSize,
+      ...size,
       // Sent even when empty: '' is how the page's backdrop is cleared, and
       // `undefined` would leave the old one in place.
       background_url: backgroundUrl.trim(),
@@ -181,7 +197,7 @@ export default function PagePropertiesPanel({ reportId, page, columns, onUpdate,
     return () => clearTimeout(timer)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [name, title, pageType, promptColumn, promptLabel, pageSize, interactionMode,
-      backgroundUrl])
+      backgroundUrl, customW, customH])
 
   /** A labelled field.
    *
@@ -260,15 +276,36 @@ export default function PagePropertiesPanel({ reportId, page, columns, onUpdate,
       <ExpandableGroup id="page-layout" title={GROUP.layout} defaultOpen {...groupFilter(GROUP.layout)}>
         {fld('Page size', (
           <div className="dl-seg" style={{ display: 'flex' }}>
-            {(['16:9', '4:3', 'custom'] as const).map(size => (
+            {(['fit', '16:9', '4:3', 'custom'] as const).map(size => (
               <button key={size} type="button" onClick={() => setPageSize(size)} aria-pressed={pageSize === size}
-                aria-label={size === 'custom' ? tr('bc.panes.page.size.customAria') : size} className={`dl-seg__btn${pageSize === size ? ' dl-seg__btn--on' : ''}`}
+                aria-label={size === 'custom' ? tr('bc.panes.page.size.customAria') : size === 'fit' ? tr('bc.panes.page.size.fitAria') : size}
+                title={size === 'fit' ? tr('bc.panes.page.size.fitAria') : size === 'custom' ? undefined : `${PAGE_PRESETS[size].w} × ${PAGE_PRESETS[size].h}`}
+                className={`dl-seg__btn${pageSize === size ? ' dl-seg__btn--on' : ''}`}
                 style={{ flex: 1, justifyContent: 'center' }}>
-                {size === 'custom' ? tr('bc.panes.page.size.custom') : size}
+                {size === 'custom' ? tr('bc.panes.page.size.custom') : size === 'fit' ? tr('bc.panes.page.size.fit') : size}
               </button>
             ))}
           </div>
         ))}
+        {pageSize === 'custom' && (
+          <div style={{ margin: '-4px 0 10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input type="number" inputMode="numeric" min={PAGE_DIM_MIN} max={PAGE_DIM_MAX} step={10}
+                aria-label={tr('bc.panes.page.size.width')} aria-invalid={customWNum === null}
+                value={customW} onChange={e => setCustomW(e.target.value)} style={{ width: 84 }} />
+              <span aria-hidden>×</span>
+              <input type="number" inputMode="numeric" min={PAGE_DIM_MIN} max={PAGE_DIM_MAX} step={10}
+                aria-label={tr('bc.panes.page.size.height')} aria-invalid={customHNum === null}
+                value={customH} onChange={e => setCustomH(e.target.value)} style={{ width: 84 }} />
+              <span style={{ fontSize: 11, color: 'var(--muted)' }}>{tr('bc.panes.page.size.px')}</span>
+            </div>
+            {customInvalid && (
+              <div role="alert" style={{ fontSize: 10.5, color: 'var(--danger, #c62828)', marginTop: 4 }}>
+                {tr('bc.panes.page.size.range', { min: PAGE_DIM_MIN, max: PAGE_DIM_MAX })}
+              </div>
+            )}
+          </div>
+        )}
         {/* One element, not a fragment: `fld` ties the label to the control by
             cloning it with an id, and a fragment swallows that silently. */}
         {fld('Background image', (

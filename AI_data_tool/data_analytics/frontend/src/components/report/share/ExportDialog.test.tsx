@@ -74,14 +74,19 @@ describe('ExportDialog', () => {
     await waitFor(() => expect(reportsApi.downloadPdf).toHaveBeenCalledTimes(2))
   })
 
-  it('the export policy greys every download with its reason, and Print still works', async () => {
+  it('the export policy greys every download with its reason, Print included (F-02)', async () => {
     vi.mocked(authzApi.decisions).mockResolvedValue([{ resource: 'report', id: 3, action: 'download', allowed: false,
       reason: 'Restricted data cannot be downloaded.' }] as never)
     open()
     const pdf = await screen.findByRole('radio', { name: /PDF/ })
     await waitFor(() => expect(pdf).toBeDisabled())
     expect(screen.getByRole('note')).toHaveTextContent('Restricted data cannot be downloaded.')
-    fireEvent.click(screen.getByRole('button', { name: 'Open print view' }))
-    expect(await screen.findByTestId('print-view')).toBeInTheDocument()
+    // The print view is where Save as PDF and PowerPoint come from: refused like the rest.
+    expect(screen.getByRole('radio', { name: /Print/ })).toBeDisabled()
+    expect(screen.getByRole('radio', { name: /PDF/ })).toHaveAttribute('aria-checked', 'true')
+    const go = screen.getByRole('button', { name: 'Export PDF' })
+    expect(go).toBeDisabled()
+    fireEvent.click(go)
+    expect(screen.queryByTestId('print-view')).toBeNull()
   })
 })

@@ -62,6 +62,8 @@ export function isOutcome(column: string | undefined | null, meta?: MetaMap): bo
   return !!column && meta?.[column]?.outcome === true
 }
 
+const YEAR_WORDS = ['year', 'yr', 'fiscal_year', 'سنة', 'السنة', 'عام']
+
 export function nonAdditiveKind(column: string | undefined | null, meta?: MetaMap): NonAdditiveKind | null {
   if (!column) return null
   // A stored latitude or longitude is a coordinate whatever kind of number it
@@ -73,7 +75,7 @@ export function nonAdditiveKind(column: string | undefined | null, meta?: MetaMa
   if (recorded) return recorded === 'code' ? 'identifier' : null
   if (WORD(column, ['lat', 'latitude', 'lon', 'lng', 'long', 'longitude', 'خط_العرض', 'خط_الطول'])) return 'coordinate'
   if (ID_NAME.test(column)) return 'identifier'
-  if (WORD(column, ['year', 'yr', 'fiscal_year', 'سنة', 'السنة', 'عام'])) return 'year'
+  if (WORD(column, YEAR_WORDS)) return 'year'
   return null
 }
 
@@ -161,6 +163,10 @@ export function isIdentifier(column: string | undefined | null, meta?: MetaMap):
   const role = meta?.[column]?.role
   if (role === 'identifier') return true
   if (markedMeasure(meta?.[column])) return false
+  // C-18: the server records a year as a number of kind `code`, which reads
+  // as an identifier here -- and the Suggest pane head-counted "distinct
+  // year". A year names a period, not a thing to count.
+  if (WORD(column, YEAR_WORDS)) return false
   return nonAdditiveKind(column, meta) === 'identifier'
 }
 

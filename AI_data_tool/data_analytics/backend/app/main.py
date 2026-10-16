@@ -10,7 +10,7 @@ from .core.widget_errors import CodedHTTPException
 from .core.said_errors import SaidHTTPException
 from .services.memory_guard import TooLargeToLoad as _TooLargeToLoad
 from .core.config import settings
-from .services.quotas import QuotaExceeded
+from .services.quotas import AiNotAllowed, QuotaExceeded
 
 logger = logging.getLogger(__name__)
 from .core.database import engine, Base, AsyncSessionLocal
@@ -61,6 +61,8 @@ async def _migrate(conn):
         # 0038: session revocation cut-off (see User.tokens_valid_after).
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS tokens_valid_after TIMESTAMP WITH TIME ZONE",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS about TEXT",
+        # 0072 (QA E-08): what each role may do; NULL = every capability allowed.
+        "ALTER TABLE roles ADD COLUMN IF NOT EXISTS permissions JSON",
         # 0039: duplicate-upload detection (see Dataset.content_sha256).
         "ALTER TABLE datasets ADD COLUMN IF NOT EXISTS content_sha256 VARCHAR(64)",
         # 0056: each refresh run's check results (see RefreshRun.checks).
@@ -81,6 +83,9 @@ async def _migrate(conn):
         # 0047: business rules on glossary terms (HR evaluation, blocker 3).
         "ALTER TABLE glossary_terms ADD COLUMN IF NOT EXISTS rule TEXT",
         "ALTER TABLE glossary_terms ADD COLUMN IF NOT EXISTS always BOOLEAN NOT NULL DEFAULT FALSE",
+        # 0071: a term of one dataset (B-21); NULL keeps every existing term as it was.
+        "ALTER TABLE glossary_terms ADD COLUMN IF NOT EXISTS dataset_id INTEGER REFERENCES datasets(id) ON DELETE CASCADE",
+        "CREATE INDEX IF NOT EXISTS ix_glossary_terms_dataset_id ON glossary_terms (dataset_id)",
         # 0048: a connection's sensitivity label (HR evaluation, item 2.2).
         "ALTER TABLE data_sources ADD COLUMN IF NOT EXISTS sensitivity VARCHAR(20)",
         # 0049: dataset share levels; dataset_group_shares is a new table.
@@ -125,7 +130,6 @@ async def _migrate(conn):
         "ALTER TABLE reports ADD COLUMN IF NOT EXISTS review_note VARCHAR(500)",
         "CREATE INDEX IF NOT EXISTS ix_reports_category ON reports (category)",
         "CREATE INDEX IF NOT EXISTS ix_reports_archived_at ON reports (archived_at)",
-        "CREATE INDEX IF NOT EXISTS ix_reports_org_published ON reports (org_id, published)",
         "ALTER TABLE report_user_grants ALTER COLUMN user_id DROP NOT NULL",
         "ALTER TABLE report_user_grants ADD COLUMN IF NOT EXISTS role_id INTEGER REFERENCES roles(id) ON DELETE CASCADE",
         "ALTER TABLE report_user_grants ADD COLUMN IF NOT EXISTS org_unit_id INTEGER REFERENCES org_units(id) ON DELETE CASCADE",
@@ -209,6 +213,10 @@ async def _migrate(conn):
         # grandfathered. report_user_grants is a NEW table -- create_all makes
         # it on startup; no ALTER needed.
         "ALTER TABLE reports ADD COLUMN IF NOT EXISTS published BOOLEAN NOT NULL DEFAULT FALSE",
+        # After the column it indexes: on a database whose `reports` predates
+        # `published` (stamped at head, see _run_alembic) indexing first made
+        # startup fail with "column published does not exist".
+        "CREATE INDEX IF NOT EXISTS ix_reports_org_published ON reports (org_id, published)",
         "ALTER TABLE workspace_nodes ADD COLUMN IF NOT EXISTS published BOOLEAN NOT NULL DEFAULT FALSE",
         # Dataset-mode memory scoping: sorted dataset ids joined with commas
         # (e.g. "3,17"), NULL for source-mode rows -- see QueryExample.dataset_key.
@@ -264,9 +272,117 @@ async def _migrate(conn):
                WHERE u.org_id = data_sources.org_id AND r.is_org_admin = true
                ORDER BY u.id LIMIT 1)
            WHERE created_by IS NULL AND org_id IS NOT NULL""",
+        # Columns only an Alembic revision added. A database stamped at head
+        # without running revisions (one first built from postgres/init.sql,
+        # or adopted before Alembic -- see _run_alembic) never got them, and
+        # "Load demo content" 500'd on the first query that read one. Same
+        # types, defaults, keys and index names as the revisions; last in the
+        # list so the tables their keys point at exist (create_all ran first).
+        # 0026_page_background
+        "ALTER TABLE report_pages ADD COLUMN IF NOT EXISTS background_url VARCHAR(1000)",
+        # 0029_aggregate_datasets
+        "ALTER TABLE datasets ADD COLUMN IF NOT EXISTS aggregate_of_dataset_id INTEGER REFERENCES datasets(id) ON DELETE CASCADE",
+        "CREATE INDEX IF NOT EXISTS ix_datasets_aggregate_of_dataset_id ON datasets (aggregate_of_dataset_id)",
+        "ALTER TABLE datasets ADD COLUMN IF NOT EXISTS aggregate_spec JSON",
+        # 0031_report_origin
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS origin VARCHAR(20) NOT NULL DEFAULT 'user'",
+        "CREATE INDEX IF NOT EXISTS ix_reports_origin ON reports (origin)",
+        # 0032_automation_run_record
+        "ALTER TABLE analysis_results ADD COLUMN IF NOT EXISTS run_id INTEGER REFERENCES automation_runs(id) ON DELETE SET NULL",
+        "CREATE INDEX IF NOT EXISTS ix_analysis_results_run_id ON analysis_results (run_id)",
+        "ALTER TABLE analysis_results ADD COLUMN IF NOT EXISTS params JSON",
+        "ALTER TABLE analysis_results ADD COLUMN IF NOT EXISTS created_by INTEGER REFERENCES users(id) ON DELETE SET NULL",
+        # 0033_dataset_column_provenance
+        "ALTER TABLE dataset_columns ADD COLUMN IF NOT EXISTS source_column_id INTEGER REFERENCES source_columns(id) ON DELETE SET NULL",
+        "CREATE INDEX IF NOT EXISTS ix_dataset_columns_source_column_id ON dataset_columns (source_column_id)",
     ]
     for s in stmts:
         await conn.execute(text(s))
+
+
+_USERS_EMAIL_CASE_DUPLICATES_SQL = (
+    # Same query as alembic revision 0069_users_email_ci_unique.
+    "SELECT id, org_id, email FROM users WHERE lower(trim(email)) IN ("
+    " SELECT lower(trim(email)) FROM users GROUP BY lower(trim(email)) HAVING COUNT(*) > 1)"
+    " ORDER BY lower(trim(email)), id"
+)
+
+
+async def _ensure_users_email_ci_unique() -> None:
+    """Revision 0069 for databases that never run it: one adopted before
+    Alembic, or built from init.sql, is stamped at head without running any
+    revision, so the unique lower(email) index would never exist there.
+
+    Not a plain `_migrate` statement on purpose: creating the index fails on a
+    database that still holds two addresses differing only by letter case,
+    and `_migrate` failing aborts startup. Instead such accounts are named in
+    an ERROR log and recorded in `_MIGRATION_ERROR` (/health/ready answers 503)
+    -- loud, but nothing is merged or deleted and the app still starts. With
+    no such accounts it lower-cases stored addresses and adds the index; every
+    step is idempotent, so on an up-to-date database it changes nothing.
+    """
+    global _MIGRATION_ERROR
+    try:
+        async with engine.begin() as conn:
+            dupes = (await conn.execute(text(_USERS_EMAIL_CASE_DUPLICATES_SQL))).fetchall()
+            if dupes:
+                logger.error(
+                    "users.email: these accounts differ only by letter case (or "
+                    "surrounding spaces), so the unique lower(email) index was NOT "
+                    "added. Rename or remove the extra account(s), then restart:\n%s",
+                    "\n".join(f"  user id={r[0]} org_id={r[1]} email={r[2]!r}" for r in dupes))
+                _MIGRATION_ERROR = _MIGRATION_ERROR or "users_email_case_duplicates"
+                return
+            await conn.execute(text(
+                "UPDATE users SET email = lower(trim(email)) WHERE email <> lower(trim(email))"))
+            await conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_users_email_lower ON users (lower(email))"))
+    except Exception as exc:
+        _MIGRATION_ERROR = _MIGRATION_ERROR or type(exc).__name__
+        logger.exception("users.email case-insensitive unique index not ensured")
+
+
+def _rename_duplicate_roles_sync(sync_conn) -> list[tuple[int, str, str]]:
+    """Same as alembic revision 0070_roles_org_name_unique: within an org the
+    oldest role keeps a duplicated name, later ones become "<name> (2)", ...
+    (skipping names already taken). Nothing is merged or deleted."""
+    rows = sync_conn.execute(text("SELECT id, org_id, name FROM roles ORDER BY org_id, id")).fetchall()
+    taken: dict[int, set[str]] = {}
+    for _id, org_id, name in rows:
+        taken.setdefault(org_id, set()).add((name or "").strip().lower())
+    seen: set[tuple[int, str]] = set()
+    renamed = []
+    for role_id, org_id, name in rows:
+        key = (org_id, (name or "").strip().lower())
+        if key not in seen:
+            seen.add(key)
+            continue
+        base, n = (name or "").strip(), 2
+        while f"{base} ({n})".lower() in taken[org_id]:
+            n += 1
+        new = f"{base} ({n})"
+        taken[org_id].add(new.lower())
+        sync_conn.execute(text("UPDATE roles SET name = :n WHERE id = :i"), {"n": new, "i": role_id})
+        renamed.append((role_id, name, new))
+    return renamed
+
+
+async def _ensure_roles_name_unique() -> None:
+    """Revision 0070 for databases stamped at head without running it (see
+    `_ensure_users_email_ci_unique`). Renames are logged; a failure is logged
+    and recorded in `_MIGRATION_ERROR`, never aborts startup."""
+    global _MIGRATION_ERROR
+    try:
+        async with engine.begin() as conn:
+            renamed = await conn.run_sync(_rename_duplicate_roles_sync)
+            for role_id, old, new in renamed:
+                logger.warning("roles: duplicate name %r in its organization -- role id=%s renamed to %r",
+                               old, role_id, new)
+            await conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_roles_org_name_lower ON roles (org_id, lower(name))"))
+    except Exception as exc:
+        _MIGRATION_ERROR = _MIGRATION_ERROR or type(exc).__name__
+        logger.exception("roles: unique (org_id, lower(name)) index not ensured")
 
 
 def _is_duplicate_schema_drift_error(exc: Exception) -> bool:
@@ -284,6 +400,10 @@ def _is_duplicate_schema_drift_error(exc: Exception) -> bool:
     DuplicateTable when x pre-exists, pass the all-tables-present check,
     and get stamped -- silently orphaning the INSERT. Before authoring the
     first data-bearing revision, gate or remove this self-heal.
+    (0069_users_email_ci_unique lower-cases emails and 0070_roles_org_name_unique
+    renames duplicate roles, but every step of both is idempotent and
+    `_ensure_users_email_ci_unique` / `_ensure_roles_name_unique` repeat them
+    on each boot, so a stamp over them orphans nothing.)
 
     Checked two ways: the driver's own exception class name (asyncpg raises
     `DuplicateTableError`/`DuplicateColumnError` for Postgres), and a message
@@ -473,6 +593,8 @@ async def lifespan(app: FastAPI):
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
                 await _migrate(conn)
+            await _ensure_users_email_ci_unique()
+            await _ensure_roles_name_unique()
             async with AsyncSessionLocal() as session:
                 await _backfill_default_org(session)
             async with AsyncSessionLocal() as session:
@@ -768,6 +890,10 @@ app.include_router(automation_router.router, prefix="/api/v1")
 # different resources: sync/review/drift under a data source, column
 # statistics under a dataset.
 app.include_router(metadata.router,      prefix="/api/v1")
+from .routers import dataset_glossary  # noqa: E402
+app.include_router(dataset_glossary.router, prefix="/api/v1")
+from .routers import org_glossary  # noqa: E402
+app.include_router(org_glossary.router, prefix="/api/v1")
 app.include_router(metadata.stats_router, prefix="/api/v1")
 # Guided setup (docs/guided-setup/PLAN.md): one journey per person and connection.
 app.include_router(guided_setup.router, prefix="/api/v1")
@@ -813,6 +939,13 @@ async def _coded_http_exception_handler(request, exc: CodedHTTPException):
     return JSONResponse(status_code=exc.status_code,
                         content={"detail": exc.detail, "code": exc.code},
                         headers=getattr(exc, "headers", None))
+
+
+@app.exception_handler(AiNotAllowed)
+async def _ai_not_allowed_handler(request, exc: AiNotAllowed):
+    """QA E-08: a role without "use AI" asked a model-first feature -> 403 with
+    the readable reason (registered here for the CORS reason given below)."""
+    return JSONResponse(status_code=403, content={"detail": exc.detail})
 
 
 @app.exception_handler(QuotaExceeded)

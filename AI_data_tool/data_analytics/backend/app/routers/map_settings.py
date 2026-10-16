@@ -45,12 +45,20 @@ def _check_template(url: str | None, label: str) -> str | None:
     return url
 
 
+async def org_map_settings(db: AsyncSession, org_id: int) -> dict:
+    """The basemap an org's maps draw on. Also published, for the report's own
+    org only, in the guest-link and embed payloads: those viewers have no
+    session, so calling the route below would 401 (and used to bounce a guest
+    to the login page)."""
+    row = (await db.execute(select(OrgMapSettings).where(
+        OrgMapSettings.org_id == org_id))).scalars().first()
+    return _out(row)
+
+
 @router.get("")
 async def get_map_settings(db: AsyncSession = Depends(get_db),
                            current_user: User = Depends(get_current_user)):
-    row = (await db.execute(select(OrgMapSettings).where(
-        OrgMapSettings.org_id == current_user.org_id))).scalars().first()
-    return _out(row)
+    return await org_map_settings(db, current_user.org_id)
 
 
 @router.put("")

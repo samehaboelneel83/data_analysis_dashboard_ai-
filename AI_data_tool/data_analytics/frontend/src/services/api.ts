@@ -1,4 +1,5 @@
 ﻿import axios from 'axios'
+import { announceReportWrite } from '../lib/reportWrites'
 import { sanitizeErrorDetail } from '../lib/friendlyError'
 import { canceledRequest } from '../lib/canceledRequest'
 import type { Report, ReportRelease, ReportPage, Widget, HierarchyNode, Bookmark, BookmarkState, WorkspaceTree, WorkspaceNode } from '../types/report'
@@ -102,10 +103,19 @@ export function handleResponseError(error: any) {
   // now -- the session is a cookie script cannot see -- and a 401 there just
   // means "not logged in"; redirecting would bounce a share-link or embed
   // viewer to the login page.
-  if (error?.response?.status === 401 && !error?.config?.quiet401) {
+  if (error?.response?.status === 401 && !error?.config?.quiet401 && !onPublicSurface()) {
     onUnauthorized?.()
   }
   return Promise.reject(error)
+}
+
+/** A guest share link or an embed: pages a viewer opens with NO session, by
+ *  design. A 401 there means "this call needs a login" -- never "your session
+ *  expired" -- so it must fail that one call, not send the whole page to the
+ *  login screen (a map's basemap request did exactly that, QA F2-55). */
+function onPublicSurface(): boolean {
+  const path = typeof window === 'undefined' ? '' : window.location.pathname
+  return path.startsWith('/shared/') || path === '/embed' || path.startsWith('/embed/')
 }
 
 api.interceptors.response.use(r => { sayJobErrors(r.data); return r }, handleResponseError)
@@ -155,6 +165,9 @@ function announceLlmUsed(headers: unknown) {
   }
 }
 api.interceptors.response.use(r => { announceLlmUsed(r.headers); return r })
+// C-17: every successful write to a report is announced, so the builder can
+// tell its own edits from another session's (lib/reportWrites).
+api.interceptors.response.use(r => { announceReportWrite(r.config); return r })
 
 /** A calculated column's Test result: sample values, plus (2026-10-10) a
  *  summary of the whole column and, for a broken formula, a problem code the
@@ -300,6 +313,10 @@ export interface Dataset {
   // SH1: transient, computed per-viewer -- true when the CURRENT user has an
   // explicit share grant on this dataset (never true for org-wide default read).
   shared?:                   boolean
+  /** Single-dataset read: may this viewer change calculated columns / measures (QA E-13). */
+  can_model?:                boolean
+  /** A row rule narrows this viewer's rows; row_count is then theirs, not the total (QA E-14). */
+  row_count_restricted?:     boolean
   /** E06: on the list only -- what the dataset is and how current. */
   catalog?:                  DatasetCatalog | null
   /** Transient, resolved per read from the SOURCE catalog through each column's
@@ -590,7 +607,7 @@ export const datasetsApi = {
    *  the `size` best by what the data shows: minutes rather than seconds, so
    *  its timeout is longer. */
   suggestDashboards: (id: number, body: { goal?: string; count?: number; mode?: 'quick' | 'panel'; size?: number;
-                                          background?: boolean; fresh?: boolean },
+                                          background?: boolean; fresh?: boolean; use_profile?: boolean },
                       signal?: AbortSignal) =>
     api.post<SuggestDashboardsAnswer>(
       `/datasets/${id}/suggest-dashboards`, body,
@@ -1051,6 +1068,8 @@ export interface LlmEndpointsOut {
   auto_pick: string | null
   source: 'saved' | 'deployment' | 'environment'
   endpoints: LlmEndpoint[]
+  /** Whether the default choice can be used now (AD-01's server-side gate). */
+  ai_available?: boolean
   /** This person's most recent answered calls, oldest first. */
   last_used?: LlmUse[]
 }
@@ -1252,8 +1271,10 @@ export const aggregatesApi = {
 export const analysisApi = {
   run: (id: number, type = 'full') =>
     api.post(`/datasets/${id}/analysis`, { analysis_type: type }).then(r => r.data),
+  /** The stored profile, or null when none has been run yet (the server
+   *  answers 200 `null`; a 204 from an older server reads as null too). */
   get: (id: number) =>
-    api.get(`/datasets/${id}/analysis`).then(r => r.data),
+    api.get(`/datasets/${id}/analysis`).then(r => (r.status === 204 || r.data === '' ? null : r.data)),
   // A2: KMeans segmentation over selected (or all usable) numeric columns.
   segment: (id: number, columns?: string[]) =>
     api.post<SegmentResult>(`/datasets/${id}/segment`, { columns: columns ?? null }).then(r => r.data),
@@ -1519,12 +1540,18 @@ export const reportsApi = {
   recent: (limit = 8) =>
     api.get<RecentReport[]>('/reports/recent', { params: { limit } }).then(r => r.data),
   list:   ()                                       => api.get<Report[]>('/reports').then(r => r.data),
-  get:    (id: number)                             => api.get<Report>(`/reports/${id}`).then(r => r.data),
+  // `view: 'print'` is a download (F-02): the server refuses it with the reason
+  // when this reader's share does not include downloads.
+  get:    (id: number, opts?: { view?: 'print' | 'released' }) =>
+    api.get<Report>(`/reports/${id}`, opts?.view ? { params: { view: opts.view } } : undefined).then(r => r.data),
   create: (data: { name: string; description?: string; dataset_id?: number }) =>
     api.post<Report>('/reports', data).then(r => r.data),
   update: (id: number, data: Partial<{ name: string; description: string; dataset_id: number; additional_dataset_ids: number[]; theme: string; display_rules: DisplayRule[]; style: import('../lib/dashboardStyle').DashboardStyle }>) =>
     api.patch<Report>(`/reports/${id}`, data).then(r => r.data),
   delete: (id: number) => api.delete(`/reports/${id}`),
+  /** C-20: a private, editable copy of a dashboard (new ids, references rewired). */
+  duplicate: (id: number, name?: string) =>
+    api.post<Report>(`/reports/${id}/duplicate`, name ? { name } : {}).then(r => r.data),
   /** Publish/unpublish an authored dashboard: published = the whole org may
    *  OPEN it, view-only. Author or admin only; legacy unowned reports 400. */
   setPublished: (id: number, published: boolean) =>
@@ -2050,6 +2077,10 @@ export const sharedApi = {
     api.get(`/shared/${token}`).then(r => r.data),
   widgetData: (token: string, widgetId: number) =>
     api.post(`/shared/${token}/widget-data/${widgetId}`).then(r => r.data),
+  /** A boundary set this shared report's maps draw with (the guest
+   *  counterpart of boundarySetsApi.get, which needs a login). */
+  boundarySet: (token: string, setId: number) =>
+    api.get<BoundarySetDetail>(`/shared/${token}/boundary-sets/${setId}`).then(r => r.data),
 }
 
 export const embedConfigsApi = {
@@ -2078,6 +2109,11 @@ export const embedApi = {
     api.get(`/embed/report`, { params: { token } }).then(r => r.data),
   widgetData: (sessionToken: string, widgetId: number) =>
     api.post(`/embed/widget-data/${widgetId}`, undefined,
+      { headers: { Authorization: `Bearer ${sessionToken}` } }).then(r => r.data),
+  /** A boundary set this embedded report's maps draw with, on the embed
+   *  session (an iframe has no login for boundarySetsApi.get). */
+  boundarySet: (sessionToken: string, setId: number) =>
+    api.get<BoundarySetDetail>(`/embed/boundary-sets/${setId}`,
       { headers: { Authorization: `Bearer ${sessionToken}` } }).then(r => r.data),
 }
 
@@ -2136,6 +2172,10 @@ export const narrateApi = {
 }
 
 const _insightsInFlight = new Map<number, Promise<unknown>>()
+/** AD-06: the last finished scan per dataset, so "View full scan →" from the
+ *  Insights hub shows the scan just seen instead of an empty panel. */
+const _insightsDone = new Map<number, { at: number; result: unknown }>()
+const INSIGHTS_FRESH_MS = 5 * 60_000
 
 export const insightsApi = {
   /** `novelty` is present only when a previous scan exists and the caller is
@@ -2146,11 +2186,22 @@ export const insightsApi = {
                            /** Tested findings only: the test, its population and effect (Phase 7.2). */
                            p_value?: number | null; p_adjusted?: number | null; significant?: boolean | null
                            evidence?: { test: string; n: number; effect: string } | null }[]
-               narrative: string }>(`/datasets/${dsId}/insights`).then(r => r.data),
+               narrative: string }>(`/datasets/${dsId}/insights`).then(r => {
+      _insightsDone.set(dsId, { at: Date.now(), result: r.data })
+      return r.data
+    }),
+  /** The scan finished in the last few minutes for this dataset, if any. */
+  cached(dsId: number) {
+    const hit = _insightsDone.get(dsId)
+    if (!hit || Date.now() - hit.at > INSIGHTS_FRESH_MS) return null
+    return hit.result as Awaited<ReturnType<typeof insightsApi.run>>
+  },
   /** Like run(), but N concurrent callers on one dataset share ONE request --
    *  every Dynamic Pin card on the dashboard evaluates through this, so five
    *  cards over the same dataset cost one scan, not five. */
   runShared(dsId: number) {
+    const done = insightsApi.cached(dsId)
+    if (done) return Promise.resolve(done)
     const hit = _insightsInFlight.get(dsId)
     if (hit) return hit as ReturnType<typeof insightsApi.run>
     const p = insightsApi.run(dsId).finally(() => _insightsInFlight.delete(dsId))
@@ -2579,8 +2630,8 @@ export interface MonitoringJobRow {
   id: number
   name: string
   interval_minutes: number
-  /** A calendar report schedule ("weekly on Monday at 09:00"). */
-  calendar?: { kind: 'daily' | 'weekly' | 'monthly'; hour: number; minute: number; weekday?: number; monthday?: number } | null
+  /** A calendar report schedule ("weekly on Monday at 09:00"); `paused`: shown, never run. */
+  calendar?: { kind: 'daily' | 'weekly' | 'monthly'; hour: number; minute: number; weekday?: number; monthday?: number; paused?: boolean } | null
   timezone?: string | null
   last_run_at: string | null
   status: string | null
@@ -2594,6 +2645,18 @@ export interface MonitoringJobRow {
 }
 
 /** One dataset refresh or dataflow run, scheduled or manual. */
+/** AD-17: one automated analysis on the Refresh & jobs page. */
+export interface MonitoringAutomationRunRow {
+  id: number
+  status: 'pending' | 'running' | 'failed' | 'needs_review' | 'done' | 'cancelled'
+  dataset_id: number | null
+  dataset_name: string | null
+  started_at: string | null
+  finished_at: string | null
+  /** The step it is at (or stopped at); null once every step is done. */
+  step: string | null
+  error: string | null
+}
 export interface RefreshRunRow {
   id: number
   kind: 'dataset' | 'dataflow'
@@ -2608,6 +2671,8 @@ export interface RefreshRunRow {
   duration_ms: number | null
   error: string | null
   error_code: string | null
+  /** AD-17: this run's checks as counts; null when none ran. */
+  checks_summary?: { pass: number; warn: number; fail: number } | null
 }
 
 export interface MonitoringDeliveryRow extends DeliveryRow {
@@ -2621,8 +2686,13 @@ export const monitoringApi = {
     api.get<RefreshRunRow[]>('/admin/monitoring/refresh-runs', { params }).then(r => r.data),
   deliveries: (limit = 200) =>
     api.get<MonitoringDeliveryRow[]>('/admin/monitoring/deliveries', { params: { limit } }).then(r => r.data),
-  activity: (limit = 200) =>
-    api.get<ActivityRow[]>('/admin/audit-log', { params: { limit } }).then(r => r.data),
+  /** AD-17: the org's automated analyses, newest first. */
+  automationRuns: (limit = 100) =>
+    api.get<MonitoringAutomationRunRow[]>('/admin/monitoring/automation-runs', { params: { limit } }).then(r => r.data),
+  /** AD-19: newest first; `before_id` pages, the rest filter on the server. */
+  activity: (params: { limit?: number; before_id?: number; action?: string; user_email?: string
+                       since?: string; until?: string } = {}) =>
+    api.get<ActivityRow[]>('/admin/audit-log', { params: { limit: 200, ...params } }).then(r => r.data),
 }
 
 /** One node of the organization's own chart (Country → Region → Branch → …).
@@ -3026,12 +3096,17 @@ export const widgetDataApi = {
 
   /** Downloads the widget's data. Goes through the same endpoint family as `query`,
    *  so the file contains exactly what the widget shows -- including row-level
-   *  security, which is applied server-side and must never be re-derived here. */
+   *  security, which is applied server-side and must never be re-derived here.
+   *  `reportId` names the widget's dashboard: the server then applies that
+   *  dashboard's "may download" right (F-02), and refuses data the reader can
+   *  reach only through a dashboard when none is named. */
   export: async (dsId: number, config: Record<string, unknown>, widgetType: string,
-                 format: 'csv' | 'xlsx', calculatedColumns: CalcColumn[] = []) => {
+                 format: 'csv' | 'xlsx', calculatedColumns: CalcColumn[] = [],
+                 opts: { reportId?: number } = {}) => {
     const r = await api.post(
       `/datasets/${dsId}/widget-data/export?format=${format}`,
-      { config, calculated_columns: calculatedColumns, widget_type: widgetType },
+      { config, calculated_columns: calculatedColumns, widget_type: widgetType,
+        ...(opts.reportId != null ? { report_id: opts.reportId } : {}) },
       { responseType: 'blob' },
     )
     // The filename is the server's to choose: it has already sanitised it for the
@@ -3182,6 +3257,8 @@ export const automationApi = {
     api.post<AutomationRunRow>(`/automation/runs/${id}/reject`, { reason: reason || null }).then(r => r.data),
   cancel: (id: number) => api.post<AutomationRunRow>(`/automation/runs/${id}/cancel`).then(r => r.data),
   retry: (id: number) => api.post<AutomationRunRow>(`/automation/runs/${id}/retry`).then(r => r.data),
+  /** AD-22: a stopped (failed or cancelled) run only. */
+  remove: (id: number) => api.delete(`/automation/runs/${id}`).then(() => undefined),
 }
 
 export const jobsApi = {
@@ -3313,10 +3390,16 @@ export interface Organization {
   name: string
 }
 
+/** QA E-08: what a role may do (backend core/role_permissions.py). */
+export type RolePermission = 'upload_data' | 'create_connection' | 'create_dashboard' | 'use_ai' | 'export'
+
 export interface Role {
   id: number
   name: string
   is_org_admin: boolean
+  /** Effective permissions (defaults applied, all true for an org admin).
+   *  Absent from an older server: treat every one as allowed. */
+  permissions?: Partial<Record<RolePermission, boolean>>
 }
 
 export interface User {
@@ -3446,9 +3529,9 @@ export const platformApi = {
 
 export const adminRolesApi = {
   list:   () => api.get<Role[]>('/admin/roles').then(r => r.data),
-  create: (body: { name: string; is_org_admin: boolean }) =>
+  create: (body: { name: string; is_org_admin: boolean; permissions?: Partial<Record<RolePermission, boolean>> }) =>
     api.post<Role>('/admin/roles', body).then(r => r.data),
-  update: (id: number, body: Partial<{ name: string; is_org_admin: boolean }>) =>
+  update: (id: number, body: Partial<{ name: string; is_org_admin: boolean; permissions: Partial<Record<RolePermission, boolean>> }>) =>
     api.patch<Role>(`/admin/roles/${id}`, body).then(r => r.data),
   delete: (id: number) => api.delete(`/admin/roles/${id}`),
 }
@@ -3827,6 +3910,9 @@ export const metadataApi = {
     api.get<SyncRun>(`/data-sources/${sourceId}/sync/latest`).then(r => r.data),
   syncStatus: (sourceId: number, runId: number) =>
     api.get<SyncRun>(`/data-sources/${sourceId}/sync/${runId}`).then(r => r.data),
+  /** B-04: stop a stuck sync; the run comes back recorded as failed. */
+  cancelSync: (sourceId: number, runId: number) =>
+    api.post<SyncRun>(`/data-sources/${sourceId}/sync/${runId}/cancel`).then(r => r.data),
   review:     (sourceId: number) =>
     api.get<ReviewQueue>(`/data-sources/${sourceId}/review`).then(r => r.data),
   confirm:    (sourceId: number, body: {
@@ -3874,6 +3960,31 @@ export const metadataApi = {
     api.patch<GlossaryTerm>(`/data-sources/${sourceId}/glossary/${termId}`, body).then(r => r.data),
   deleteTerm: (sourceId: number, termId: number) =>
     api.delete(`/data-sources/${sourceId}/glossary/${termId}`),
+  /** B-21: the terms that apply to ONE dataset (org-wide, its connection's and
+   *  its own), and its own terms' writes -- an uploaded file has no connection. */
+  datasetGlossary: (datasetId: number) =>
+    api.get<GlossaryTerm[]>(`/datasets/${datasetId}/glossary`).then(r => r.data),
+  addDatasetTerm: (datasetId: number, body: { term: string; definition?: string
+                                      synonyms?: string[]; maps_to_column?: string; rule?: string; always?: boolean }) =>
+    api.post<GlossaryTerm>(`/datasets/${datasetId}/glossary`, body).then(r => r.data),
+  updateDatasetTerm: (datasetId: number, termId: number, body: { definition?: string | null
+                                      synonyms?: string[]; rule?: string | null; always?: boolean }) =>
+    api.patch<GlossaryTerm>(`/datasets/${datasetId}/glossary/${termId}`, body).then(r => r.data),
+  deleteDatasetTerm: (datasetId: number, termId: number) =>
+    api.delete(`/datasets/${datasetId}/glossary/${termId}`),
+  /** B-21: ORG-WIDE terms (no connection, no dataset) -- they apply to every
+   *  connection and dataset. Writes are org-admin only, like every term's. */
+  orgGlossary: () =>
+    api.get<GlossaryTerm[]>('/glossary').then(r => r.data),
+  addOrgTerm: (body: { term: string; definition?: string
+                       synonyms?: string[]; maps_to_object?: string
+                       maps_to_column?: string; rule?: string; always?: boolean }) =>
+    api.post<GlossaryTerm>('/glossary', body).then(r => r.data),
+  updateOrgTerm: (termId: number, body: { definition?: string | null
+                       synonyms?: string[]; rule?: string | null; always?: boolean }) =>
+    api.patch<GlossaryTerm>(`/glossary/${termId}`, body).then(r => r.data),
+  deleteOrgTerm: (termId: number) =>
+    api.delete(`/glossary/${termId}`),
 }
 
 /** A business term and its aliases. `data_source_id` null means the term is
@@ -3891,6 +4002,8 @@ export interface GlossaryTerm {
   /** Apply `rule` to every question on this connection, named or not. */
   always?: boolean
   data_source_id: number | null
+  /** Set when the term belongs to one dataset only (B-21). */
+  dataset_id?: number | null
 }
 
 /** One share on a workspace folder, names resolved server-side. Exactly one
@@ -4147,12 +4260,24 @@ export interface SetupTable {
   deprecated: boolean
 }
 
+export interface SetupLatestRun {
+  id: number
+  status: string
+  started_at: string | null
+  stages_done: number
+  stages_total: number
+  current: string | null
+  error: string | null
+}
+
 export interface SetupSummary {
   status: 'ready' | 'syncing' | 'failed' | 'empty'
   source: { id: number; name: string; type: string; allow_ai: boolean }
   sync: { status: string; last_synced_at: string | null }
   can_edit: boolean
   language: 'en' | 'ar'
+  /** The connection's latest read (SyncRun); null when it was never read (B-03). */
+  latest_run?: SetupLatestRun | null
   /** True while the exact date ranges are being measured (the page asks again). */
   ranges_pending?: boolean
   /** Present when status is 'ready'. `pending`: the AI is still writing; ask again shortly. */
@@ -4197,7 +4322,11 @@ export interface SetupProposal {
   refine_failed?: string
 }
 
+/** B-11: whether the AI can help on a guided-setup step right now. */
+export interface SetupAiState { available: boolean; reason: 'off' | 'unavailable' | null }
+
 export interface SetupDatasetsStep {
+  ai?: SetupAiState
   proposals: { pending: boolean; failed: string | null; items: SetupProposal[]; language: string | null; asked: boolean
                /** When the running step started (server UTC). */
                since?: string | null }
@@ -4233,6 +4362,8 @@ export interface SetupFindingItem {
 
 export interface SetupFindings {
   pending: boolean
+  /** B-12: the plain findings are in; the AI's ideas are still being written. */
+  ai_pending?: boolean
   failed: string | null
   health: SetupFindingItem[]
   insights: SetupFindingItem[]
@@ -4247,9 +4378,13 @@ export interface SetupFindings {
 }
 
 export interface SetupCheckStep {
+  ai?: SetupAiState
   datasets: { id: number; name: string; mode: string; row_count: number | null
               /** True when the setup made this dataset, so it cleans it by itself. */
-              auto_clean?: boolean; findings: SetupFindings }[]
+              auto_clean?: boolean
+              /** B-33: how many dashboards already read it. */
+              used_by?: { dashboards: number }
+              findings: SetupFindings }[]
   demand?: SetupDemand
   usual?: SetupUsualWaits
 }
@@ -4296,6 +4431,7 @@ export interface SetupDesign {
 }
 
 export interface SetupDashboardStep {
+  ai?: SetupAiState
   designs: { pending: boolean; failed: string | null; items: SetupDesign[]; asked: boolean; report_id: number | null
              /** Designs already made into pages of this analysis's dashboard. */
              used?: string[]; language?: string | null; since?: string | null }

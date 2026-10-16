@@ -4,6 +4,7 @@ import { StrictMode } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 import SuggestDashboardsDialog from './SuggestDashboardsDialog'
 import { DirectionProvider } from '../../contexts/DirectionContext'
+import { translate } from '../../i18n'
 import { calcColumnsApi, datasetsApi, jobsApi, measuresApi, reportsApi } from '../../services/api'
 
 /**
@@ -264,6 +265,37 @@ describe('the relations between the widgets', () => {
   })
 })
 
+describe('without a model (F-03, B-10)', () => {
+  it('sends use_profile: false for a blank goal, so the profile text cannot call the model', async () => {
+    open()
+    fireEvent.click(screen.getByRole('button', { name: /suggest/i }))
+    await waitFor(() => expect(datasetsApi.suggestDashboards).toHaveBeenCalledWith(
+      7, expect.objectContaining({ use_profile: false }), expect.anything()))
+  })
+
+  it('does not send use_profile: false when a goal is typed', async () => {
+    open()
+    fireEvent.change(screen.getByLabelText(/what do you do/i), { target: { value: 'I run the ward' } })
+    fireEvent.click(screen.getByRole('button', { name: /suggest/i }))
+    await waitFor(() => expect(datasetsApi.suggestDashboards).toHaveBeenCalled())
+    expect(vi.mocked(datasetsApi.suggestDashboards).mock.calls[0][1]).not.toHaveProperty('use_profile', false)
+  })
+
+  it('says the model could not be reached when the statistics answered instead', async () => {
+    vi.spyOn(datasetsApi, 'suggestDashboards').mockResolvedValue(
+      { proposals: [{ ...PROPOSAL, source: 'insights' }], reason: 'ai_unreachable',
+        profile: PROFILE, source: 'insights' } as never)
+    open()
+    fireEvent.change(screen.getByLabelText(/what do you do/i), { target: { value: 'I run the ward' } })
+    fireEvent.click(screen.getByRole('button', { name: /suggest/i }))
+    expect(await screen.findByTestId('sdd-ai-unreachable')).toHaveTextContent(/could not be reached/i)
+  })
+
+  it('does not blame the dataset size for a slow answer', () => {
+    expect(translate('en', 'sdd.slow')).not.toMatch(/large datasets/i)
+  })
+})
+
 describe('saying which engine answered', () => {
   /** A person looking at a generated page should be able to tell whether a
    *  model chose these charts or the statistics did. The two are not equally
@@ -275,6 +307,15 @@ describe('saying which engine answered', () => {
     open()
     fireEvent.click(screen.getByRole('button', { name: /suggest/i }))
     expect(await screen.findByText(/no AI/i)).toBeInTheDocument()
+  })
+
+  it('says AI is off for this person when they chose "Off — no AI" (F-11)', async () => {
+    vi.spyOn(datasetsApi, 'suggestDashboards').mockResolvedValue(
+      { proposals: [{ ...PROPOSAL, source: 'insights' }], reason: 'ai_off',
+        profile: PROFILE, source: 'insights' } as never)
+    open()
+    fireEvent.click(screen.getByRole('button', { name: /suggest/i }))
+    expect(await screen.findByTestId('sdd-ai-off')).toHaveTextContent(/AI is off for you/)
   })
 
   it('says so when the model was used', async () => {

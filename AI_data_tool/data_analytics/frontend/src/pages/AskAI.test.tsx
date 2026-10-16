@@ -34,9 +34,12 @@ vi.mock('../services/api', () => ({
   datasetsApi: { list: vi.fn() },
   dataSourcesApi: { list: vi.fn() },
   agentApi: { listConversations: vi.fn(), rename: vi.fn(), remove: vi.fn() },
+  allowAiApi: { get: vi.fn() },
+  // AD-11 step 3: the stored profile (which labels have a value per row); none here.
+  analysisApi: { get: vi.fn().mockResolvedValue(null) },
 }))
 
-import { datasetsApi, dataSourcesApi, agentApi } from '../services/api'
+import { datasetsApi, dataSourcesApi, agentApi, allowAiApi } from '../services/api'
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -52,6 +55,7 @@ beforeEach(() => {
   vi.mocked(agentApi.listConversations).mockResolvedValue([])
   vi.mocked(agentApi.rename).mockImplementation(async (id, title) => ({ id, title }))
   vi.mocked(agentApi.remove).mockResolvedValue(undefined)
+  vi.mocked(allowAiApi.get).mockResolvedValue({ own: null, effective: true, decided_by: 'default', connection: null } as any)
 })
 
 const renderAt = (path: string) => renderWithProviders(
@@ -68,6 +72,20 @@ describe('AskAI', () => {
   it('deep-links to a dataset scope: /ask?dataset=32 -> ChatPane datasetIds=[32]', async () => {
     renderAt('/ask?dataset=32')
     expect(await screen.findByTestId('chat-pane')).toHaveTextContent('datasets:32')
+  })
+
+  it('says AI is off for this dataset before the first question (AD-10)', async () => {
+    vi.mocked(allowAiApi.get).mockResolvedValue({ own: false, effective: false, decided_by: 'dataset', connection: null } as any)
+    renderAt('/ask?dataset=32')
+    expect(await screen.findByTestId('ask-ai-off')).toHaveTextContent(/AI is off for this dataset/i)
+    expect(allowAiApi.get).toHaveBeenCalledWith(32)
+  })
+
+  it('shows no such notice where AI is allowed', async () => {
+    renderAt('/ask?dataset=32')
+    await screen.findByTestId('chat-pane')
+    await waitFor(() => expect(allowAiApi.get).toHaveBeenCalled())
+    expect(screen.queryByTestId('ask-ai-off')).toBeNull()
   })
 
   it('deep-links to a source scope: /ask?source=3 -> ChatPane dataSourceId=3', async () => {
@@ -102,7 +120,7 @@ describe('AskAI', () => {
     expect(await screen.findByRole('heading', { name: 'Ask your data anything' })).toBeInTheDocument()
     expect(screen.getByText('Choose your data')).toBeInTheDocument()
     expect(screen.getByText('Step 1')).toBeInTheDocument()
-    expect(screen.getByRole('textbox', { name: 'Your question' })).toBeDisabled()
+    expect(screen.getByRole('textbox', { name: 'Your question' })).toHaveAttribute('aria-disabled', 'true')
   })
 
   it('a failed dataset list is an error, never "no data yet"', async () => {

@@ -134,6 +134,16 @@ describe('Overview side column (3b)', () => {
   })
 })
 
+describe('Overview of a new live dataset (B-25)', () => {
+  it('never says "We read 0 rows" for a DirectQuery dataset', () => {
+    show({ firstRun: true, ds: { ...DS, mode: 'directquery', row_count: 0, col_count: 10, file_size: 0, data_source_id: 3 } as Dataset })
+    const strip = screen.getByTestId('overview-firstrun')
+    expect(strip).not.toHaveTextContent(/0 rows/)
+    expect(strip).toHaveTextContent('queried live from its source')
+    expect(strip).toHaveTextContent('10 columns')
+  })
+})
+
 describe('Overview recent activity (3b)', () => {
   it('is hidden from non-admins, who never call the audit endpoints', async () => {
     show({ isAdmin: false })
@@ -155,7 +165,7 @@ describe('Overview recent activity (3b)', () => {
     show({ isAdmin: true })
     const card = await screen.findByTestId('overview-activity')
     await waitFor(() => expect(within(card).getAllByRole('listitem')).toHaveLength(2))
-    expect(monitoringApi.activity).toHaveBeenCalledWith(200)
+    expect(monitoringApi.activity).toHaveBeenCalledWith({ limit: 200 })
     expect(adminAuditApi.list).toHaveBeenCalledWith({ limit: 200, q: 'dataset:1' })
     expect(card).toHaveTextContent('You shared it omar@x.io')
     expect(card).toHaveTextContent('You uploaded it')

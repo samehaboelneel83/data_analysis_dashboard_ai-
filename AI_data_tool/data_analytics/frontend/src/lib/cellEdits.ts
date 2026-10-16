@@ -46,13 +46,15 @@ function isEditCells(s: PrepStep, keyColumn: string, column: string): boolean {
  *  UI ahead of what the server has agreed to. */
 export function mergeCellEdit(
   steps: PrepStep[],
-  { keyColumn, column, key, value }:
-    { keyColumn: string; column: string; key: string; value: unknown },
+  { keyColumn, column, key, value, allowMany }:
+    { keyColumn: string; column: string; key: string; value: unknown
+      /** B-08: the person confirmed this edit changes every row sharing the key. */
+      allowMany?: boolean },
 ): PrepStep[] {
   const index = steps.findIndex(s => isEditCells(s, keyColumn, column))
   if (index === -1) {
     return [...steps, { kind: 'edit_cells', key_column: keyColumn,
-      column, edits: [{ key, value }] } as unknown as PrepStep]
+      column, edits: [{ key, value }], ...(allowMany ? { allow_many: true } : {}) } as unknown as PrepStep]
   }
   const step = steps[index] as unknown as EditCellsStep
   const at = step.edits.findIndex(e => e.key === key)
@@ -68,7 +70,7 @@ export function mergeCellEdit(
     ? [...step.edits, { key, value }]
     : step.edits.map((e, i) => (i === at ? { key, value } : e))
   const next = [...steps]
-  next[index] = { ...step, edits } as unknown as PrepStep
+  next[index] = { ...step, edits, ...(allowMany ? { allow_many: true } : {}) } as unknown as PrepStep
   return next
 }
 

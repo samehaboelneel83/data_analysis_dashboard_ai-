@@ -28,10 +28,13 @@ const COLUMNS: DatasetColumn[] = [
 const NUMBERS = ['sales', 'cost', 'margin']      // a formula column counts as a number
 const DATES = ['ordered_at']
 const EVERYTHING = COLUMNS.map(c => c.name)
+// C-23: a role that splits a chart into groups takes any field but a plain
+// number (a formula column may be text, so it stays offered).
+const CATEGORIES = ['region', 'product', 'ordered_at', 'margin']
 
 const expectedFor = (role: string) => {
   const kind = roleAccepts(role)
-  return kind === 'numeric' ? NUMBERS : kind === 'datetime' ? DATES : EVERYTHING
+  return kind === 'numeric' ? NUMBERS : kind === 'datetime' ? DATES : kind === 'category' ? CATEGORIES : EVERYTHING
 }
 
 /** "Aa region · 4 values" / "# sales" / "sales" -> "region" / "sales". */
@@ -85,7 +88,7 @@ describe('+ Add offers the fields each role can use, for every object family', (
       for (const rf of specs) {
         const want = expectedFor(rf.role)
         const kind = roleAccepts(rf.role)
-        it(`${rf.label ?? rf.role}: offers ${kind === 'any' ? 'every field' : kind === 'numeric' ? 'numbers only' : 'dates only'}, and saves to ${configKeyFor(rf.role)}`, () => {
+        it(`${rf.label ?? rf.role}: offers ${kind === 'any' ? 'every field' : kind === 'numeric' ? 'numbers only' : kind === 'category' ? 'no plain numbers' : 'dates only'}, and saves to ${configKeyFor(rf.role)}`, () => {
           const onUpdate = renderPanel(type)
           const dialog = openAdd(rf.role)
 
@@ -99,7 +102,7 @@ describe('+ Add offers the fields each role can use, for every object family', (
             const [first, second] = [boxes[1], boxes[0]]
             const order = [first, second].map(b => fieldOf(b.closest('label')!.textContent ?? ''))
             fireEvent.click(first); fireEvent.click(second)
-            fireEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
+            fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }))  // C-26: ticks apply at once
             act(() => { vi.advanceTimersByTime(700) })
             const saved = onUpdate.mock.calls.at(-1)![0]
             if (rf.multi) expect(saved[configKeyFor(rf.role)]).toEqual(order)

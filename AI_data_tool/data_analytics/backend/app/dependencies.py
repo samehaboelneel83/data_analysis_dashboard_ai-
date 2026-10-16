@@ -92,14 +92,23 @@ async def get_current_user(
     # A bearer credential is either a machine API key (dk_…) or a login JWT. Machine
     # keys let agents (the MCP server) authenticate durably without a login round-trip.
     if looks_like_api_key(token):
-        return await _user_from_api_key(db, token)
+        return _with_role_ai_policy(await _user_from_api_key(db, token))
     payload = decode_access_token(token)
     if payload is None:
         raise _CREDS_ERROR
     user_id = payload.get("sub")
     if user_id is None:
         raise _CREDS_ERROR
-    return await _load_active_user(db, int(user_id), payload)
+    return _with_role_ai_policy(await _load_active_user(db, int(user_id), payload))
+
+
+def _with_role_ai_policy(user: User) -> User:
+    """QA E-08: no model call for the rest of this request when the user's
+    role lacks `use_ai` (services/llm.py checks it on every completion)."""
+    from .core.role_permissions import refusal
+    from .services import llm
+    llm.set_role_ai_denied(refusal(user.role, "use_ai"))
+    return user
 
 
 async def get_current_user_optional(
@@ -136,12 +145,33 @@ async def require_org_admin(current_user: User = Depends(get_current_user)) -> U
     return current_user
 
 
-def is_super_admin(user: User | None) -> bool:
-    """A platform super-admin, from the config email allowlist. Read dynamically so the
-    allowlist can change (and tests can set it) without a restart."""
+def require_role_capability(capability: str):
+    """QA E-08: the current user, refused with 403 (and the reason) when their
+    role lacks `capability` (core/role_permissions.py). Used in place of
+    `get_current_user` on the endpoint the capability guards."""
+    from .core import role_permissions
+    if capability not in role_permissions.CAPABILITIES:
+        raise ValueError(f"unknown capability {capability!r}")
+
+    async def _require(current_user: User = Depends(get_current_user)) -> User:
+        role_permissions.check(current_user, capability)
+        return current_user
+    return _require
+
+
+def is_allowlisted_email(email: str | None) -> bool:
+    """Whether this address is on the platform super-admin allowlist, in ANY
+    letter case. Read dynamically so the allowlist can change (and tests can
+    set it) without a restart. Every place that creates or renames an account
+    must check this: whoever holds an allowlisted address holds the platform."""
     from .core.config import settings
     allow = {e.strip().lower() for e in (settings.super_admin_emails or "").split(",") if e.strip()}
-    return bool(user and user.email and user.email.lower() in allow)
+    return bool(email) and email.strip().lower() in allow
+
+
+def is_super_admin(user: User | None) -> bool:
+    """A platform super-admin, from the config email allowlist."""
+    return bool(user and is_allowlisted_email(user.email))
 
 
 async def require_super_admin(current_user: User = Depends(get_current_user)) -> User:

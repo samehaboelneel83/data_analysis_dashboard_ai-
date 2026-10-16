@@ -79,3 +79,27 @@ async def test_data_preview_directquery_applies_rls(client, db_session, two_orgs
 
     assert resp.status_code == 200
     assert resp.json()["total"] == 2
+
+
+async def test_data_preview_directquery_pages_are_stable_and_exact(client, db_session, two_orgs, auth_headers, tmp_path):
+    """B-19: a live table over the row cap was previewed from a RANDOM sample
+    (ORDER BY RANDOM()), so Next/Prev reshuffled the rows and the offset was
+    ignored. A page is now read in a stable order with the exact total."""
+    org_id = two_orgs["a"]["org"].id
+    rows = [(f"r{i:05d}", float(i)) for i in range(12_000)]
+    db_path = _seed_sqlite_sales_db(tmp_path, rows=rows)
+    src = await _seed_data_source(db_session, org_id, config={"filepath": db_path})
+    ds = await _seed_directquery_dataset(db_session, org_id, src.id)
+
+    async def page(offset):
+        r = await client.post(f"/api/v1/datasets/{ds.id}/data-preview",
+                              json={"limit": 100, "offset": offset}, headers=auth_headers["a"])
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    first, second, again = await page(0), await page(100), await page(0)
+    assert first["total"] == 12_000
+    assert len(first["rows"]) == 100 and len(second["rows"]) == 100
+    assert first["rows"] == again["rows"]
+    assert not {tuple(r) for r in first["rows"]} & {tuple(r) for r in second["rows"]}
+    assert first["rows"][0] == ["r00000", 0.0] and second["rows"][0] == ["r00100", 100.0]

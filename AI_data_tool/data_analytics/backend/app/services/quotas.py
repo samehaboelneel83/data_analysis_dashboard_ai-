@@ -67,6 +67,18 @@ class QuotaExceeded(Exception):
         telemetry.quota_rejections.add(1, {"quota": kind})
 
 
+class AiNotAllowed(Exception):
+    """The person's role may not use AI (QA E-08).
+
+    A domain exception for the same reason as QuotaExceeded: this module must
+    not import the web framework (test_layer_conformance). `app.main` turns it
+    into a 403 carrying `detail`, the readable reason."""
+
+    def __init__(self, detail: str):
+        super().__init__(detail)
+        self.detail = detail
+
+
 _QUOTA_CACHE_TTL_SECONDS = 30.0
 # org_id -> (cached Quota row or None, expiry monotonic timestamp)
 _quota_cache: dict[int, tuple[Quota | None, float]] = {}
@@ -262,15 +274,22 @@ async def open_ai_meter(db: AsyncSession, org_id: int, user_id: int | None,
     own = await ai_user_budget(db, org_id, user_id)
     if own[0] is not None and (remaining is None or own[0] < remaining):
         remaining, kind, resets_in = own
+    from ..core.role_permissions import user_may
     return UsageMeter(org_id=org_id, user_id=user_id, feature=feature,
-                      remaining=remaining, limit_kind=kind, resets_in=resets_in)
+                      remaining=remaining, limit_kind=kind, resets_in=resets_in,
+                      denied=await user_may(db, user_id, "use_ai"))
 
 
 def enforce_ai_budget(meter: UsageMeter) -> None:
     """429 + Retry-After before a model-first request (a question, the
     copilot) when the org's budget is already spent. Features where the model
     is an embellishment are not refused: their calls return None and they
-    fall back, as they do when the model is down."""
+    fall back, as they do when the model is down.
+
+    QA E-08: a person whose role may not use AI is refused with 403 and the
+    reason, before the budget is looked at."""
+    if meter.denied:
+        raise AiNotAllowed(meter.denied)
     if not meter.spent:
         return
     kind = meter.limit_kind or "ai_tokens"

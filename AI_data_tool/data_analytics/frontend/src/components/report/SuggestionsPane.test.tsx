@@ -62,6 +62,29 @@ describe('SuggestionsPane', () => {
     expect(addButtons()).toHaveLength(before - 1)
   })
 
+  it('"Add all shown" hands the filtered ideas over at once, and each then says Added (F-15)', async () => {
+    const onAddMany = vi.fn().mockResolvedValue(true)
+    render(<SuggestionsPane columns={cols} analysis={analysis} onAdd={vi.fn()} onAddMany={onAddMany} />)
+    fireEvent.click(screen.getByRole('button', { name: /^Trend over time/ }))
+    const shown = addButtons().length
+    fireEvent.click(screen.getByRole('button', { name: `Add all shown (${shown})` }))
+    await waitFor(() => expect(onAddMany).toHaveBeenCalled())
+    const list = onAddMany.mock.calls[0][0]
+    expect(list).toHaveLength(shown)
+    await waitFor(() => expect(screen.queryAllByRole('button', { name: /^Add “/ })).toHaveLength(0))
+    expect(screen.getAllByText('Added')).toHaveLength(shown)
+    expect(screen.queryByRole('button', { name: /Add all shown/ })).toBeNull()
+  })
+
+  it('nothing is marked added when adding them all was cancelled (F-15)', async () => {
+    const onAddMany = vi.fn().mockResolvedValue(false)
+    render(<SuggestionsPane columns={cols} analysis={analysis} onAdd={vi.fn()} onAddMany={onAddMany} />)
+    const before = addButtons().length
+    fireEvent.click(screen.getByRole('button', { name: `Add all shown (${before})` }))
+    await waitFor(() => expect(onAddMany).toHaveBeenCalled())
+    expect(addButtons()).toHaveLength(before)
+  })
+
   it('groups ideas under headings, with chips that filter them', () => {
     render(<SuggestionsPane columns={cols} analysis={analysis} onAdd={vi.fn()} />)
     expect(screen.getByRole('heading', { name: /Trend over time/ })).toBeInTheDocument()
@@ -327,5 +350,34 @@ describe('suggestions that remember (server side)', () => {
     const { typeBias } = await import('./SuggestionsPane')
     const fb = { dismissed: [], types: {}, org_types: { treemap: { added: 0, dismissed: 9 } } }
     expect(typeBias('treemap', fb)).toBeLessThan(0)
+  })
+})
+
+describe('C-18: a year is not an identifier to head-count', () => {
+  it('never suggests a distinct count of year', () => {
+    const withYear = [...cols, { id: 5, name: 'year', dtype: 'numeric', missing_pct: 0, stats: {} }] as unknown as DatasetColumn[]
+    const s = suggestWidgets(withYear, analysis, 0, { year: { number: 'code' } } as never)
+    expect(s.length).toBeGreaterThan(0)
+    for (const x of s) {
+      const c = x.config as Record<string, unknown>
+      expect(c.measure === 'year' && c.aggregation === 'countd').toBe(false)
+    }
+  })
+})
+
+describe('C-18 round 2: an identifier is head-counted only when it is mostly unique', () => {
+  const withStore = [...cols, { id: 6, name: 'store_id', dtype: 'categorical', missing_pct: 0, stats: {} }] as unknown as DatasetColumn[]
+  const counted = (s: ReturnType<typeof suggestWidgets>) =>
+    s.some(x => (x.config as Record<string, unknown>).measure === 'store_id' && (x.config as Record<string, unknown>).aggregation === 'countd')
+  const profile = (nUnique: number) => ({ ...analysis, overview: { rows: 1000 },
+    categorical: { columns: { ...(analysis as any).categorical?.columns, store_id: { n_unique: nUnique } } } }) as never
+  it('12 stores over 1,000 rows: count rows, not distinct stores', () => {
+    expect(counted(suggestWidgets(withStore, profile(12)))).toBe(false)
+  })
+  it('900 distinct over 1,000 rows: it identifies the rows -- head-count it', () => {
+    expect(counted(suggestWidgets(withStore, profile(900)))).toBe(true)
+  })
+  it('no counts known: the name decides, as before', () => {
+    expect(counted(suggestWidgets(withStore, analysis))).toBe(true)
   })
 })

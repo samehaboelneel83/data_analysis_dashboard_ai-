@@ -810,6 +810,8 @@ async def load_context(db, source_id: int, org_id: int) -> SchemaContext:
         GlossaryTerm.org_id == org_id,
         or_(GlossaryTerm.data_source_id == source_id,
             GlossaryTerm.data_source_id.is_(None)),
+        # One dataset's term (B-21) is that dataset's, not the org's.
+        GlossaryTerm.dataset_id.is_(None),
     ))).scalars().all()
     for t in terms:
         ctx.glossary.append(GlossaryInfo(

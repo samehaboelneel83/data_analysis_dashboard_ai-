@@ -174,3 +174,30 @@ it('a sunburst with an only child still draws its ring', () => {
   // Two half-arcs each, so the ring is not a zero-length path.
   d.forEach(x => expect(x.match(/A/g)!.length).toBe(4))
 })
+
+describe('C-15: sunburst segments are labelled and coloured by branch', () => {
+  const regions = {
+    type: 'sunburst',
+    root: { name: 'root', value: 100, depth: 0, children: ['Europe', 'Asia', 'Americas', 'Africa'].map((r, i) => ({
+      name: r, value: 25, depth: 1,
+      children: [{ name: `${r} HW`, value: 15 - i, depth: 2, children: [] }, { name: `${r} SW`, value: 10 + i, depth: 2, children: [] }],
+    })) },
+  }
+  it('each top-level branch has its own colour, carried to its children', () => {
+    const { container } = render(<HierarchyRenderer {...props(regions)} plotW={480} plotH={360} />)
+    const fills = [...container.querySelectorAll('path[data-depth="1"]')].map(p => p.getAttribute('fill'))
+    expect(new Set(fills).size).toBe(4)
+    const europeKids = [...container.querySelectorAll('path[data-branch="0"][data-depth="2"]')].map(p => p.getAttribute('fill'))
+    expect(europeKids.length).toBe(2)
+    expect(new Set(europeKids)).toEqual(new Set([fills[0]]))
+  })
+  it('wide segments carry their name as text', () => {
+    const { container } = render(<HierarchyRenderer {...props(regions)} plotW={480} plotH={360} />)
+    const texts = [...container.querySelectorAll('svg text')].map(t => t.textContent)
+    for (const r of ['Europe', 'Asia', 'Americas', 'Africa']) expect(texts).toContain(r)
+  })
+  it('is sized from the tile, not a fixed 260px', () => {
+    const { container } = render(<HierarchyRenderer {...props(regions)} plotW={480} plotH={360} />)
+    expect(Number(container.querySelector('svg[role="group"]')!.getAttribute('width'))).toBeGreaterThan(300)
+  })
+})

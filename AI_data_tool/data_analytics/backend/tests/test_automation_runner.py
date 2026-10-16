@@ -3098,3 +3098,107 @@ def test_a_plain_title_states_no_value():
     assert t == "Average salary by dept name"
     assert automation_runner._plain_widget_title(
         {"widget_type": "histogram", "config": {"measure": "salary"}}) == "Distribution of salary"
+
+
+# ── AD-03: a hung step times out, a stale "running" is reaped, failures are told ──
+
+def _hanging(name_to_hang: str, calls: list[str]):
+    import asyncio
+
+    steps = recording_steps(calls)
+    out = []
+    for spec in steps:
+        if spec.name == name_to_hang:
+            async def _hang(ctx, session, _n=spec.name):
+                calls.append(_n)
+                await asyncio.sleep(5)
+                return "never"
+            out.append(StepSpec(name=spec.name, run=_hang))
+        else:
+            out.append(spec)
+    return out
+
+
+async def _notifications(db_session, user_id):
+    from sqlalchemy import select
+    from app.models.models import Notification
+    return (await db_session.execute(select(Notification).where(
+        Notification.user_id == user_id, Notification.kind == "automation"))).scalars().all()
+
+
+class TestStepTimeout:
+    async def test_a_hung_step_fails_with_a_reason_and_the_creator_is_told(
+            self, db_session, monkeypatch):
+        calls: list[str] = []
+        monkeypatch.setattr(automation_runner, "STEPS", _hanging("profile", calls))
+        monkeypatch.setitem(automation_runner.STEP_TIMEOUT_S, "profile", 0.05)
+        org, user = await _seed(db_session)
+        run = await automation_runner.create_run(
+            db_session, org_id=org.id, created_by=user.id,
+            trigger="manual", subject_type="dataset", subject_id=7)
+
+        assert await automation_runner.tick(db_session) is True
+
+        await db_session.refresh(run)
+        assert run.status == "failed"
+        step = (await _steps_of(db_session, run.id))[0]
+        assert step.status == "failed"
+        assert "Profile the data did not finish" in (step.error or "")
+        notes = await _notifications(db_session, user.id)
+        assert len(notes) == 1
+        assert "stopped at Profile the data" in notes[0].text
+        assert notes[0].link == f"/automation?run={run.id}"
+
+    async def test_only_the_first_failure_is_announced(self, db_session, monkeypatch):
+        from datetime import datetime, timedelta
+        calls: list[str] = []
+        monkeypatch.setattr(automation_runner, "STEPS",
+                            recording_steps(calls, fails={"profile"}))
+        org, user = await _seed(db_session)
+        await automation_runner.create_run(
+            db_session, org_id=org.id, created_by=user.id,
+            trigger="manual", subject_type="dataset", subject_id=7)
+        await automation_runner.tick(db_session)
+        await automation_runner.tick(db_session, now=datetime.utcnow() + timedelta(days=2))
+        assert len(calls) == 2
+        assert len(await _notifications(db_session, user.id)) == 1
+
+
+class TestPeriodicReaper:
+    async def test_a_step_running_far_past_its_budget_is_failed(self, db_session, monkeypatch):
+        from datetime import datetime, timedelta
+        monkeypatch.setattr(automation_runner, "STEPS", recording_steps([]))
+        org, user = await _seed(db_session)
+        run = await automation_runner.create_run(
+            db_session, org_id=org.id, created_by=user.id,
+            trigger="manual", subject_type="dataset", subject_id=7)
+        steps = await _steps_of(db_session, run.id)
+        now = datetime.utcnow()
+        steps[0].status, steps[0].started_at = "running", now - timedelta(hours=2)
+        steps[1].status, steps[1].started_at = "running", now - timedelta(seconds=5)
+        run.status = "running"
+        await db_session.commit()
+
+        assert await automation_runner.reap_stale_running_steps(db_session, now) == 1
+
+        steps = await _steps_of(db_session, run.id)
+        assert steps[0].status == "failed" and "Stopped responding" in steps[0].error
+        assert steps[1].status == "running"      # still inside its budget
+        await db_session.refresh(run)
+        assert run.status == "failed"
+        assert len(await _notifications(db_session, user.id)) == 1
+
+
+class TestFinishedAtIsTheEnd:
+    async def test_finished_at_is_taken_when_the_step_ends_not_when_the_tick_began(
+            self, db_session, monkeypatch):
+        from datetime import datetime, timedelta
+        monkeypatch.setattr(automation_runner, "STEPS", recording_steps([]))
+        org, user = await _seed(db_session)
+        run = await automation_runner.create_run(
+            db_session, org_id=org.id, created_by=user.id,
+            trigger="manual", subject_type="dataset", subject_id=7)
+        tick_start = datetime.utcnow() - timedelta(minutes=10)
+        await automation_runner.tick(db_session, now=tick_start)
+        step = (await _steps_of(db_session, run.id))[0]
+        assert automation_runner._as_utc_naive(step.finished_at) > tick_start + timedelta(minutes=5)

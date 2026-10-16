@@ -13,10 +13,13 @@ const MARGIN_LEFT = 6
 const GUTTER_PX = 52
 const W = 1000
 const H = 400
+const ROT_DEG = 40
+const ROT_MAX_PX = 90   // a turned name longer than this ellipsises
+const LINE_PX = 18      // the across-the-axis room one turned name needs
 
 interface BoxRow { name: string; min: number; q1: number; median: number; q3: number; max: number; outliers: number[] }
 
-export default function BoxPlotRenderer({ data, rtl, measureFmt, cfg }: ChartRendererProps) {
+export default function BoxPlotRenderer({ data, rtl, measureFmt, cfg, plotW: tileW }: ChartRendererProps) {
   const t9 = useT()
   // The shared tick formatter, compact by default here: a gutter is narrow.
   const tick = valueTick({ ...(cfg ?? {}), labels_compact: cfg?.labels_compact ?? true }, measureFmt)
@@ -39,10 +42,20 @@ export default function BoxPlotRenderer({ data, rtl, measureFmt, cfg }: ChartRen
   const boxW = Math.min(slotW * 0.5, 60)
 
   const TICKS = [0, 0.25, 0.5, 0.75, 1]
+  // C-16 (round 2): crowded names. Measured in real pixels (the tile's width
+  // less the value gutter): a name wider than its slot is turned -40deg, with
+  // a strip made for it under the plot; too many slots even for turned names
+  // shows every k-th (each box still names itself on its tooltip).
+  const slotPx = Math.max(1, ((tileW ?? 600) - GUTTER_PX) * (slotW / W))
+  const longestPx = Math.max(...orderedRows.map(r => String(r.name).length)) * 6.6
+  const rotated = longestPx > slotPx - 4
+  const step = rotated ? Math.max(1, Math.ceil(LINE_PX / slotPx)) : 1
+  const stripPx = rotated ? Math.round(Math.min(ROT_MAX_PX, longestPx) * Math.sin(ROT_DEG * Math.PI / 180) + 10) : 0
   return (
     <div style={{ height: '100%', width: '100%', position: 'relative', display: 'flex',
       flexDirection: rtl ? 'row-reverse' : 'row' }}>
-      <div aria-hidden data-testid="boxplot-ticks" style={{ position: 'relative', width: GUTTER_PX, flexShrink: 0 }}>
+      <div aria-hidden data-testid="boxplot-ticks" style={{ position: 'relative', width: GUTTER_PX, flexShrink: 0,
+        ...(rotated ? { height: `calc(100% - ${stripPx}px)` } : {}) }}>
         {TICKS.map(t => {
           const v = yMin + t * yRange
           return (
@@ -52,7 +65,9 @@ export default function BoxPlotRenderer({ data, rtl, measureFmt, cfg }: ChartRen
           )
         })}
       </div>
-      <svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display: 'block', flex: 1, minWidth: 0 }}>
+      <div style={{ position: 'relative', flex: 1, minWidth: 0, ...(rotated ? { display: 'flex', flexDirection: 'column' } : {}) }}>
+      <div style={{ position: 'relative', ...(rotated ? { flex: 1, minHeight: 0 } : { height: '100%' }) }}>
+      <svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display: 'block' }}>
         {TICKS.map(t => {
           const v = yMin + t * yRange
           const y = yToPx(v)
@@ -76,12 +91,32 @@ export default function BoxPlotRenderer({ data, rtl, measureFmt, cfg }: ChartRen
               {(r.outliers ?? []).map((o, oi) => (
                 <circle key={oi} cx={cx} cy={yToPx(o)} r={2.5} fill="var(--muted)" fillOpacity={0.7} />
               ))}
-              <text x={cx} y={H - MARGIN_BOTTOM + 16} textAnchor="middle" fontSize={10} fill="var(--muted)">{r.name}</text>
               <title>{t9('cr.boxTitle', { name: String(r.name), min: fmtStr(r.min, measureFmt), q1: fmtStr(r.q1, measureFmt), median: fmtStr(r.median, measureFmt), q3: fmtStr(r.q3, measureFmt), max: fmtStr(r.max, measureFmt) })}</title>
             </g>
           )
         })}
       </svg>
+      </div>
+      {/* C-16: the category names in HTML under the drawing, like the value
+          gutter: as SVG text they stretched with the viewBox to ~4px glyphs. */}
+      <div data-testid="boxplot-categories" data-layout={rotated ? 'rotated' : 'level'}
+        style={rotated ? { position: 'relative', height: stripPx, flexShrink: 0 }
+          : { position: 'absolute', left: 0, right: 0, top: `${((H - MARGIN_BOTTOM) / H) * 100}%`, bottom: 0 }}>
+        {orderedRows.map((r, i) => i % step !== 0 ? null : rotated ? (
+          // The name's END sits under its box; it reads up and away to the left.
+          <span key={r.name} title={String(r.name)} style={{ position: 'absolute', top: 2,
+            right: `${100 - ((MARGIN_LEFT + slotW * (i + 0.5)) / W) * 100}%`,
+            transform: `rotate(-${ROT_DEG}deg)`, transformOrigin: 'right center',
+            maxWidth: ROT_MAX_PX, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            fontSize: 11, color: 'var(--muted)' }}>{r.name}</span>
+        ) : (
+          <span key={r.name} title={String(r.name)} style={{ position: 'absolute', top: 4,
+            left: `${((MARGIN_LEFT + slotW * (i + 0.5)) / W) * 100}%`, transform: 'translateX(-50%)',
+            maxWidth: `${(slotW / W) * 100}%`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            fontSize: 11, color: 'var(--muted)' }}>{r.name}</span>
+        ))}
+      </div>
+      </div>
     </div>
   )
 }

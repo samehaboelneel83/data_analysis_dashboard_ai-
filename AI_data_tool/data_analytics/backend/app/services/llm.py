@@ -78,6 +78,8 @@ def _gates() -> tuple[asyncio.Semaphore, asyncio.Semaphore]:
 #: What `last_error` says when a call was refused by the budget; callers
 #: already treat any None as "no model this time" and fall back.
 BUDGET_SPENT = "the organization's AI budget is used up"
+#: B-11: every endpoint was found down moments ago; the call was not attempted.
+MODEL_UNREACHABLE = "model unreachable"
 
 
 @dataclass
@@ -104,6 +106,10 @@ class UsageMeter:
     refused: int = 0
     tokens_in: int = 0
     tokens_out: int = 0
+    #: QA E-08: why the person this work is for may not use AI (their role
+    #: lacks `use_ai`), or None. Every call is then refused like a spent
+    #: budget, and a model-first endpoint answers 403 (quotas.enforce_ai_budget).
+    denied: str | None = None
 
     @property
     def spent(self) -> bool:
@@ -126,7 +132,16 @@ _meter: ContextVar[UsageMeter | None] = ContextVar("llm_usage_meter", default=No
 #: forget the switch: with AI off for the data, its call returns None and its
 #: own no-model path runs, exactly as when the endpoint is down.
 AI_NOT_ALLOWED = "AI is switched off for this data"
+#: What `last_error` says when every endpoint the call could use was marked
+#: down moments ago (llm_endpoints.known_down): no request is sent, so the
+#: caller's no-model path runs at once instead of after a connect timeout.
+MODEL_UNREACHABLE = "the AI model is unreachable"
 _ai_denied: ContextVar[str | None] = ContextVar("llm_ai_denied", default=None)
+#: QA E-08: why the signed-in person's ROLE may not use AI, or None. Set for
+#: every request by `dependencies.get_current_user` (core/role_permissions.py),
+#: kept apart from `_ai_denied` so the data's own switch (`allow_ai`) can never
+#: lift it. Background tasks a request starts inherit it.
+_role_ai_denied: ContextVar[str | None] = ContextVar("llm_role_ai_denied", default=None)
 
 
 # ── untrusted text in prompts ───────────────────────────────────────────────
@@ -180,6 +195,15 @@ def allow_ai() -> None:
     _ai_denied.set(None)
 
 
+def set_role_ai_denied(reason: str | None) -> None:
+    """QA E-08: the requester's role allows AI (None) or not (the reason)."""
+    _role_ai_denied.set(reason)
+
+
+def role_ai_denied() -> str | None:
+    return _role_ai_denied.get()
+
+
 def ai_denied() -> str | None:
     return _ai_denied.get()
 
@@ -202,6 +226,24 @@ def release_meter(token: Token) -> None:
         _meter.set(None)
 
 
+def _describe(exc: BaseException, base: str, connect_s: float | None = None) -> str:
+    """A readable reason for a failed call. httpx's timeouts and connect errors
+    often have an EMPTY str(), which left "ConnectTimeout:" with nothing after
+    the colon on the settings page (QA E-17)."""
+    text = str(exc).strip()
+    name = type(exc).__name__
+    if text:
+        return f"{name}: {text}"
+    if isinstance(exc, httpx.ConnectTimeout):
+        within = f" within {connect_s:g} s" if connect_s else ""
+        return f"{name}: no answer from {base}{within} (is the model server running?)"
+    if isinstance(exc, httpx.ConnectError):
+        return f"connection refused by {base} (is the model server running?)"
+    if isinstance(exc, httpx.TimeoutException):
+        return f"{name}: no answer from {base} in time"
+    return f"{name} talking to {base}"
+
+
 class LLMClient:
     """One configured connection to the model endpoint.
 
@@ -215,7 +257,7 @@ class LLMClient:
         base_url: str,
         model: str,
         enabled: bool = True,
-        timeout: float = 180.0,
+        timeout: "float | httpx.Timeout" = 180.0,
         transport: httpx.BaseTransport | None = None,
         api_key: str = "",
         endpoint_id: str | None = None,
@@ -280,7 +322,9 @@ class LLMClient:
         if not self.enabled:
             # Not an error worth recording — the operator turned it off.
             return None
-        denied = _ai_denied.get()
+        meter = _meter.get()
+        denied = _role_ai_denied.get() or (meter.denied if meter is not None else None) \
+            or _ai_denied.get()
         if denied:
             # The owner of this data said no (services/ai_policy.py). Nothing
             # leaves the process; the caller's no-model path takes over.
@@ -348,6 +392,25 @@ class LLMClient:
             out.append((ep.id or None, ep.base_url.rstrip("/"), ep.model, ep.api_key, max_tokens))
         return out
 
+    def _http_timeout(self) -> httpx.Timeout:
+        """The full timeout for reading a slow answer, but a short one for
+        CONNECTING: an unreachable host must fail in seconds, not minutes
+        (a single float would make connect wait the whole 180 s too)."""
+        if isinstance(self.timeout, httpx.Timeout):
+            return self.timeout  # the caller chose both already (E-17's Test connection)
+        connect = min(float(settings.llm_connect_timeout_s), float(self.timeout))
+        return httpx.Timeout(self.timeout, connect=connect)
+
+    def available(self) -> bool:
+        """B-11: False when the client is off, or every endpoint it would try
+        was found down moments ago (llm_endpoints.known_down) -- so a caller
+        can say "AI unavailable" at once instead of waiting on timeouts."""
+        if not self.enabled:
+            return False
+        from . import llm_endpoints
+        ids = [self.endpoint_id] + [getattr(f, "id", None) for f in self.fallbacks]
+        return not all(llm_endpoints.known_down(i) for i in ids)
+
     async def _post(self, payload: dict[str, Any], weight: str = "normal") -> str | None:
         meter = _meter.get()
         if meter is not None and meter.spent:
@@ -355,10 +418,18 @@ class LLMClient:
             self.last_error = BUDGET_SPENT
             logger.info("LLM call refused: AI budget spent (org %s, %s)", meter.org_id, meter.feature)
             return None
-        self.call_count += 1
         from . import llm_endpoints
 
         targets = self._targets(payload, weight)
+        # AD-01: skip endpoints whose light turned red moments ago. Dialling
+        # one only waits for the connect timeout to learn the same thing.
+        live = [t for t in targets if not llm_endpoints.known_down(t[0])]
+        if targets and not live:
+            self.last_error = MODEL_UNREACHABLE
+            logger.info("LLM call skipped: every endpoint is known to be down")
+            return None
+        targets = live
+        self.call_count += 1
         data = None
         errors: list[str] = []
         for n, (eid, base, model, key, max_tokens) in enumerate(targets):
@@ -368,8 +439,10 @@ class LLMClient:
                 headers["Authorization"] = f"Bearer {key}"
             llm_endpoints.begin_call(eid)
             try:
+                # A short connect timeout: an unreachable host is known in
+                # seconds, while a slow answer still gets the full budget.
                 async with httpx.AsyncClient(
-                    timeout=self.timeout, transport=self._transport
+                    timeout=self._http_timeout(), transport=self._transport
                 ) as http:
                     response = await http.post(f"{base}/chat/completions", json=body, headers=headers)
                     if response.status_code >= 400:
@@ -393,7 +466,8 @@ class LLMClient:
                 # Deliberately broad: connect errors, timeouts, TLS failures, invalid
                 # JSON bodies and DNS problems are all the same event to a caller —
                 # "no description this run" — and none of them may escape.
-                err = f"{type(exc).__name__}: {exc}"
+                connect_s = self.timeout.connect if isinstance(self.timeout, httpx.Timeout) else None
+                err = _describe(exc, base, connect_s)
                 llm_endpoints.mark(eid, False, err)
                 errors.append(err)
                 more = " -- trying the next endpoint" if n + 1 < len(targets) else ""
@@ -606,8 +680,12 @@ def get_client(choice: str | None = None) -> LLMClient:
 
     targets = llm_endpoints.candidates(choice)
     if not targets:
-        return LLMClient(base_url=settings.llm_base_url, model=settings.llm_model,
-                         enabled=False, timeout=settings.llm_timeout_s)
+        off = LLMClient(base_url=settings.llm_base_url, model=settings.llm_model,
+                        enabled=False, timeout=settings.llm_timeout_s)
+        if llm_endpoints.is_off(choice):
+            # F-11: the person chose "Off -- no AI" in the top bar.
+            off.last_error = "AI is off for you (top-bar model picker)."
+        return off
     first, rest = targets[0], targets[1:]
     picked = choice or llm_endpoints.current_choice()
     return LLMClient(

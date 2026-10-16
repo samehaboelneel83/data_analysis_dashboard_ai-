@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import select
 
 from app.models.models import (AgentMessage, AgentRun, DataSource,
-                               ObjectRowPolicy, Role, SourceObject, User)
+                               ObjectRowPolicy, Role, SourceColumn, SourceObject, User)
 from app.services.agent import graph as graph_module
 
 
@@ -39,6 +39,10 @@ async def seeded_object(db_session, seeded_source, two_orgs):
     obj = SourceObject(data_source_id=seeded_source.id,
                        org_id=two_orgs["a"]["org"].id, name="orders")
     db_session.add(obj)
+    await db_session.flush()
+    # A rule's columns are checked against the synced columns (QA E-10).
+    for i, name in enumerate(("region", "userid", "Owner_Email")):
+        db_session.add(SourceColumn(source_object_id=obj.id, name=name, position=i))
     await db_session.commit()
     return obj
 
@@ -139,6 +143,22 @@ class TestAsk:
         assert got.json()["answer"] == "Total is 30."
         msgs = (await db_session.execute(select(AgentMessage))).scalars().all()
         assert [m.role for m in msgs] == ["user", "assistant"]
+
+    async def test_an_ask_is_in_the_activity_log_without_its_question(
+            self, client, auth_headers, seeded_source, scripted_ok, db_session):
+        """AD-19 (decision): the conversation and its data, never the
+        question text -- a question can carry sensitive words."""
+        from app.models.models import AuditLogEntry
+        cid = (await client.post("/api/v1/agent/conversations",
+                                 json={"data_source_id": seeded_source.id},
+                                 headers=auth_headers["a"])).json()["id"]
+        await client.post(f"/api/v1/agent/conversations/{cid}/ask",
+                          json={"question": "salary of Jane Secret"}, headers=auth_headers["a"])
+        [e] = (await db_session.execute(select(AuditLogEntry).where(
+            AuditLogEntry.action == "agent.ask"))).scalars().all()
+        assert e.entity == "conversation" and e.entity_id == cid
+        assert "Jane" not in (e.detail or "") and "salary" not in (e.detail or "")
+        assert f"connection #{seeded_source.id}" in (e.detail or "")
 
     async def test_a_run_is_readable_with_its_steps(self, client,
                                                     auth_headers,
@@ -303,6 +323,8 @@ class TestRowPolicies:
         obj = SourceObject(data_source_id=mysql_source.id, org_id=org_a.id,
                            name="orders")
         db_session.add(obj)
+        await db_session.flush()
+        db_session.add(SourceColumn(source_object_id=obj.id, name="region", position=0))
         await db_session.commit()
 
         real_parse_one = agent_module.sqlglot.parse_one
@@ -323,3 +345,27 @@ class TestRowPolicies:
 
         assert r.status_code == 200
         assert recorded_dialects == ["mysql"]
+
+
+
+class TestRowPolicyColumns:
+    """QA E-10: `nonexistent_col = 'x'` was saved; it would fail or deny rows
+    only when someone asked a question."""
+
+    async def test_row_policy_unknown_column_is_422(self, client, auth_headers, two_orgs,
+                                                    seeded_source, seeded_object, db_session):
+        r = await client.post("/api/v1/agent/row-policies", headers=auth_headers["a"], json={
+            "source_object_id": seeded_object.id, "role_id": two_orgs["a"]["role"].id,
+            "predicate": "nonexistent_col = 'x' AND region = 'us'"})
+        assert r.status_code == 422, r.text
+        detail = r.json()["detail"]
+        assert "nonexistent_col" in detail and "orders" in detail
+        assert "region" in detail and "userid" in detail       # the columns it does have
+        assert (await db_session.execute(select(ObjectRowPolicy))).first() is None
+
+    async def test_row_policy_known_column_and_userid_token_ok(self, client, auth_headers, two_orgs,
+                                                               seeded_source, seeded_object):
+        r = await client.post("/api/v1/agent/row-policies", headers=auth_headers["a"], json={
+            "source_object_id": seeded_object.id, "role_id": two_orgs["a"]["role"].id,
+            "predicate": "USERID = USERID() AND owner_email = USEREMAIL() AND region IN MYSCOPE()"})
+        assert r.status_code == 200, r.text

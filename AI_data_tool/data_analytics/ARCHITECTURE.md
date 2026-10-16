@@ -1166,7 +1166,7 @@ SQLAlchemy, grouped by concern:
 | Platform | `saml_authn_requests`, `org_mcp_access`, `eval_runs` |
 | Ops | `sync_runs`, `schema_versions`, `column_stats`, `materializations`, `quotas`, `query_runs`, `ai_usage`, `migration_items` |
 
-Schema changes go through **Alembic** (`backend/alembic/`, 68 revisions).
+Schema changes go through **Alembic** (`backend/alembic/`, 72 revisions).
 Every timestamp column is `TIMESTAMPTZ` and the app writes naive UTC; `core/database.py` marks each bound naive datetime as UTC (asyncpg would read it as the process's local time) and pins the session time zone to UTC, so stored times are right on a server whose clock is not UTC.
 `postgres/init.sql` provides the initial schema and indexes.
 
@@ -1510,7 +1510,7 @@ breaks an org's tokens down by day, feature and person.
 
 ### Routers
 
-**38 router modules**, mounted with 41 `include_router` calls in `main.py` --
+**40 router modules**, mounted with 43 `include_router` calls in `main.py` --
 `analysis`, `metadata` and `publishing` each expose a second router. All under `/api/v1`
 except the agent:
 
@@ -1524,6 +1524,8 @@ except the agent:
 | `data_sources` | Connections |
 | `relationships` | Model relationships |
 | `metadata` (+ `stats`) | Catalog and profiling |
+| `dataset_glossary` | Business terms scoped to one dataset (B-21) |
+| `org_glossary` | Organization-wide business terms, `/glossary` (B-21) |
 | `auth`, `sso` | Login, SAML/OIDC, provisioning |
 | `admin`, `platform` | Administration, tenancy |
 | `shared`, `embed` | Public links, embedded reports |
@@ -2361,8 +2363,8 @@ Agent pane (7)
 
 | Suite | Scope | Count |
 |-------|-------|-------|
-| Backend | `backend/tests/` | ~6,670 tests across 538 modules |
-| Frontend | colocated `*.test.ts(x)` | ~3,410 tests across 389 files |
+| Backend | `backend/tests/` | ~6,670 tests across 559 modules |
+| Frontend | colocated `*.test.ts(x)` | ~3,410 tests across 411 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |
 | Doc audit | `tests/test_architecture_doc.py` | Enforces the *counts* in this document |

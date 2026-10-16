@@ -6,6 +6,8 @@ reaches the audit log.
 """
 import time
 
+import httpx
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -77,7 +79,9 @@ async def test_llm(body: LlmTest | None = None, _: User = Depends(require_super_
     model = (body.llm_model or d_model).strip()
     key = d_key if body.llm_api_key is None else body.llm_api_key
     client = LLMClient(base_url=base, model=model, enabled=True, api_key=key,
-                       timeout=min(settings.llm_timeout_s, 30.0),
+                       # A dead host must fail in seconds, not after the whole
+                       # answer budget (QA E-17: ~34 s, then "ConnectTimeout:").
+                       timeout=httpx.Timeout(min(settings.llm_timeout_s, 30.0), connect=5.0),
                        endpoint_id=saved.id if saved and not (body.llm_base_url or body.llm_model) else None)
     started = time.monotonic()
     reply = await client.complete([{"role": "user", "content": "Reply with the word ok."}],

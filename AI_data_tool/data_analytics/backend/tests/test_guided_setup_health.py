@@ -5,6 +5,7 @@ import pytest
 
 from app.services.data_quality import quality_report
 from app.services.guided_setup import health
+from app.services.llm import get_client as _real_get_client
 
 
 class FakeClient:
@@ -67,6 +68,37 @@ class TestPlainLines:
         rules = health.generic_rules(df, "en", skip=skip)
         assert [r["column"] for r in rules if r["kind"] == "negative"] == ["price"]
         assert rules[0]["rows"] == 5
+
+
+class TestTheTwoMissedChecks:
+    """B-34: numbers kept as text in the source, and an end date before the start."""
+
+    def test_end_before_start_is_one_line_with_a_fix(self):
+        n = 200
+        created = pd.date_range("2025-01-01", periods=n, freq="D")
+        delivered = created + pd.Timedelta(days=3)
+        delivered = delivered.where(pd.RangeIndex(n) >= 5, created - pd.Timedelta(days=2))
+        df = pd.DataFrame({"created_at": created, "delivered_at": delivered, "fee": range(n)})
+        items = [i for i in health.generic_rules(df, "en") if i["kind"] == "dateorder"]
+        assert len(items) == 1
+        item = items[0]
+        assert item["rows"] == 5 and item["column"] == "delivered_at"
+        assert "“delivered_at” before “created_at”" in item["what"]
+        assert item["action"]["kind"] == "exclude" and item["action"]["rule"] == "`delivered_at` >= `created_at`"
+
+    def test_dates_in_order_say_nothing(self):
+        created = pd.date_range("2025-01-01", periods=50, freq="D")
+        df = pd.DataFrame({"created_at": created, "delivered_at": created + pd.Timedelta(days=1)})
+        assert not [i for i in health.generic_rules(df, "en") if i["kind"] == "dateorder"]
+
+    def test_a_text_column_in_the_source_read_as_numbers_is_reported(self):
+        df = pd.DataFrame({"declared_value": [10.5, 20.0, 31.25, 7.0] * 10, "city": ["a", "b", "c", "d"] * 10})
+        items = health.column_items(quality_report(df), df, "en", stored_types={"declared_value": "text", "city": "text"})
+        textnum = [i for i in items if i["kind"] == "textnum"]
+        assert [i["column"] for i in textnum] == ["declared_value"]
+        assert textnum[0]["action"]["kind"] == "retype"
+        # Without the stored type nothing changes.
+        assert not [i for i in health.column_items(quality_report(df), df, "en") if i["kind"] == "textnum"]
 
 
 class TestModelRules:
@@ -176,6 +208,96 @@ class TestRoutes:
                                json={"item_id": item["id"]})).json()
         assert seen["steps"][-1]["kind"] == "fill_nulls"
         assert f"{item['id']}|fix" in r["findings"]["fixed"]
+
+    async def test_warn_on_every_refresh_saves_a_warning_check(self, client, auth_headers, setup, db_session):
+        """B-02: "Warn me on every refresh" (how="check") imported DataCheckIn
+        from the wrong module, so it was a 500 every time."""
+        from sqlalchemy import select
+        from app.models.models import DataCheck
+        src, ds = setup
+        f = (await client.get(f"/api/v1/setup/{src.id}/check", headers=auth_headers["a"])).json()["datasets"][0]["findings"]
+        item = next(i for i in f["health"] if (i.get("action") or {}).get("rule"))
+        r = await client.post(f"/api/v1/setup/{src.id}/check/{ds.id}/fix", headers=auth_headers["a"],
+                              json={"item_id": item["id"], "how": "check"})
+        assert r.status_code == 200, r.text
+        assert f"{item['id']}|check" in r.json()["findings"]["fixed"]
+        rows = (await db_session.execute(select(DataCheck).where(DataCheck.dataset_id == ds.id))).scalars().all()
+        assert [(c.kind, c.severity, c.params["expression"]) for c in rows] == \
+            [("rule", "warn", item["action"]["rule"])]
+
+    async def test_plain_findings_are_kept_before_the_ai_answers(
+            self, client, auth_headers, setup, db_session, monkeypatch):
+        """B-12: the deterministic findings are written (and shown) first,
+        marked ai_pending, while the slow model calls are still running."""
+        from sqlalchemy import select
+        from app.models.models import SetupFlow
+        src, ds = setup
+        seen = {}
+
+        async def slow_model_rules(*a, **k):
+            flow = (await db_session.execute(select(SetupFlow))).scalars().first()
+            await db_session.refresh(flow)
+            seen["entry"] = dict((flow.findings or {}).get(str(ds.id)) or {})
+            return []
+        monkeypatch.setattr(health, "model_rules", slow_model_rules)
+        done = (await client.get(f"/api/v1/setup/{src.id}/check", headers=auth_headers["a"])).json()
+        mid = seen["entry"]
+        assert mid["ai_pending"] is True and not mid.get("pending")
+        assert any(i["kind"] == "placeholder" for i in mid["health"])
+        f = done["datasets"][0]["findings"]
+        assert f["ai_pending"] is False and not f["pending"]
+
+    async def test_a_fix_recounts_the_rows_and_columns(self, client, auth_headers, setup, db_session, monkeypatch):
+        """B-32: after a one-click fix the wizard and the dataset kept the
+        pre-fix shape (64,420 x 26 when the output was 62,662 x 24)."""
+        from app.models.models import Dataset
+        src, ds = setup
+        f = (await client.get(f"/api/v1/setup/{src.id}/check", headers=auth_headers["a"])).json()["datasets"][0]["findings"]
+        assert f["rows"] == 400
+        item = next(i for i in f["health"] if i["kind"] == "empty")
+
+        async def fake_set(dataset_id, steps, db, user):
+            return steps
+        monkeypatch.setattr("app.routers.datasets.set_prep_steps", fake_set)
+        smaller = cars_frame().iloc[:350].drop(columns=[cars_frame().columns[0]])
+
+        async def after_fix(db, d, user):
+            return smaller
+        monkeypatch.setattr("app.services.alerts.alert_frame", after_fix)
+        r = (await client.post(f"/api/v1/setup/{src.id}/check/{ds.id}/fix", headers=auth_headers["a"],
+                               json={"item_id": item["id"]})).json()
+        assert (r["findings"]["rows"], r["findings"]["columns"]) == (350, smaller.shape[1])
+        await db_session.refresh(ds)
+        assert (ds.row_count, ds.col_count) == (350, smaller.shape[1])
+
+    async def test_each_dataset_says_how_many_dashboards_use_it(self, client, auth_headers, setup, db_session, two_orgs):
+        """B-33: a fix on a dataset already in use changes it for everyone; the
+        step needs to know that before it asks."""
+        from app.models.models import Report
+        src, ds = setup
+        got = (await client.get(f"/api/v1/setup/{src.id}/check", headers=auth_headers["a"])).json()
+        assert got["datasets"][0]["used_by"] == {"dashboards": 0}
+        db_session.add(Report(name="Ops", dataset_id=ds.id, org_id=two_orgs["a"]["org"].id))
+        await db_session.commit()
+        got = (await client.get(f"/api/v1/setup/{src.id}/check", headers=auth_headers["a"])).json()
+        assert got["datasets"][0]["used_by"] == {"dashboards": 1}
+
+    async def test_the_step_says_when_the_ai_is_unavailable(self, client, auth_headers, setup, db_session, monkeypatch):
+        """B-11: the check step carries ai.available so the page can say "AI is
+        not available" at once instead of a spinner."""
+        from app.services import llm_endpoints
+        from app.models.models import DataSource
+        src, ds = setup
+        got = (await client.get(f"/api/v1/setup/{src.id}/check", headers=auth_headers["a"])).json()
+        assert got["ai"] == {"available": False, "reason": "off"}      # the connection does not allow it
+        src.allow_llm_sampling = True
+        await db_session.commit()
+        monkeypatch.setattr("app.services.llm.get_client", _real_get_client)
+        monkeypatch.setattr("app.core.config.settings.llm_enabled", True)
+        for e in llm_endpoints.endpoints():
+            llm_endpoints.mark(e.id, False, "ConnectError")
+        got = (await client.get(f"/api/v1/setup/{src.id}/check", headers=auth_headers["a"])).json()
+        assert got["ai"] == {"available": False, "reason": "unavailable"}
 
     async def test_findings_are_offered_to_the_datasets_own_pages(self, client, auth_headers, setup):
         src, ds = setup

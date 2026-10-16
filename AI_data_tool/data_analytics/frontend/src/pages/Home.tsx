@@ -64,7 +64,7 @@ export default function Home() {
   const t = useT()
   const user = useOptionalAuth()?.user ?? null
   const isAdmin = !!user?.role?.is_org_admin
-  const { offline } = useAiOffline()
+  const { offline, off: aiOff, role: aiRole } = useAiOffline()
   // Guided setup: unfinished setups to continue (plan 1c). Optional; silent on failure.
   const setups = useSlot(() => setupApi.journeys())
   const askRef = useRef<HTMLInputElement>(null)
@@ -94,7 +94,7 @@ export default function Home() {
   const sources = useSlot<DataSource[]>(() => dataSourcesApi.list())
   const convs = useSlot(() => agentApi.listConversations())
   const runs = useSlot<RefreshRunRow[]>(() => monitoringApi.refreshRuns({ limit: 200 }), isAdmin)
-  const activity = useSlot<ActivityRow[]>(() => monitoringApi.activity(200), isAdmin)
+  const activity = useSlot<ActivityRow[]>(() => monitoringApi.activity({ limit: 200 }), isAdmin)
 
   const digest = useMemo(() => runs.data ? jobsDigest(runs.data) : null, [runs.data])
   const feed = useMemo(() => activity.data ? feedItems(activity.data, user?.email, reports, datasets) : [],
@@ -191,7 +191,7 @@ export default function Home() {
   return (
     <div className="dl-hm" aria-busy={loading || undefined}>
       <div className="hm-toprow">
-        <Hero ref={askRef} name={name} firstRun={firstRun} noData={noData} offline={offline} loading={loading} chips={chips} />
+        <Hero ref={askRef} name={name} firstRun={firstRun} noData={noData} offline={offline} aiOff={aiOff} aiRole={aiRole} loading={loading} chips={chips} />
         <Stats tiles={tiles} loading={loading} />
       </div>
       {setUp

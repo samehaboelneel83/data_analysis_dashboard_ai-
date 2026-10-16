@@ -272,6 +272,9 @@ EXCUSED_ROUTES = {
     ("GET", "/api/v1/datasets/{dataset_id}/allow-ai"): "the 'Allow AI' setting and who decides it; no row content; test_dataset_allow_ai.py",
     ("GET", "/api/v1/datasets/{dataset_id}/column-lineage"): "where a column comes from and what uses it -- names and definitions, the SQL only for editors; no row content (docs/pipeline/PLAN.md, P5)",
     ("POST", "/api/v1/datasets/{dataset_id}/column-meta/classify-again"): "data capability required; re-reads what each number IS (kinds, not values) with denied columns left out of what the model is shown; returns column_meta as the dataset detail does; test_column_classes.py",
+    # B-21: one dataset's glossary terms.
+    ("GET", "/api/v1/datasets/{dataset_id}/glossary"): "glossary terms (words, definitions, a column name); dataset read required; terms naming a denied column left out; no row content; test_glossary_dataset_scope.py",
+    ("POST", "/api/v1/datasets/{dataset_id}/glossary"): "org admin only; writes a term naming one of the dataset's columns; no row content; test_glossary_dataset_scope.py",
 }
 
 

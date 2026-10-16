@@ -13,11 +13,28 @@ import { pickChartSvg, svgToPngDataUrl } from './widgetImage'
 export async function exportPrintViewToPptx(reportName: string, root: HTMLElement): Promise<number> {
   const { default: PptxGen } = await import('pptxgenjs')
   const pres = new PptxGen()
-  pres.layout = 'LAYOUT_WIDE'                      // 13.33 x 7.5 in
-  const SLIDE_W = 13.33, SLIDE_H = 7.5
   const TITLE_H = 0.6, MARGIN = 0.3
+  const SLIDE_W = 13.33
+  let SLIDE_H = 7.5
 
   const sections = [...root.querySelectorAll<HTMLElement>('section.print-page')]
+  // C-21: pages drawn at a fixed size (data-page-frame="WxH") get slides of
+  // that shape when they all share one -- a deck has a single slide size.
+  // Otherwise the widescreen slide, with each fixed page kept in proportion.
+  const frameOf = (sec: HTMLElement) => {
+    const m = /^(\d+)x(\d+)$/.exec(sec.querySelector('[data-print-canvas]')?.getAttribute('data-page-frame') ?? '')
+    return m ? { w: Number(m[1]), h: Number(m[2]) } : null
+  }
+  const frames = sections.map(frameOf)
+  const first = frames[0]
+  if (first && frames.every(f => f && f.w * first.h === f.h * first.w)) {
+    const contentW = SLIDE_W - 2 * MARGIN
+    SLIDE_H = Math.min(56, Math.max(1, contentW * first.h / first.w + TITLE_H + 2 * MARGIN))
+    pres.defineLayout({ name: 'DL_PAGE', width: SLIDE_W, height: SLIDE_H })
+    pres.layout = 'DL_PAGE'
+  } else {
+    pres.layout = 'LAYOUT_WIDE'                    // 13.33 x 7.5 in
+  }
   for (const section of sections) {
     const slide = pres.addSlide()
     const title = section.querySelector('h2')?.textContent ?? ''
@@ -28,8 +45,13 @@ export async function exportPrintViewToPptx(reportName: string, root: HTMLElemen
     if (!canvasBox) continue
     const sec = canvasBox.getBoundingClientRect()
     if (sec.width === 0 || sec.height === 0) continue
-    const contentH = SLIDE_H - TITLE_H - 2 * MARGIN
-    const contentW = SLIDE_W - 2 * MARGIN
+    let contentH = SLIDE_H - TITLE_H - 2 * MARGIN
+    let contentW = SLIDE_W - 2 * MARGIN
+    if (frameOf(section)) {
+      // A fixed page is not stretched to the slide: same proportions as drawn.
+      const k = Math.min(contentW / sec.width, contentH / sec.height)
+      contentW = sec.width * k; contentH = sec.height * k
+    }
 
     for (const node of canvasBox.querySelectorAll<HTMLElement>('[data-print-widget]')) {
       const r = node.getBoundingClientRect()

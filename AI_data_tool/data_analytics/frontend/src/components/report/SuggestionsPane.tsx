@@ -33,6 +33,7 @@ export function suggestWidgets(
   analysis: {
     numeric?: { correlation?: Record<string, Record<string, number>> }
     categorical?: { columns?: Record<string, { n_unique?: number }> }
+    overview?: { rows?: number }
   } | null,
   seed = 0,
   meta: Record<string, ColumnMeta | undefined> = {},
@@ -45,7 +46,17 @@ export function suggestWidgets(
     && meta[c.name]?.eligible_for_suggestion !== false)
   // An identifier is never a measure: "Emp no by gender" summed employee
   // numbers (HR evaluation). It is what a head-count counts instead.
-  const idCol = visible.find(c => isIdentifier(c.name, meta))
+  // C-18: and it is head-counted only when it really tells the rows apart:
+  // "distinct store_id" over 12 stores in 1,000 rows is not how many things
+  // there are. With the profile's row count and distinct count both known, an
+  // identifier at or under 50% unique is not one to count; unknown keeps the
+  // name/classification rule.
+  const rowCount = Number(analysis?.overview?.rows ?? NaN)
+  const mostlyUnique = (c: DatasetColumn) => {
+    const n = Number(analysis?.categorical?.columns?.[c.name]?.n_unique ?? NaN)
+    return !(Number.isFinite(n) && Number.isFinite(rowCount) && rowCount > 0) || n / rowCount > 0.5
+  }
+  const idCol = visible.find(c => isIdentifier(c.name, meta) && mostlyUnique(c))
   const numeric = visible.filter(c => (c.dtype === 'numeric' || roleOf(c) === 'measure')
     && !isIdentifier(c.name, meta) && !['category', 'temporal', 'geography'].includes(roleOf(c) ?? '')
     // The stored classification first (a code is never a measure, whatever its
@@ -294,13 +305,16 @@ function Thumb({ shape }: { shape: ReturnType<typeof thumbnail> }) {
   )
 }
 
-export default function SuggestionsPane({ columns, analysis, onAdd, reportId, datasetId, pageWidgets, columnMeta }: {
+export default function SuggestionsPane({ columns, analysis, onAdd, onAddMany, reportId, datasetId, pageWidgets, columnMeta }: {
   columns: DatasetColumn[]
   /** The author's column meaning (role, default summary): identifiers are
       never charted as measures, a salary is averaged. */
   columnMeta?: Record<string, ColumnMeta | undefined>
   analysis: { numeric?: { correlation?: Record<string, Record<string, number>> } } | null
   onAdd: (s: Suggestion) => void
+  /** F-15: add every idea shown (under the current chip) at once. Resolves
+   *  false when nothing was added (the builder asked and was told no). */
+  onAddMany?: (list: Suggestion[]) => Promise<boolean>
   /** When set, the pane leads with insight-driven suggestions for this
       report: the insights engine's ranked findings mapped to widgets, with
       findings about columns the report's name/description mentions first. */
@@ -440,6 +454,15 @@ export default function SuggestionsPane({ columns, analysis, onAdd, reportId, da
     remember(v.widget_type, v.config, 'added')
     onAdd({ widget_type: v.widget_type, title: v.headline, reason: v.reason, config: labelled(v) })
   }
+  // F-15: in the order they are shown, strongest section first.
+  const addable = sections.flatMap(sec => sec.items).filter(v => !added.includes(v.key))
+  const addAll = async () => {
+    if (!onAddMany || addable.length === 0) return
+    const ok = await onAddMany(addable.map(v => ({ widget_type: v.widget_type, title: v.headline, reason: v.reason, config: labelled(v) })))
+    if (!ok) return
+    setAdded(a => [...a, ...addable.map(v => v.key)])
+    addable.forEach(v => remember(v.widget_type, v.config, 'added'))
+  }
   const goTo = (w: Widget) => {
     const el = document.querySelector(`[data-widget-id="${w.id}"]`) as HTMLElement | null
     if (!el) return
@@ -468,6 +491,11 @@ export default function SuggestionsPane({ columns, analysis, onAdd, reportId, da
             <span className="dl-sug__title"><Lightbulb size={15} aria-hidden /> {tr('sug.title')}</span>
             <span className="dl-sug__summary">{tr('sug.summary', { n })}</span>
           </div>
+          {onAddMany && addable.length > 0 && (
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => void addAll()}>
+              <Plus size={12} aria-hidden /> {tr('sug.addAll', { n: addable.length })}
+            </button>
+          )}
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSeed(x => x + 1)}
             title={tr('sug.moreTitle')}>
             <RefreshCw size={12} aria-hidden /> {tr('sug.more')}

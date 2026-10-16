@@ -4,6 +4,9 @@ import RelativeDateEditor from '../components/report/RelativeDateEditor'
 import AccessExplainer from '../components/report/AccessExplainer'
 import { DEFAULT_SPEC, PRESETS, describeSpec, parseSpec, specProblem, type RelativeSpec } from '../lib/relativeDates'
 import { closeAll, closeOpen, markOpen, readOpen, type OpenReport } from '../lib/openReports'
+import { stackBelow } from '../lib/stackLayouts'
+import { pageFrame } from '../lib/pageSize'
+import { REPORT_WRITE_EVENT, type ReportWriteDetail } from '../lib/reportWrites'
 import OpenReportsMenu from '../components/report/OpenReportsMenu'
 import { useEffect, useState, useCallback, useMemo, useRef, lazy, Suspense, Fragment, type ReactNode } from 'react'
 import LoadError from '../components/ui/LoadError'
@@ -69,7 +72,7 @@ import { countLabel } from '../lib/fieldHints'
 import { boundarySetsApi, type BoundaryPack } from '../services/api'
 import PackTermsConfirm from '../components/report/PackTermsConfirm'
 import { describeFilter } from '../components/report/ViewerKit'
-import { fieldHints, hintTitle } from '../lib/fieldHints'
+import { fieldHints, hintTitle, numericRanges } from '../lib/fieldHints'
 import { PRE_AGGREGATED_HINT } from '../lib/aggregateDisclosure'
 import { CrossFilterProvider, useCrossFilter } from '../components/report/CrossFilterContext'
 import CollapsibleSide from '../components/report/CollapsibleSide'
@@ -104,6 +107,7 @@ import PageTakeaways from './reportBuilder/PageTakeaways'
 import FocusView from './reportBuilder/FocusView'
 import PresentControls from './reportBuilder/PresentControls'
 import { useAiOffline } from './ask/useAiOffline'
+import { aiOffKey } from './ask/aiOffKey'
 import { datasetSuggestions, type ColumnClasses } from './ask/suggestions'
 import './reportBuilder/viewMode.css'
 import './reportBuilder/builder.css'
@@ -265,6 +269,11 @@ export default function ReportBuilder() {
   const [cfSpec, setCfSpec] = useState<RelativeSpec>({ ...DEFAULT_SPEC })
   // Phase 7.3: what this user may do here, with reasons, and the sensitivity in force.
   const [access, setAccess] = useState<Record<string, AuthzDecision>>({})
+  // F-02: the share's "may download". The server refuses every export path
+  // (print view, PDF, workbook, a chart's CSV/Excel) on its own; this only
+  // keeps the UI from offering what will be refused. A screenshot or the
+  // browser's own print of the live view cannot be prevented by any app.
+  const mayDownload = access.download?.allowed !== false
   const [sens, setSens] = useState<{ floor?: string | null; floor_reasons?: string[]; effective?: string | null; effective_reasons?: string[] } | null>(null)
   const [accessOpen2, setAccessOpen2] = useState(false)
   const [dataset,    setDataset]    = useState<Dataset | null>(null)
@@ -272,6 +281,10 @@ export default function ReportBuilder() {
   // True once the datasets map (calc columns, formats, meta) has resolved --
   // the widget canvas waits on it; see the loading effect below.
   const [datasetsReady, setDatasetsReady] = useState(false)
+  // C-05: the attached dataset could not be loaded (after one retry). Said in
+  // the Fields pane with a Retry, not as "Attach a dataset" -- which made
+  // people think the pick at create time was lost and attach it twice.
+  const [datasetLoadError, setDatasetLoadError] = useState(false)
   const [allDatasets,setAllDatasets]= useState<Dataset[]>([])
   // Primary dataset's connection name, for the header breadcrumb -- fetched only
   // when there is one (source-backed dataset); an upload's dataset has no
@@ -370,7 +383,14 @@ export default function ReportBuilder() {
   // beside another panel) scales the page down to fit, instead of cutting
   // widgets off behind a sideways scroll. Drag and resize use the same scale.
   const { width: columnW, attach: attachColumn } = useMeasuredWidth(0)
-  const fitScale = columnW > 0 && columnW < MIN_CANVAS_W ? columnW / MIN_CANVAS_W : 1
+  // C-21: a page with a fixed size (16:9, 4:3, Custom W x H) is drawn in a
+  // frame of exactly that size, in Edit, View and Present alike; a column
+  // narrower than the frame scales it down the same way. A flowing page
+  // ("Fit to width", and every page made before sizes were applied) fills
+  // the column as before.
+  const frame = pageFrame(activePage)
+  const baseCanvasW = frame ? frame.w : MIN_CANVAS_W
+  const fitScale = columnW > 0 && columnW < baseCanvasW ? columnW / baseCanvasW : 1
   // The render in which the CANVAS changed width (a side panel or the rail
   // opened or closed, the window resized). Tiles snap to their new boxes in
   // that render instead of easing there: an eased tile hands its chart a new
@@ -399,6 +419,13 @@ export default function ReportBuilder() {
   const canvasScale = (zoom / 100) * fitScale
   const [multiSelectedIds, setMultiSelectedIds] = useState<Set<number>>(new Set())
   useEffect(() => { setZoom(100); setMultiSelectedIds(new Set()) }, [activePage?.id])
+  // C-04: a page change (add, switch, bookmark, Present) drops a selected
+  // widget that is not on the new page. Kept, the Properties pane went on
+  // editing it and every edit PATCHed /pages/<new page>/widgets/<old widget>: 404.
+  useEffect(() => {
+    setSelectedW(s => s && activePage?.widgets.some(w => w.id === s.id) ? s : null)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePage?.id])
   type RightPanelMode = 'default' | 'mobile' | 'selection' | 'sync' | 'bookmarks' | 'taborder' | 'performance' | 'reportrules' | 'parameters' | 'schedule' | 'review' | 'comments' | 'outline' | 'suggestions' | 'translations' | 'insights' | 'ask' | 'history'
   const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>('default')
   const [pageMenuOpen, setPageMenuOpen] = useState(false)
@@ -415,7 +442,8 @@ export default function ReportBuilder() {
   const [aiTab, setAiTab] = useState<AssistTab>('ask')
   const [askSeed, setAskSeed] = useState<{ q: string; n: number } | null>(null)
   const [focusW, setFocusW] = useState<Widget | null>(null)
-  const aiOffline = useAiOffline().offline
+  const aiState = useAiOffline()
+  const aiOffline = aiState.offline
   // Refresh in the Modern header remounts the canvas, so every widget asks again.
   const [refreshNonce, setRefreshNonce] = useState(0)
 
@@ -489,7 +517,7 @@ export default function ReportBuilder() {
 
   // Drag / resize state
   const [dragging,  setDragging]  = useState<{ widgetId:number; startX:number; startY:number; layout:Widget['layout']; offsetX:number; offsetY:number; packed:boolean; items:ReturnType<typeof toLayoutItems> } | null>(null)
-  const [resizing,  setResizing]  = useState<{ widgetId:number; startX:number; startY:number; layout:Widget['layout']; packed:boolean; items:ReturnType<typeof toLayoutItems> } | null>(null)
+  const [resizing,  setResizing]  = useState<{ widgetId:number; startX:number; startY:number; layout:Widget['layout']; packed:boolean; items:ReturnType<typeof toLayoutItems>; axis?: 'both' | 'x' | 'y' } | null>(null)
   const [localLayouts, setLocalLayouts] = useState<Record<number, Widget['layout']>>({})
   // Mirrored in a ref so the drag effect's mouseup can read the LATEST layout
   // without listing localLayouts in its deps -- with it listed, every
@@ -525,6 +553,8 @@ export default function ReportBuilder() {
   // our writes mid-drag would be worse than telling us to reload.
   const [loadedRevision, setLoadedRevision] = useState<number | null>(null)
   const loadedRevisionRef = useRef<number | null>(null)
+  /** When this session last wrote to the report (C-17). */
+  const lastOwnWriteRef = useRef(0)
   const [staleRevision, setStaleRevision] = useState<number | null>(null)
   /** E09: a save refused because someone else changed the widget first. */
   const [editConflict, setEditConflict] = useState<EditConflict | null>(null)
@@ -710,11 +740,14 @@ export default function ReportBuilder() {
       // Skip while one of our own writes is in flight: it bumps the counter and then
       // reloads, and reporting that as somebody else's edit would be a false alarm.
       if (savingRef.current) return
+      // C-17: nor just after one this session announced (its re-sync is on the way).
+      const ownWriteRecent = () => Date.now() - lastOwnWriteRef.current < 3000
+      if (ownWriteRecent()) return
       try {
         const remote = await reportsApi.getRevision(reportId)
         // The fetch may have started before our save; ignore if we wrote meanwhile
         // or if loadReport already caught up.
-        if (savingRef.current) return
+        if (savingRef.current || ownWriteRecent()) return
         const known = loadedRevisionRef.current
         if (!cancelled && known != null && remote > known) setStaleRevision(remote)
       } catch {
@@ -743,7 +776,10 @@ export default function ReportBuilder() {
     ]
     if (ids.length === 0) { setDatasetsReady(true); return }
     try {
-      const list = await Promise.all(ids.map(id => datasetsApi.get(id)))
+      const fetchAll = () => Promise.all(ids.map(id => datasetsApi.get(id)))
+      // One retry: the first open of a just-created dashboard is the slowest
+      // moment, and one failed fetch used to stick until a reload.
+      const list = await fetchAll().catch(() => fetchAll())
       const map: Record<number, Dataset> = {}
       list.forEach(ds => { map[ds.id] = ds })
       setDatasets(map)
@@ -755,9 +791,11 @@ export default function ReportBuilder() {
         setColumnMeta(primary.column_meta ?? {})
         setColumnFormats(primary.column_formats ?? {})
       }
+      setDatasetLoadError(false)
       setDatasetsReady(true)
     } catch {
       // A failed dataset fetch must not blank the canvas forever.
+      setDatasetLoadError(true)
       setDatasetsReady(true)
     }
   }, [])
@@ -1116,6 +1154,27 @@ export default function ReportBuilder() {
   const syncRevisionAfterOwnWrite = async () => {
     try { setLoadedRevision(await reportsApi.getRevision(reportId)) } catch { /* next poll decides */ }
   }
+  // C-17 (sweep): ANY successful write this session makes to this report --
+  // the API client announces each one (lib/reportWrites) -- re-syncs the known
+  // revision, so no write path has to remember to, and none raises "changed in
+  // another session" on the author's own edit. A burst of writes syncs once.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const onWrite = (e: Event) => {
+      if ((e as CustomEvent<ReportWriteDetail>).detail?.reportId !== reportId) return
+      lastOwnWriteRef.current = Date.now()
+      clearTimeout(timer)
+      timer = setTimeout(() => {
+        reportsApi.getRevision(reportId).then(r => {
+          // The ref at once too: the poll reads it, and must not wait a render.
+          if (loadedRevisionRef.current == null || r > loadedRevisionRef.current) loadedRevisionRef.current = r
+          setLoadedRevision(known => known == null || r > known ? r : known)
+        }).catch(() => { /* next poll decides */ })
+      }, 250)
+    }
+    window.addEventListener(REPORT_WRITE_EVENT, onWrite)
+    return () => { window.removeEventListener(REPORT_WRITE_EVENT, onWrite); clearTimeout(timer) }
+  }, [reportId])
 
   /** Change the dashboard's look (fonts, borders, corners...) as one undoable step. */
   const setStyleUndoable = async (next: DashboardStyle) => {
@@ -1484,6 +1543,48 @@ export default function ReportBuilder() {
     } finally {
       setSaving(false)
     }
+  }
+
+  /** F-15: the Suggestions pane's "Add all shown". One under another below
+   *  the page (stackBelow), one save of the packed layout, one reload, and ONE
+   *  undo entry that takes them all away. Asks first when there are many. */
+  const addSuggestedWidgets = async (list: Suggestion[]): Promise<boolean> => {
+    if (!activePage) { toast.error(tr('bc.shell.t.selectPage')); return false }
+    if (!list.length) return false
+    if (list.length > 8 && !(await confirm({ title: tr('sug.addAllConfirm', { n: list.length }), body: tr('sug.addAllBody'),
+      confirmLabel: tr('sug.addAll', { n: list.length }), destructive: false }))) return false
+    const ws = activePage.widgets
+    const sizeOf = (t: string) => ({ w: Math.max(6, minSize(t).w), h: Math.max(5, minSize(t).h) })
+    const boxes = stackBelow(ws.map(w => w.layout), list.map(x => sizeOf(x.widget_type)))
+    const pageId = activePage.id
+    const made: Widget[] = []
+    setSaving(true)
+    try {
+      for (let i = 0; i < list.length; i++) {
+        const sug = list[i]
+        made.push(await reportsApi.addWidget(reportId, pageId, {
+          widget_type: sug.widget_type as WidgetType, title: sug.title, config: sug.config, layout: boxes[i],
+        }))
+      }
+    } finally {
+      if (made.length) {
+        const snaps = made.map((w, i) => ({ id: w.id, snap: { widget_type: list[i].widget_type as WidgetType, title: list[i].title,
+          config: list[i].config, layout: w.layout } as Partial<Widget> }))
+        pushUndo({
+          label: tr('sug.addAllDone', { n: made.length }),
+          undo: async () => { for (const m of snaps) await removeWidgetById(pageId, m.id) },
+          redo: async () => { for (const m of snaps) await recreateWidget(pageId, m.id, m.snap) },
+        })
+        if (isPackedMode(activePage.layout_mode) && !needsAutoPack(activePage.layout_mode)) {
+          const nextWidgets = [...ws, ...made]
+          await persistWidgetLayouts({ ...activePage, widgets: nextWidgets }, compact(toLayoutItems(nextWidgets)))
+        }
+        await loadReport()
+        toast.success(tr('sug.addAllDone', { n: made.length }))
+      }
+      setSaving(false)
+    }
+    return made.length === list.length
   }
 
   const applyAlign = async (mode: Parameters<typeof alignWidgets>[1]) => {
@@ -2012,7 +2113,14 @@ export default function ReportBuilder() {
       setSelectedW(copy)
       setTimeout(() => document.querySelector(`[data-widget-id="${copy.id}"]`)
         ?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }), 60)
-      toast.success(tr('bc.shell.t.duplicated'))
+      // C-12: a copy made by a stray click is one press away from gone.
+      toast.success(tt => (
+        <span className="dl-toast-undo">
+          {tr('bc.shell.t.duplicated')}
+          <button type="button" className="btn btn-ghost btn-sm"
+            onClick={() => { toast.dismiss(tt.id); void runUndoRef.current() }}>{tr('bd.keys.undo')}</button>
+        </span>
+      ), { duration: 8000 })
     } catch {
       toast.error(tr('bc.shell.t.duplicateFailed'))
     } finally {
@@ -2075,7 +2183,12 @@ export default function ReportBuilder() {
 
   const updateWidgetConfig = useCallback(async (config: Record<string, unknown>, title: string, overwrite = false) => {
     if (!selectedW || !activePage) return
-    const before = activePage.widgets.find(x => x.id === selectedW.id) ?? selectedW
+    // C-04: write to the page the widget is really on. A widget no longer in
+    // the report is said, not sent (the request could only 404).
+    const home = activePage.widgets.some(x => x.id === selectedW.id) ? activePage
+      : report?.pages.find(p => p.widgets.some(x => x.id === selectedW.id))
+    if (!home) { setSelectedW(null); toast.error(tr('bc.shell.t.widgetGone')); return }
+    const before = home.widgets.find(x => x.id === selectedW.id) ?? selectedW
     const beforeCfg = (before.config ?? {}) as Record<string, unknown>
     const beforeTitle = before.title
     setSaving(true)
@@ -2085,14 +2198,14 @@ export default function ReportBuilder() {
       // "Save mine anyway" sends it without one.
       const base = overwrite ? undefined : (loadedRevisionRef.current ?? undefined)
       try {
-        await reportsApi.updateWidget(reportId, activePage.id, selectedW.id,
+        await reportsApi.updateWidget(reportId, home.id, selectedW.id,
           { config, title, ...(base != null ? { base_revision: base } : {}) })
       } catch (err) {
         const status = (err as { response?: { status?: number } })?.response?.status
         const detail = structuredDetail<ConflictDetail & { code?: string }>(err)
         if (status === 409 && detail?.code === 'edit_conflict') {
           setEditConflict(conflictFrom(detail,
-            { widget_type: before.widget_type, title, config }, activePage.id, selectedW.id,
+            { widget_type: before.widget_type, title, config }, home.id, selectedW.id,
             () => { setEditConflict(null); updateWidgetConfig(config, title, true) }))
           return
         }
@@ -2101,7 +2214,7 @@ export default function ReportBuilder() {
       setEditConflict(null)
       const keys = changedKeys(beforeCfg, config)
       if (keys.length || beforeTitle !== title) {
-        const pageId = activePage.id
+        const pageId = home.id
         const id = selectedW.id
         const write = (c: Record<string, unknown>, t: string) =>
           reportsApi.updateWidget(reportId, pid(pageId), widgetIds.current.resolve(id), { config: c, title: t }).then(() => {})
@@ -2117,7 +2230,7 @@ export default function ReportBuilder() {
     } finally {
       setSaving(false)
     }
-  }, [selectedW, activePage, reportId, loadReport, pushUndo])
+  }, [selectedW, activePage, report, reportId, loadReport, pushUndo, tr])
 
   /** Save the combination of the editor's change and a colleague's (E09).
    *  Sent against the revision the conflict reported, so a THIRD edit made
@@ -2371,7 +2484,10 @@ export default function ReportBuilder() {
         const sensible = defaultSummary(columnName, columnMeta)
         // Written only when it changes the meaning: an unset aggregation
         // already sums, so an amount on a fresh chart is left as it was.
-        if (!cfg[configKeyFor(target.role)] && (was === 'count' || (was === '' && sensible !== 'sum'))) {
+        // C-11: a blank aggregation2 means "same as the first axis", so the
+        // second measure is compared with THAT, not with Sum.
+        const inherited = target.role === 'measure2' ? String(cfg.aggregation ?? 'sum').toLowerCase() : 'sum'
+        if (!cfg[configKeyFor(target.role)] && (was === 'count' || (was === '' && sensible !== inherited))) {
           next[aggKey] = sensible
         }
       }
@@ -2574,10 +2690,11 @@ export default function ReportBuilder() {
     })
   }, [containerW, canvasScale, activePage])
 
-  const handleResizeStart = useCallback((widget: Widget) => (e: React.MouseEvent) => {
+  const handleResizeStart = useCallback((widget: Widget) => (e: React.MouseEvent, axis: 'both' | 'x' | 'y' = 'both') => {
     e.preventDefault()
     if (!activePage) return
     setResizing({
+      axis,
       widgetId: widget.id, startX: e.clientX, startY: e.clientY, layout: shownLayout(widget),
       packed: isPackedMode(activePage.layout_mode),
       items: toLayoutItems(activePage.widgets.map(w => ({ ...w, layout: shownLayout(w) }))),
@@ -2591,15 +2708,17 @@ export default function ReportBuilder() {
   const resizeStartRef = useRef(handleResizeStart); resizeStartRef.current = handleResizeStart
   const perWidgetHandlers = useMemo(() => {
     const m = new Map<number, { onSelect: (e: React.MouseEvent) => void; onDelete: () => void
-      onDuplicate: () => void
-      onDragStart: (e: React.MouseEvent) => void; onResizeStart: (e: React.MouseEvent) => void }>()
+      onDuplicate: () => void; onEditOptions: () => void
+      onDragStart: (e: React.MouseEvent) => void; onResizeStart: (e: React.MouseEvent, axis?: 'both' | 'x' | 'y') => void }>()
     for (const w of (activePage?.widgets ?? [])) {
       m.set(w.id, {
         onSelect: (e) => widgetActionsRef.current.selectWidget(w, e),
         onDelete: () => { void widgetActionsRef.current.deleteWidget(w) },
         onDuplicate: () => { void widgetActionsRef.current.duplicateWidget(w) },
+        // F-16: the widget menu's "Edit options…" -- its Format options, opened.
+        onEditOptions: () => { setSelectedW(w); setRightPanelMode('default'); setPropSection('format'); setRightOpenSignal(n => n + 1) },
         onDragStart: (e) => dragStartRef.current(w)(e),
-        onResizeStart: (e) => resizeStartRef.current(w)(e),
+        onResizeStart: (e, axis) => resizeStartRef.current(w)(e, axis),
       })
     }
     return m
@@ -2626,8 +2745,9 @@ export default function ReportBuilder() {
       if (resizing) {
         const dx = (e.clientX - resizing.startX) / scale
         const dy = (e.clientY - resizing.startY) / scale
-        const rawW = resizing.layout.w + Math.round(dx / (cellW + GAP))
-        const rawH = resizing.layout.h + Math.round(dy / (ROW_H + GAP))
+        // C-19: an edge handle moves one dimension only.
+        const rawW = resizing.axis === 'y' ? resizing.layout.w : resizing.layout.w + Math.round(dx / (cellW + GAP))
+        const rawH = resizing.axis === 'x' ? resizing.layout.h : resizing.layout.h + Math.round(dy / (ROW_H + GAP))
         const next = resizing.packed
           ? resizePacked(resizing.items, resizing.widgetId, rawW, rawH)
           : resizeFree(resizing.items, resizing.widgetId, rawW, rawH)
@@ -2655,7 +2775,15 @@ export default function ReportBuilder() {
     window.addEventListener('pointercancel', onUp)
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup',   onUp)
+    // C-19: no page text is selected while a widget is moved or resized (the
+    // drag highlighted the AI pane), and the cursor stays the drag's own.
+    const body = document.body.style
+    const was = { userSelect: body.userSelect, cursor: body.cursor }
+    body.userSelect = 'none'
+    body.cursor = resizing ? (resizing.axis === 'x' ? 'ew-resize' : resizing.axis === 'y' ? 'ns-resize' : 'nwse-resize') : 'grabbing'
     return () => {
+      body.userSelect = was.userSelect
+      body.cursor = was.cursor
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
@@ -2768,6 +2896,8 @@ export default function ReportBuilder() {
       : `${f.column} ${(() => { const k = `bc.shell.rf.op.${f.op}` as MessageKey; const v = tr(k); return v !== k ? v : f.op })()} ${Array.isArray(f.value) ? (f.value as unknown[]).join(', ') : String(f.value)}`,
   }))
   const hints = fieldHints(analysis)
+  // (after the early returns: a plain value, not a hook; the panel compares it by value)
+  const valueRanges = numericRanges(analysis)
   const pageWidgets = activePage?.widgets ?? []
   // A report being READ always uses the Modern look (the old "Default"
   // reading look was removed: same data, one look to maintain). Never while
@@ -2880,6 +3010,7 @@ export default function ReportBuilder() {
 
                   {selectedW
                     ? <WidgetConfigPanel key={`${selectedW.id}:${panelEpoch}`} section={propSection} onSection={setPropSection} geography={geography} widget={selectedW} columns={columns} datasets={datasets} primaryDatasetId={report.dataset_id} pages={report.pages} hierarchy={hierarchy} onHierarchyRefresh={refreshHierarchy} bookmarks={bookmarks} onUpdate={updateWidgetConfig} ruleErrors={perfStats[selectedW.id]?.ruleErrors}
+                      valueRanges={valueRanges}
                       distinctCounts={Object.fromEntries(Object.entries(hints).flatMap(([k, h]) => typeof (h as { distinct?: unknown })?.distinct === 'number' ? [[k, (h as { distinct: number }).distinct]] : []))} />
                     : activePage && <PagePropertiesPanel reportId={reportId} page={activePage} columns={columns} onUpdate={updatePageProps}
                         pages={report.pages} bookmarks={bookmarks} onSelectWidget={setSelectedW}
@@ -3466,7 +3597,13 @@ export default function ReportBuilder() {
                   missing). The list above is THE list of fields; the folders
                   are an arrangement tool, folded away until asked for. */}
               {!dataset
-                ? <p style={{ fontSize:12, color:'var(--muted)', textAlign:'center', marginTop:20 }}>{tr('bc.shell.ds.attachToBrowse')}</p>
+                ? (report?.dataset_id && datasetLoadError
+                  ? <p data-testid="dataset-load-error" role="alert" style={{ fontSize:12, color:'var(--muted)', textAlign:'center', marginTop:20 }}>
+                      {tr('bc.shell.ds.loadFailed')}{' '}
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => { if (report) void reloadAttachedDatasets(report) }}>{tr('bc.shell.ds.retry')}</button>
+                    </p>
+                  : <p style={{ fontSize:12, color:'var(--muted)', textAlign:'center', marginTop:20 }}>
+                      {tr(report?.dataset_id ? 'bc.shell.ds.loadingFields' : 'bc.shell.ds.attachToBrowse')}</p>)
                 : (
                   <details className="dl-bd-hier" data-testid="hierarchy-folders">
                     <summary className="dl-bd-gh" style={{ cursor: 'pointer' }}>{tr('bc.shell.hier.organize')}</summary>
@@ -3645,10 +3782,15 @@ export default function ReportBuilder() {
                   const next = e.target.value
                   const updated = await reportsApi.setClassification(reportId, next)
                   setReport(updated)
+                  // C-17: this write bumped the revision; knowing it is ours keeps
+                  // the poll from calling it "changed in another session".
+                  if (typeof updated?.revision === 'number') setLoadedRevision(updated.revision)
+                  else void syncRevisionAfterOwnWrite()
                   pushUndo({ label: next ? tr('bc.shell.u.classify', { label: next }) : tr('bc.shell.u.clearClass'),
-                    undo: () => reportsApi.setClassification(reportId, prev).then(() => {}),
-                    redo: () => reportsApi.setClassification(reportId, next).then(() => {}) })
-                  toast.success(e.target.value ? tr('bc.shell.t.classified', { label: e.target.value }) : tr('bc.shell.t.classCleared'))
+                    undo: () => reportsApi.setClassification(reportId, prev).then(() => syncRevisionAfterOwnWrite()),
+                    redo: () => reportsApi.setClassification(reportId, next).then(() => syncRevisionAfterOwnWrite()) })
+                  // The captured choice, not e.target.value read after an await.
+                  toast.success(next ? tr('bc.shell.t.classified', { label: next }) : tr('bc.shell.t.classCleared'))
                 } catch (err) {
                   toast.error((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? tr('bc.shell.t.classifyFailed'))
                 }
@@ -3733,7 +3875,7 @@ export default function ReportBuilder() {
               <ActionMenu label={tr('vw.more')} align="end" portal triggerClassName="btn btn-ghost btn-sm dl-vw-more"
                 trigger={<EllipsisVertical size={15} aria-hidden />}
                 items={[
-                  { key: 'print', label: tr('shx.ex.print'), icon: <Printer size={14} />, onSelect: () => navigate(`/reports/${reportId}/print`) },
+                  ...(mayDownload ? [{ key: 'print', label: tr('shx.ex.print'), icon: <Printer size={14} />, onSelect: () => navigate(`/reports/${reportId}/print`) }] : []),
                   ...(canEdit ? [
                     // QA2 N2: over the view while reading; the rail panel while editing.
                     { key: 'history', label: tr('shx.vh.title'), icon: <History size={14} />, onSelect: () => {
@@ -4049,7 +4191,7 @@ export default function ReportBuilder() {
                         <WidgetRenderer
                           widget={localisedWidgets.get(widget.id) ?? widget}
                           datasetId={report.dataset_id}
-                          reportId={reportId}
+                          reportId={reportId} allowExport={mayDownload}
                           parameters={effectiveParams}
                           onSetParameter={stableOnSetParameter}
                           calculatedColumns={calcCols}
@@ -4074,10 +4216,12 @@ export default function ReportBuilder() {
                 })()}
               </div>
             ) : (
-            <div style={{ height: canvasH(pageWidgets.map(w => ({ ...w, layout: localLayouts[w.id] ?? packedPreview[w.id] ?? w.layout }))) * canvasScale,
-              minWidth: MIN_CANVAS_W * fitScale, overflow: fitScale < 1 && zoom <= 100 ? 'hidden' : undefined }}>
+            <div style={{ height: Math.max(canvasH(pageWidgets.map(w => ({ ...w, layout: localLayouts[w.id] ?? packedPreview[w.id] ?? w.layout }))), frame?.h ?? 0) * canvasScale,
+              minWidth: baseCanvasW * fitScale, overflow: fitScale < 1 && zoom <= 100 ? 'hidden' : undefined,
+              ...(frame ? { width: frame.w * canvasScale, margin: '0 auto' } : {}) }}>
               <div ref={attachCanvas}
                 data-canvas
+                data-page-frame={frame ? `${frame.w}x${frame.h}` : undefined}
                 onDragOver={e => { if (e.dataTransfer.types.includes('application/x-fields') || e.dataTransfer.types.includes('application/x-field') || e.dataTransfer.types.includes('application/x-hierarchy')) {
                   e.preventDefault(); e.dataTransfer.dropEffect = 'copy'
                   // A hierarchy is a target too: it fills a hierarchy widget's levels (QA6 B2).
@@ -4130,7 +4274,7 @@ export default function ReportBuilder() {
                     if (!(target && fillHierarchyLevels(target, Number(hier)))) void addWidgetFromHierarchy(Number(hier))
                   }
                 }}
-                style={{ position:'relative', minHeight:canvasH(pageWidgets.map(w => ({ ...w, layout: localLayouts[w.id] ?? packedPreview[w.id] ?? w.layout }))),
+                style={{ position:'relative', minHeight:Math.max(canvasH(pageWidgets.map(w => ({ ...w, layout: localLayouts[w.id] ?? packedPreview[w.id] ?? w.layout }))), frame?.h ?? 0),
                 // The page's own backdrop, with objects that opt into
                 // transparency floating on it. `cover` rather than `contain`:
                 // a page is a fixed aspect box and a letterboxed photograph
@@ -4142,8 +4286,14 @@ export default function ReportBuilder() {
                 // The dashboard's own look: fonts, card borders, corners, light or dark.
                 ...styleVars(report?.style),
                 borderRadius:'var(--radius)', border:'1px solid var(--border)',
-                ...(fitScale < 1 ? { width: MIN_CANVAS_W } : {}),
+                ...(frame ? { width: frame.w } : fitScale < 1 ? { width: MIN_CANVAS_W } : {}),
                 transform: `scale(${canvasScale})`, transformOrigin: 'top left' }}>
+                {/* C-21: where a fixed page ends, when objects run past it. */}
+                {editMode && frame && pageWidgets.some(w => { const l = localLayouts[w.id] ?? packedPreview[w.id] ?? w.layout
+                  return (l.y + l.h) * (ROW_H + GAP) > frame.h }) && (
+                  <div data-testid="page-frame-edge" aria-hidden
+                    style={{ position:'absolute', left:0, right:0, top:frame.h, borderTop:'1px dashed var(--muted)', pointerEvents:'none', zIndex:0 }} />
+                )}
                 {pageWidgets.length === 0 && (
                   // An empty page TEACHES (SAS: "Drag objects or data items onto
                   // the page, or start from a page template"). The drag-a-field
@@ -4217,7 +4367,7 @@ export default function ReportBuilder() {
                         <div className="dl-vw-wt" role="toolbar" aria-label={tr('vw.wt.aria', { title: widget.title || widget.widget_type })}>
                           <button type="button" onClick={() => askAbout(widget)} disabled={aiOffline}
                             aria-label={tr('vw.wt.ask', { title: widget.title || widget.widget_type })}
-                            title={aiOffline ? tr('off.composer') : tr('vw.wt.askShort')}>
+                            title={aiOffline ? tr(aiOffKey(aiState, 'composer')) : tr('vw.wt.askShort')}>
                             <span className="dl-vw-av" aria-hidden><AiMascot size={15} /></span>
                           </button>
                           <button type="button" onClick={() => setFocusW(widget)}
@@ -4225,7 +4375,7 @@ export default function ReportBuilder() {
                             <Maximize2 size={15} aria-hidden />
                           </button>
                           {/* 9-polish: the chart as a picture, for a chart drawn as SVG. */}
-                          {!NO_CHART_IMAGE.test(widget.widget_type) && (
+                          {mayDownload && !NO_CHART_IMAGE.test(widget.widget_type) && (
                             <button type="button" aria-label={tr('pol.copyImage', { title: widget.title || widget.widget_type })} title={tr('pol.copyImageShort')}
                               onClick={e => {
                                 const el = (e.currentTarget as HTMLElement).closest('[data-widget-id]')
@@ -4259,7 +4409,7 @@ export default function ReportBuilder() {
                       <WidgetRenderer
                         widget={localisedWidgets.get(widget.id) ?? widget}
                         datasetId={report.dataset_id}
-                        reportId={reportId}
+                        reportId={reportId} allowExport={mayDownload}
                         parameters={effectiveParams}
                         onSetParameter={stableOnSetParameter}
                         calculatedColumns={calcCols}
@@ -4270,6 +4420,7 @@ export default function ReportBuilder() {
                         onSelect={editMode ? perWidgetHandlers.get(widget.id)?.onSelect : undefined}
                         onDelete={editMode ? perWidgetHandlers.get(widget.id)?.onDelete : undefined}
                         onDuplicate={editMode ? perWidgetHandlers.get(widget.id)?.onDuplicate : undefined}
+                        onEditOptions={editMode ? perWidgetHandlers.get(widget.id)?.onEditOptions : undefined}
                         editMode={editMode}
                         promptFilter={activePromptFilter}
                         onDragStart={editMode ? perWidgetHandlers.get(widget.id)?.onDragStart : undefined}
@@ -4356,7 +4507,7 @@ export default function ReportBuilder() {
                 reportId={canEdit ? reportId : undefined}
                 onComposed={canEdit ? () => { void loadReport() } : undefined} />}
               suggest={canEdit ? (
-                <SuggestionsPane columns={columns} analysis={analysis} onAdd={addSuggestedWidget} reportId={reportId}
+                <SuggestionsPane columns={columns} analysis={analysis} onAdd={addSuggestedWidget} onAddMany={addSuggestedWidgets} reportId={reportId}
                   datasetId={report.dataset_id} pageWidgets={activePage?.widgets ?? []} columnMeta={columnMeta} />
               ) : undefined} />
           )}
@@ -4470,7 +4621,7 @@ export default function ReportBuilder() {
                   }} />
               )}
               {rightPanelMode === 'suggestions' && (
-                <SuggestionsPane columns={columns} analysis={analysis} onAdd={addSuggestedWidget} reportId={reportId}
+                <SuggestionsPane columns={columns} analysis={analysis} onAdd={addSuggestedWidget} onAddMany={addSuggestedWidgets} reportId={reportId}
                   datasetId={report.dataset_id} pageWidgets={activePage?.widgets ?? []} columnMeta={columnMeta} />
               )}
               {rightPanelMode === 'insights' && (
@@ -4659,7 +4810,7 @@ export default function ReportBuilder() {
           askDisabled={aiOffline}
           onAsk={q => { setFocusW(null); setAiOpen(true); setAiTab('ask'); setAskSeed(s => ({ q, n: (s?.n ?? 0) + 1 })) }}
           render={w => (
-            <WidgetRenderer widget={w} datasetId={report.dataset_id} reportId={reportId}
+            <WidgetRenderer widget={w} datasetId={report.dataset_id} reportId={reportId} allowExport={mayDownload}
               parameters={effectiveParams} onSetParameter={stableOnSetParameter}
               calculatedColumns={calcCols} columnFormats={columnFormats} geography={geography}
               datasets={datasets} relationships={relationships} editMode={false}
@@ -4734,6 +4885,7 @@ export default function ReportBuilder() {
         <ShareDashboardDialog report={report} canEdit={canEdit} isAdmin={isAdmin} pageId={activePage?.id ?? null}
           onClose={() => setShareOpen(false)}
           onPublishedChange={published => setReport(r => r ? { ...r, published } : r)}
+          onReleased={() => { loadReport().catch(() => {}) }}
           onAccessWhy={Object.keys(access).length ? () => { setShareOpen(false); setAccessOpen2(true) } : undefined}
           onAccessByRole={() => { setShareOpen(false); setAccessOpen(true) }} />
       )}
@@ -4764,7 +4916,7 @@ export default function ReportBuilder() {
             <WidgetRenderer
               widget={localise(widget)}
               datasetId={report.dataset_id}
-              reportId={reportId}
+              reportId={reportId} allowExport={mayDownload}
               parameters={effectiveParams}
               onSetParameter={stableOnSetParameter}
               calculatedColumns={calcCols}
@@ -4794,7 +4946,7 @@ export default function ReportBuilder() {
             <WidgetRenderer
               widget={localise(widget)}
               datasetId={report.dataset_id}
-              reportId={reportId}
+              reportId={reportId} allowExport={mayDownload}
               parameters={effectiveParams}
               onSetParameter={stableOnSetParameter}
               calculatedColumns={calcCols}

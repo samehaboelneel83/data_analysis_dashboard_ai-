@@ -1,6 +1,6 @@
 import asyncio
 import pandas as pd
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -237,7 +237,11 @@ async def get_analysis(dataset_id: int, db: AsyncSession = Depends(get_db), curr
     )
     ar = result.scalar_one_or_none()
     if not ar:
-        raise HTTPException(404, "No analysis found — run POST first")
+        # No profile yet is the normal state of a new dataset, not an error:
+        # `null` (200) says "none" without a 404 in every visitor's console
+        # (AD-06 / B-15). 404 stays for a dataset that does not exist and for
+        # restricted callers (above).
+        return None
     return as_response(ar.result)
 
 

@@ -155,3 +155,36 @@ describe('shares a reader can see', () => {
     expect(sharePercent(0)).toBe('0%')
   })
 })
+
+describe('a count is not money (F-12)', () => {
+  const money = { type: 'currency', symbol: '$', decimals: 0 } as const
+  const counted = [{ name: 'North', value: 1200 }, { name: 'South', value: 800 }]
+
+  it('a donut of row counts shows a plain total and says "Rows", whatever the measure\'s format', async () => {
+    const { container } = wrap(
+      <DonutChartRenderer rows={counted} data={{}} cfg={{ measure: 'revenue', aggregation: 'count' }} rtl={false}
+        broadcasts={false} localSelected={null} onClickPoint={() => {}} measureFmt={money} />
+    )
+    await waitFor(() => expect(container.textContent).toContain('2,000'))
+    expect(container.textContent).not.toContain('$')
+    expect(container.textContent).toContain('Rows')
+    expect(container.textContent).not.toContain('Total revenue')
+  })
+
+  it('a distinct count says what was counted', async () => {
+    const { container } = wrap(
+      <DonutChartRenderer rows={counted} data={{}} cfg={{ measure: 'customer_id', aggregation: 'countd' }} rtl={false}
+        broadcasts={false} localSelected={null} onClickPoint={() => {}} />
+    )
+    await waitFor(() => expect(container.textContent).toContain('Distinct customer id'))
+  })
+
+  it('a sum keeps its money format and its "Total" caption', async () => {
+    const { container } = wrap(
+      <DonutChartRenderer rows={counted} data={{}} cfg={{ measure: 'revenue', aggregation: 'sum' }} rtl={false}
+        broadcasts={false} localSelected={null} onClickPoint={() => {}} measureFmt={money} />
+    )
+    await waitFor(() => expect(container.textContent).toContain('Total revenue'))
+    expect(container.textContent).toContain('$')
+  })
+})

@@ -20,6 +20,22 @@ function when(iso: string | null | undefined, locale: string): string {
   return isNaN(d.getTime()) ? '' : d.toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' })
 }
 
+/** Release a dashboard's changes to its readers, saying how it went (a toast,
+ *  and a warning naming anything the release could not carry). True when it
+ *  was released. Shared by the header control and the Publishing tab (F-10). */
+export async function releaseReport(reportId: number, tr: ReturnType<typeof useT>): Promise<boolean> {
+  try {
+    const got = await reportsApi.release(reportId)
+    toast.success(tr('release.done'))
+    if (got?.missing?.length) toast(describeMissing(got.missing), { icon: '⚠' })
+    return true
+  } catch (err) {
+    const detail = (err as { response?: { data?: { detail?: { message?: string } | string } } })?.response?.data?.detail
+    toast.error(typeof detail === 'string' ? detail : detail?.message ?? tr('release.failed'))
+    return false
+  }
+}
+
 export default function ReleaseControl({ report, canEdit, revision, onReleased }: {
   report: Pick<Report, 'id' | 'published' | 'release' | 'unreleased_changes'>
   canEdit: boolean
@@ -47,13 +63,7 @@ export default function ReleaseControl({ report, canEdit, revision, onReleased }
   async function doRelease() {
     setBusy(true)
     try {
-      const got = await reportsApi.release(report.id)
-      toast.success(tr('release.done'))
-      if (got?.missing?.length) toast(describeMissing(got.missing), { icon: '⚠' })
-      onReleased?.()
-    } catch (err) {
-      const detail = (err as { response?: { data?: { detail?: { message?: string } | string } } })?.response?.data?.detail
-      toast.error(typeof detail === 'string' ? detail : detail?.message ?? tr('release.failed'))
+      if (await releaseReport(report.id, tr)) onReleased?.()
     } finally {
       setBusy(false)
     }

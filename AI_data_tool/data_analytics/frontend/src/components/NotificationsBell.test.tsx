@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Link, Route, Routes } from 'react-router-dom'
 import NotificationsBell from './NotificationsBell'
 import { notificationsApi } from '../services/api'
 
@@ -37,5 +37,36 @@ describe('NotificationsBell', () => {
     fireEvent.click(screen.getByRole('button', { name: /Notifications/ }))
     await waitFor(() => expect(notificationsApi.markRead).toHaveBeenCalled())
     await waitFor(() => expect(screen.queryByTestId('bell-unread')).not.toBeInTheDocument())
+  })
+
+  describe('closes when it should (AD-14)', () => {
+    const openBell = async () => {
+      render(<MemoryRouter initialEntries={['/']}>
+        <NotificationsBell />
+        <Routes><Route path="*" element={<Link to="/reports/7">go</Link>} /></Routes>
+      </MemoryRouter>)
+      await screen.findByTestId('bell-unread')
+      fireEvent.click(screen.getByRole('button', { name: /Notifications/ }))
+      expect(screen.getByText(/Alert "Rev" is firing/)).toBeInTheDocument()
+    }
+
+    it('on Escape, returning focus to the bell', async () => {
+      await openBell()
+      fireEvent.keyDown(document, { key: 'Escape' })
+      expect(screen.queryByText(/Alert "Rev" is firing/)).toBeNull()
+      expect(screen.getByRole('button', { name: /Notifications/ })).toHaveFocus()
+    })
+
+    it('on a route change', async () => {
+      await openBell()
+      fireEvent.click(screen.getByText('go'))
+      await waitFor(() => expect(screen.queryByText(/Alert "Rev" is firing/)).toBeNull())
+    })
+
+    it('when the command palette opens (Ctrl+K)', async () => {
+      await openBell()
+      fireEvent.keyDown(document, { key: 'k', ctrlKey: true })
+      expect(screen.queryByText(/Alert "Rev" is firing/)).toBeNull()
+    })
   })
 })

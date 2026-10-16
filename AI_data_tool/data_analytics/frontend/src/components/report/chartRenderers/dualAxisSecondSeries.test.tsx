@@ -92,3 +92,19 @@ describe.each(DUAL_ONLY)('%s over a long time axis', (_name, Renderer) => {
     expect(container.textContent).toContain('sum(RATED_AMOUNT)')
   })
 })
+
+describe('C-25: a time series whose data goes below zero (refunds)', () => {
+  const REFUND_DAY = [{ name: '2024-01-01', value: 120, value2: 3 }, { name: '2024-01-02', value: -40, value2: 1 },
+                      { name: '2024-01-03', value: 90, value2: 2 }]
+  it('marks zero, and draws straight segments that cannot overshoot the data', async () => {
+    const { container } = draw(DualAxisTimeSeriesRenderer, REFUND_DAY, { measure: 'revenue', measure2: 'units' })
+    await waitFor(() => expect(container.querySelector('.recharts-wrapper')).toBeTruthy())
+    expect(container.querySelector('[data-testid="zero-line"], .recharts-reference-line')).toBeTruthy()
+    expect(container.querySelector('.recharts-line-curve')?.getAttribute('d')).not.toMatch(/C/)
+  })
+  it('adds nothing when every value is positive', async () => {
+    const { container } = draw(DualAxisTimeSeriesRenderer, TWO, { measure: 'a', measure2: 'b' })
+    await waitFor(() => expect(container.querySelector('.recharts-wrapper')).toBeTruthy())
+    expect(container.querySelector('.recharts-reference-line')).toBeNull()
+  })
+})

@@ -14,7 +14,7 @@ import MonitoringActivity from './MonitoringActivity'
  */
 
 vi.mock('../../services/api', () => ({
-  monitoringApi: { jobs: vi.fn(), deliveries: vi.fn(), activity: vi.fn(), refreshRuns: vi.fn() },
+  monitoringApi: { jobs: vi.fn(), deliveries: vi.fn(), activity: vi.fn(), refreshRuns: vi.fn(), automationRuns: vi.fn() },
 }))
 
 import { monitoringApi } from '../../services/api'
@@ -24,6 +24,7 @@ const renderIn = (ui: React.ReactElement) => render(<MemoryRouter>{ui}</MemoryRo
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(monitoringApi.refreshRuns).mockResolvedValue([])
+  vi.mocked(monitoringApi.automationRuns).mockResolvedValue([])
 })
 
 describe('MonitoringJobs', () => {
@@ -72,6 +73,37 @@ describe('MonitoringJobs', () => {
     // Each row links to where the job is configured.
     expect(screen.getByRole('link', { name: 'Weekly digest' })).toHaveAttribute('href', '/reports/9')
     expect(screen.getByRole('link', { name: 'Revenue floor' })).toHaveAttribute('href', '/datasets/4')
+  })
+
+  it('lists automated analyses with a link to each run, and the checks of every refresh (AD-17)', async () => {
+    vi.mocked(monitoringApi.jobs).mockResolvedValue([])
+    vi.mocked(monitoringApi.automationRuns).mockResolvedValue([
+      { id: 12, status: 'failed', dataset_id: 3, dataset_name: 'Sales', started_at: '2026-10-14T10:00:00Z',
+        finished_at: null, step: 'Build the report', error: 'Build the report did not finish in 3 min' },
+    ] as never)
+    vi.mocked(monitoringApi.refreshRuns).mockResolvedValue([
+      { id: 1, kind: 'dataset', item_id: 3, name: 'Sales', trigger: 'schedule', status: 'ok', started_at: '2026-10-14T09:00:00Z',
+        finished_at: null, rows: 10, duration_ms: 100, error: null, error_code: null, checks_summary: { pass: 2, warn: 1, fail: 0 } },
+    ] as never)
+    renderIn(<MonitoringJobs />)
+    const section = await screen.findByTestId('automation-runs')
+    expect(section).toHaveTextContent('Sales')
+    expect(section).toHaveTextContent('Build the report did not finish')
+    expect(screen.getByRole('link', { name: /Run #12/ })).toHaveAttribute('href', '/automation?run=12')
+    expect(await screen.findByText('2 pass · 1 warn')).toBeInTheDocument()
+  })
+
+  it('says Paused for an unscheduled job and marks a paused calendar (AD-16)', async () => {
+    vi.mocked(monitoringApi.jobs).mockResolvedValue([
+      { kind: 'alert', id: 3, name: 'Demo alert', interval_minutes: 0,
+        last_run_at: null, status: null, error: null, dataset_id: 4 },
+      { kind: 'report_schedule', id: 2, name: 'Demo weekly', interval_minutes: 0, last_run_at: null, status: null,
+        error: null, report_id: 9, calendar: { kind: 'weekly', weekday: 0, hour: 9, minute: 0, paused: true } },
+    ] as never)
+    renderIn(<MonitoringJobs />)
+    await screen.findByText('Demo alert')
+    expect(screen.getByText('Paused (not scheduled)')).toBeInTheDocument()
+    expect(screen.getByText(/weekly .*\(paused\)/i)).toBeInTheDocument()
   })
 
   it('links a dataflow job to the Dataflows page, opened on it (E12)', async () => {
@@ -170,6 +202,29 @@ describe('MonitoringDeliveries', () => {
   })
 })
 
+describe('the Monitoring tables stack on a phone (AD-20)', () => {
+  it('every cell names its column, in all three tables', async () => {
+    vi.mocked(monitoringApi.jobs).mockResolvedValue([
+      { kind: 'dataset_refresh', id: 1, name: 'Orders', interval_minutes: 60, last_run_at: null, status: null, error: null },
+    ])
+    vi.mocked(monitoringApi.deliveries).mockResolvedValue([
+      { id: 1, created_at: '2026-09-01T10:00:00Z', report_id: 3, report_name: 'R', kind: 'schedule',
+        status: 'sent', error: null, recipients: ['a@b.com'], file_name: null, artifact_kind: 'pdf', duration_ms: 10 },
+    ] as never)
+    vi.mocked(monitoringApi.activity).mockResolvedValue([
+      { id: 1, user_email: 'a@b.com', action: 'dataset.upload', entity: 'dataset', entity_id: 4, detail: 'x', created_at: '2026-09-01T10:00:00Z' },
+    ])
+    for (const Page of [MonitoringJobs, MonitoringDeliveries, MonitoringActivity]) {
+      const { container, unmount } = renderIn(<Page />)
+      await waitFor(() => expect(container.querySelector('table.dl-table--stack tbody td')).not.toBeNull())
+      const cells = [...container.querySelectorAll('table.dl-table--stack td')]
+      expect(cells.length).toBeGreaterThan(0)
+      for (const td of cells) expect(td.getAttribute('data-label')).toBeTruthy()
+      unmount()
+    }
+  })
+})
+
 describe('MonitoringActivity', () => {
   it('lists the audit-log rows -- the first reader this endpoint has had', async () => {
     vi.mocked(monitoringApi.activity).mockResolvedValue([
@@ -180,6 +235,43 @@ describe('MonitoringActivity', () => {
     expect(await screen.findByText('dataset.upload')).toBeInTheDocument()
     expect(screen.getByText('dataset #4')).toBeInTheDocument()
     expect(screen.getByText('orders.csv')).toBeInTheDocument()
+  })
+
+  it('writes a legacy key=value detail in words: None is "no limit" (AD-18)', async () => {
+    vi.mocked(monitoringApi.activity).mockResolvedValue([
+      { id: 1, user_email: 'a@b.com', action: 'platform.set_org_quota', entity: 'organization',
+        entity_id: 2, detail: 'queries=None asks=5', created_at: '2026-09-01T10:00:00Z' },
+      { id: 2, user_email: 'a@b.com', action: 'report.unshare', entity: 'report',
+        entity_id: 3, detail: 'grant:7', created_at: '2026-09-01T10:00:00Z' },
+    ])
+    renderIn(<MonitoringActivity />)
+    expect(await screen.findByText('queries: no limit')).toBeInTheDocument()
+    expect(screen.getByText('asks: 5')).toBeInTheDocument()
+    expect(screen.queryByText(/None/)).toBeNull()
+    expect(screen.getByText('share #7')).toBeInTheDocument()
+  })
+
+  it('pages with "Load more", filters by action on the server, and opens a row (AD-19)', async () => {
+    const row = (id: number) => ({ id, user_email: 'a@b.com', action: 'report.create', entity: 'report',
+      entity_id: id, detail: `detail ${id}`, created_at: '2026-09-01T10:00:00Z' })
+    vi.mocked(monitoringApi.activity)
+      .mockResolvedValueOnce(Array.from({ length: 100 }, (_, i) => row(500 - i)))
+      .mockResolvedValueOnce([row(300)])
+      .mockResolvedValue([row(42)])
+    renderIn(<MonitoringActivity />)
+    await screen.findByText('detail 500')
+    expect(vi.mocked(monitoringApi.activity).mock.calls[0][0]).toMatchObject({ limit: 100 })
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }))
+    expect(await screen.findByText('detail 300')).toBeInTheDocument()
+    expect(vi.mocked(monitoringApi.activity).mock.calls[1][0]).toMatchObject({ before_id: 401 })
+    expect(screen.queryByRole('button', { name: 'Load more' })).toBeNull()   // a short page is the end
+
+    fireEvent.change(screen.getByLabelText('Action'), { target: { value: 'report.create' } })
+    await waitFor(() => expect(vi.mocked(monitoringApi.activity).mock.calls[2][0]).toMatchObject({ action: 'report.create' }))
+    fireEvent.click(await screen.findByText('detail 42'))
+    const detail = await screen.findByTestId('activity-detail-42')
+    expect(detail).toHaveTextContent('detail 42')
+    expect(detail.querySelector('a[href="/reports/42"]')).not.toBeNull()
   })
 
   it('empty and error states are distinct', async () => {

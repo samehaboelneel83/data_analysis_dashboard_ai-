@@ -7,7 +7,7 @@ import type { BrushRange } from './chartRenderers/axisOptions'
 import OverviewStrip from './chartRenderers/OverviewStrip'
 import { StaticChartsContext } from './chartRenderers/useChartViewport'
 import { createPortal } from 'react-dom'
-import { Copy, Trash2, MoreVertical, Link as LinkIcon } from 'lucide-react'
+import { Copy, Trash2, MoreVertical, Link as LinkIcon, SlidersHorizontal } from 'lucide-react'
 import { widgetDataApi } from '../../services/api'
 import { isCanceledRequest } from '../../lib/canceledRequest'
 import { useT, type MessageKey, type TranslateFn } from '../../i18n'
@@ -80,10 +80,13 @@ interface Props {
   /** "Another one of these" -- SAS's Duplicate Object. Separate from widget
    *  templates, which are for reuse ACROSS reports rather than beside this one. */
   onDuplicate?:  () => void
+  /** F-16: select this widget and open its options -- the edit menu's first item. */
+  onEditOptions?: () => void
   editMode?:     boolean
   promptFilter?: { column: string; value: string } | null
   onDragStart?:  (e: React.MouseEvent) => void
-  onResizeStart?:(e: React.MouseEvent) => void
+  /** `axis`: the corner resizes both ways (the default), an edge one way (C-19). */
+  onResizeStart?:(e: React.MouseEvent, axis?: 'both' | 'x' | 'y') => void
   isDragging?:   boolean
   onFetchComplete?: (widgetId: number, info: { durationMs: number; rowCount: number; sampled: boolean; ruleErrors?: { id?: string; message: string }[] }) => void
   pages?:        ReportPage[]
@@ -255,7 +258,19 @@ export function binningTitle(b: Binning | undefined | null, t?: TranslateFn): st
     + 'Every row is still counted. Drag the slider under the chart to zoom in and see more detail.'
 }
 
-function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, geography, datasets, selected, isMultiSelected, onSelect, onDelete, onDuplicate, editMode, promptFilter, onDragStart, onResizeStart, isDragging, onFetchComplete, pages, reportDisplayRules, reportFilters, pageFilters, onDrillthrough, isPreview, hierarchy, bookmarks, onNavigateToPage, onApplyBookmark, reportId, parameters, onSetParameter, dataOverride, relationships, eagerFetch, allowExport = true, refreshNonce }: Props) {
+/** How early (px) a tile below the fold starts fetching. */
+const LAZY_MARGIN_PX = 300
+/** True when the element has a laid-out box within (or LAZY_MARGIN_PX of) the viewport. */
+function inViewport(el: Element): boolean {
+  const r = el.getBoundingClientRect()
+  if (r.width <= 0 || r.height <= 0) return false
+  const vh = window.innerHeight || document.documentElement.clientHeight
+  const vw = window.innerWidth || document.documentElement.clientWidth
+  return r.bottom >= -LAZY_MARGIN_PX && r.top <= vh + LAZY_MARGIN_PX
+    && r.right >= -LAZY_MARGIN_PX && r.left <= vw + LAZY_MARGIN_PX
+}
+
+function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, geography, datasets, selected, isMultiSelected, onSelect, onDelete, onDuplicate, onEditOptions, editMode, promptFilter, onDragStart, onResizeStart, isDragging, onFetchComplete, pages, reportDisplayRules, reportFilters, pageFilters, onDrillthrough, isPreview, hierarchy, bookmarks, onNavigateToPage, onApplyBookmark, reportId, parameters, onSetParameter, dataOverride, relationships, eagerFetch, allowExport = true, refreshNonce }: Props) {
   const { emitFilter, emitMultiFilter, getFiltersFor, canBroadcast, canReceive, activeFilters, clearAllFilters, clearFilter, interactions, getReceiveMode, carryFiltersTo, drillOf, setDrill } = useCrossFilter()
   const [data,    setData]    = useState<any>(null)
   const [loading, setLoading] = useState(
@@ -717,10 +732,32 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
     if (!el) { setHasBeenVisible(true); return }  // no root to observe: fetch
     const io = new IntersectionObserver(entries => {
       if (entries.some(e => e.isIntersecting)) setHasBeenVisible(true)
-    }, { rootMargin: '300px' })
+    }, { rootMargin: `${LAZY_MARGIN_PX}px` })
     io.observe(el)
-    return () => io.disconnect()
+    // C-01: the observer's first entry can say "not intersecting" for a tile
+    // that IS on screen, because the canvas has not settled yet (datasets
+    // still loading, the fallback measured width, the canvas scale). No new
+    // intersection follows until the reader scrolls, so the tile sat blank.
+    // Check the position directly now, once more after layout settles, and
+    // whenever the tile's own box changes size.
+    const check = () => { if (inViewport(el)) setHasBeenVisible(true) }
+    check()
+    const timer = setTimeout(check, 1500)
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(check) : null
+    ro?.observe(el)
+    return () => { io.disconnect(); clearTimeout(timer); ro?.disconnect() }
   }, [lazyEligible, hasBeenVisible])
+
+  // C-01 diagnostics (dev only): name a tile that has been "loading" for a
+  // long time, and whether it ever became visible, so the gate is findable.
+  useEffect(() => {
+    if (!import.meta.env.DEV || !loading) return
+    const id = setTimeout(() => {
+      console.warn(`[WidgetRenderer] widget ${widget.id} still loading after 20s `
+        + `(visible: ${!lazyEligible || hasBeenVisible}, request ${inflightRef.current ? 'queued or in flight' : 'not sent'})`)
+    }, 20_000)
+    return () => clearTimeout(id)
+  }, [loading, widget.id, lazyEligible, hasBeenVisible])
 
   // Refetch only when config content actually changes (or first visibility).
   // The first load goes at once. A CHANGE (a filter clicked, a slicer ticked)
@@ -1063,7 +1100,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
     setShowContextMenu(false)
     if (widgetDatasetId == null) return
     try {
-      await widgetDataApi.export(widgetDatasetId, mergedConfig, wt, format, effectiveCalcCols)
+      await widgetDataApi.export(widgetDatasetId, mergedConfig, wt, format, effectiveCalcCols, { reportId })
     } catch {
       toast.error(t('bc.canvas.exportFailed'))
     }
@@ -1441,6 +1478,15 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
             </span>
           )
         })()}
+        {/* C-24: the server chose the date grain (a long daily axis drawn by
+            week, say): said, so a reader knows each point is a week. */}
+        {typeof (data as { auto_granularity?: unknown } | null)?.auto_granularity === 'string' && (
+          <span data-testid="auto-grain-chip" title={t('bc.canvas.autoGrainTitle')}
+            style={{ fontSize: 9, padding: '1px 5px', borderRadius: 99, whiteSpace: 'nowrap',
+              background: 'color-mix(in srgb, var(--accent) 14%, transparent)', color: 'var(--accent)' }}>
+            {t('bc.canvas.autoGrain', { grain: grainWord((data as { auto_granularity: string }).auto_granularity, t) })}
+          </span>
+        )}
         {data?.sampled && (
           <span title={t('bc.canvas.sampleTitle', { n: String(data.sample_size), total: String(data.total_rows) })}
             style={{ fontSize: 9, background: 'rgba(230,160,60,.18)', color: '#e6a03c', padding: '1px 5px', borderRadius: 99 }}>
@@ -1569,6 +1615,12 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
                 trigger={<MoreVertical size={15} aria-hidden />} triggerClassName="dl-wicon"
                 label={t('bc.canvas.moreActions', { title })}
                 items={[
+                  // F-16: the options first -- a model widget's display choices
+                  // were hard to find, and Duplicate sat where a first click lands.
+                  ...(onEditOptions
+                    ? [{ key: 'edit-options', label: t('bc.canvas.editOptions'),
+                         icon: <SlidersHorizontal size={12} />, onSelect: () => onEditOptions() }]
+                    : []),
                   // Offered only when the caller can act on it: every existing
                   // caller passes onDelete alone, and a menu item wired to
                   // nothing is worse than an absent one.
@@ -1784,7 +1836,10 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
       {editMode && onResizeStart && (
         <div
           data-testid="widget-resize-handle"
-          onMouseDown={e => { e.stopPropagation(); e.preventDefault(); onResizeStart(e) }}
+          // C-19: pointer events only. Handling mousedown too started the resize
+          // twice (the second start reset the first), and preventDefault on
+          // pointerdown suppresses the compatibility mousedown anyway.
+          onMouseDown={e => e.stopPropagation()}
           onPointerDown={e => {
             e.stopPropagation(); e.preventDefault()
             try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* jsdom */ }
@@ -1792,7 +1847,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
           }}
           style={{
             position: 'absolute', bottom: 0, right: 0, direction: 'ltr',
-            width: 18, height: 18, cursor: 'nwse-resize',
+            width: 24, height: 24, cursor: 'nwse-resize', touchAction: 'none',
             display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end',
             padding: '3px',
           }}
@@ -1802,6 +1857,21 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
           </svg>
         </div>
       )}
+      {/* C-19: edge handles -- the right edge sets the width only, the bottom
+          edge the height only. 8px strips along the edges, stopping short of
+          the corner handle so the two never compete. */}
+      {editMode && onResizeStart && (['x', 'y'] as const).map(axis => (
+        <div key={axis} data-testid={`widget-resize-edge-${axis}`} aria-hidden
+          onMouseDown={e => e.stopPropagation()}
+          onPointerDown={e => {
+            e.stopPropagation(); e.preventDefault()
+            try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* jsdom */ }
+            onResizeStart(e, axis)
+          }}
+          style={axis === 'x'
+            ? { position: 'absolute', top: 24, bottom: 24, right: 0, width: 8, cursor: 'ew-resize', touchAction: 'none' }
+            : { position: 'absolute', left: 24, right: 24, bottom: 0, height: 8, cursor: 'ns-resize', touchAction: 'none' }} />
+      ))}
 
       {showTooltipPreview && tooltipPage && (
         <div style={{

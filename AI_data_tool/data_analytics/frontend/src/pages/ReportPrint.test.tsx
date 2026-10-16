@@ -50,6 +50,27 @@ describe('ReportPrint loading and error states', () => {
   })
 })
 
+describe('the print view is a download (F-02)', () => {
+  beforeEach(() => { vi.mocked(reportsApi.get).mockReset() })
+
+  it('asks the server for the print view, so the server can refuse it', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue({ id: 1, name: 'Sales', dataset_id: null, pages: [] } as never)
+    renderAt()
+    await screen.findByRole('heading', { name: 'Sales' })
+    expect(reportsApi.get).toHaveBeenCalledWith(1, { view: 'print' })
+  })
+
+  it("a 403 shows the server's reason with only a way back: no Print, no PowerPoint", async () => {
+    vi.mocked(reportsApi.get).mockRejectedValue({ response: { status: 403, data: { detail: 'Your access to this dashboard does not include downloads.' } } })
+    renderAt()
+    expect(await screen.findByText('Your access to this dashboard does not include downloads.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Print / Save as PDF' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Download PowerPoint' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /try again/i })).toBeNull()
+    expect(screen.getByRole('link', { name: 'Back to report' })).toHaveAttribute('href', '/reports/1')
+  })
+})
+
 describe('the print view (QA2 Visual 7, Translation 15)', () => {
   const report = { id: 1, name: 'Sales', dataset_id: null, pages: [{ id: 10, name: 'P1', page_type: 'normal', widgets: [] }, { id: 11, name: 'P2', page_type: 'normal', widgets: [] }] }
 
@@ -90,5 +111,29 @@ describe('the print view (QA2 Visual 7, Translation 15)', () => {
       expect(screen.getByRole('link', { name: 'العودة إلى التقرير' })).toBeInTheDocument()
       expect(screen.getByText('صفحتان')).toBeInTheDocument()
     } finally { localStorage.removeItem('datalytics.language') }
+  })
+})
+
+describe('C-21: a fixed page prints at its own size', () => {
+  const widget = { id: 1, page_id: 10, widget_type: 'text', title: 'T', config: { text: 'x' },
+    layout: { x: 6, y: 0, w: 6, h: 2 }, created_at: '' }
+  it('a sized page lays its grid over its own width and reserves its height; its sheet has that size', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue({ id: 1, name: 'Sized', dataset_id: null, pages: [
+      { id: 10, name: 'P1', page_type: 'normal', page_size: 'custom', custom_width: 1600, custom_height: 1200, widgets: [widget] },
+      { id: 11, name: 'P2', page_type: 'normal', page_size: '16:9', widgets: [{ ...widget, id: 2, page_id: 11 }] },
+    ] } as never)
+    const { container } = renderAt()
+    await screen.findByRole('heading', { name: 'Sized' })
+    const [sized, legacy] = [...container.querySelectorAll<HTMLElement>('[data-print-canvas]')]
+    expect(sized.style.width).toBe('1600px')
+    expect(parseFloat(sized.style.minHeight)).toBe(1200)
+    expect(sized.getAttribute('data-page-frame')).toBe('1600x1200')
+    // x=6 of 12 columns starts half-way across (plus half a gap)
+    const left = parseFloat(sized.querySelector<HTMLElement>('[data-print-widget]')!.style.left)
+    expect(left).toBeGreaterThan(790); expect(left).toBeLessThan(810)
+    // the flowing page keeps the long-standing 1050 px print width
+    expect(legacy.style.width).toBe('')
+    expect(legacy.hasAttribute('data-page-frame')).toBe(false)
+    expect(container.innerHTML).toMatch(/@page dl-page-10 \{ size: \d+px \d+px/)
   })
 })

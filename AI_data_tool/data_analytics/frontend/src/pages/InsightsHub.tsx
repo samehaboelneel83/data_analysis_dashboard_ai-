@@ -1,5 +1,5 @@
 import { sayText } from '../lib/readbackText'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { datasetsApi, insightsApi } from '../services/api'
 import type { Dataset } from '../services/api'
@@ -10,7 +10,7 @@ import LoadingState from '../components/ui/LoadingState'
 import FindingChart from '../components/insights/FindingChart'
 import { Database } from 'lucide-react'
 import { useT } from '../i18n'
-import DatasetListFilter, { useCleanDatasets } from '../components/dataset/DatasetListFilter'
+import DatasetListFilter, { useCleanDatasets, withSelected } from '../components/dataset/DatasetListFilter'
 import { isCertified } from '../lib/cleanDatasets'
 import SetupInsights from '../components/setup/SetupInsights'
 import { isolateNumbers } from '../lib/isolateNumbers'
@@ -85,22 +85,30 @@ export default function InsightsHub() {
   // identical scan moments later if the author clicks through, and sharing
   // the in-flight request is the whole reason that variant exists.
   interface ScanResult {
+    /** The dataset this result is about (AD-04): a late answer for another one is never shown. */
+    forId: number
     narrative: string
-    findings: { kind: string; title: string; detail: string; score: number; columns: string[] }[]
+    findings: { kind: string; title: string; detail: string; score: number; columns: string[]; significant?: boolean | null }[]
   }
   const [scan, setScan] = useState<ScanResult | null>(null)
   const [scanLoading, setScanLoading] = useState(false)
   const [scanError, setScanError] = useState<unknown>(null)
 
+  // AD-04: each scan gets a number; only the latest one may write its result.
+  // Switching Sales -> Metrics quickly let the slower Sales answer land last
+  // and sit under the Metrics picker.
+  const scanSeq = useRef(0)
   const runScan = () => {
+    const seq = ++scanSeq.current
     if (selected == null || isDirectQuery) return
+    const forId = selected
     setScan(null)
     setScanError(null)
     setScanLoading(true)
-    insightsApi.runShared(selected)
-      .then(r => setScan(r as ScanResult))
-      .catch(setScanError)
-      .finally(() => setScanLoading(false))
+    insightsApi.runShared(forId)
+      .then(r => { if (seq === scanSeq.current) setScan({ ...(r as Omit<ScanResult, 'forId'>), forId }) })
+      .catch(e => { if (seq === scanSeq.current) setScanError(e) })
+      .finally(() => { if (seq === scanSeq.current) setScanLoading(false) })
   }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(runScan, [selected, isDirectQuery])
@@ -132,9 +140,10 @@ export default function InsightsHub() {
               style={{ fontSize: 12, padding: '6px 8px', background: 'var(--surface2)',
                 border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', minWidth: 240 }}>
               <option value="" disabled>{t('insights.choose')}</option>
-              {(noMatches ? clean.visible : filtered).map(d => (
+              {withSelected(noMatches ? clean.visible : filtered, datasets, selected).map(d => (
                 <option key={d.id} value={d.id}>
                   {isCertified(d) ? '✓ ' : ''}{d.name}{d.mode === 'directquery' ? ` · ${t('common.live')}` : ''}
+                  {d.hiddenByFilter ? ` · ${t('dsf.hiddenByFilter')}` : ''}
                 </option>
               ))}
             </select>
@@ -177,19 +186,20 @@ export default function InsightsHub() {
             </div>
           )}
 
-          {!isDirectQuery && !scanLoading && scanError == null && scan
+          {!isDirectQuery && !scanLoading && scanError == null && scan && scan.forId === selected
             && (scan.narrative || scan.findings.length > 0) && (() => {
             // Filtered for the PREVIEW only. The panel itself still renders
             // whenever the scan returned anything, so "View full scan →"
             // survives even when nothing clears the bar -- otherwise a quiet
             // dataset would lose its only route into the full results.
-            const strong = scan.findings.filter(f => (f.score ?? 0) >= MIN_PREVIEW_SCORE)
+            // AD-07: nor one whose test did not hold -- the preview is a claim.
+            const strong = scan.findings.filter(f => (f.score ?? 0) >= MIN_PREVIEW_SCORE && f.significant !== false)
             return (
             <div style={{ marginBottom: 16, padding: 14, background: 'var(--surface)',
               border: '1px solid var(--border)', borderRadius: 'var(--radius, 8px)' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: scan.narrative || strong.length ? 8 : 0 }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.05em' }}>
-                  {t('insights.top')}
+                <span data-testid="insights-top-heading" style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                  {t('insights.top')}{current ? <> · <bdi style={{ textTransform: 'none' }}>{current.name}</bdi></> : null}
                 </span>
                 <Link to={`/datasets/${selected}#insights`} style={{ fontSize: 12 }}>{t('insights.fullScan')}</Link>
               </div>
@@ -210,7 +220,7 @@ export default function InsightsHub() {
                       <strong>{isolateNumbers(sayText(t, f.title, (f as { title_i18n?: { key: string; vars?: Record<string, unknown> } | null }).title_i18n as never))}</strong>
                       {f.detail && <span style={{ color: 'var(--muted)' }}> — {isolateNumbers(sayText(t, f.detail, (f as { detail_i18n?: unknown }).detail_i18n as never))}</span>}
                       {current && (
-                        <FindingChart datasetId={current.id} finding={f}
+                        <FindingChart datasetId={current.id} finding={f} calculatedColumns={current.calculated_columns ?? []}
                           columnTypes={Object.fromEntries(current.columns.map(c => [c.name, c.dtype ?? '']))} />
                       )}
                     </li>

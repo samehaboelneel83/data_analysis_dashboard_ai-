@@ -406,6 +406,7 @@ export const PANEL_AR: Record<string, string> = {
   'A series split and several measures cannot be drawn together. Keep one measure to split it by a series.': 'لا يمكن رسم التقسيم إلى سلاسل مع عدة مقاييس معًا. أبقِ مقياسًا واحدًا لتقسيمه إلى سلاسل.',
   '{name} (hierarchy)': '{name} (تسلسل هرمي)',
   '{name} (current)': '{name} (الحالي)',
+  '{name} (values out of range)': '{name} (قيم خارج النطاق)',
   'pre-aggregated': 'مجمّعة مسبقًا',
   'Checking {column} against the map…': 'جارٍ مطابقة «{column}» مع الخريطة…',
   'This role is full: remove a field to add another': 'هذا الدور ممتلئ: أزل حقلًا لإضافة آخر',
@@ -426,6 +427,7 @@ export const PANEL_AR: Record<string, string> = {
   'No dataset is attached to this report yet.': 'لم تُرفق أي مجموعة بيانات بهذا التقرير بعد.',
   'This dataset has no numeric columns to measure.': 'لا تحوي مجموعة البيانات هذه أعمدة رقمية للقياس.',
   "This dataset has no date columns. Set a column's type to date in the Data tab, or use a chart that takes a category.": 'لا تحوي مجموعة البيانات هذه أعمدة تاريخ. اجعل نوع أحد الأعمدة تاريخًا من تبويب البيانات، أو استخدم مخططًا يقبل فئة.',
+  'This dataset has no text or date columns to split by.': 'لا تحوي مجموعة البيانات هذه أعمدة نصية أو تاريخ للتقسيم حسبها.',
   'No columns of the right kind for this field.': 'لا توجد أعمدة من النوع المناسب لهذا الحقل.',
 }
 
@@ -454,7 +456,7 @@ export const ROLE_AR: Record<string, string> = {
   'Source name': 'اسم المصدر', 'Stage': 'المرحلة', 'Start date': 'تاريخ البداية', 'Target': 'الهدف',
   'Target latitude': 'خط عرض الهدف', 'Target longitude': 'خط طول الهدف', 'Target name': 'اسم الهدف', 'Task': 'المهمة',
   'Value': 'القيمة', 'Values': 'القيم', 'Variables': 'المتغيرات', 'Weight': 'الوزن', 'Word text': 'نص الكلمة',
-  'X axis': 'المحور السيني', 'Y axis': 'المحور الصادي', 'Conclusions about': 'استنتاجات حول',
+  'X axis': 'المحور السيني', 'Y axis': 'المحور الصادي', 'Split into multiples by': 'التقسيم إلى مضاعفات حسب', 'Conclusions about': 'استنتاجات حول',
   // Hints (the part in brackets)
   'Group / X-axis': 'المجموعة / المحور السيني', 'X-axis': 'المحور السيني', 'Y-axis': 'المحور الصادي',
   'Training / Validation': 'تدريب / تحقق', 'at least two': 'اثنان على الأقل',
@@ -472,7 +474,7 @@ export const ROLE_AR: Record<string, string> = {
   'Hierarchy levels': 'مستويات التسلسل الهرمي', 'Country or Latitude/Longitude': 'الدولة أو خط العرض/خط الطول',
   'Saved model': 'نموذج محفوظ', 'Models to compare': 'نماذج للمقارنة',
   // Field groups in the Add dialog and the column pickers
-  'Categories': 'الفئات', 'Dates': 'التواريخ', 'Numbers': 'الأرقام', 'Calculated': 'محسوبة', 'Hierarchies': 'التسلسلات الهرمية',
+  'Categories': 'الفئات', 'Dates': 'التواريخ', 'Numbers': 'الأرقام', 'Calculated': 'محسوبة', 'Hierarchies': 'التسلسلات الهرمية', 'Geography': 'الجغرافيا',
 }
 
 /** A data-role label (or one half of it) in the current language: "Dimension

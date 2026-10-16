@@ -90,6 +90,7 @@ export const en = {
   'bc.shell.t.duplicateFailed': 'Could not duplicate this widget',
   'bc.shell.t.noEmptyLeft': '"{widget}" has no empty field left for {col}',
   'bc.shell.t.pageAdded': 'Page added',
+  'bc.shell.t.widgetGone': 'That widget is no longer in this dashboard. Select it again to edit it.',
   'bc.shell.t.pageDeleted': 'Page deleted',
   'bc.shell.t.moveFailed': 'Could not move the page',
   'bc.shell.t.attachFirst': 'Attach a dataset first',
@@ -217,6 +218,9 @@ export const en = {
   'bc.shell.hier.autoTitle': 'Rebuild the folders?',
   'bc.shell.hier.autoBody': 'This replaces every folder and level with new ones built from the columns. Folders you arranged by hand are lost.',
   'bc.shell.ds.attachToBrowse': 'Attach a dataset to this report to browse columns.',
+  'bc.shell.ds.loadingFields': 'Loading the dataset’s fields…',
+  'bc.shell.ds.loadFailed': 'Couldn’t load this report’s dataset.',
+  'bc.shell.ds.retry': 'Retry',
 
   // Header
   'bc.shell.h.name': 'Dashboard name',
@@ -406,6 +410,7 @@ export const ar: Record<keyof typeof en, string> = {
   'bc.shell.t.duplicateFailed': 'تعذّر تكرار هذا العنصر',
   'bc.shell.t.noEmptyLeft': 'لم يبقَ في «{widget}» حقل فارغ لـ«{col}»',
   'bc.shell.t.pageAdded': 'أُضيفت صفحة',
+  'bc.shell.t.widgetGone': 'لم تعد هذه الأداة موجودة في لوحة المعلومات. حدّدها مرة أخرى لتعديلها.',
   'bc.shell.t.pageDeleted': 'حُذفت الصفحة',
   'bc.shell.t.moveFailed': 'تعذّر نقل الصفحة',
   'bc.shell.t.attachFirst': 'أرفق مجموعة بيانات أولًا',
@@ -528,6 +533,9 @@ export const ar: Record<keyof typeof en, string> = {
   'bc.shell.hier.autoTitle': 'إعادة بناء المجلدات؟',
   'bc.shell.hier.autoBody': 'يستبدل هذا كل المجلدات والمستويات بأخرى جديدة مبنية من الأعمدة. ستفقد المجلدات التي رتّبتها بنفسك.',
   'bc.shell.ds.attachToBrowse': 'أرفق مجموعة بيانات بهذا التقرير لتتصفح أعمدتها.',
+  'bc.shell.ds.loadingFields': 'جارٍ تحميل حقول مجموعة البيانات…',
+  'bc.shell.ds.loadFailed': 'تعذّر تحميل مجموعة بيانات هذا التقرير.',
+  'bc.shell.ds.retry': 'إعادة المحاولة',
 
   'bc.shell.h.name': 'اسم لوحة المعلومات',
   'bc.shell.h.rename': 'إعادة تسمية لوحة المعلومات هذه',

@@ -1,15 +1,17 @@
 import asyncio
 import re
+from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..core.database import get_db
+from ..core import role_permissions
 from ..core.org_scope import check_org
-from ..core.security import hash_password
-from ..dependencies import get_current_user, require_org_admin
+from ..core.security import email_problem, hash_password, normalize_email, password_problem
+from ..dependencies import get_current_user, is_allowlisted_email, is_super_admin, require_org_admin
 from ..models.models import AuditLogEntry, ColumnSecurityRule, Dataset, Role, RowSecurityRule, User
 from ..schemas.schemas import (
     RoleCreate, RoleUpdate, RoleOut,
@@ -34,14 +36,35 @@ async def list_roles(db: AsyncSession = Depends(get_db), current_user: User = De
     return result.scalars().all()
 
 
+async def _checked_role_name(db: AsyncSession, org_id: int, name: str | None,
+                             *, except_id: int | None = None) -> str:
+    """A role name, trimmed, that no other role in the org has in any letter
+    case (QA E-15: "QA E Role" was created twice, making role pickers and the
+    bulk import's role-by-name ambiguous)."""
+    name = (name or "").strip()
+    if not name:
+        raise HTTPException(422, "A role needs a name")
+    q = select(Role.id).where(Role.org_id == org_id, func.lower(func.trim(Role.name)) == name.lower())
+    if except_id is not None:
+        q = q.where(Role.id != except_id)
+    if (await db.execute(q.limit(1))).first() is not None:
+        raise HTTPException(409, "A role with this name already exists")
+    return name
+
+
 @router.post("/roles", response_model=RoleOut)
 async def create_role(body: RoleCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_org_admin)):
-    role = Role(org_id=current_user.org_id, name=body.name, is_org_admin=body.is_org_admin)
+    name = await _checked_role_name(db, current_user.org_id, body.name)
+    perms = role_permissions.normalise(body.permissions) if body.permissions is not None else None
+    role = Role(org_id=current_user.org_id, name=name, is_org_admin=body.is_org_admin,
+                permissions_raw=perms)
     db.add(role)
     # Who can do what is the first thing an audit is asked (governance tour,
     # 2026-10-10): role and user changes were not recorded at all.
-    await admin_audit.record(db, current_user, "role.create", f"role:{body.name}",
-                             "org admin" if body.is_org_admin else None)
+    denied = [c for c, ok in (perms or {}).items() if not ok]
+    detail = "; ".join(x for x in ("org admin" if body.is_org_admin else None,
+                                   f"denied: {', '.join(denied)}" if denied else None) if x)
+    await admin_audit.record(db, current_user, "role.create", f"role:{name}", detail or None)
     await db.commit()
     await db.refresh(role)
     return role
@@ -52,12 +75,22 @@ async def update_role(role_id: int, body: RoleUpdate, db: AsyncSession = Depends
     role = await db.get(Role, role_id)
     check_org(role, current_user, "Role not found")
     changes = []
-    if body.name is not None and body.name != role.name:
-        changes.append(f"renamed from {role.name}")
-        role.name = body.name
+    if body.name is not None:
+        name = await _checked_role_name(db, current_user.org_id, body.name, except_id=role.id)
+        if name != role.name:
+            changes.append(f"renamed from {role.name}")
+            role.name = name
     if body.is_org_admin is not None and bool(body.is_org_admin) != bool(role.is_org_admin):
         changes.append("now org admin" if body.is_org_admin else "no longer org admin")
         role.is_org_admin = body.is_org_admin
+    if body.permissions is not None:
+        before = role_permissions.normalise(None, role.permissions_raw)
+        after = role_permissions.normalise(body.permissions, role.permissions_raw)
+        flipped = [f"{c} {'allowed' if after[c] else 'denied'}" for c in role_permissions.CAPABILITIES
+                   if before[c] != after[c]]
+        if flipped:
+            changes.append("permissions: " + ", ".join(flipped))
+            role.permissions_raw = after
     if changes:
         await admin_audit.record(db, current_user, "role.update", f"role:{role.name}", "; ".join(changes))
     await db.commit()
@@ -86,28 +119,87 @@ async def _load_user_out(db: AsyncSession, user_id: int) -> User:
     return result.scalar_one()
 
 
+def _refuse_if_platform_admin(target: User, current_user: User) -> None:
+    """A platform super-admin's account can only be changed by a platform
+    super-admin. An org admin of the org it happens to live in could otherwise
+    reset its password, rename it or demote it -- a takeover of every org
+    (QA E-01). Called before any change is made."""
+    if is_super_admin(target) and not is_super_admin(current_user):
+        raise HTTPException(403, "Platform administrators can only be changed by a platform administrator")
+
+
+def _refuse_allowlisted_email(email: str, current_user: User) -> None:
+    """Whoever holds an allowlisted address holds the platform, so only a
+    platform super-admin may give one to an account (QA E-02)."""
+    if is_allowlisted_email(email) and not is_super_admin(current_user):
+        raise HTTPException(403, "This address is reserved for platform administrators")
+
+
+def _refuse_invalid_credentials(email: str, password: str | None) -> None:
+    """422 with a readable reason for a malformed address or a weak password
+    (QA E-04: "not-an-email" / "x" were accepted). `password=None` checks the
+    email only (a PATCH that doesn't change the password)."""
+    if (why := email_problem(email)):
+        raise HTTPException(422, why)
+    if password is not None and (why := password_problem(password, email)):
+        raise HTTPException(422, why)
+
+
+async def _email_taken(db: AsyncSession, email: str, *, except_id: int | None = None) -> bool:
+    """Is this address in use, in ANY letter case (accounts made before
+    emails were normalised may still hold capitals)."""
+    q = select(User.id).where(func.lower(User.email) == normalize_email(email))
+    if except_id is not None:
+        q = q.where(User.id != except_id)
+    return (await db.execute(q.limit(1))).first() is not None
+
+
 @router.get("/users", response_model=list[UserOut])
-async def list_users(db: AsyncSession = Depends(get_db), current_user: User = Depends(require_org_admin)):
-    result = await db.execute(
-        select(User).options(selectinload(User.role), selectinload(User.organization))
-        .where(User.org_id == current_user.org_id)
-    )
-    return result.scalars().all()
+async def list_users(response: Response, q: str | None = None, role_id: int | None = None,
+                     active: bool | None = None,
+                     limit: int | None = Query(default=None, ge=1, le=500),
+                     offset: int = Query(default=0, ge=0),
+                     db: AsyncSession = Depends(get_db), current_user: User = Depends(require_org_admin)):
+    """The org's users, sorted by email (QA E-16: unordered, unfiltered and
+    unpaged). Optional `q` (email contains, any case), `role_id`, `active`,
+    and `limit`/`offset`; X-Total-Count is the number matching before paging.
+    Without `limit` every match is returned, as every existing caller expects."""
+    where = [User.org_id == current_user.org_id]
+    if q and q.strip():
+        where.append(func.lower(User.email).contains(q.strip().lower()))
+    if role_id is not None:
+        where.append(User.role_id == role_id)
+    if active is not None:
+        where.append(User.is_active.is_(active))
+    total = (await db.execute(select(func.count(User.id)).where(*where))).scalar_one()
+    response.headers["X-Total-Count"] = str(total)
+    stmt = (select(User).options(selectinload(User.role), selectinload(User.organization))
+            .where(*where).order_by(func.lower(User.email), User.id).offset(offset))
+    if limit is not None:
+        stmt = stmt.limit(limit)
+    users = (await db.execute(stmt)).scalars().all()
+    # Transient, as on /auth/me: lets the UI hide Edit/Delete on a platform
+    # admin's row for an org admin, who may not change it (E-01).
+    for u in users:
+        u.is_super_admin = is_super_admin(u)
+    return users
 
 
 @router.post("/users", response_model=UserOut)
 async def create_user(body: UserCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_org_admin)):
     role = await db.get(Role, body.role_id)
     check_org(role, current_user, "Role not found")
-    existing = await db.execute(select(User).where(User.email == body.email))
-    if existing.scalar_one_or_none() is not None:
+    email = normalize_email(body.email)
+    _refuse_invalid_credentials(email, body.password)
+    _refuse_allowlisted_email(email, current_user)
+    if await _email_taken(db, email):
         raise HTTPException(400, "Email already in use")
     user = User(
         org_id=current_user.org_id, role_id=body.role_id,
-        email=body.email, password_hash=hash_password(body.password),
+        email=email, password_hash=hash_password(body.password),
     )
     db.add(user)
-    await admin_audit.record(db, current_user, "user.create", f"user:{body.email}", f"role:{role.name}")
+    await admin_audit.record(db, current_user, "user.create", f"user:{email}", f"role:{role.name}")
     await db.commit()
     return await _load_user_out(db, user.id)
 
@@ -125,25 +217,32 @@ async def bulk_create_users(body: BulkUserCreate, db: AsyncSession = Depends(get
     for r in roles:
         role_by_name.setdefault((r.name or "").strip().lower(), r)   # first wins on a name clash
 
-    wanted = [(u.email or "").strip() for u in body.users if (u.email or "").strip()]
+    wanted = [normalize_email(u.email) for u in body.users if normalize_email(u.email)]
     taken = set()
     if wanted:
-        taken = set((await db.execute(select(User.email).where(User.email.in_(wanted)))).scalars().all())
+        taken = set((await db.execute(
+            select(func.lower(User.email)).where(func.lower(User.email).in_(wanted)))).scalars().all())
+    may_grant_platform = is_super_admin(current_user)
 
     errors: list[dict] = []
     valid: list[tuple[str, int, str]] = []   # (email, role_id, password)
     seen: set[str] = set()
     for i, u in enumerate(body.users):
         row = i + 1                           # 1-based, matches a spreadsheet
-        email = (u.email or "").strip()
-        if not email or "@" not in email:
+        email = normalize_email(u.email)
+        if email_problem(email):
             errors.append({"row": row, "email": email, "error": "invalid email"}); continue
+        if is_allowlisted_email(email) and not may_grant_platform:
+            errors.append({"row": row, "email": email,
+                           "error": "reserved for platform administrators"}); continue
         if email in seen:
             errors.append({"row": row, "email": email, "error": "duplicate email in this upload"}); continue
         if email in taken:
             errors.append({"row": row, "email": email, "error": "email already in use"}); continue
         if not (u.password or "").strip():
             errors.append({"row": row, "email": email, "error": "password required"}); continue
+        if (why := password_problem(u.password, email)):
+            errors.append({"row": row, "email": email, "error": why}); continue
         role = role_by_name.get((u.role or "").strip().lower())
         if role is None:
             errors.append({"row": row, "email": email, "error": f"unknown role '{u.role}'"}); continue
@@ -166,16 +265,22 @@ async def bulk_create_users(body: BulkUserCreate, db: AsyncSession = Depends(get
 async def update_user(user_id: int, body: UserUpdate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_org_admin)):
     user = await db.get(User, user_id)
     check_org(user, current_user, "User not found")
+    _refuse_if_platform_admin(user, current_user)
     changes: list[str] = []
     was_email = user.email
     if body.email is not None:
-        existing = await db.execute(select(User).where(User.email == body.email, User.id != user_id))
-        if existing.scalar_one_or_none() is not None:
+        email = normalize_email(body.email)
+        if email != user.email:      # an unchanged legacy address still saves
+            _refuse_invalid_credentials(email, None)
+        _refuse_allowlisted_email(email, current_user)
+        if await _email_taken(db, email, except_id=user_id):
             raise HTTPException(400, "Email already in use")
-        if body.email != user.email:
+        if email != user.email:
             changes.append(f"email from {user.email}")
-        user.email = body.email
+        user.email = email
     if body.password is not None:
+        if (why := password_problem(body.password, user.email)):
+            raise HTTPException(422, why)
         changes.append("password reset")
         user.password_hash = hash_password(body.password)
         # A reset is the moment a revocation is certainly wanted (a leaked or
@@ -203,6 +308,7 @@ async def update_user(user_id: int, body: UserUpdate, db: AsyncSession = Depends
 async def delete_user(user_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_org_admin)):
     user = await db.get(User, user_id)
     check_org(user, current_user, "User not found")
+    _refuse_if_platform_admin(user, current_user)
     if user.id == current_user.id:
         raise HTTPException(400, "Cannot delete your own account")
     await admin_audit.record(db, current_user, "user.delete", f"user:{user.email}", None)
@@ -226,15 +332,23 @@ def _refuse_if_aggregate(dataset: Dataset) -> None:
                  f"on the source dataset, not the aggregate.")
 
 
-async def _validate_filter_expr(dataset: Dataset, filter_expr: str) -> None:
-    # Resolve any USEREMAIL()/USER()/USERID() tokens against a placeholder identity so
-    # the rule validates as the concrete expression it becomes at query time — the
-    # column references and grammar are what we are checking here, not a real user.
-    from ..core.rls import apply_user_context
-    filter_expr = apply_user_context(
+def _placeholder_expr(filter_expr: str) -> str:
+    """Resolve USEREMAIL()/USER()/USERID()/ORGID()/ORGNAME() against a placeholder
+    identity, and MYSCOPE() against a one-value placeholder scope, so a rule
+    validates as the concrete expression it becomes at query time -- the column
+    references and grammar are what is checked, not a real user. One value keeps
+    `col in [...]` valid for both the pandas evaluator and the SQL translator.
+    The stored rule keeps its tokens; this is only what gets checked."""
+    from ..core.rls import apply_scope, apply_user_context
+    expr = apply_user_context(
         filter_expr, email="validator@example.com", user_id=0,
         org_id=0, org_name="validator-org",
     ) or filter_expr
+    return apply_scope(expr, ["__scope_validator__"]) or expr
+
+
+async def _validate_filter_expr(dataset: Dataset, filter_expr: str) -> None:
+    filter_expr = _placeholder_expr(filter_expr)
     if dataset.mode == "directquery":
         # No file to sample against -- validate the same way DirectQuery pushdown
         # itself will: does this expression translate to SQL against the dataset's
@@ -424,14 +538,12 @@ async def rule_preflight(
     import-mode expression the pandas evaluator accepts but the translator
     rejects (function calls, %, **, chained compares) reports no columns --
     see the spec's follow-up list, item 12."""
-    from ..core.rls import apply_user_context
     role = await db.get(Role, role_id)
     check_org(role, current_user, "Role not found")
     dataset = (await db.execute(select(Dataset).options(selectinload(Dataset.columns))
                                 .where(Dataset.id == dataset_id))).scalar_one_or_none()
     check_org(dataset, current_user, "Dataset not found")
-    expr = apply_user_context(filter_expr, email="validator@example.com", user_id=0,
-                              org_id=0, org_name="validator-org") or filter_expr
+    expr = _placeholder_expr(filter_expr)
     known = {c.name for c in dataset.columns}
     try:
         columns = sorted(expression_columns(expr, known))
@@ -487,16 +599,40 @@ async def delete_rule(rule_id: int, db: AsyncSession = Depends(get_db), current_
 @router.get("/audit-log")
 async def list_audit_log(
     limit: int = 200,
+    before_id: int | None = None,
+    action: str | None = None,
+    user_email: str | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
     db: AsyncSession = Depends(get_db),
     admin: User = Depends(require_org_admin),
 ):
     """The org's audit trail, newest first. Admin-only and org-scoped: the log records
-    an org's own actions and is readable by that org's admins alone."""
+    an org's own actions and is readable by that org's admins alone.
+
+    AD-19: `before_id` pages (keyset on the same newest-first order: the next
+    page starts after that row), `action` and `user_email` filter exactly,
+    `since` / `until` bound the time."""
+    from sqlalchemy import and_, or_
     limit = max(1, min(limit, 1000))
+    stmt = select(AuditLogEntry).where(AuditLogEntry.org_id == admin.org_id)
+    if action:
+        stmt = stmt.where(AuditLogEntry.action == action)
+    if user_email:
+        stmt = stmt.where(AuditLogEntry.user_email == user_email)
+    if since is not None:
+        stmt = stmt.where(AuditLogEntry.created_at >= since)
+    if until is not None:
+        stmt = stmt.where(AuditLogEntry.created_at <= until)
+    if before_id is not None:
+        anchor = await db.get(AuditLogEntry, before_id)
+        if anchor is None or anchor.org_id != admin.org_id:
+            return []
+        stmt = stmt.where(or_(AuditLogEntry.created_at < anchor.created_at,
+                              and_(AuditLogEntry.created_at == anchor.created_at,
+                                   AuditLogEntry.id < anchor.id)))
     rows = (await db.execute(
-        select(AuditLogEntry)
-        .where(AuditLogEntry.org_id == admin.org_id)
-        .order_by(AuditLogEntry.created_at.desc(), AuditLogEntry.id.desc())
+        stmt.order_by(AuditLogEntry.created_at.desc(), AuditLogEntry.id.desc())
         .limit(limit)
     )).scalars().all()
     return [
@@ -586,6 +722,11 @@ async def list_admin_audit(
 # delivery log. The one thing each endpoint adds is the cross-object view:
 # "what runs in this org, and when did it last work" was previously answerable
 # only by opening every report and every dataset one at a time.
+
+def summarize_checks(checks) -> dict:
+    from ..services.data_checks import summarize
+    return summarize(checks)
+
 
 async def _latest_runs(db: AsyncSession, kind: str, ids: list[int]) -> dict:
     """The newest RefreshRun per item, by item id."""
@@ -727,7 +868,44 @@ async def list_refresh_runs(
              "trigger": r.trigger, "status": r.status,
              "started_at": r.started_at, "finished_at": r.finished_at,
              "rows": r.rows, "duration_ms": r.duration_ms,
-             "error": r.error, "error_code": r.error_code} for r in runs]
+             "error": r.error, "error_code": r.error_code,
+             # AD-17: how this run's checks went, as counts.
+             "checks_summary": summarize_checks(r.checks) if r.checks else None} for r in runs]
+
+
+@router.get("/monitoring/automation-runs")
+async def list_monitoring_automation_runs(
+    limit: int = 100,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_org_admin),
+):
+    """AD-17: the org's automated analyses, newest first -- they run too, and
+    "Everything that runs" did not list them. Status, the step a running or
+    stopped run is at, and its error; each row links to /automation?run=<id>."""
+    from ..models.models import AutomationRun, AutomationStep
+    from ..services.automation_runner import STEP_LABELS
+    limit = max(1, min(int(limit or 100), 500))
+    runs = (await db.execute(select(AutomationRun).where(AutomationRun.org_id == admin.org_id)
+                             .order_by(AutomationRun.id.desc()).limit(limit))).scalars().all()
+    ids = [r.id for r in runs]
+    steps: dict[int, list] = {}
+    if ids:
+        for st in (await db.execute(select(AutomationStep).where(AutomationStep.run_id.in_(ids))
+                                    .order_by(AutomationStep.run_id, AutomationStep.order))).scalars().all():
+            steps.setdefault(st.run_id, []).append(st)
+    ds_ids = {r.subject_id for r in runs if r.subject_type == "dataset" and r.subject_id}
+    names = dict((await db.execute(select(Dataset.id, Dataset.name).where(
+        Dataset.id.in_(ds_ids), Dataset.org_id == admin.org_id))).all()) if ds_ids else {}
+    out = []
+    for r in runs:
+        current = next((st for st in steps.get(r.id, []) if not st.output_ref), None)
+        out.append({"id": r.id, "status": r.status,
+                    "dataset_id": r.subject_id if r.subject_type == "dataset" else None,
+                    "dataset_name": names.get(r.subject_id),
+                    "started_at": r.created_at, "finished_at": r.finished_at,
+                    "step": STEP_LABELS.get(current.name, current.name) if current is not None else None,
+                    "error": (current.error if current is not None and current.error else None) or r.error})
+    return out
 
 
 @router.get("/monitoring/deliveries")
@@ -909,6 +1087,7 @@ async def set_user_org_units(user_id: int, body: dict, db: AsyncSession = Depend
     from ..models.models import OrgUnit, UserOrgUnit
     target = await db.get(User, user_id)
     check_org(target, admin, "User not found")
+    _refuse_if_platform_admin(target, admin)
     ids = [int(i) for i in (body.get("org_unit_ids") or [])]
     if ids:
         valid = (await db.execute(

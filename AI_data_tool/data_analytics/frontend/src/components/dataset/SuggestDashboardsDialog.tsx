@@ -99,6 +99,9 @@ function reasonFrom(e: unknown, fallback: string): string {
   return (e as Error)?.message || fallback
 }
 
+/** F-03: `reason` when the statistics engine answered because the model could not be reached. */
+const AI_UNREACHABLE = 'ai_unreachable'
+
 export default function SuggestDashboardsDialog(
   { datasetId, datasetName, onClose, initialGoal }: SuggestDashboardsDialogProps,
 ) {
@@ -219,7 +222,12 @@ export default function SuggestDashboardsDialog(
     setQuestion(''); setStats(null); setFacts([]); setStage(null)
     try {
       abortRef.current = new AbortController()
-      const body = mode === 'panel' ? { goal, mode, size, background: true, fresh } : { goal, count: 3 }
+      // B-10: a blank box promises "no AI involved", so the profile's text
+      // may not stand in for it and call the model.
+      const blank = !goal.trim()
+      const body = mode === 'panel'
+        ? { goal, mode, size, background: true, fresh, ...(blank ? { use_profile: false } : {}) }
+        : { goal, count: 3, ...(blank ? { use_profile: false } : {}) }
       const got = await datasetsApi.suggestDashboards(datasetId, body, abortRef.current.signal)
       if (!alive.current) return
       if (got.job_id) {
@@ -399,6 +407,8 @@ export default function SuggestDashboardsDialog(
         )}
 
         {error && <div style={{ ...card, color: 'var(--danger)' }}>{error}</div>}
+        {/* F-11: the person chose "Off — no AI" in the top bar. */}
+        {reason === 'ai_off' && !busy && <div role="status" data-testid="sdd-ai-off" style={{ ...card, ...muted }}>{tr('sdd.aiOff')}</div>}
 
         {profile && (
           <details style={card}>
@@ -425,9 +435,15 @@ export default function SuggestDashboardsDialog(
           </details>
         )}
 
+        {reason === AI_UNREACHABLE && !busy && (
+          <div data-testid="sdd-ai-unreachable" role="status" style={{ ...card, borderColor: 'var(--warning, #b45309)' }}>
+            {tr('sdd.aiUnreachable')}
+          </div>
+        )}
+
         {proposals?.length === 0 && !busy && (
           <div style={{ ...card, ...muted }}>
-            {tr('sdd.none')}{reason ? `: ${reason}` : '.'}
+            {tr('sdd.none')}{reason && reason !== AI_UNREACHABLE ? `: ${reason}` : '.'}
             {/* The refusal, then the way forward. Answering edits the goal in
                 place and asks again, so the person never retypes what they
                 already said. */}

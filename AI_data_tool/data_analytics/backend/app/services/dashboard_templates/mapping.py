@@ -72,7 +72,12 @@ def score(slot: dict, col: dict) -> float:
     if col["kind"] not in ("category", "flag") or col["identifier"]:
         return 0.0
     if kind == "geography":
-        return 3.0 if col.get("geo") and col["geo"] not in ("latitude", "longitude") else 0.0
+        # F-13: a named level (country, state, city...) is a surer place than
+        # a generic "region", which is as often a sales split as a map.
+        geo = col.get("geo")
+        if not geo or geo in ("latitude", "longitude"):
+            return 0.0
+        return 2.5 if geo == "region" else 3.0
     limit = slot.get("max_distinct") or (STAGE_MAX_DISTINCT if kind == "stage" else DEFAULT_MAX_DISTINCT)
     if distinct is not None and (distinct < 2 or distinct > limit):
         return 0.0
@@ -119,19 +124,29 @@ def columns_for(slot: dict, columns: list[dict], others: dict[str, list[dict]] |
     return columns if not key else (others or {}).get(key)
 
 
+#: Slot kinds whose columns are labels: one column fills one of them only
+#: (F-13: `region` was offered as both the main split and the place).
+LABEL_KINDS = ("category", "geography", "stage", "flag")
+
+
 def suggest(spec: dict, columns: list[dict], others: dict[str, list[dict]] | None = None) -> dict[str, list[str]]:
     """{slot id: [columns]} -- each slot its best column not already taken by
-    a slot of the same kind (in the same dataset); required slots choose first."""
+    a slot of the same kind (label-like kinds count as one; in the same
+    dataset); required slots choose first, and a place before a split."""
     taken: dict[tuple, set[str]] = {}
     out: dict[str, list[str]] = {}
     slots = spec.get("slots") or []
-    # A slot measured against another is chosen after it.
-    for slot in sorted(slots, key=lambda s: (bool(s.get("same_unit")), not s.get("required"), slots.index(s))):
+    # A slot measured against another is chosen after it; a place is chosen
+    # before a split of the same standing, so a place column is not first
+    # taken as a way to split.
+    for slot in sorted(slots, key=lambda s: (bool(s.get("same_unit")), not s.get("required"),
+                                             s.get("kind") != "geography", slots.index(s))):
         own = columns_for(slot, columns, others)
         if own is None:
             continue
         by_name = {c["name"]: c for c in own}
-        used = taken.setdefault((slot.get("dataset"), slot["kind"]), set())
+        pool = "label" if slot["kind"] in LABEL_KINDS else slot["kind"]
+        used = taken.setdefault((slot.get("dataset"), pool), set())
         partner = by_name.get((out.get(slot.get("same_unit")) or [None])[0]) if slot.get("same_unit") else None
         free = [n for n in candidates(slot, own, partner) if n not in used]
         take = free[:int(slot.get("max") or MANY_DEFAULT)] if slot.get("many") else free[:1]

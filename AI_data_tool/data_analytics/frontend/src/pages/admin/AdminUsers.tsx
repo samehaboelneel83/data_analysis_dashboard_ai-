@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useContext, useEffect, useState } from 'react'
+import { AuthContext } from '../../contexts/AuthContext'
 import { fieldStyle } from '../../components/ui/fieldStyle'
 import { useT } from '../../i18n'
 import { nodesT } from '../../i18n/pages/adminSecurity'
@@ -12,6 +13,7 @@ import LoadError from '../../components/ui/LoadError'
 import LoadingState from '../../components/ui/LoadingState'
 import EmptyState from '../../components/ui/EmptyState'
 import { Plus, Users as UsersIcon } from 'lucide-react'
+import { isLongEnoughPassword, isValidEmail, PASSWORD_MIN_LENGTH } from '../../lib/credentials'
 
 function UserModal({ initial, roles, onSave, onClose }: {
   initial?: User | null
@@ -24,15 +26,27 @@ function UserModal({ initial, roles, onSave, onClose }: {
   const isEdit = !!initial
   const [email, setEmail] = useState(initial?.email ?? '')
   const [password, setPassword] = useState('')
-  const [roleId, setRoleId] = useState<number | ''>(initial?.role.id ?? roles[0]?.id ?? '')
+  // A new user starts with NO role -- pre-selecting the first one (often
+  // Admin) made "Create" mint another administrator by default (QA E-05, F-07).
+  const [roleId, setRoleId] = useState<number | ''>(initial?.role.id ?? '')
   const [isActive, setIsActive] = useState(initial?.is_active ?? true)
   const [saving, setSaving] = useState(false)
+  // Shown under the field (QA E-04), not as a toast that fades away.
+  const [emailErr, setEmailErr] = useState<string | null>(null)
+  const [passwordErr, setPasswordErr] = useState<string | null>(null)
 
   const inp = { style: fieldStyle }
 
   const handleSave = async () => {
     if (!email.trim()) { toast.error(t('pg.adminSecurity.users.emailRequired')); return }
     if (!isEdit && !password) { toast.error(t('pg.adminSecurity.users.passwordRequired')); return }
+    // An unchanged address is not re-checked: an older account may predate the rule.
+    const eErr = (!isEdit || email.trim() !== initial!.email) && !isValidEmail(email)
+      ? t('pg.adminSecurity.users.emailInvalid') : null
+    const pErr = password && !isLongEnoughPassword(password)
+      ? t('pg.adminSecurity.users.passwordTooShort', { n: PASSWORD_MIN_LENGTH }) : null
+    setEmailErr(eErr); setPasswordErr(pErr)
+    if (eErr || pErr) return
     if (roleId === '') { toast.error(t('pg.adminSecurity.users.roleRequired')); return }
     setSaving(true)
     try {
@@ -63,17 +77,21 @@ function UserModal({ initial, roles, onSave, onClose }: {
 
         <label style={{ display: 'block', marginBottom: 12 }}>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{t('pg.adminSecurity.users.emailLabel')}</div>
-          <input type="email" value={email} onChange={e => setEmail(e.target.value)} {...inp}
-            id="managed-user-email" name="managed-user-email" autoComplete="off" />
+          <input type="email" value={email} onChange={e => { setEmail(e.target.value); setEmailErr(null) }} {...inp}
+            id="managed-user-email" name="managed-user-email" autoComplete="off"
+            aria-invalid={emailErr ? true : undefined} aria-describedby={emailErr ? 'managed-user-email-err' : undefined} />
         </label>
+        {emailErr && <div id="managed-user-email-err" role="alert" style={{ fontSize: 11, color: 'var(--danger)', marginTop: -8, marginBottom: 12 }}>{emailErr}</div>}
 
         <label style={{ display: 'block', marginBottom: 12 }}>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>
             {isEdit ? t('pg.adminSecurity.users.newPasswordLabel') : t('pg.adminSecurity.users.passwordLabel')}
           </div>
-          <input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="new-password" {...inp}
-            id="managed-user-password" name="managed-user-password" />
+          <input type="password" value={password} onChange={e => { setPassword(e.target.value); setPasswordErr(null) }} autoComplete="new-password" {...inp}
+            id="managed-user-password" name="managed-user-password" minLength={PASSWORD_MIN_LENGTH}
+            aria-invalid={passwordErr ? true : undefined} aria-describedby={passwordErr ? 'managed-user-password-err' : undefined} />
         </label>
+        {passwordErr && <div id="managed-user-password-err" role="alert" style={{ fontSize: 11, color: 'var(--danger)', marginTop: -8, marginBottom: 12 }}>{passwordErr}</div>}
 
         <label style={{ display: 'block', marginBottom: 12 }}>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{t('pg.adminSecurity.c.roleReq')}</div>
@@ -100,6 +118,8 @@ function UserModal({ initial, roles, onSave, onClose }: {
     </div>
   )
 }
+
+const USERS_PAGE_SIZE = 50
 
 interface BulkResult { created_count: number; created: string[]; errors: { row: number; email: string; error: string }[] }
 
@@ -178,6 +198,7 @@ function BulkImportModal({ onDone, onClose }: { onDone: () => void; onClose: () 
 
 export default function AdminUsers() {
   const t = useT()
+  const viewerIsPlatformAdmin = !!useContext(AuthContext)?.user?.is_super_admin
   const [users, setUsers] = useState<User[]>([])
   const [roles, setRoles] = useState<Role[]>([])
   const [loading, setLoading] = useState(true)
@@ -199,6 +220,22 @@ export default function AdminUsers() {
   }
 
   useEffect(() => { load().finally(() => setLoading(false)) }, [])
+
+  // Search, filters and pages (QA E-16: one flat, unsorted list).
+  const [query, setQuery] = useState('')
+  const [roleFilter, setRoleFilter] = useState('')
+  const [status, setStatus] = useState<'all' | 'active' | 'inactive'>('all')
+  const [page, setPage] = useState(0)
+  useEffect(() => setPage(0), [query, roleFilter, status])
+  const q = query.trim().toLowerCase()
+  const matching = [...users]
+    .sort((a, b) => a.email.localeCompare(b.email))
+    .filter(u => (!q || u.email.toLowerCase().includes(q))
+      && (roleFilter === '' || String(u.role.id) === roleFilter)
+      && (status === 'all' || (status === 'active') === !!u.is_active))
+  const pageCount = Math.max(1, Math.ceil(matching.length / USERS_PAGE_SIZE))
+  const shownPage = Math.min(page, pageCount - 1)
+  const visible = matching.slice(shownPage * USERS_PAGE_SIZE, (shownPage + 1) * USERS_PAGE_SIZE)
 
   const handleSaved = (u: User) => {
     setUsers(prev => {
@@ -250,21 +287,64 @@ export default function AdminUsers() {
           description={t('pg.adminSecurity.users.emptyBody')} />
       )}
 
+      {users.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+          <input type="search" value={query} onChange={e => setQuery(e.target.value)}
+            aria-label={t('pg.adminSecurity.users.search')} placeholder={t('pg.adminSecurity.users.search')}
+            style={{ ...fieldStyle, flex: '1 1 220px', maxWidth: 360 }} />
+          <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)}
+            aria-label={t('pg.adminSecurity.users.roleFilter')} style={{ ...fieldStyle, width: 'auto' }}>
+            <option value="">{t('pg.adminSecurity.users.allRoles')}</option>
+            {roles.map(r => <option key={r.id} value={String(r.id)}>{r.name}</option>)}
+          </select>
+          <select value={status} onChange={e => setStatus(e.target.value as typeof status)}
+            aria-label={t('pg.adminSecurity.users.status')} style={{ ...fieldStyle, width: 'auto' }}>
+            <option value="all">{t('pg.adminSecurity.users.statusAll')}</option>
+            <option value="active">{t('pg.adminSecurity.users.statusActive')}</option>
+            <option value="inactive">{t('pg.adminSecurity.users.statusInactive')}</option>
+          </select>
+        </div>
+      )}
+      {users.length > 0 && matching.length === 0 && (
+        <p style={{ fontSize: 13, color: 'var(--muted)' }}>{t('pg.adminSecurity.users.noMatch')}</p>
+      )}
+
       <div className="dl-rows">
-        {users.map(u => (
+        {visible.map(u => (
           <div key={u.id} className="dl-rows__row">
             <div className="dl-rows__main">
               <div className="dl-rows__title">
                 <bdi dir="ltr">{u.email}</bdi>
-                {!u.is_active && <span style={{ marginInlineStart: 8, fontSize: 11, color: 'var(--danger)' }}>{t('pg.adminSecurity.users.inactive')}</span>}
+                {!u.is_active && <span style={{ marginInlineStart: 8, fontSize: 11, color: 'var(--danger)',
+                  border: '1px solid currentColor', borderRadius: 99, padding: '0 6px' }}>{t('pg.adminSecurity.users.inactive')}</span>}
               </div>
               <div className="dl-rows__meta"><bdi>{u.role.name}</bdi>{u.role.is_org_admin && <>{' '}{t('pg.adminSecurity.c.adminTag')}</>}</div>
             </div>
-            <button className="btn btn-ghost btn-sm" onClick={() => setModal(u)}>{t('admin.edit')}</button>
-            <button className="btn btn-ghost btn-sm dl-danger-item" onClick={() => handleDelete(u)}>{t('admin.delete')}</button>
+            {u.is_super_admin && !viewerIsPlatformAdmin ? (
+              // Only a platform admin may change a platform admin (the server
+              // refuses it too); say why instead of offering dead buttons.
+              <span className="dl-rows__meta" title={t('pg.adminSecurity.users.platformAdminHint')}>
+                {t('pg.adminSecurity.users.platformAdminTag')}
+              </span>
+            ) : (<>
+              <button className="btn btn-ghost btn-sm" onClick={() => setModal(u)}>{t('admin.edit')}</button>
+              <button className="btn btn-ghost btn-sm dl-danger-item" onClick={() => handleDelete(u)}>{t('admin.delete')}</button>
+            </>)}
           </div>
         ))}
       </div>
+
+      {matching.length > USERS_PAGE_SIZE && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginTop: 8, fontSize: 12 }}>
+          <span style={{ color: 'var(--muted)' }}>{t('pg.adminSecurity.users.range', {
+            from: shownPage * USERS_PAGE_SIZE + 1,
+            to: Math.min((shownPage + 1) * USERS_PAGE_SIZE, matching.length), total: matching.length })}</span>
+          <button className="btn btn-ghost btn-sm" disabled={shownPage === 0} onClick={() => setPage(shownPage - 1)}
+            aria-label={t('pg.adminSecurity.users.prevPage')}>‹</button>
+          <button className="btn btn-ghost btn-sm" disabled={shownPage >= pageCount - 1} onClick={() => setPage(shownPage + 1)}
+            aria-label={t('pg.adminSecurity.users.nextPage')}>›</button>
+        </div>
+      )}
 
       {modal && (
         <UserModal

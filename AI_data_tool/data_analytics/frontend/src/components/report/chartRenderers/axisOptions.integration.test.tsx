@@ -437,7 +437,10 @@ describe('ScatterChartRenderer formatting options', () => {
   it('honours a custom tick colour on both axes', () => {
     const { container } = render(
       <div style={{ width: 600, height: 400 }}>
-        <ScatterChartRenderer {...base} cfg={{ axis_tick_color: '#ff0000' }} />
+        {/* Numeric x: a scatter of text categories ('US', 'CA') plots nothing and
+            now says so (C-07), so it has no axis ticks to colour. */}
+        <ScatterChartRenderer {...base} rows={[{ x: 1, y: 1500 }, { x: 2, y: 400 }]}
+          data={{ rows: [{ x: 1, y: 1500 }, { x: 2, y: 400 }] }} cfg={{ axis_tick_color: '#ff0000' }} />
       </div>
     )
     const fills = [...container.querySelectorAll('.recharts-cartesian-axis-tick-value')]

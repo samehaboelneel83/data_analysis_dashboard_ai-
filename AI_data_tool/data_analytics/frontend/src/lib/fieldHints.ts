@@ -97,3 +97,15 @@ export function hintTitle(hint: FieldHint | undefined): string {
   }
   return parts.join(' · ')
 }
+
+/** C-09: each numeric field's observed min/max from the analysis profile
+ *  (`numeric.columns[col].min/max`), for checks such as "can this be a
+ *  longitude". Fields without both numbers are left out. */
+export function numericRanges(analysis: any): Record<string, { min: number; max: number }> {
+  const out: Record<string, { min: number; max: number }> = {}
+  for (const [col, stats] of Object.entries<any>(analysis?.numeric?.columns ?? {})) {
+    const min = Number(stats?.min), max = Number(stats?.max)
+    if (stats?.min != null && stats?.max != null && Number.isFinite(min) && Number.isFinite(max)) out[col] = { min, max }
+  }
+  return out
+}

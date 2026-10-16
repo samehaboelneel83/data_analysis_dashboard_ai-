@@ -195,3 +195,112 @@ class TestFactory:
         client = llm_module.get_client()
         assert client.model
         assert client.base_url
+
+
+class TestFailFastWhenTheModelIsKnownDown:
+    """AD-01: an unreachable model must cost seconds, not minutes."""
+
+    @pytest.fixture(autouse=True)
+    def _clean_health(self):
+        from app.services import llm_endpoints as le
+        le._health.clear()
+        yield
+        le._health.clear()
+
+    async def test_connect_has_its_own_short_timeout(self, monkeypatch):
+        from app.core.config import settings
+        monkeypatch.setattr(settings, "llm_connect_timeout_s", 4.0)
+        seen = {}
+
+        real = httpx.AsyncClient
+
+        class Spy(real):
+            def __init__(self, *a, **kw):
+                seen["timeout"] = kw.get("timeout")
+                super().__init__(*a, **kw)
+
+        monkeypatch.setattr(llm_module.httpx, "AsyncClient", Spy)
+        client = _client(lambda r: _reply("ok"), timeout=180.0)
+        assert await client.complete([{"role": "user", "content": "hi"}]) == "ok"
+        t = seen["timeout"]
+        assert isinstance(t, httpx.Timeout)
+        assert t.connect == 4.0 and t.read == 180.0
+
+    async def test_a_freshly_down_endpoint_is_not_dialled(self):
+        from app.services import llm_endpoints as le
+        calls = []
+
+        def handler(request):
+            calls.append(request)
+            return _reply("ok")
+
+        client = _client(handler, endpoint_id="env")
+        le.mark("env", False, "ConnectTimeout")
+        assert await client.complete([{"role": "user", "content": "hi"}]) is None
+        assert calls == []
+        assert client.last_error == llm_module.MODEL_UNREACHABLE
+
+    async def test_a_stale_down_mark_still_calls_out(self, monkeypatch):
+        from app.services import llm_endpoints as le
+        calls = []
+
+        def handler(request):
+            calls.append(request)
+            return _reply("ok")
+
+        client = _client(handler, endpoint_id="env")
+        le.mark("env", False, "ConnectTimeout")
+        le._health["env"]["at"] -= 10 * le.PROBE_SECONDS
+        assert await client.complete([{"role": "user", "content": "hi"}]) == "ok"
+        assert len(calls) == 1
+
+
+_ANY = {"type": "object"}
+
+
+class TestAvailableAndSkipKnownDown:
+    """B-11: an endpoint the prober (or the last call) just found down is not
+    tried again with the full timeout; the call answers None at once."""
+
+    @pytest.fixture(autouse=True)
+    def _clean_health(self, monkeypatch):
+        from app.services import llm_endpoints
+        monkeypatch.setattr(llm_endpoints, "_health", {})
+
+    async def test_a_freshly_down_endpoint_is_not_called(self):
+        from app.services import llm_endpoints
+        seen = []
+
+        def handler(request):
+            seen.append(request)
+            return _reply('{"a": 1}')
+        llm_endpoints.mark("gpu", False, "ConnectError")
+        client = _client(handler, endpoint_id="gpu")
+        assert client.available() is False
+        assert await client.complete_json([{"role": "user", "content": "x"}], _ANY) is None
+        assert seen == []
+        assert client.last_error == llm_module.MODEL_UNREACHABLE
+
+    async def test_an_up_or_unknown_endpoint_is_still_called(self):
+        from app.services import llm_endpoints
+        seen = []
+
+        def handler(request):
+            seen.append(request)
+            return _reply('{"a": 1}')
+        client = _client(handler, endpoint_id="gpu")
+        assert client.available() is True
+        assert await client.complete_json([{"role": "user", "content": "x"}], _ANY) == {"a": 1}
+        llm_endpoints.mark("gpu", True)
+        assert await client.complete_json([{"role": "user", "content": "x"}], _ANY) == {"a": 1}
+        assert len(seen) == 2
+
+    async def test_a_stale_red_light_does_not_stop_a_call(self, monkeypatch):
+        from datetime import datetime, timedelta, timezone
+        from app.services import llm_endpoints
+        llm_endpoints.mark("gpu", False, "old")
+        llm_endpoints._health["gpu"]["checked_at"] = (
+            datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+        llm_endpoints._health["gpu"]["at"] -= 600
+        client = _client(lambda r: _reply('{"a": 1}'), endpoint_id="gpu")
+        assert await client.complete_json([{"role": "user", "content": "x"}], _ANY) == {"a": 1}

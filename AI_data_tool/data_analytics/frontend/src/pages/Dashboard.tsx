@@ -23,6 +23,7 @@ import {
   bucketOf, dashboardsOf, freshnessWords, sourceKind, sourceWords, statusOf,
   type Bucket, type SourceKind, type Status,
 } from './datasetsList/classify'
+import { roleAllows } from '../lib/rolePermissions'
 import './datasetsList/datasetsList.css'
 
 /**
@@ -145,6 +146,8 @@ export default function Dashboard() {
   const user = useContext(AuthContext)?.user ?? null
   const meId = user?.id ?? null
   const isAdmin = !!(user?.role?.is_org_admin || user?.is_super_admin)
+  // QA E-08: the role may not upload (the server refuses it too).
+  const canUpload = roleAllows(user, 'upload_data')
   const [datasets, setDatasets] = useState<DatasetSummary[]>([])
   const [graph, setGraph] = useState<LineageGraph | null>(null)
   // Which dataset the suggestion panel is open for, if any. Held here rather
@@ -288,7 +291,7 @@ export default function Dashboard() {
         </div>
         <div className="dl-dsl__head-actions">
           <Link to="/connections" className="btn"><Plug size={15} aria-hidden /> {t('dsl.connect')}</Link>
-          <Link to="/upload" className="btn btn-primary"><Upload size={15} aria-hidden /> {t('dsl.upload')}</Link>
+          {canUpload && <Link to="/upload" className="btn btn-primary"><Upload size={15} aria-hidden /> {t('dsl.upload')}</Link>}
         </div>
       </header>
 

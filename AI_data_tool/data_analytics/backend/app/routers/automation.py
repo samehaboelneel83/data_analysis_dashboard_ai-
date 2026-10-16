@@ -33,16 +33,12 @@ from ..dependencies import get_current_user
 from ..models.models import AutomationRun, AutomationStep, Dataset, User
 from ..services import automation_runner as runner
 from ..services.audit import record as audit
+from ..services.notifications import notify
 
 router = APIRouter(prefix="/automation", tags=["automation"])
 
 #: Plain words for the seven steps, for the run page.
-STEP_LABELS = {
-    "profile": "Profile the data", "describe": "Describe the columns",
-    "scan": "Scan for findings", "propose": "Propose a dashboard",
-    "review": "Review the proposal", "compose": "Build the report",
-    "notify": "Tell you",
-}
+STEP_LABELS = runner.STEP_LABELS
 
 
 class StartRun(BaseModel):
@@ -107,6 +103,10 @@ async def start_run(body: StartRun, db: AsyncSession = Depends(get_db),
     if ds is None or ds.org_id != user.org_id:
         raise HTTPException(404, "Dataset not found")
     await require_dataset_capability(db, user, body.dataset_id, "data")
+    # QA E-08: the run composes a dashboard as its starter (step 6, which
+    # checks again when it runs: the role may change in between).
+    from ..core import role_permissions
+    role_permissions.check(user, "create_dashboard")
     if not ds.filename and not (ds.mode == "directquery" and ds.data_source_id):
         raise HTTPException(400, "This dataset has no data behind it to analyse")
     active = (await db.execute(select(AutomationRun).where(
@@ -192,18 +192,68 @@ async def cancel_run(run_id: int, db: AsyncSession = Depends(get_db),
     if res.rowcount:
         runner.discard_run_artifacts(run.org_id, run.id)
         await audit(db, user, "automation.cancel", "automation_run", run.id, None)
+        if run.created_by is not None and run.created_by != user.id:
+            # AD-03: someone else stopped this person's run; they should know.
+            await db.refresh(run)
+            text, link = runner.describe_run(run)
+            await notify(db, run.org_id, run.created_by, "automation", text, link)
     await db.commit()
     await db.refresh(run)
     return await _out(db, run, detail=True)
 
 
+#: AD-22: the runs a person may delete or retry -- stopped ones.
+STOPPED = ("failed", "cancelled")
+
+
+async def _active_twin(db: AsyncSession, run: AutomationRun) -> AutomationRun | None:
+    """Another unfinished run of the same dataset (one at a time, as on start)."""
+    return (await db.execute(select(AutomationRun).where(
+        AutomationRun.org_id == run.org_id, AutomationRun.subject_type == run.subject_type,
+        AutomationRun.subject_id == run.subject_id, AutomationRun.id != run.id,
+        AutomationRun.status.in_([*runner.ACTIVE_RUN_STATUSES, runner.NEEDS_REVIEW])))).scalars().first()
+
+
+@router.delete("/runs/{run_id}", status_code=204)
+async def delete_run(run_id: int, db: AsyncSession = Depends(get_db),
+                     user: User = Depends(get_current_user)):
+    """AD-22: remove a stopped (failed or cancelled) run, its steps and any
+    artifacts left on disk. A run still going, held for a decision or done
+    is not deletable here."""
+    run = await _visible_run(db, run_id, user)
+    if run.status not in STOPPED:
+        raise HTTPException(409, "Only a stopped run (failed or cancelled) can be deleted")
+    runner.discard_run_artifacts(run.org_id, run.id)
+    for st in (await db.execute(select(AutomationStep).where(AutomationStep.run_id == run.id))).scalars().all():
+        await db.delete(st)
+    await audit(db, user, "automation.delete", "automation_run", run.id, f"was {run.status}")
+    await db.delete(run)
+    await db.commit()
+
+
 @router.post("/runs/{run_id}/retry")
 async def retry_run(run_id: int, db: AsyncSession = Depends(get_db),
                     user: User = Depends(get_current_user)):
-    """A failed step waiting out its backoff: try it on the next tick instead."""
+    """A failed step waiting out its backoff: try it on the next tick instead.
+
+    AD-22: a CANCELLED run starts again from its first step. Cancelling
+    discarded its artifacts, so no earlier step's output can be reused."""
     run = await _visible_run(db, run_id, user)
+    if run.status == "cancelled":
+        if await _active_twin(db, run) is not None:
+            raise HTTPException(409, "Another automated analysis of this dataset is already going")
+        for st in (await db.execute(select(AutomationStep).where(AutomationStep.run_id == run.id))).scalars().all():
+            st.status, st.output_ref, st.error = "pending", None, None
+            st.attempts, st.next_attempt_at, st.started_at, st.finished_at = 0, None, None, None
+        run.status, run.error, run.finished_at = "pending", None, None
+        run.widgets_accepted = run.widgets_rejected = None
+        run.rejection_reasons = run.raw_proposals = run.proposal_path = None
+        await audit(db, user, "automation.retry", "automation_run", run.id, "restarted after a cancel")
+        await db.commit()
+        await db.refresh(run)
+        return await _out(db, run, detail=True)
     if run.status != "failed":
-        raise HTTPException(409, "Only a failed run can be retried")
+        raise HTTPException(409, "Only a failed or cancelled run can be retried")
     step = (await db.execute(select(AutomationStep).where(
         AutomationStep.run_id == run.id, AutomationStep.output_ref.is_(None))
         .order_by(AutomationStep.order))).scalars().first()

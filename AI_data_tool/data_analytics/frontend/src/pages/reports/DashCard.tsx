@@ -10,7 +10,7 @@ import { pageCount, provenance, showsDataset, statusOf } from './model'
 /**
  * One dashboard, as a card (grid) or a row (list), for the Dashboards page
  * (redesign 7b). The page decides what this viewer may do; this only draws it.
- * No star, owner avatar, view count or Duplicate: the backend has no data for
+ * No star, owner avatar or view count: the backend has no data for
  * them (PLAN.md, Backend follow-ups).
  */
 

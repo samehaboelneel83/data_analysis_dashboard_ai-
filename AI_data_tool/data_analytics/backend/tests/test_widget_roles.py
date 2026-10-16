@@ -56,8 +56,11 @@ def frontend_required() -> dict[str, set[str]]:
 class TestParityWithTheFrontend:
     def test_the_spec_file_was_actually_read(self):
         """A parser that quietly returns nothing would make every test below
-        pass. The catalogue is 65 types and the doc tests already pin that."""
-        assert len(frontend_required()) == 75, sorted(frontend_required())
+        pass. The catalogue in frontend/src/types/report.ts (ROLE_SPECS) had 77
+        types when this was last checked; a floor rather than an exact count
+        still catches a broken parser without turning CI red each time a chart
+        type is added (`test_every_widget_type_is_covered` guards real parity)."""
+        assert len(frontend_required()) >= 70, sorted(frontend_required())
 
     def test_every_widget_type_is_covered(self):
         missing = set(frontend_required()) - set(REQUIRED_ROLES)
@@ -340,3 +343,11 @@ class TestAKpiNeedsOnlyAMeasure:
         kpis = {w["id"]: w["config"] for p in loaded["pages"] for w in p["widgets"]}
         assert kpis[ids[1]]["dimension"] == "region" and kpis[ids[1]]["aggregation"] == "avg"
         assert "dimension" not in kpis[ids[0]]
+
+
+def test_small_multiples_requires_its_split_field():
+    """C-23: the facet DEFINES a small multiple; without it the widget drew a
+    single 'All' panel. It is a required role, carried in `facet_by`."""
+    assert missing_roles("small_multiples", {"dimension": "category", "measure": "revenue"}) == ["facet_by"]
+    assert missing_roles("small_multiples", {"dimension": "category", "facet_by": "region"}) == []
+    assert config_key_for_role("facet") == "facet_by"

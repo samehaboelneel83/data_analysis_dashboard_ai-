@@ -119,3 +119,40 @@ describe('AdminOrgUnits', () => {
     expect(await screen.findByText('Egypt')).toBeInTheDocument()
   })
 })
+
+describe('AdminOrgUnits — the value a unit takes in the data (QA E-18)', () => {
+  it('adding a unit asks for its value, defaulting to the name, and sends match_value', async () => {
+    vi.mocked(orgUnitsApi.create).mockResolvedValue({ id: 9 } as never)
+    renderPage()
+    await screen.findByText('Egypt')
+    fireEvent.click(screen.getByRole('button', { name: /Add top-level unit/ }))
+    fireEvent.change(await screen.findByLabelText('Unit name'), { target: { value: 'Cairo Branch' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await screen.findByLabelText('Level name')
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+    const value = await screen.findByLabelText('Value in your data') as HTMLInputElement
+    expect(value.value).toBe('Cairo Branch')
+    fireEvent.change(value, { target: { value: 'Cairo' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add unit' }))
+    await waitFor(() => expect(orgUnitsApi.create).toHaveBeenCalledWith(
+      { name: 'Cairo Branch', parent_id: null, level_name: undefined, match_value: 'Cairo' }))
+  })
+
+  it('edits a unit’s value through the existing update', async () => {
+    vi.mocked(orgUnitsApi.update).mockResolvedValue({} as never)
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit the value of Egypt' }))
+    const value = await screen.findByLabelText('Value in your data') as HTMLInputElement
+    expect(value.value).toBe('Egypt')
+    fireEvent.change(value, { target: { value: 'EG' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(orgUnitsApi.update).toHaveBeenCalledWith(1, { match_value: 'EG' }))
+  })
+
+  it('always shows each unit’s value, even when it equals the name', async () => {
+    renderPage()
+    await screen.findByText('Egypt')
+    expect(screen.getByText('= Egypt')).toBeInTheDocument()
+    expect(screen.getByText('= Alexandria')).toBeInTheDocument()
+  })
+})

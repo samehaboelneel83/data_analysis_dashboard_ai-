@@ -9,7 +9,7 @@ import type { Widget, ReportPage, HierarchyNode } from '../../types/report'
 
 vi.mock('../../services/api', () => ({
   pinsApi: { create: vi.fn().mockResolvedValue({ id: 1, widget_id: 1, already_pinned: false }), list: vi.fn().mockResolvedValue([]), remove: vi.fn().mockResolvedValue(undefined) },
-  widgetDataApi: { query: vi.fn() },
+  widgetDataApi: { query: vi.fn(), export: vi.fn() },
   // The lazily-imported map renderers reach this module through
   // geo/regionSetCache. Without the export the dynamic import fails and the
   // widget sits on "Loading map…" forever, which reads as a renderer bug.
@@ -594,6 +594,39 @@ describe('WidgetRenderer matrix', () => {
   })
 })
 
+describe('C-02: table, crosstab and KPI numbers use the measure format', () => {
+  const usd = { revenue: { type: 'currency', symbol: '$', decimals: 0 } } as never
+  const plainText = (t: string) => (_: string, el: Element | null) =>
+    !!el && el.children.length === 0 && (el.textContent ?? '').replace(/[\u2066-\u2069]/g, '') === t
+  beforeEach(() => { vi.mocked(widgetDataApi.query).mockReset() })
+
+  it('a crosstab cell and its subtotal carry the measure\'s currency', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ type: 'crosstab',
+      columns: ['region', 'Hardware', '__total__'], rows: [['Asia', 700019.84, 1.2e6]], total: 1 } as never)
+    renderWidget({ columnFormats: usd, widget: barWidget({ widget_type: 'crosstab',
+      config: { dimension: 'region', dimension2: 'category', measure: 'revenue', aggregation: 'sum' } }) })
+    expect(await screen.findByText('Asia')).toBeInTheDocument()
+    expect(screen.getByText(plainText('$ 700,020'))).toBeInTheDocument()
+    expect(screen.getByText(plainText('$ 1,200,000'))).toBeInTheDocument()
+  })
+
+  it('a grouped table\'s value column is formatted; without a format it is grouped', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'Asia', value: 795152.7 }], total: 10 } as never)
+    renderWidget({ widget: barWidget({ widget_type: 'table',
+      config: { dimension: 'region', measure: 'units', aggregation: 'sum' } }) })
+    expect(await screen.findByText('Asia')).toBeInTheDocument()
+    expect(screen.getByText('795,152.7')).toBeInTheDocument()
+  })
+
+  it('a KPI counting a currency column shows no currency symbol', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'revenue', value: 2000 }] } as never)
+    renderWidget({ columnFormats: usd, widget: barWidget({ widget_type: 'kpi', title: 'Rows',
+      config: { measure: 'revenue', aggregation: 'count' } }) })
+    expect(await screen.findAllByText('2,000')).not.toHaveLength(0)
+    expect(screen.queryByText(/\$/)).toBeNull()
+  })
+})
+
 describe('WidgetRenderer card', () => {
   it('renders one label+value row per measure', async () => {
     vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'revenue', value: 60 }, { name: 'cost', value: 20 }], sampled: false })
@@ -606,6 +639,36 @@ describe('WidgetRenderer card', () => {
     expect(screen.getByText(fmt(60))).toBeInTheDocument()
     expect(screen.getByText('cost')).toBeInTheDocument()
     expect(screen.getByText(fmt(20))).toBeInTheDocument()
+  })
+})
+
+describe('C-13: card figures fit the tile height too', () => {
+  it('sizes each of three figures by the tile\'s height as well as its width', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [
+      { name: 'revenue', value: 8632597 }, { name: 'cost', value: 20 }, { name: 'units', value: 5 }], sampled: false })
+    renderWidget({ widget: barWidget({ widget_type: 'card', config: { measures: ['revenue', 'cost', 'units'] } }) })
+    const label = await screen.findByText('units')
+    const figure = label.previousElementSibling as HTMLElement
+    expect(figure.style.fontSize).toContain('cqb')
+  })
+
+  // C-13 round 2: a tile much wider than tall lays its figures side by side.
+  it('a wide tile lays the figures in a row: the card is a named size container the stylesheet turns', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [
+      { name: 'revenue', value: 8632597 }, { name: 'cost', value: 20 }, { name: 'units', value: 5 }], sampled: false })
+    renderWidget({ widget: barWidget({ widget_type: 'card', config: { measures: ['revenue', 'cost', 'units'] } }) })
+    const label = await screen.findByText('units')
+    const figure = label.previousElementSibling as HTMLElement
+    const list = label.closest('.dl-card__rows') as HTMLElement
+    expect(list).toBeTruthy()
+    expect(list.parentElement!.classList.contains('dl-card')).toBe(true)
+    // the height cap reads the row count from a variable the wide layout resets to 1
+    expect(figure.style.fontSize).toContain('var(--dl-card-rows')
+    const fs = await import('node:fs'); const path = await import('node:path')
+    const css = fs.readFileSync(path.join(__dirname, '..', '..', 'index.css'), 'utf8')
+    const m = /@container dlcard \(min-aspect-ratio: [\d.]+ ?\/ ?[\d.]+\)\s*\{([\s\S]*?)\n\}/.exec(css)
+    expect(m?.[1] ?? '').toMatch(/\.dl-card__rows\s*\{[^}]*flex-direction:\s*row/)
+    expect(m?.[1] ?? '').toMatch(/--dl-card-rows:\s*1/)
   })
 })
 
@@ -1097,7 +1160,8 @@ describe('WidgetRenderer totals row', () => {
 
     const footRow = await screen.findByTestId('table-totals-row')
     expect(footRow).toHaveTextContent('Total')
-    expect(footRow).toHaveTextContent('1500')
+    // C-02: the measure's total is grouped like every other measure value.
+    expect(footRow).toHaveTextContent('1,500')
   })
 
   it('renders no totals row when the server sent none', async () => {
@@ -1616,6 +1680,69 @@ describe('viewport-lazy fetch', () => {
     renderWidget({ eagerFetch: true })
     await waitFor(() => expect(widgetDataApi.query).toHaveBeenCalled())
   })
+
+  // C-01: a tile already on screen whose observer never reports an
+  // intersection (layout not settled at observe time) used to wait for a scroll.
+  class InertIO { observe() {} disconnect() {} unobserve() {} }
+  const inView = { top: 10, left: 0, bottom: 210, right: 300, width: 300, height: 200, x: 0, y: 10, toJSON() {} } as DOMRect
+
+  it('fetches on mount when the tile is already in the viewport, even if the observer never fires', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'A', value: 1 }] })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(globalThis as any).IntersectionObserver = InertIO
+    const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(inView)
+    try {
+      renderWidget()
+      await waitFor(() => expect(widgetDataApi.query).toHaveBeenCalled())
+    } finally { spy.mockRestore() }
+  })
+
+  it('re-checks the position after layout settles and fetches without a scroll', async () => {
+    // Real timers: fake ones strand module-level rAF work and leak into later tests.
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'A', value: 1 }] })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(globalThis as any).IntersectionObserver = InertIO
+    const zero = { top: 0, left: 0, bottom: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON() {} } as DOMRect
+    let rect = zero
+    const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => rect)
+    try {
+      renderWidget()
+      await act(async () => { await Promise.resolve() })
+      expect(widgetDataApi.query).not.toHaveBeenCalled()
+      rect = inView                       // the canvas has now been laid out
+      await waitFor(() => expect(widgetDataApi.query).toHaveBeenCalled(), { timeout: 3000 })
+    } finally { spy.mockRestore() }
+  })
+
+  it('a tile far below the fold still waits for the observer', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'A', value: 1 }] })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(globalThis as any).IntersectionObserver = InertIO
+    const far = { ...inView, top: 5000, bottom: 5200, y: 5000 } as DOMRect
+    const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(far)
+    try {
+      renderWidget()
+      await act(async () => { await Promise.resolve() })
+      expect(widgetDataApi.query).not.toHaveBeenCalled()
+    } finally { spy.mockRestore() }
+  })
+
+  it('clears "Loading…" when a superseded fetch is replaced by a newer one', async () => {
+    // The first answer never arrives (the request is aborted by the config change).
+    vi.mocked(widgetDataApi.query)
+      .mockImplementationOnce((_ds, _cfg, _cc, _wt, opts) => new Promise((_res, rej) => {
+        opts?.signal?.addEventListener('abort', () => rej(Object.assign(new Error('canceled'), { name: 'CanceledError', code: 'ERR_CANCELED' })))
+      }) as never)
+      .mockResolvedValue({ rows: [{ name: 'A', value: 1 }] })
+    const { rerender } = renderWidget({ eagerFetch: true })
+    await waitFor(() => expect(widgetDataApi.query).toHaveBeenCalledTimes(1))
+    rerender(
+      <CrossFilterProvider>
+        <WidgetRenderer widget={barWidget({ config: { dimension: 'product' } })} datasetId={10} eagerFetch />
+      </CrossFilterProvider>)
+    await waitFor(() => expect(widgetDataApi.query).toHaveBeenCalledTimes(2), { timeout: 3000 })
+    await waitFor(() => expect(screen.queryByText(/Loading/)).toBeNull())
+  })
 })
 
 describe('render discipline (React.memo)', () => {
@@ -2083,6 +2210,20 @@ describe('widget header action menu (U1)', () => {
   })
 })
 
+describe('the edit-mode menu leads with the options, not with Duplicate (F-16)', () => {
+  it('"Edit options…" comes first and opens the options; opening the menu fires nothing', () => {
+    const onDuplicate = vi.fn(), onEditOptions = vi.fn()
+    renderWidget({ editMode: true, onDelete: vi.fn(), onDuplicate, onEditOptions })
+    fireEvent.click(screen.getByRole('button', { name: 'More actions for widget Sales' }))
+    const items = screen.getAllByRole('menuitem').map(i => i.textContent)
+    expect(items[0]).toBe('Edit options…')
+    expect(onDuplicate).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Edit options…' }))
+    expect(onEditOptions).toHaveBeenCalledTimes(1)
+    expect(onDuplicate).not.toHaveBeenCalled()
+  })
+})
+
 describe('a refused request explains itself', () => {
   // The import row cap is enforced server-side and returns 413 with a message
   // naming the limit, the actual row count and the two remedies. The widget
@@ -2456,7 +2597,8 @@ describe('labels name what a figure is', () => {
     const { container } = renderWidget({ widget: barWidget({ id: 62, widget_type: 'kpi',
       config: { measure: 'RATED_AMOUNT', aggregation: 'count' } }) })
     await waitFor(() => expect(container.textContent).toContain('3,576'))
-    expect(container.textContent).toMatch(/count\(RATED_AMOUNT\)|Count of RATED_AMOUNT/i)
+    // B-36 writes the column name in words ("Count of RATED AMOUNT").
+    expect(container.textContent).toMatch(/count\(RATED_AMOUNT\)|Count of RATED[_ ]AMOUNT/i)
   })
 })
 
@@ -2617,9 +2759,15 @@ describe('every widget error has a code the widget can act on', () => {
       type: 'error', code: 'measure_error', rows: [], total: 0,
       message: 'Measure "margin" failed: unknown column cost',
     } as never)
-    renderWidget()
+    // The author, who can fix the formula, gets the evaluator's reason...
+    const { unmount } = renderWidget({ editMode: true })
     expect(await screen.findByText(/Measure "margin" failed/i)).toBeInTheDocument()
     expect(screen.queryByText(/configure widget/i)).not.toBeInTheDocument()
+    unmount()
+    // ...a reader a plain sentence that names no column (QA E-12 / SEC-02).
+    renderWidget()
+    expect(await screen.findByText('This measure could not be calculated.')).toBeInTheDocument()
+    expect(screen.queryByText(/cost/)).not.toBeInTheDocument()
   })
 
   it('offers to try again only when the source was unreachable', async () => {
@@ -3042,5 +3190,45 @@ describe('groups too small to rank (persona test, plan 1.6)', () => {
     renderWidget({ widget: barWidget() })
     expect(await screen.findByTestId('too-few-to-rank-note')).toHaveTextContent('fewer than 30 rows')
     expect(screen.queryByTestId('small-groups-note')).not.toBeInTheDocument()
+  })
+})
+
+describe('WidgetRenderer chart download (F-02)', () => {
+  it("names the widget's dashboard, so the server asks that dashboard's \"may download\"", async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'A', value: 1 }], sampled: false })
+    vi.mocked(widgetDataApi.export).mockResolvedValue(undefined as never)
+    renderWidget({ reportId: 7 })
+    await waitFor(() => expect(widgetDataApi.query).toHaveBeenCalled())
+    fireEvent.click(await screen.findByRole('button', { name: 'Analyse Sales' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Export data as CSV' }))
+    await waitFor(() => expect(widgetDataApi.export).toHaveBeenCalled())
+    expect(vi.mocked(widgetDataApi.export).mock.calls[0][5]).toEqual({ reportId: 7 })
+  })
+
+  it('offers no data download when the dashboard says no downloads', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'A', value: 1 }], sampled: false })
+    renderWidget({ reportId: 7, allowExport: false })
+    await waitFor(() => expect(widgetDataApi.query).toHaveBeenCalled())
+    fireEvent.click(await screen.findByRole('button', { name: 'Analyse Sales' }))
+    await screen.findAllByRole('menuitem')
+    expect(screen.queryByRole('menuitem', { name: 'Export data as CSV' })).toBeNull()
+  })
+})
+
+describe('C-24: an automatically chosen date grain is said', () => {
+  it('a dual-axis time series bucketed by week says "by week (automatic)"', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: '2024-01-01', value: 1, value2: 2 }],
+      auto_granularity: 'week', sampled: false } as never)
+    renderWidget({ widget: barWidget({ widget_type: 'dual_axis_time_series',
+      config: { start: 'date', measure: 'revenue', measure2: 'units' } }) })
+    expect(await screen.findByTestId('auto-grain-chip')).toHaveTextContent('by week (automatic)')
+  })
+  it('no chip when the author chose the grain', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: '2024-01', value: 1, value2: 2 }], sampled: false })
+    renderWidget({ widget: barWidget({ widget_type: 'dual_axis_time_series',
+      config: { start: 'date', measure: 'revenue', measure2: 'units', dimension_granularity: 'month' } }) })
+    await screen.findByText(/./, { selector: '[role="heading"]' })
+    await new Promise(r => setTimeout(r, 50))
+    expect(screen.queryByTestId('auto-grain-chip')).toBeNull()
   })
 })

@@ -58,7 +58,7 @@ export default function MonitoringDeliveries() {
       {noMatches && <p style={{ color: 'var(--muted)' }}>{t('deliveries.noMatch')}</p>}
 
       {!loading && loadError == null && filtered.length > 0 && (
-        <div className="card dl-table-card"><table className="dl-table">
+        <div className="card dl-table-card"><table className="dl-table dl-table--stack">
           <thead>
             <tr>
               <th>{t('col.when')}</th>
@@ -73,24 +73,24 @@ export default function MonitoringDeliveries() {
           <tbody>
             {filtered.map(r => (
               <tr key={r.id}>
-                <td style={{ whiteSpace: 'nowrap' }}>{formatDate(r.created_at)}</td>
-                <td style={{ fontWeight: 600 }}>
+                <td data-label={t('col.when')} style={{ whiteSpace: 'nowrap' }}>{formatDate(r.created_at)}</td>
+                <td data-label={t('col.report')} style={{ fontWeight: 600 }}>
                   {r.report_id != null
                     ? <Link to={`/reports/${r.report_id}`} style={{ color: 'var(--text)' }}>{r.report_name ?? `#${r.report_id}`}</Link>
                     : r.subject
                       ? <span>{r.subject}</span>
                       : <span style={{ color: 'var(--muted)' }}>—</span>}
                 </td>
-                <td>{t(`pg.dataPages.del.kind.${r.kind}` as MessageKey) || r.kind}</td>
-                <td style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                <td data-label={t('col.kind')}>{t(`pg.dataPages.del.kind.${r.kind}` as MessageKey) || r.kind}</td>
+                <td data-label={t('col.recipients')} style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                   title={r.recipients ?? undefined}>{r.recipients || <span style={{ color: 'var(--muted)' }}>—</span>}</td>
-                <td title={r.file_name ?? undefined}>
+                <td data-label={t('col.artifact')} title={r.file_name ?? undefined}>
                   {r.file_name ?? (r.artifact_kind === 'none' ? '—' : r.artifact_kind)}
                 </td>
-                <td style={{ whiteSpace: 'nowrap' }}>
+                <td data-label={t('col.duration')} style={{ whiteSpace: 'nowrap' }}>
                   {r.duration_ms != null ? t('pg.dataPages.jobs.ms', { n: r.duration_ms }) : '—'}
                 </td>
-                <td style={{
+                <td data-label={t('col.status')} style={{
                   color: r.status === 'ok' ? 'var(--success)' : 'var(--danger)' }}
                   title={r.error ?? undefined}>
                   {r.status === 'ok' ? t('jobs.status.ok') : r.error ? t('pg.dataPages.del.failedWith', { error: r.error }) : t('jobs.status.failed')}

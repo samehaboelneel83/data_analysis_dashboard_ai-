@@ -40,7 +40,7 @@ from ...models.models import (ColumnStats, DataSource, Entity, SchemaVersion,
                               SyncRun)
 from .. import pii
 from . import drift, infer_keys, infer_semantic, introspect, sample, store
-from .sync import StageResult, _run_stage, _skip
+from .sync import StageResult, StageSkipped, _run_stage, _skip
 
 logger = logging.getLogger(__name__)
 
@@ -650,6 +650,10 @@ async def stage_describe(context: CatalogContext) -> dict:
         return {"semantic_types": typed, "llm_used": False,
                 "objects_described": 0, "columns_described": 0,
                 "source_overview": False}
+    # B-11: a model known to be down is not waited on; the run log says so
+    # ("skipped -- AI unavailable") instead of "ok" with nothing written.
+    if not _model_available(context.llm_client):
+        raise StageSkipped("AI unavailable", {"semantic_types": typed})
 
     # ── the database-level pass ────────────────────────────────────────────
     by_id = {o.id: o for o in context.objects}
@@ -792,6 +796,9 @@ async def stage_describe(context: CatalogContext) -> dict:
                 column.enum_labels_source = "inferred"
                 labels_drafted += 1
 
+    if not wrote_overview and not objects_described and not columns_described \
+            and _model_failed(context.llm_client):
+        raise StageSkipped(f"AI unavailable: {context.llm_client.last_error}", {"semantic_types": typed})
     return {
         "semantic_types": typed, "llm_used": True,
         "source_overview": wrote_overview,
@@ -822,6 +829,8 @@ async def stage_entities(context: CatalogContext) -> dict:
     """
     if not (context.allow_llm and context.llm_client and context.objects):
         return {"llm_used": False, "drafted": 0}
+    if not _model_available(context.llm_client):
+        raise StageSkipped("AI unavailable")
 
     payload_tables = [{
         "name": o.name, "kind": o.kind, "row_count": o.row_count_estimate,
@@ -831,6 +840,8 @@ async def stage_entities(context: CatalogContext) -> dict:
     proposals = await infer_semantic.draft_entities(
         context.source.name, payload_tables, context.llm_client, allow=True)
     if not proposals:
+        if _model_failed(context.llm_client):
+            raise StageSkipped(f"AI unavailable: {context.llm_client.last_error}")
         return {"llm_used": True, "drafted": 0}
 
     existing = (await context.db.execute(
@@ -947,6 +958,27 @@ async def stage_link_datasets(context: CatalogContext) -> dict:
 
 # ── runner ──────────────────────────────────────────────────────────────────
 
+def _model_available(client) -> bool:
+    """False when the client says every endpoint is known down (B-11)."""
+    check = getattr(client, "available", None)
+    try:
+        return bool(check()) if callable(check) else True
+    except Exception:                                       # noqa: BLE001
+        return True
+
+
+def _model_failed(client) -> bool:
+    """The model never answered this stage: no call succeeded and the client
+    recorded why (B-11). A model that answered with nothing is not a failure."""
+    return bool(getattr(client, "last_error", None)) and getattr(client, "tokens_out", 0) == 0
+
+
+#: The stages of a catalog sync, in the order run_catalog_sync runs them; the
+#: UI shows "step x of len(STAGE_NAMES)" from it.
+STAGE_NAMES = ("discover", "sample", "profile", "infer_keys",
+               "describe", "entities", "drift", "link_datasets")
+
+
 async def run_catalog_sync(
     db, source: DataSource, *, cache, llm_client=None, allow_llm: bool = False,
     source_config: dict | None = None, trigger: str = "manual",
@@ -990,8 +1022,12 @@ async def run_catalog_sync(
     else:
         _skip(context, "infer_keys", "no cached samples")
 
-    await _run_stage(context, "describe", stage_describe)
-    await _run_stage(context, "entities", stage_entities)
+    # B-04: the model stages wait on an endpoint that may never answer; each
+    # gets its own budget and is recorded "skipped" when it runs over.
+    from ...core.config import settings
+    llm_budget = settings.metadata_llm_stage_timeout_s
+    await _run_stage(context, "describe", stage_describe, timeout_s=llm_budget)
+    await _run_stage(context, "entities", stage_entities, timeout_s=llm_budget)
     await _run_stage(context, "drift", stage_drift)
     await _run_stage(context, "link_datasets", stage_link_datasets)
 

@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.config import settings
 from ..core.database import get_db
 from ..core.security import create_access_token, set_session_cookie
-from ..dependencies import require_org_admin
+from ..dependencies import is_super_admin, require_org_admin
 from ..models.models import OrgIdp, SamlAuthnRequest, User
 from ..services import saml, sso
 
@@ -110,6 +110,10 @@ async def oidc_callback(request: Request, db: AsyncSession = Depends(get_db),
     if user is None:
         # Match-existing only: authenticated at the IdP, but no account here to log into.
         return fail("no_account")
+    if is_super_admin(user):
+        # The org's identity provider is set up by that org's admin, so it must
+        # not be able to vouch for a platform admin (a takeover of every org).
+        return fail("platform_admin")
 
     token = create_access_token(user.id, user.org_id)
     # T6: the session is the httpOnly cookie; the token no longer rides in the
@@ -197,6 +201,8 @@ async def saml_acs(request: Request, db: AsyncSession = Depends(get_db),
     user = await sso.match_user(db, org_id, claims.get("email") or "")
     if user is None:
         return fail("no_account")
+    if is_super_admin(user):
+        return fail("platform_admin")   # see the OIDC callback
     token = create_access_token(user.id, user.org_id)
     resp = RedirectResponse(_frontend("/sso/callback"), status_code=303)
     set_session_cookie(resp, token)     # T6: see the OIDC callback

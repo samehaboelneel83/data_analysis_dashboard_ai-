@@ -2,7 +2,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import SourceReview from './SourceReview'
-import { dataSourcesApi, metadataApi, type ReviewEntity, type ReviewQueue, type SyncRun } from '../services/api'
+import { dataSourcesApi, metadataApi, setupApi, type ReviewEntity, type ReviewQueue, type SyncRun } from '../services/api'
 
 /**
  * Stage 7 — human confirmation.
@@ -191,6 +191,39 @@ describe('SourceReview', () => {
       'A sync is already running for this source'))
   })
 
+  it('says a sync that could not start failed (B-03 regression guard)', async () => {
+    const toast = (await import('react-hot-toast')).default
+    vi.spyOn(metadataApi, 'sync').mockRejectedValue({ response: { status: 500 } })
+    renderPage()
+    await waitFor(() => screen.getByText('Run sync'))
+    fireEvent.click(screen.getByText('Run sync'))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(toast.error).mock.calls[0][0]).not.toBe('A sync is already running for this source')
+  })
+
+  it('shows how long a running sync has run, its current step, and can cancel it (B-04)', async () => {
+    const toast = (await import('react-hot-toast')).default
+    const running: SyncRun = { id: 5, status: 'running', trigger: 'manual',
+      started_at: new Date(Date.now() - 75_000).toISOString(),
+      stages: [{ name: 'discover', status: 'ok', ms: 5 }, { name: 'sample', status: 'ok', ms: 5 },
+               { name: 'profile', status: 'ok', ms: 5 }, { name: 'infer_keys', status: 'ok', ms: 5 }] }
+    vi.spyOn(metadataApi, 'latestSync').mockResolvedValue(running)
+    vi.spyOn(metadataApi, 'syncStatus').mockResolvedValue(running)
+    const ended: SyncRun = { ...running, status: 'failed', error: 'Cancelled by a@x', finished_at: '2026-10-15T10:00:00Z' }
+    const cancel = vi.spyOn(metadataApi, 'cancelSync').mockImplementation(async () => {
+      vi.mocked(metadataApi.latestSync).mockResolvedValue(ended)
+      vi.mocked(metadataApi.syncStatus).mockResolvedValue(ended)
+      return ended
+    })
+    renderPage()
+    expect(await screen.findByText(/Running for 1:1\d — current step: describe/)).toBeInTheDocument()
+    expect(await screen.findByText(/Syncing… 4\/8/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel sync' }))
+    await waitFor(() => expect(cancel).toHaveBeenCalledWith(7, 5))
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Sync cancelled'))
+    expect(screen.queryByRole('button', { name: 'Cancel sync' })).not.toBeInTheDocument()
+  })
+
   it('polls the run and reports progress while it is still going', async () => {
     // The whole reason the sync moved to the background: stages have to become
     // visible DURING the run, not all at once when it finishes.
@@ -214,7 +247,7 @@ describe('SourceReview', () => {
     fireEvent.click(screen.getByText('Run sync'))
 
     // Mid-run: the button counts the stages seen so far.
-    await waitFor(() => expect(screen.getByText(/Syncing… 2\/6/)).toBeInTheDocument(),
+    await waitFor(() => expect(screen.getByText(/Syncing… 2\/8/)).toBeInTheDocument(),
                   { timeout: 4000 })
     expect(status).toHaveBeenCalledWith(7, 9)
   })
@@ -233,6 +266,19 @@ describe('SourceReview', () => {
                   { timeout: 4000 })
     // Button returns to its resting state rather than spinning forever.
     await waitFor(() => expect(screen.getByText('Run sync')).toBeEnabled())
+  })
+
+  it('refetches the review and the plain summary when a sync finishes (B-29)', async () => {
+    const summary = vi.spyOn(setupApi, 'summary').mockResolvedValue({ status: 'syncing' } as never)
+    vi.spyOn(metadataApi, 'sync').mockResolvedValue({ sync_run_id: 9, status: 'running', stages: [] })
+    vi.spyOn(metadataApi, 'syncStatus').mockResolvedValue({ ...RUN, id: 9 })
+    renderPage()
+    await waitFor(() => screen.getByText('Run sync'))
+    await waitFor(() => expect(summary).toHaveBeenCalledTimes(1))
+    const reviews = vi.mocked(metadataApi.review).mock.calls.length
+    fireEvent.click(screen.getByText('Run sync'))
+    await waitFor(() => expect(summary).toHaveBeenCalledTimes(2), { timeout: 4000 })
+    expect(vi.mocked(metadataApi.review).mock.calls.length).toBeGreaterThan(reviews)
   })
 
   it('reports a partial run as a failure with the stage count', async () => {

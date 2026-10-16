@@ -39,15 +39,19 @@ export function endpointLight(ep: Pick<LlmEndpoint, 'enabled' | 'status'> | unde
   return ep.status.ok ? 'up' : 'down'
 }
 
+/** F-11: the person's "Off — no AI". Not an endpoint: no model is asked for
+ *  their requests (the server's llm_endpoints.OFF), stored like any pick. */
+export const AI_OFF = 'off'
+
 /** What the person's requests use: their pick when it still exists, else the default. */
 export function effectiveChoice(data: LlmEndpointsOut, picked: string | null): string {
-  if (picked === 'auto') return 'auto'
+  if (picked === 'auto' || picked === AI_OFF) return picked
   if (picked && data.endpoints.some(e => e.id === picked && e.enabled)) return picked
   return data.default
 }
 
 export function choiceLight(data: LlmEndpointsOut, choice: string): Light {
-  if (!data.llm_enabled) return 'off'
+  if (!data.llm_enabled || choice === AI_OFF) return 'off'
   if (choice === 'auto') {
     if (data.auto_pick) return 'up'
     return data.endpoints.some(e => e.enabled && !e.status) ? 'unknown' : 'down'
@@ -96,7 +100,7 @@ export default function LlmPicker() {
       // A pick of an endpoint the admin has since removed or turned off would
       // otherwise be sent forever and silently ignored by the server.
       const mine = getLlmChoice()
-      if (mine && mine !== 'auto' && !out.endpoints.some(e => e.id === mine && e.enabled)) {
+      if (mine && mine !== 'auto' && mine !== AI_OFF && !out.endpoints.some(e => e.id === mine && e.enabled)) {
         setLlmChoice(null)
       }
     } catch { /* the light stays as it was; the next poll tries again */ }
@@ -157,14 +161,15 @@ export default function LlmPicker() {
   // (reported by the server), not a guess: "Auto → Qwen 3.8 27B".
   const usedEp = choice === 'auto' ? byId(main) : undefined
   const light = usedEp ? endpointLight(usedEp, data.llm_enabled) : choiceLight(data, choice)
-  const name = choice === 'auto'
+  const off = choice === AI_OFF
+  const name = off ? t('llm.aiOff') : choice === 'auto'
     ? (usedEp ? `${t('llm.auto')} → ${usedEp.name}` : `${t('llm.auto')}${autoEp ? ` · ${autoEp.name}` : ''}`)
     : current?.name ?? choice
   const weightLabel = (w: string) => (w === 'heavy' ? t('llm.w.heavy') : w === 'light' ? t('llm.w.light') : t('llm.w.normal'))
   const trail = used.map(u => `${byId(u.id)?.name ?? u.id} (${weightLabel(u.weight)})`)
   // Consecutive steps on the same model read as one: "9B (light) → 27B (heavy)".
   const trailText = trail.filter((x, i) => x !== trail[i - 1]).join(' → ')
-  const state = !data.llm_enabled ? t('llm.off')
+  const state = !data.llm_enabled ? t('llm.off') : off ? t('llm.offMine')
     : light === 'up' ? t('llm.up') : light === 'down' ? t('llm.down') : t('llm.unknown')
 
   const pick = (id: string) => { setLlmChoice(id); setPicked(id); setOpen(false) }
@@ -265,6 +270,8 @@ export default function LlmPicker() {
             disabled: !ep.enabled, tag: ep.is_default ? t('llm.default') : undefined,
             title: ep.status?.error ?? undefined,
           }))}
+          <div aria-hidden style={{ borderTop: '1px solid var(--border)', margin: '4px 6px' }} />
+          {row(AI_OFF, t('llm.offRow'), t('llm.offRowSub'), 'off')}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, borderTop: '1px solid var(--border)',
             marginTop: 6, padding: '6px 8px 2px' }}>
             <button type="button" className="btn btn-sm" disabled={checking} onClick={() => void load(true)}>

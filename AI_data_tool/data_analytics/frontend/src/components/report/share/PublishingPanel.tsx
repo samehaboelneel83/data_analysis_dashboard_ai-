@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
-import { Archive, ArchiveRestore, History, UserRoundCog } from 'lucide-react'
+import { Archive, ArchiveRestore, History, Send, UserRoundCog } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { publishingApi, reviewApi, type Publication, type ReleaseSummary } from '../../../services/api'
+import { publishingApi, type Publication, type ReleaseSummary } from '../../../services/api'
 import { useConfirm } from '../../ui/ConfirmDialog'
 import { useT, type MessageKey } from '../../../i18n'
 import { formatDate } from '../../../lib/dateFormat'
 import { localDigits } from '../../../lib/arabicFormats'
 import type { ShareTarget } from './ShareDashboardDialog'
+import { releaseReport } from '../ReleaseControl'
 
 /**
  * Publishing, for a dashboard's owner (and administrators): where it stands,
@@ -26,10 +27,12 @@ const REASON: Record<string, MessageKey> = {
   publish: 'pub.reason.publish', release: 'pub.reason.release', rollback: 'pub.reason.rollback', first_edit: 'pub.reason.edit',
 }
 
-export default function PublishingPanel({ report, isAdmin, onStateChange }: {
+export default function PublishingPanel({ report, isAdmin, onStateChange, onReleased }: {
   report: ShareTarget
   isAdmin: boolean
   onStateChange?: (state: Publication['state']) => void
+  /** After "Publish these changes", so the builder can re-read its release status. */
+  onReleased?: () => void
 }) {
   const t = useT()
   const confirm = useConfirm()
@@ -74,9 +77,17 @@ export default function PublishingPanel({ report, isAdmin, onStateChange }: {
     await run(() => publishingApi.archive(report.id), t('pub.archive.done'))
     onStateChange?.('archived')
   }
+  const publishChanges = async () => {
+    setBusy(true)
+    try {
+      if (await releaseReport(report.id, t)) { onReleased?.(); load() }
+    } finally { setBusy(false) }
+  }
   const restore = async () => {
-    await run(() => publishingApi.restore(report.id), t('pub.restore.done'))
-    onStateChange?.('draft')
+    // F-04: the server restores as a draft; tell the builder what it answered.
+    const out: { state?: Publication['state'] } = {}
+    await run(async () => { out.state = (await publishingApi.restore(report.id))?.state as Publication['state'] }, t('pub.restore.done'))
+    if (out.state) onStateChange?.(out.state)
   }
   const goBack = async (r: ReleaseSummary) => {
     if (!(await confirm({ title: t('pub.versions.confirm', { n: n(r.revision) }), body: t('pub.versions.confirmBody'),
@@ -105,6 +116,14 @@ export default function PublishingPanel({ report, isAdmin, onStateChange }: {
           {pub.unreleased_changes && !archived && <p>{t('pub.unreleased')}</p>}
         </div>
       </div>
+      {/* F-10: the action next to the sentence that asks for it. */}
+      {pub.unreleased_changes && !archived && pub.state === 'published' && (
+        <div className="shx-acts">
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void publishChanges()}>
+            <Send size={14} aria-hidden />{t('pub.releaseNow')}
+          </button>
+        </div>
+      )}
       <div className="shx-acts">
         {archived
           ? <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void restore()}><ArchiveRestore size={14} aria-hidden />{t('pub.restore')}</button>
@@ -112,12 +131,13 @@ export default function PublishingPanel({ report, isAdmin, onStateChange }: {
       </div>
 
       {(review.required || isAdmin) && !archived && <div className="shx-sec">{t('pub.review')}</div>}
+      {/* F-09: the switch is the ORGANISATION's, so it lives on Admin -> Settings
+          (asked about there first); here an admin only sees what it is set to. */}
       {isAdmin && !archived && (
-        <label className="shx-ck" data-testid="approval-switch">
-          <input type="checkbox" checked={review.required} disabled={busy}
-            onChange={e => void run(() => reviewApi.setApproval(e.target.checked), t('pub.saved'))} />
-          <span>{t('pub.review.switch')}<br /><small style={{ color: 'var(--muted)' }}>{t('pub.review.switchHelp')}</small></span>
-        </label>
+        <p className="shx-note" data-testid="approval-org-setting">
+          {t(review.required ? 'pub.review.orgOn' : 'pub.review.orgOff')}{' '}
+          <a href="/admin/settings">{t('pub.review.changeInSettings')}</a>
+        </p>
       )}
       {review.required && !archived && (<>
         <div className="shx-st" style={{ marginTop: isAdmin ? 10 : 0 }}>

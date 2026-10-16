@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     # there is no chicken-and-egg grant problem; empty means no super-admin exists.
     super_admin_emails: str = ""
 
+    # Shortest password an admin may set for a user or a new org admin (E-04).
+    password_min_length: int = Field(default=8, ge=1)
+
     # At-rest encryption of connection secrets in DataSource.config (services/
     # secrets.py). A Fernet key (urlsafe base64, 44 chars); empty derives a stable
     # key from secret_key, so encryption is always on without extra config. Rotating
@@ -101,6 +104,9 @@ class Settings(BaseSettings):
     # the self-hosted vLLM this was written against expects.
     llm_api_key: str = ""
     llm_timeout_s: float = Field(default=180.0, gt=0)
+    # Connecting to the model is quick or it is not going to happen; only the
+    # answer itself may take llm_timeout_s (AD-01).
+    llm_connect_timeout_s: float = Field(default=5.0, gt=0)
     llm_enabled: bool = True
     # Where the charts of an AI-designed dashboard come from.
     #   cards -- the model CHOOSES among charts the platform has already built,
@@ -219,6 +225,14 @@ class Settings(BaseSettings):
     # still set it -- removing a setting out from under someone is not a safe
     # change even when nothing reads it anymore.
     metadata_describe_concurrency: int = Field(default=12, ge=1)
+    # B-04: a metadata sync must end on its own. The whole run gets
+    # metadata_sync_timeout_s (then it is recorded "failed -- timed out"); each
+    # model stage (describe, entities) gets metadata_llm_stage_timeout_s and is
+    # recorded "skipped" when it runs over, so the rest of the run still lands.
+    metadata_sync_timeout_s: float = Field(default=1800.0, gt=0)
+    # B-26: read the demo connection's catalog when the demo is loaded.
+    demo_sync_on_seed: bool = True
+    metadata_llm_stage_timeout_s: float = Field(default=600.0, gt=0)
 
     # Foreign-key inference thresholds (services/metadata/infer_keys.py), as
     # value-overlap ratios. At or above _high: proposed with high confidence and

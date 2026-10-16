@@ -89,7 +89,10 @@ export default function Overview(p: OverviewProps) {
         <section className="dl-ov__firstrun" data-testid="overview-firstrun">
           <div>
             <h2>{t('ov3.first.title')}</h2>
-            <p>{t('ov3.first.body', { rows: localDigits(ds.row_count.toLocaleString('en-US')), cols: localDigits(String(ds.col_count)) })}</p>
+            {/* B-25: a live dataset stores no rows (row_count 0); its rows are counted at the source. */}
+            <p>{ds.mode === 'directquery'
+              ? t('ov3.first.bodyLive', { cols: localDigits(String(ds.col_count)) })
+              : t('ov3.first.body', { rows: localDigits(ds.row_count.toLocaleString('en-US')), cols: localDigits(String(ds.col_count)) })}</p>
           </div>
           <button type="button" onClick={() => p.goTab('columns')}>
             <strong>{t('ov3.first.s1')}</strong><span>{t('ov3.first.s1b')}</span></button>
@@ -422,7 +425,7 @@ function Activity({ ds, me }: { ds: Dataset; me: { id: number | null; email: str
     let on = true
     const target = `dataset:${ds.id}`
     Promise.all([
-      Promise.resolve().then(() => monitoringApi?.activity?.(200)).catch(() => []),
+      Promise.resolve().then(() => monitoringApi?.activity?.({ limit: 200 })).catch(() => []),
       Promise.resolve().then(() => adminAuditApi?.list?.({ limit: 200, q: target })).catch(() => []),
     ]).then(([general, admin]) => {
       if (!on) return

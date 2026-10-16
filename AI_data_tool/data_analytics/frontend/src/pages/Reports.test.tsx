@@ -18,7 +18,7 @@ import { axeViolations } from '../test/axe'
  */
 
 vi.mock('../services/api', () => ({
-  reportsApi: { list: vi.fn(), recent: vi.fn(), delete: vi.fn(), create: vi.fn(), update: vi.fn(), setPublished: vi.fn(),
+  reportsApi: { list: vi.fn(), recent: vi.fn(), delete: vi.fn(), create: vi.fn(), update: vi.fn(), setPublished: vi.fn(), duplicate: vi.fn(),
     downloadPdf: vi.fn(), deletePage: vi.fn() },
   reportGrantsApi: { list: vi.fn(), create: vi.fn(), remove: vi.fn() },
   datasetsApi: { list: vi.fn() },
@@ -165,7 +165,7 @@ describe('publish and share', () => {
 
   it('the share dialog lists grants and posts a new one by email', async () => {
     vi.mocked(reportGrantsApi.list).mockResolvedValue([{ id: 5, user_id: 2, email: 'a@x.io', level: 'view' }] as never)
-    vi.mocked(reportGrantsApi.create).mockResolvedValue({ id: 6, user_id: 3, email: 'b@x.io', level: 'edit' } as never)
+    vi.mocked(reportGrantsApi.create).mockResolvedValue({ id: 6, user_id: 3, email: 'b@x.io', level: 'view' } as never)
     renderReports()
     await screen.findByTestId('dash-card-1')
     fireEvent.click(within(card(1)).getByRole('button', { name: 'Share Revenue' }))
@@ -173,7 +173,8 @@ describe('publish and share', () => {
     expect(await within(dialog).findByText('a@x.io')).toBeInTheDocument()
     fireEvent.change(within(dialog).getByLabelText('Email to share with'), { target: { value: 'b@x.io' } })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Invite' }))
-    await waitFor(() => expect(reportGrantsApi.create).toHaveBeenCalledWith(1, { email: 'b@x.io', level: 'edit' }))
+    // F-06: a new person share starts at "Can view" (least privilege).
+    await waitFor(() => expect(reportGrantsApi.create).toHaveBeenCalledWith(1, { email: 'b@x.io', level: 'view' }))
   })
 })
 
@@ -579,11 +580,32 @@ describe('creating a dashboard', () => {
     vi.mocked(reportsApi.create).mockResolvedValue({ id: 42, pages: [{ id: 420 }] } as never)
   })
 
-  it('Blank with no data opens the builder asking for data, auto-named', async () => {
+  // C-30 (QA DASH-04): a name is required. This test used to assert that an
+  // empty name auto-named the dashboard "Untitled dashboard"; the product now
+  // asks for the name instead.
+  it('Create stays disabled, and says why, until the dashboard has a name', async () => {
     renderReports()
     await screen.findByTestId('dash-card-1')
     fireEvent.click(screen.getByRole('button', { name: 'New dashboard' }))
     const dialog = await screen.findByRole('dialog', { name: 'Create a dashboard' })
+    const create = within(dialog).getByRole('button', { name: /^Create$/ }) as HTMLButtonElement
+    expect(create.disabled).toBe(true)
+    expect(within(dialog).getByText('Give the dashboard a name')).toBeInTheDocument()
+    fireEvent.change(within(dialog).getByLabelText('Dashboard name'), { target: { value: '   ' } })
+    expect(create.disabled).toBe(true)
+    fireEvent.keyDown(within(dialog).getByLabelText('Dashboard name'), { key: 'Enter' })
+    expect(reportsApi.create).not.toHaveBeenCalled()
+    fireEvent.change(within(dialog).getByLabelText('Dashboard name'), { target: { value: 'Q4 sales' } })
+    expect(create.disabled).toBe(false)
+    expect(within(dialog).queryByText('Give the dashboard a name')).toBeNull()
+  })
+
+  it('Blank with no data opens the builder asking for data', async () => {
+    renderReports()
+    await screen.findByTestId('dash-card-1')
+    fireEvent.click(screen.getByRole('button', { name: 'New dashboard' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Create a dashboard' })
+    fireEvent.change(within(dialog).getByLabelText('Dashboard name'), { target: { value: 'Untitled dashboard' } })
     fireEvent.click(within(dialog).getByRole('button', { name: /^Create$/ }))
     await waitFor(() => expect(reportsApi.create).toHaveBeenCalledWith({ name: 'Untitled dashboard' }))
     await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/reports/42?pick=data'))
@@ -614,6 +636,7 @@ describe('creating a dashboard', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Create a dashboard' })
     fireEvent.click(within(dialog).getByRole('radio', { name: /Template/ }))
     expect(await within(dialog).findByRole('radio', { name: /Four-panel comparison/ })).toHaveAttribute('aria-checked', 'true')
+    fireEvent.change(within(dialog).getByLabelText('Dashboard name'), { target: { value: 'Quad' } })   // C-30: a name is required
     fireEvent.click(within(dialog).getByRole('button', { name: /^Create$/ }))
     await waitFor(() => expect(pageTemplatesApi.addFrom).toHaveBeenCalledWith(42, { builtin: 'quad' }))
     await waitFor(() => expect(reportsApi.deletePage).toHaveBeenCalledWith(42, 420))
@@ -923,5 +946,17 @@ describe('the search box while the list loads (QA2 B8)', () => {
     expect(await screen.findByTestId('dash-card-4')).toBeInTheDocument()
     expect(screen.queryByTestId('dash-card-1')).toBeNull()
     expect(screen.getByRole('searchbox', { name: /Search dashboards/ })).toHaveValue('Board 3')
+  })
+})
+
+describe('C-20: duplicating a dashboard', () => {
+  it('the card menu copies it and opens the copy in Edit', async () => {
+    vi.mocked(reportsApi.duplicate).mockResolvedValue({ id: 91, name: 'Revenue (copy)' } as never)
+    renderReports()
+    await screen.findByTestId('dash-card-1')
+    fireEvent.click(within(card(1)).getByRole('button', { name: 'More actions for Revenue' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Duplicate' }))
+    await waitFor(() => expect(reportsApi.duplicate).toHaveBeenCalledWith(1))
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/reports/91?edit=1'))
   })
 })

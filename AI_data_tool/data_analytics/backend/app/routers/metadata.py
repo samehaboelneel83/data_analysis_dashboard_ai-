@@ -154,6 +154,37 @@ async def sync_status(
     return _run_payload(run)
 
 
+@router.post("/{source_id}/sync/{run_id}/cancel")
+async def cancel_sync(
+    source_id: int, run_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_org_admin),
+):
+    """B-04: stop a sync that is stuck (a model that never answers, a source
+    that stalls). Cancels the task when it runs in this process and records the
+    run as failed either way, so a new sync is accepted at once."""
+    from datetime import datetime
+    await _get_source(db, source_id, current_user)
+    run = await db.get(SyncRun, run_id)
+    if run is None or run.data_source_id != source_id:
+        raise HTTPException(404, "Sync run not found")
+    check_org(run, current_user, "Sync run not found")
+    if run.status != "running":
+        raise HTTPException(409, "This sync is no longer running")
+    task = sync.RUNNING_TASKS.pop(run_id, None)
+    if task is not None and not task.done():
+        task.cancel()
+    run.status = "failed"
+    run.error = f"Cancelled by {current_user.email}"
+    run.finished_at = datetime.utcnow()
+    source = await db.get(DataSource, source_id)
+    if source is not None:
+        source.sync_status = "failed"
+    await db.commit()
+    await db.refresh(run)
+    return _run_payload(run)
+
+
 def _run_payload(run: SyncRun) -> dict:
     return {
         "id": run.id,
@@ -467,7 +498,44 @@ def _glossary_payload(t: GlossaryTerm) -> dict:
             "synonyms": t.synonyms or [], "maps_to_object": t.maps_to_object,
             "maps_to_column": t.maps_to_column,
             "rule": getattr(t, "rule", None), "always": bool(getattr(t, "always", False)),
-            "data_source_id": t.data_source_id}
+            "data_source_id": t.data_source_id, "dataset_id": getattr(t, "dataset_id", None)}
+
+
+def new_glossary_term(body: GlossaryIn, *, org_id: int,
+                      data_source_id: int | None) -> GlossaryTerm:
+    """A validated, unsaved term from the create form -- a connection's
+    (`data_source_id`) or org-wide (None, routers/org_glossary.py)."""
+    term = body.term.strip()
+    if not term:
+        raise HTTPException(422, "term must not be empty")
+
+    synonyms = body.synonyms or []
+    if not isinstance(synonyms, list) or not all(
+        isinstance(s, str) and s.strip() for s in synonyms
+    ):
+        raise HTTPException(422, "synonyms must be a list of non-empty strings")
+
+    return GlossaryTerm(
+        org_id=org_id, data_source_id=data_source_id, term=term,
+        definition=body.definition, synonyms=[s.strip() for s in synonyms],
+        maps_to_object=body.maps_to_object, maps_to_column=body.maps_to_column,
+        rule=(body.rule or "").strip() or None, always=bool(body.always),
+    )
+
+
+def apply_glossary_patch(term: GlossaryTerm, body: GlossaryPatch) -> bool:
+    """Apply an inline edit; True when the term's rule may have changed (the
+    caller then forgets the remembered answers that rule affects)."""
+    data = body.model_dump(exclude_unset=True)
+    if "definition" in data:
+        term.definition = data["definition"]
+    if "synonyms" in data and data["synonyms"] is not None:
+        term.synonyms = [s.strip() for s in data["synonyms"] if s and s.strip()]
+    if "rule" in data:
+        term.rule = (data["rule"] or "").strip() or None
+    if "always" in data and data["always"] is not None:
+        term.always = bool(data["always"])
+    return "rule" in data or "always" in data
 
 
 @router.get("/{source_id}/glossary")
@@ -486,6 +554,8 @@ async def list_glossary(
             GlossaryTerm.org_id == current_user.org_id,
             or_(GlossaryTerm.data_source_id == source_id,
                 GlossaryTerm.data_source_id.is_(None)),
+            # One dataset's term (B-21) is listed on that dataset only.
+            GlossaryTerm.dataset_id.is_(None),
         ).order_by(GlossaryTerm.term)
     )).scalars().all()
     return [_glossary_payload(t) for t in rows]
@@ -498,23 +568,7 @@ async def create_glossary_term(
     current_user: User = Depends(require_org_admin),
 ):
     source = await _get_source(db, source_id, current_user)
-
-    term = body.term.strip()
-    if not term:
-        raise HTTPException(422, "term must not be empty")
-
-    synonyms = body.synonyms or []
-    if not isinstance(synonyms, list) or not all(
-        isinstance(s, str) and s.strip() for s in synonyms
-    ):
-        raise HTTPException(422, "synonyms must be a list of non-empty strings")
-
-    row = GlossaryTerm(
-        org_id=current_user.org_id, data_source_id=source.id, term=term,
-        definition=body.definition, synonyms=[s.strip() for s in synonyms],
-        maps_to_object=body.maps_to_object, maps_to_column=body.maps_to_column,
-        rule=(body.rule or "").strip() or None, always=bool(body.always),
-    )
+    row = new_glossary_term(body, org_id=current_user.org_id, data_source_id=source.id)
     db.add(row)
     if row.rule:
         # A new rule changes what earlier answers SHOULD have been.
@@ -535,18 +589,11 @@ async def update_glossary_term(
     await _get_source(db, source_id, current_user)
     term = await db.get(GlossaryTerm, term_id)
     check_org(term, current_user, "Glossary term not found")
-    if term.data_source_id not in (None, source_id):
+    # Only this connection's own terms. An org-wide term is in use on every
+    # connection and dataset: it is edited through /glossary (B-21).
+    if term.data_source_id != source_id or term.dataset_id is not None:
         raise HTTPException(404, "Glossary term not found")
-    data = body.model_dump(exclude_unset=True)
-    if "definition" in data:
-        term.definition = data["definition"]
-    if "synonyms" in data and data["synonyms"] is not None:
-        term.synonyms = [s.strip() for s in data["synonyms"] if s and s.strip()]
-    if "rule" in data:
-        term.rule = (data["rule"] or "").strip() or None
-    if "always" in data and data["always"] is not None:
-        term.always = bool(data["always"])
-    if "rule" in data or "always" in data:
+    if apply_glossary_patch(term, body):
         from ..services.agent import memory
         await memory.forget(db, current_user.org_id, source_id=source_id)
     await db.commit()
@@ -563,10 +610,9 @@ async def delete_glossary_term(
     await _get_source(db, source_id, current_user)
     term = await db.get(GlossaryTerm, term_id)
     check_org(term, current_user, "Glossary term not found")
-    # A source-scoped delete must not reach into another source's term —
-    # only this source's own rows, or an org-wide (NULL) row, are fair game
-    # from this endpoint.
-    if term.data_source_id not in (None, source_id):
+    # A source-scoped delete must not reach into another source's term, nor
+    # into an org-wide one (in use everywhere; deleted through /glossary).
+    if term.data_source_id != source_id or term.dataset_id is not None:
         raise HTTPException(404, "Glossary term not found")
     await db.delete(term)
     await db.commit()

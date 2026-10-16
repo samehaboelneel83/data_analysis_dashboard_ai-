@@ -152,3 +152,59 @@ async def test_unseeding_one_org_leaves_another_orgs_demo_intact(client, auth_he
 
     org_b = two_orgs["b"]["org"].id
     assert await _datasets(db_session, org_b), "org B's demo was removed by org A's unseed"
+
+
+class TestTheDemoConnectionIsReadAtSeedTime:
+    """B-26: "Demo — Live SQLite" used to be left never synced, so its review
+    page and catalog were empty for every new user. Seeding now starts a
+    catalog sync of it (model off) -- and a sync that cannot start never fails
+    the seed."""
+
+    @pytest.fixture(autouse=True)
+    def _sync_on(self, monkeypatch):
+        from app.core.config import settings
+        monkeypatch.setattr(settings, "demo_sync_on_seed", True)
+
+    @pytest.fixture
+    def started(self, monkeypatch):
+        calls = []
+
+        async def fake(session_factory, run_id, source_id, org_id, **kw):
+            calls.append({"run_id": run_id, "source_id": source_id, "org_id": org_id, **kw})
+        from app.services.metadata import sync
+        monkeypatch.setattr(sync, "run_sync_background", fake)
+        return calls
+
+    @pytest.mark.asyncio
+    async def test_seeding_starts_a_sync_of_the_demo_connection(
+            self, client, auth_headers, db_session, two_orgs, started):
+        import asyncio
+        from app.models.models import SyncRun
+        r = await client.post("/api/v1/demo/seed", headers=auth_headers["a"])
+        assert r.status_code == 200, r.text
+        await asyncio.sleep(0)
+        source = (await db_session.execute(
+            select(DataSource).where(DataSource.org_id == two_orgs["a"]["org"].id))).scalars().one()
+        runs = (await db_session.execute(
+            select(SyncRun).where(SyncRun.data_source_id == source.id))).scalars().all()
+        assert [run.status for run in runs] == ["running"]
+        assert started and started[0]["source_id"] == source.id and started[0]["run_id"] == runs[0].id
+        assert started[0]["allow_llm"] is False and started[0]["llm_client"] is None
+        assert started[0]["source_config"]["type"] == "sqlite"
+
+    @pytest.mark.asyncio
+    async def test_seeding_twice_still_works(self, client, auth_headers, db_session, two_orgs, started):
+        for _ in range(2):
+            r = await client.post("/api/v1/demo/seed", headers=auth_headers["a"])
+            assert r.status_code == 200, r.text
+
+    @pytest.mark.asyncio
+    async def test_a_sync_that_cannot_start_does_not_fail_the_seed(
+            self, client, auth_headers, db_session, two_orgs, monkeypatch):
+        from app.services.metadata import cache
+        def broken():
+            raise RuntimeError("metadata cache is locked")
+        monkeypatch.setattr(cache, "get_cache", broken)
+        r = await client.post("/api/v1/demo/seed", headers=auth_headers["a"])
+        assert r.status_code == 200, r.text
+        assert any(d.mode == "directquery" for d in await _datasets(db_session, two_orgs["a"]["org"].id))

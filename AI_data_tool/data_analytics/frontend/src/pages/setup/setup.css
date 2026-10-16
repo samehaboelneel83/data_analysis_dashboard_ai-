@@ -53,6 +53,7 @@
   align-items: center; gap: 8px; line-height: 1.5;
 }
 .setup-ai--pending { color: var(--accent); }
+.setup-ai--error { color: var(--danger, #b42318); }
 .setup-ai--pending svg { animation: setup-pulse 1.4s ease-in-out infinite; }
 @keyframes setup-pulse { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .setup-ai--pending svg { animation: none; } }

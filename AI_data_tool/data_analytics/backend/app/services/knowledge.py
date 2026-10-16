@@ -345,6 +345,37 @@ async def link_columns(db: AsyncSession, dataset: Dataset) -> int:
     return linked
 
 
+async def glossary_terms_for(db: AsyncSession, dataset: Dataset, *,
+                             denied: set[str] | None = None) -> list[GlossaryTerm]:
+    """The glossary terms that apply to this dataset, for a reader whose role
+    is denied `denied` columns: every org-wide term (no source, no dataset),
+    its connection's terms, and the terms of THIS dataset (B-21) -- never
+    another dataset's. A term that names a column this reader may not see
+    (the dataset's own term, or one mapped to the dataset's table or to no
+    table) is left out: its words would describe what security hid."""
+    from sqlalchemy import and_, or_
+    if dataset.org_id is None:
+        return []
+    scopes = [and_(GlossaryTerm.data_source_id.is_(None), GlossaryTerm.dataset_id.is_(None)),
+              GlossaryTerm.dataset_id == dataset.id]
+    if dataset.data_source_id is not None:
+        scopes.append(and_(GlossaryTerm.data_source_id == dataset.data_source_id,
+                           GlossaryTerm.dataset_id.is_(None)))
+    terms = list((await db.execute(
+        select(GlossaryTerm).where(GlossaryTerm.org_id == dataset.org_id, or_(*scopes))
+        .order_by(GlossaryTerm.term))).scalars().all())
+    hidden = {d.casefold() for d in (denied or set())}
+    if not hidden:
+        return terms
+    table = str(dataset.source_table or "").casefold()
+
+    def on_this_dataset(t: GlossaryTerm) -> bool:
+        obj = str(t.maps_to_object or "").casefold()
+        return t.dataset_id == dataset.id or not obj or (bool(table) and obj in (table, table.rsplit(".", 1)[-1]))
+    return [t for t in terms
+            if not (t.maps_to_column and t.maps_to_column.casefold() in hidden and on_this_dataset(t))]
+
+
 async def for_dataset(db: AsyncSession, dataset: Dataset, *,
                       denied: set[str] | None = None) -> DatasetKnowledge:
     """Everything known about this dataset's columns, both stores consulted.
@@ -458,15 +489,7 @@ async def for_dataset(db: AsyncSession, dataset: Dataset, *,
 
     glossary: list[GlossaryEntry] = []
     if dataset.org_id is not None:
-        terms = (await db.execute(
-            select(GlossaryTerm).where(
-                GlossaryTerm.org_id == dataset.org_id,
-                # A term with no source is org-wide: "GMV" usually means the
-                # same thing in every database a company has.
-                (GlossaryTerm.data_source_id == dataset.data_source_id)
-                | (GlossaryTerm.data_source_id.is_(None)),
-            ).order_by(GlossaryTerm.term)
-        )).scalars().all()
+        terms = await glossary_terms_for(db, dataset, denied=denied)
         glossary = [GlossaryEntry(term=t.term, definition=t.definition,
                                   synonyms=list(t.synonyms or []),
                                   maps_to_object=t.maps_to_object,

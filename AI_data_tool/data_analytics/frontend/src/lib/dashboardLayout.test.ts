@@ -227,3 +227,18 @@ describe('shownLayouts (QA3 N3): drawn, not saved', () => {
     expect(shownLayouts({ layout_mode: 'free', widgets: [w(1, 0, 0), w(2, 3, 2)] })).toEqual({})
   })
 })
+
+describe('C-22: dual-axis charts get room for two axes', () => {
+  it('a dual-axis, small-multiples or forecast chart is never narrower than half the page', () => {
+    for (const t of ['dual_axis_bar', 'dual_axis_line', 'dual_axis_bar_line', 'dual_axis_time_series',
+                     'comparative_time_series', 'small_multiples', 'forecast']) {
+      expect(minSize(t).w, t).toBeGreaterThanOrEqual(6)
+    }
+  })
+  it('the executive recipe does not squeeze a dual-axis chart into the 4-column side slot', () => {
+    const items = [item(1, 'bar'), item(2, 'dual_axis_bar')]
+    const next = applyRecipe(items, 'executive')
+    assertNoOverlap(next)
+    expect(next[2].w).toBeGreaterThanOrEqual(6)
+  })
+})

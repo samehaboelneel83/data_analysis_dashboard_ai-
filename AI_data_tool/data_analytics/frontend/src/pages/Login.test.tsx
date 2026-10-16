@@ -11,8 +11,9 @@ import { DirectionProvider } from '../contexts/DirectionContext'
  */
 
 const login = vi.fn()
+let signedIn: unknown = null
 vi.mock('../contexts/AuthContext', () => ({
-  useAuth: () => ({ user: null, login }),
+  useAuth: () => ({ user: signedIn, login }),
 }))
 const discover = vi.fn()
 vi.mock('../services/api', () => ({
@@ -27,6 +28,7 @@ const submit = () => screen.getByRole('button', { name: /^Sign In/ })
 beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
+  signedIn = null
 })
 afterEach(() => { document.documentElement.removeAttribute('data-theme') })
 
@@ -141,5 +143,43 @@ describe('Login', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Switch to dark mode' }))
     expect(document.documentElement).toHaveAttribute('data-theme', 'dark')
     expect(localStorage.getItem('theme')).toBe('dark')
+  })
+
+  describe('returns to the page that asked for a sign-in (AD-12)', () => {
+    const original = window.location
+    let replace: ReturnType<typeof vi.fn>
+    beforeEach(() => {
+      replace = vi.fn()
+      Object.defineProperty(window, 'location', { value: { ...original, replace }, writable: true, configurable: true })
+      sessionStorage.clear()
+    })
+    afterEach(() => {
+      Object.defineProperty(window, 'location', { value: original, writable: true, configurable: true })
+      window.history.replaceState(null, '')
+    })
+
+    it('goes to the deep link once signed in', () => {
+      window.history.replaceState({ usr: { from: '/reports/1' } }, '')
+      signedIn = { id: 1 }
+      renderLogin()
+      expect(replace).toHaveBeenCalledWith('/reports/1')
+    })
+
+    it('refuses another origin and goes home', () => {
+      window.history.replaceState({ usr: { from: '//evil.example' } }, '')
+      signedIn = { id: 1 }
+      renderLogin()
+      expect(replace).toHaveBeenCalledWith('/')
+    })
+
+    it('keeps the deep link across an SSO round trip', async () => {
+      window.history.replaceState({ usr: { from: '/reports/9' } }, '')
+      discover.mockResolvedValue({ sso: true, protocol: 'oidc' })
+      Object.defineProperty(window, 'location', { value: { ...original, replace, href: '' }, writable: true, configurable: true })
+      renderLogin()
+      fireEvent.change(email(), { target: { value: 'sara@corp.com' } })
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Sign in with SSO' })) })
+      expect(sessionStorage.getItem('datalytics:return-to')).toBe('/reports/9')
+    })
   })
 })

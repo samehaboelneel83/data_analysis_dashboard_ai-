@@ -185,6 +185,38 @@ class TestLlm:
         assert r.status_code == 200 and r.json() == {**r.json(), "ok": False, "detail": "connection refused"}
 
 
+class TestConnectionTestFailsFast:
+    """QA E-17: "Test connection" waited ~34 s and then said "Could not reach
+    the model: ConnectTimeout:" -- nothing after the colon."""
+
+    async def test_test_llm_connect_timeout_has_readable_detail(self, client, two_orgs, auth_headers, monkeypatch):
+        seen = {}
+        real_init = llm_service.LLMClient.__init__
+
+        def _boom(request):
+            raise httpx.ConnectTimeout("")
+
+        def init(self, *a, **kw):
+            seen["timeout"] = kw.get("timeout")
+            kw["transport"] = httpx.MockTransport(_boom)
+            real_init(self, *a, **kw)
+        monkeypatch.setattr(llm_service.LLMClient, "__init__", init)
+        r = await client.post(URL + "/test-llm", headers=auth_headers["a"],
+                              json={"llm_base_url": "http://model-box:8000/v1", "llm_model": "m"})
+        body = r.json()
+        assert r.status_code == 200 and body["ok"] is False
+        assert not body["detail"].rstrip().endswith(":")
+        assert "http://model-box:8000/v1" in body["detail"] and "5 s" in body["detail"]
+        assert isinstance(seen["timeout"], httpx.Timeout) and seen["timeout"].connect == 5.0
+
+    def test_errors_without_text_are_described(self):
+        from app.services.llm import _describe
+        base = "http://h:1/v1"
+        assert _describe(httpx.ConnectError(""), base) == f"connection refused by {base} (is the model server running?)"
+        assert _describe(httpx.ReadTimeout(""), base).startswith("ReadTimeout: no answer from")
+        assert _describe(ValueError("bad json"), base) == "ValueError: bad json"
+
+
 def test_every_setting_has_its_label_in_both_languages():
     """A setting added without its catalogue entries shows its English label
     on an Arabic screen (six did, found on screen 2026-10-11)."""

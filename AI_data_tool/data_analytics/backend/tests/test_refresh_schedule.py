@@ -269,6 +269,19 @@ def test_daily_calendar_fires_once_after_its_time():
     assert is_calendar_due(spec, y, after) is True
 
 
+def test_a_paused_calendar_schedule_is_never_due():
+    """AD-16: a schedule can show its calendar ("weekly, Monday 09:00") and
+    still never run -- the seeded demo must not mail anyone."""
+    from types import SimpleNamespace
+    from app.services.refresh_scheduler import schedule_is_due
+    spec = {"kind": "weekly", "weekday": 0, "hour": 9, "minute": 0, "paused": True}
+    row = SimpleNamespace(recipients=["x@example.invalid", {"__calendar__": spec}],
+                          last_run_at=None, interval_minutes=0, timezone=None)
+    assert schedule_is_due(row, datetime(2026, 8, 31, 12, 0)) is False
+    row.recipients = ["x@example.invalid", {"__calendar__": {**spec, "paused": False}}]
+    assert schedule_is_due(row, datetime(2026, 8, 31, 12, 0)) is True
+
+
 def test_weekly_calendar_respects_the_weekday():
     from app.services.refresh_scheduler import is_calendar_due
     spec = {"kind": "weekly", "weekday": 0, "hour": 7, "minute": 30}  # Mondays 07:30

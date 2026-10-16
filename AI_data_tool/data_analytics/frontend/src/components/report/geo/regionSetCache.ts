@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { boundarySetsApi } from '../../../services/api'
+import { boundarySetLoader, onRegionSetLoaderChange } from './boundarySource'
 import { COUNTRY_SET, buildRegionSet, type RegionSet } from './worldGeometry'
 
 /**
@@ -17,11 +17,16 @@ import { COUNTRY_SET, buildRegionSet, type RegionSet } from './worldGeometry'
  */
 const cache = new Map<number, Promise<RegionSet>>()
 
+// Shapes come through whichever route the page installed (boundarySource.ts:
+// signed-in by default, the guest link or embed session on those pages). A
+// change of route empties the cache.
+onRegionSetLoaderChange(() => cache.clear())
+
 export function loadRegionSet(id: number): Promise<RegionSet> {
   const hit = cache.get(id)
   if (hit) return hit
   // Through Promise.resolve so even a synchronous failure lands in the catch.
-  const flight = Promise.resolve().then(() => boundarySetsApi.get(id))
+  const flight = Promise.resolve().then(() => boundarySetLoader()(id))
     .then(d => buildRegionSet(d.geometry, d.key_properties ?? []))
     .catch(err => {
       // A failed fetch must not be cached: the set may be there on the next

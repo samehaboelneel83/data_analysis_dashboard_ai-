@@ -78,6 +78,18 @@ class TestGoldenWireShape:
         assert get_resp.status_code == 200
         assert get_resp.json() == post_resp.json()
 
+    async def test_no_analysis_yet_is_200_null_not_a_404(
+        self, client, db_session, two_orgs, auth_headers, tmp_path
+    ):
+        """AD-06: "no profile yet" is the normal state of a new dataset, not an
+        error -- the page logged two 404s on every visit."""
+        ds = await _seed_dataset_with_file(db_session, tmp_path, two_orgs["a"]["org"].id, _fixture_df())
+        r = await client.get(f"/api/v1/datasets/{ds.id}/analysis", headers=auth_headers["a"])
+        assert r.status_code == 200 and r.json() is None
+        # Another organisation's dataset is still not found.
+        foreign = await client.get(f"/api/v1/datasets/{ds.id}/analysis", headers=auth_headers["b"])
+        assert foreign.status_code == 404
+
 
 class TestContractShape:
     def test_full_profile_contract_fields(self):
@@ -110,3 +122,12 @@ class TestContractShape:
         clean = safe_clean(dirty)
         assert clean == {"a": 3, "b": 1.5, "c": None, "d": [True], "e": None}
         assert isinstance(clean["a"], int) and not isinstance(clean["a"], np.integer)
+
+
+class TestNoProfileYet:
+    """B-15 / AD-06: a dataset nobody has profiled yet is not an error (that is
+    `200 null`, tested above) -- but a dataset that does not exist still is."""
+
+    async def test_an_unknown_dataset_is_still_404(self, client, auth_headers):
+        r = await client.get("/api/v1/datasets/999999/analysis", headers=auth_headers["a"])
+        assert r.status_code == 404

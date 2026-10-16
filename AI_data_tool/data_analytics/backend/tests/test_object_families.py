@@ -188,7 +188,9 @@ def _option_frame():
 
 _FILL = {"category": "region", "category2": "product", "measure": "revenue", "measure2": "cost",
          "size": "units", "measures": ["revenue", "cost"], "start": "day", "animation": "day",
-         "color": "product", "lat": "lat", "lon": "lon"}
+         "color": "product", "lat": "lat", "lon": "lon",
+         # C-23: small multiples' split field is a required role now.
+         "facet": "product"}
 #: Each option, set against a baseline, on a fixture where it must change the answer.
 _OPTION_CASES = {
     "sort": ({"sort_by": "value", "sort": "asc"}, {"sort_by": "value", "sort": "desc"}),

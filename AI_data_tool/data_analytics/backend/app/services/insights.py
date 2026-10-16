@@ -350,8 +350,10 @@ def _mean_standouts(v: pd.Series, levels: pd.Series, cat: str, m: str,
             "detail": _then(_d("vsOverall", "{v} against {o} overall, across {n} rows.", v=_fmt(hi), o=_fmt(overall),
                                n=f"{int(stats.loc[hi_name, 'count']):,}"), _p(p)),
             "columns": [cat, m],
+            # `aggregation`: the finding is about AVERAGES, so its chart is too
+            # (AD-07) -- a reader never has to parse the title to know.
             "figures": {"mean": round(hi, 4), "overall_mean": round(overall, 4),
-                        "member": str(hi_name), "ratio": round(hi / overall, 4)},
+                        "member": str(hi_name), "ratio": round(hi / overall, 4), "aggregation": "avg"},
             "p_value": None if p is None else round(p, 6),
             "significant": None if p is None else (not weak),
             "evidence": None if p is None else {
@@ -367,7 +369,7 @@ def _mean_standouts(v: pd.Series, levels: pd.Series, cat: str, m: str,
                          n=f"{int(stats.loc[lo_name, 'count']):,}"),
             "columns": [cat, m],
             "figures": {"mean": round(lo, 4), "overall_mean": round(overall, 4),
-                        "member": str(lo_name), "ratio": round(lo / overall, 4)},
+                        "member": str(lo_name), "ratio": round(lo / overall, 4), "aggregation": "avg"},
         })
     return out
 
@@ -1053,6 +1055,12 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
     # run, before ranking -- is what makes "significant" mean something in a
     # scanned list rather than in a single deliberate test.
     _apply_multiple_comparison_correction(findings)
+    # AD-07: a standout or laggard whose test did not hold (p >= alpha, or not
+    # after the correction) is a pattern in these rows, not a STANDOUT --
+    # the label is a claim the evidence does not support. Kept, relabelled.
+    for f in findings:
+        if f.get("kind") in ("standout", "laggard") and f.get("significant") is False:
+            f["kind"] = "pattern"
 
     # Which way is good: "the highest average rating" is good news and "the
     # highest average delay" is not. Carried as data (`tone`), so no reader
@@ -1329,6 +1337,8 @@ _FINDING_CHART = {
     "trend":          "line",
     "standout":       "bar",
     "laggard":        "bar",
+    # A standout whose test did not hold (AD-07): the same chart, a weaker word.
+    "pattern":        "bar",
     "correlation":    "numeric_series",
     # A box plot needs a category the finding does not carry; a histogram
     # shows the outlying tail from the measure alone.

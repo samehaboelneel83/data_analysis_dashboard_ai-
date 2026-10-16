@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timedelta
 
 from ..core.database import get_db
+from ..core.security import email_problem, normalize_email, password_problem
 from ..dependencies import require_super_admin
 from ..models.models import AgentRun, AiUsage, Dataset, Organization, OrgParent, QueryRun, Quota, User
 from ..services.audit import record as audit
@@ -32,10 +33,10 @@ class OrgCreate(BaseModel):
 async def create_org(body: OrgCreate, db: AsyncSession = Depends(get_db),
                      current_user: User = Depends(require_super_admin)):
     """Provision a whole organization plus its first admin user in one call."""
-    email = body.admin_email.strip()
-    if "@" not in email:
-        raise HTTPException(400, "admin_email must be an email address")
-    if (await db.execute(select(User).where(User.email == email))).scalar_one_or_none() is not None:
+    email = normalize_email(body.admin_email)
+    if (why := email_problem(email)) or (why := password_problem(body.admin_password, email)):
+        raise HTTPException(422, why)
+    if (await db.execute(select(User.id).where(func.lower(User.email) == email).limit(1))).first() is not None:
         raise HTTPException(400, "That admin email is already in use")
     org, role, admin = await create_organization_with_admin(db, body.name.strip(), email, body.admin_password)
     await audit(db, current_user, "platform.create_org", "organization", None, body.name.strip())
@@ -110,10 +111,12 @@ async def list_orgs(db: AsyncSession = Depends(get_db),
 
 
 class OrgQuotaSet(BaseModel):
-    max_queries_per_day: int | None = None
-    max_agent_asks_per_day: int | None = None
-    max_storage_mb: int | None = None
-    max_concurrent_asks: int | None = None
+    # None = unlimited, 0 = none allowed; a negative limit is refused (QA E-06:
+    # -3 queries/day was saved and blocked every query).
+    max_queries_per_day: int | None = Field(default=None, ge=0)
+    max_agent_asks_per_day: int | None = Field(default=None, ge=0)
+    max_storage_mb: int | None = Field(default=None, ge=0)
+    max_concurrent_asks: int | None = Field(default=None, ge=0)
     max_ai_tokens_per_day: int | None = Field(default=None, ge=0)
     max_ai_tokens_per_month: int | None = Field(default=None, ge=0)
 
@@ -138,11 +141,17 @@ async def set_org_quota(org_id: int, body: OrgQuotaSet, db: AsyncSession = Depen
     row.max_concurrent_asks = body.max_concurrent_asks
     row.max_ai_tokens_per_day = body.max_ai_tokens_per_day
     row.max_ai_tokens_per_month = body.max_ai_tokens_per_month
+    # AD-18: in words, not "queries=None asks=None ...".
+    def _lim(v, unit=""):
+        return "no limit" if v is None else f"{v:,}{unit}"
     await audit(db, current_user, "platform.set_org_quota", "organization", org_id,
-               f"queries={body.max_queries_per_day} asks={body.max_agent_asks_per_day} "
-               f"storage_mb={body.max_storage_mb} concurrent={body.max_concurrent_asks} "
-               f"ai_tokens_day={body.max_ai_tokens_per_day} "
-               f"ai_tokens_month={body.max_ai_tokens_per_month}")
+               " · ".join([
+                   f"Daily queries: {_lim(body.max_queries_per_day)}",
+                   f"AI asks per day: {_lim(body.max_agent_asks_per_day)}",
+                   f"Storage: {_lim(body.max_storage_mb, ' MB')}",
+                   f"Concurrent asks: {_lim(body.max_concurrent_asks)}",
+                   f"AI tokens per day: {_lim(body.max_ai_tokens_per_day)}",
+                   f"AI tokens per month: {_lim(body.max_ai_tokens_per_month)}"]))
     await db.commit()
     quotas.invalidate_quota_cache(org_id)
     return {"org_id": org_id, "max_queries_per_day": row.max_queries_per_day,
@@ -272,6 +281,8 @@ async def set_org_parent(org_id: int, body: OrgParentSet, db: AsyncSession = Dep
         existing.parent_org_id = parent_id
     else:
         db.add(OrgParent(org_id=org_id, parent_org_id=parent_id))
-    await audit(db, current_user, "platform.set_org_parent", "organization", org_id, f"parent={parent_id}")
+    parent = await db.get(Organization, parent_id)
+    await audit(db, current_user, "platform.set_org_parent", "organization", org_id,
+                f"Parent organization: {parent.name if parent is not None else f'#{parent_id}'}")
     await db.commit()
     return {"org_id": org_id, "parent_org_id": parent_id}

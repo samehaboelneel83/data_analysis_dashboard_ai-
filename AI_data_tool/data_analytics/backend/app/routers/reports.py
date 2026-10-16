@@ -10,7 +10,7 @@ from ..core.said_errors import refused
 from ..core.org_scope import check_org
 from ..core.capability import (_config_dataset_ids, can_read_dataset, effective_capabilities,
                                effective_capability, require_capability, require_dataset_read)
-from ..dependencies import get_current_user
+from ..dependencies import get_current_user, require_role_capability
 from ..services.audit import record as audit
 from ..models.models import CommonFilter, DataAlert, OrgTheme, PageRoleVisibility, PageTemplate, Report, ReportClassification, ReportParameter, ReportRelease, ReportSchedule, ReportPage, ReportUserGrant, ReportVersion, ReportWidget, Bookmark, RecentView, Role, User
 from ..schemas.schemas import (
@@ -286,7 +286,8 @@ async def _require_readable_datasets(db: AsyncSession, user: User, ids, *, alrea
 
 
 @router.post("", response_model=ReportOut, status_code=201)
-async def create_report(body: ReportCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def create_report(body: ReportCreate, db: AsyncSession = Depends(get_db),
+                        current_user: User = Depends(require_role_capability("create_dashboard"))):
     await _require_readable_datasets(
         db, current_user, [body.dataset_id, *(getattr(body, "additional_dataset_ids", None) or [])])
     obj = Report(**body.model_dump(), org_id=current_user.org_id,
@@ -375,6 +376,18 @@ async def get_report(report_id: int, view: str | None = None,
     or the release with `?view=released` -- to see what viewers see."""
     from ..services.report_release import latest_release, summary
     report = await _get_report(report_id, db, current_user)
+    if view == "print":
+        # F-02: Print / Save as PDF and PowerPoint are built in the browser from
+        # this view, so asking for it IS a download. Gated like /pdf and /xlsx:
+        # 403 with the reason (and an audit entry) when downloads are not theirs.
+        from .shared import download_gate
+        await download_gate(db, current_user, report=report)
+        try:
+            from ..services.audit import record
+            await record(db, current_user, "report.export", "report", report_id, "print")
+            await db.commit()
+        except Exception:                                   # noqa: BLE001 -- an audit hiccup must not block a permitted print
+            await db.rollback()
     # Server-side page visibility: a page restricted to roles the viewer lacks is
     # ABSENT from the response, not hidden by the client -- its widgets' configs are
     # never serialised to that viewer at all. Admins are exempt: an admin locked out
@@ -764,8 +777,8 @@ async def create_grant(report_id: int, body: dict,
     report = await db.get(Report, report_id)
     check_org(report, current_user, "Report not found")
     try:
-        # The level a share had before it could say more: 'edit' when unsaid.
-        asked = GrantIn(**{"level": "edit", **{k: v for k, v in (body or {}).items() if k in GrantIn.model_fields}})
+        # Least privilege (F-06): a share that does not say its level is view.
+        asked = GrantIn(**{k: v for k, v in (body or {}).items() if k in GrantIn.model_fields})
     except ValidationError as e:
         raise HTTPException(400, f"That share could not be read: {e.errors()[0].get('msg')}")
     return await create_or_update_grant(db, report, current_user, asked)
@@ -782,8 +795,9 @@ async def delete_grant(report_id: int, grant_id: int,
     grant = await db.get(ReportUserGrant, grant_id)
     if grant is None or grant.report_id != report_id:
         raise HTTPException(404, "Grant not found")
+    from .publishing import grant_subject
     await audit(db, current_user, "report.unshare", "report", report.id,
-                f"grant:{grant_id}")
+                f"Stopped sharing with {await grant_subject(db, grant)}")
     await db.delete(grant)
     await db.commit()
 
@@ -805,6 +819,17 @@ async def add_page(report_id: int, body: PageCreate, db: AsyncSession = Depends(
 async def update_page(report_id: int, page_id: int, body: PageUpdate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     page = await _get_page(page_id, report_id, db, current_user)
     changes = body.model_dump(exclude_none=True)
+    # C-21: a dimension sent as null clears it (Undo restores "no frame").
+    for dim in ("custom_width", "custom_height"):
+        if dim in body.model_fields_set and getattr(body, dim) is None:
+            changes[dim] = None
+    if changes.get("page_size") == "fit":
+        changes["custom_width"] = changes["custom_height"] = None
+    elif changes.get("page_size") == "custom":
+        w = changes.get("custom_width", page.custom_width)
+        h = changes.get("custom_height", page.custom_height)
+        if not (w and h):
+            raise HTTPException(422, "A custom page size needs both a width and a height")
     if "background_url" in changes:
         # The same rule every author-typed address in this product follows
         # (image widget, web content, custom visual, precision container):
@@ -1217,6 +1242,105 @@ def _remap_restored_refs(widgets: list, bookmarks: list,
             st["hiddenWidgetIds"] = hidden
         b.state = st
     return {"links_remapped": remapped, "links_dropped": dropped}
+
+
+from pydantic import BaseModel as _DupBase  # noqa: E402
+
+
+class _DuplicateBody(_DupBase):
+    name: str | None = None
+
+
+async def _file_copy_beside(db: AsyncSession, source_id: int, copy_id: int, user: User) -> None:
+    """C-20: file a copy in the original's folder, right after it.
+
+    Only where filing cannot change who sees it: a folder that is published,
+    or shared by a folder grant, on the way up opens everything filed under it
+    -- and the copy is a private draft. Such a copy (and the copy of an
+    unfiled report) stays at the root, as before."""
+    from ..models.models import WorkspaceFolderGrant, WorkspaceNode
+    src = (await db.execute(select(WorkspaceNode).where(WorkspaceNode.report_id == source_id))).scalars().first()
+    if src is None or src.parent_id is None or src.org_id != user.org_id:
+        return
+    seen: set[int] = set()
+    node_id = src.parent_id
+    while node_id is not None and node_id not in seen:
+        seen.add(node_id)
+        folder = await db.get(WorkspaceNode, node_id)
+        if folder is None or folder.published:
+            return
+        granted = (await db.execute(select(WorkspaceFolderGrant.id)
+                                    .where(WorkspaceFolderGrant.node_id == node_id).limit(1))).first()
+        if granted:
+            return
+        node_id = folder.parent_id
+    db.add(WorkspaceNode(org_id=src.org_id, parent_id=src.parent_id, node_type="report",
+                         report_id=copy_id, created_by=user.id, position=(src.position or 0) + 1))
+
+
+@router.post("/{report_id}/duplicate", response_model=ReportOut, status_code=201)
+async def duplicate_report(report_id: int, body: _DuplicateBody | None = None,
+                           db: AsyncSession = Depends(get_db),
+                           current_user: User = Depends(require_role_capability("create_dashboard"))):
+    """C-20: a full, independent copy of a dashboard -- "Save as copy".
+
+    Edit access is required: a viewer of a released dashboard is served the
+    release, not the draft, and a copy of the draft would hand them content
+    they were never shown. Only pages the caller can see are copied (a
+    role-restricted page is not leaked into a copy that has no restriction).
+    The copy is the caller's own private draft: unpublished, no grants, no
+    share links, no schedules. Content is cloned with new ids and every
+    internal reference (containers, drill-through / tooltip / action pages,
+    bookmarks) is pointed at the copy."""
+    src = await _get_report(report_id, db, current_user)
+    await require_capability(db, current_user, report_id, "edit")
+    await _require_readable_datasets(db, current_user, [src.dataset_id, *(src.additional_dataset_ids or [])])
+    visible = await _visible_page_ids(db, src, current_user)
+    name = ((body.name if body else None) or "").strip() or f"{src.name} (copy)"
+    copy = Report(name=name[:255], description=src.description, dataset_id=src.dataset_id,
+                  additional_dataset_ids=list(src.additional_dataset_ids or []),
+                  theme=src.theme, display_rules=src.display_rules, style=src.style,
+                  org_id=current_user.org_id, created_by=current_user.id, published=False)
+    db.add(copy)
+    await db.flush()
+    page_map: dict[int, int] = {}
+    new_widgets: list[tuple[int, ReportWidget]] = []
+    for p in sorted(src.pages, key=lambda p: p.position or 0):
+        if p.id not in visible:
+            continue
+        page = ReportPage(report_id=copy.id, name=p.name, title=p.title, page_type=p.page_type,
+                          prompt_column=p.prompt_column, prompt_label=p.prompt_label,
+                          position=p.position, page_size=p.page_size, custom_width=p.custom_width,
+                          custom_height=p.custom_height, mobile_layout=p.mobile_layout,
+                          layout_mode=p.layout_mode, layout_template=p.layout_template)
+        db.add(page)
+        await db.flush()
+        page_map[p.id] = page.id
+        for w in p.widgets:
+            nw = ReportWidget(page_id=page.id, widget_type=w.widget_type, title=w.title,
+                              config=dict(w.config or {}), layout=dict(w.layout or {}))
+            db.add(nw)
+            new_widgets.append((w.id, nw))
+    await db.flush()
+    widget_map = {old: nw.id for old, nw in new_widgets}
+    marks = []
+    for b in (await db.execute(select(Bookmark).where(Bookmark.report_id == report_id)
+                               .order_by(Bookmark.position))).scalars().all():
+        nb = Bookmark(report_id=copy.id, name=b.name, position=b.position, state=dict(b.state or {}))
+        db.add(nb)
+        marks.append(nb)
+    for prm in (await db.execute(select(ReportParameter).where(ReportParameter.report_id == report_id))).scalars().all():
+        db.add(ReportParameter(report_id=copy.id, name=prm.name, param_type=prm.param_type, label=prm.label,
+                               default_value=prm.default_value, options=prm.options, position=prm.position))
+    for cf in (await db.execute(select(CommonFilter).where(CommonFilter.report_id == report_id))).scalars().all():
+        db.add(CommonFilter(report_id=copy.id, column=cf.column, op=cf.op, value=cf.value, position=cf.position))
+    _remap_restored_refs([nw for _, nw in new_widgets], marks, page_map, widget_map)
+    await _file_copy_beside(db, report_id, copy.id, current_user)
+    await audit(db, current_user, "report.duplicate", "report", copy.id, f"copy of report {report_id}")
+    await db.commit()
+    created = await _get_report(copy.id, db, current_user)
+    created.is_mine = True
+    return created
 
 
 @router.get("/{report_id}/versions/{version_id}/dependencies")
@@ -2649,7 +2773,8 @@ async def set_report_capabilities(report_id: int, body: dict, db: AsyncSession =
     for rid, lvl in clean.items():
         db.add(ReportCapability(report_id=report_id, role_id=rid, level=lvl))
     await audit(db, current_user, "report.capabilities", "report", report_id,
-                "; ".join(f"role {rid}={lvl}" for rid, lvl in clean.items()) or "cleared")
+                "; ".join(f"role {org_roles[rid].name}: {lvl}" for rid, lvl in clean.items())
+                or "No role restrictions")
     await db.commit()
     return {"levels": clean}
 

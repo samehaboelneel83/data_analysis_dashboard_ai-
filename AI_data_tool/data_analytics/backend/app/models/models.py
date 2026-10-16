@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, Float, BigInteger, DateTime, ForeignKey, JSON, Boolean, LargeBinary, UniqueConstraint, text
+from sqlalchemy import Column, Integer, String, Text, Float, BigInteger, DateTime, ForeignKey, JSON, Boolean, LargeBinary, UniqueConstraint, Index, func, text
 from sqlalchemy.orm import relationship
 from ..core.database import Base
 
@@ -588,7 +588,17 @@ class Role(Base):
     org_id       = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
     name         = Column(String(255), nullable=False)
     is_org_admin = Column(Boolean, nullable=False, default=False)
+    #: QA E-08: what the role may do, {capability: bool} (core/role_permissions.py).
+    #: NULL, or a capability missing from it, means allowed -- every role that
+    #: predates the column keeps every right. Read `permissions`, which applies
+    #: the defaults and gives an org-admin role everything.
+    permissions_raw = Column("permissions", JSON, nullable=True)
     created_at   = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+    @property
+    def permissions(self) -> dict:
+        from ..core.role_permissions import effective
+        return effective(self)
 
     organization = relationship("Organization", back_populates="roles")
     users        = relationship("User", back_populates="role")
@@ -615,6 +625,11 @@ class User(Base):
 
     organization = relationship("Organization", back_populates="users")
     role         = relationship("Role", back_populates="users")
+
+
+#: One account per address whatever its letter case (migration 0069): a
+#: case-variant of a platform-admin address must never be a second account.
+Index("ux_users_email_lower", func.lower(User.email), unique=True)
 
 
 class OrgUnit(Base):
@@ -1871,6 +1886,10 @@ class GlossaryTerm(Base):
     id             = Column(Integer, primary_key=True)
     org_id         = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     data_source_id = Column(Integer, ForeignKey("data_sources.id", ondelete="CASCADE"), nullable=True, index=True)
+    #: B-21: a term of ONE dataset (an uploaded file has no connection to hang
+    #: it on). Shown and used only where that dataset is readable; NULL for an
+    #: org-wide or a connection's term (0071_glossary_dataset_scope).
+    dataset_id     = Column(Integer, ForeignKey("datasets.id", ondelete="CASCADE"), nullable=True, index=True)
     term           = Column(String(200), nullable=False)
     definition     = Column(Text, nullable=True)
     synonyms       = Column(JSON, nullable=False, default=list)   # ["GMV", "إجمالي المبيعات"]

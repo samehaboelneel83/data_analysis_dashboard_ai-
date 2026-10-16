@@ -245,3 +245,106 @@ async def test_a_rule_whose_dataset_is_in_another_org_is_not_this_orgs(client, d
     assert r.status_code == 404
     assert (await client.delete(f"/api/v1/admin/row-security-rules/{row.id}", headers=h)).status_code == 404
     assert (await client.delete(f"/api/v1/admin/column-security-rules/{col.id}", headers=h)).status_code == 404
+
+
+# ── E-03: MYSCOPE() (org-chart scope) must validate like the other tokens ────
+
+async def _analyst_role(db_session, org):
+    from app.models.models import Role
+    role = Role(org_id=org.id, name="Analyst", is_org_admin=False)
+    db_session.add(role)
+    await db_session.commit()
+    await db_session.refresh(role)
+    return role
+
+
+async def test_create_rule_with_myscope_is_accepted(client, db_session, two_orgs, auth_headers, tmp_path):
+    org = two_orgs["a"]["org"]
+    ds = await _seed_dataset_with_file(db_session, tmp_path, org.id, [{"region": "North", "sales": 100}])
+    role = await _analyst_role(db_session, org)
+
+    resp = await client.post(
+        "/api/v1/admin/row-security-rules",
+        json={"role_id": role.id, "dataset_id": ds.id, "filter_expr": "region in MYSCOPE()"},
+        headers=auth_headers["a"],
+    )
+
+    assert resp.status_code == 200, resp.text
+    saved = (await db_session.execute(select(RowSecurityRule).where(
+        RowSecurityRule.id == resp.json()["id"]))).scalar_one()
+    assert saved.filter_expr == "region in MYSCOPE()"      # the token is stored, not expanded
+
+
+async def test_myscope_rule_with_unknown_column_is_400(client, db_session, two_orgs, auth_headers, tmp_path):
+    org = two_orgs["a"]["org"]
+    ds = await _seed_dataset_with_file(db_session, tmp_path, org.id, [{"region": "North", "sales": 100}])
+    role = await _analyst_role(db_session, org)
+
+    resp = await client.post(
+        "/api/v1/admin/row-security-rules",
+        json={"role_id": role.id, "dataset_id": ds.id, "filter_expr": "nope in MYSCOPE()"},
+        headers=auth_headers["a"],
+    )
+
+    assert resp.status_code == 400
+    assert "MYSCOPE" not in resp.json()["detail"]
+
+
+async def test_create_directquery_rule_with_myscope_is_accepted(client, db_session, two_orgs, auth_headers):
+    org = two_orgs["a"]["org"]
+    ds = await _seed_directquery_dataset(db_session, org.id)
+    role = await _analyst_role(db_session, org)
+
+    ok = await client.post(
+        "/api/v1/admin/row-security-rules",
+        json={"role_id": role.id, "dataset_id": ds.id, "filter_expr": "region in MYSCOPE()"},
+        headers=auth_headers["a"],
+    )
+    assert ok.status_code == 200, ok.text
+
+    other = await _analyst_role(db_session, org)
+    bad = await client.post(
+        "/api/v1/admin/row-security-rules",
+        json={"role_id": other.id, "dataset_id": ds.id, "filter_expr": "nope in MYSCOPE()"},
+        headers=auth_headers["a"],
+    )
+    assert bad.status_code == 400
+
+
+async def test_preflight_reads_the_column_of_a_myscope_rule(client, db_session, two_orgs, auth_headers):
+    org = two_orgs["a"]["org"]
+    ds = await _seed_directquery_dataset(db_session, org.id)
+    role = await _analyst_role(db_session, org)
+
+    resp = await client.get(
+        "/api/v1/admin/row-security-rules/preflight",
+        params={"role_id": role.id, "dataset_id": ds.id, "filter_expr": "region in MYSCOPE()"},
+        headers=auth_headers["a"],
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["columns"] == ["region"]
+
+
+async def test_saved_myscope_rule_expands_for_a_placed_user(client, db_session, two_orgs, auth_headers, tmp_path):
+    from app.core.rls import resolve_rls_expr
+    from app.models.models import OrgUnit, User, UserOrgUnit
+    org = two_orgs["a"]["org"]
+    ds = await _seed_dataset_with_file(db_session, tmp_path, org.id, [{"region": "North", "sales": 100}])
+    role = await _analyst_role(db_session, org)
+    resp = await client.post(
+        "/api/v1/admin/row-security-rules",
+        json={"role_id": role.id, "dataset_id": ds.id, "filter_expr": "region in MYSCOPE()"},
+        headers=auth_headers["a"],
+    )
+    assert resp.status_code == 200, resp.text
+
+    unit = OrgUnit(org_id=org.id, name="North branch", match_value="North")
+    user = User(org_id=org.id, role_id=role.id, email="north@example.com", password_hash="x")
+    db_session.add_all([unit, user])
+    await db_session.flush()
+    db_session.add(UserOrgUnit(user_id=user.id, org_unit_id=unit.id))
+    await db_session.commit()
+    await db_session.refresh(user, ["role"])
+
+    assert await resolve_rls_expr(db_session, user, ds.id) == "region in ['North']"

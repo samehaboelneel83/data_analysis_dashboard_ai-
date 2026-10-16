@@ -12,8 +12,9 @@
 import type { CalcColumnFormat } from '../../../services/api'
 import { createElement, type ComponentType } from 'react'
 import { LineChart, Line } from 'recharts'
-import { fmtStr, LegendWithTitle } from '../chartUtils'
-import { hijriLabel } from '../../../lib/arabicFormats'
+import { fmtStr, isolateLtr, LegendWithTitle } from '../chartUtils'
+import { hijriLabel, symbolAfter } from '../../../lib/arabicFormats'
+import { defaultSummary } from '../../../lib/semanticGuard'
 
 export interface FormatConfig {
   overview_axis?: boolean
@@ -483,7 +484,12 @@ export function axisTitles(cfg: FormatConfig): {
     // COUNT names no column -- "how many rows" -- and the axis should say so
     // rather than stay blank on the one aggregation that has nothing to name.
     ?? (agg === 'count' ? 'count' : undefined)
-  const measure2 = applied(text(cfg.measure2), text(cfg.aggregation2) ?? agg)
+  // C-11: a blank aggregation2 inherits the first axis's -- except that the
+  // server (shape_dual_series) never sums a percentage or a rate there, and
+  // the title must name what it actually drew ("avg(margin_pct)").
+  const m2 = text(cfg.measure2)
+  const sensible2 = m2 && !text(cfg.aggregation2) && (agg ?? 'sum') === 'sum' ? defaultSummary(m2) : undefined
+  const measure2 = applied(m2, text(cfg.aggregation2) ?? (sensible2 && sensible2 !== 'sum' ? sensible2 : agg))
   // Several measures on one axis (extra_measures): no single field names it,
   // and "sum(revenue)" over revenue, cost and profit would say something false.
   // The legend names each series; an author's own title still wins.
@@ -1049,7 +1055,21 @@ export function valueTick(cfg: FormatConfig, fmt?: CalcColumnFormat | null) {
   // width (Chrome re-test of 5.11).
   return (v: unknown) => typeof v === 'number' && Math.abs(v) >= 10000
     && (cfg.labels_compact ?? Math.abs(v) >= 1_000_000)
-    ? COMPACT.format(v) : fmtStr(v, fmt ?? undefined)
+    ? withUnit(COMPACT.format(v), fmt) : fmtStr(v, fmt ?? undefined)
+}
+
+/** C-02: an abbreviated value keeps the measure's unit, so "1.2M" sits beside
+ *  "$ 600,000" as "$ 1.2M" and not as a bare number in another unit. */
+function withUnit(compact: string, fmt?: CalcColumnFormat | null): string {
+  if (!fmt || fmt.type === 'none') return compact
+  const pre = fmt.prefix ?? '', suf = fmt.suffix ?? ''
+  if (fmt.type === 'currency') {
+    const sym = fmt.symbol ?? '$'
+    return isolateLtr(symbolAfter(sym, fmt.symbol_position)
+      ? `${pre}${compact} ${sym}${suf}` : `${pre}${sym} ${compact}${suf}`)
+  }
+  if (fmt.type === 'percent') return isolateLtr(`${pre}${compact}%${suf}`)
+  return `${pre}${compact}${suf}`
 }
 
 export function labelListProps(

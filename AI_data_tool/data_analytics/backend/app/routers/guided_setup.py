@@ -530,6 +530,25 @@ def _since(state: dict) -> str | None:
     return state.get("at") if state.get("pending") else None
 
 
+async def _latest_run(db: AsyncSession, source: DataSource) -> dict | None:
+    """The connection's latest read (SyncRun), so step 1 can say what is really
+    happening -- running (step x of n), failed (and why) or never read -- rather
+    than guess from source.sync_status (B-03)."""
+    from ..models.models import SyncRun
+    from ..services.metadata.catalog_sync import STAGE_NAMES
+    run = (await db.execute(select(SyncRun).where(SyncRun.data_source_id == source.id)
+                            .order_by(SyncRun.id.desc()).limit(1))).scalar_one_or_none()
+    if run is None:
+        return None
+    stages = run.stages or []
+    return {"id": run.id, "status": run.status,
+            "started_at": run.started_at.isoformat() if run.started_at else None,
+            "stages_done": len(stages), "stages_total": len(STAGE_NAMES),
+            "current": (STAGE_NAMES[len(stages)] if run.status == "running" and len(stages) < len(STAGE_NAMES)
+                        else None),
+            "error": run.error}
+
+
 async def _summary(db: AsyncSession, user: User, source: DataSource, lang: str,
                    *, fresh: bool = False) -> dict:
     from ..services.guided_setup import understand
@@ -543,6 +562,7 @@ async def _summary(db: AsyncSession, user: User, source: DataSource, lang: str,
                  "last_synced_at": source.last_synced_at.isoformat() if source.last_synced_at else None},
         "can_edit": _may_administer(source, user),
         "language": lang,
+        "latest_run": await _latest_run(db, source),
     }
     if not facts:
         # Nothing catalogued: still syncing, the sync failed, or the database is empty.
@@ -988,6 +1008,23 @@ async def _existing_datasets(db: AsyncSession, user: User, source: DataSource) -
     return out[:20]
 
 
+def _ai_state(source: DataSource | None) -> dict:
+    """B-11: whether the AI can help on this step right now, so the page says
+    so at once instead of showing a spinner: off (this connection or the
+    platform does not use it), unavailable (every endpoint was found down
+    moments ago), or available."""
+    from ..core.config import settings
+    if source is None or not source.allow_llm_sampling or not settings.llm_enabled:
+        return {"available": False, "reason": "off"}
+    try:
+        from ..services.llm import get_client
+        if not get_client().available():
+            return {"available": False, "reason": "unavailable"}
+    except Exception:                                       # noqa: BLE001 -- unknown is not "down"
+        pass
+    return {"available": True, "reason": None}
+
+
 async def _dashboards_using(db: AsyncSession, user: User, ids: list[int]) -> dict[int, int]:
     """How many dashboards of the organization read each dataset."""
     if not ids:
@@ -1051,6 +1088,7 @@ async def get_datasets_step(source_id: int, lang: str = "en", flow: int | None =
             "chosen": list(f.dataset_ids or []),
             "can_create": _may_create(user),
             "allow_ai": bool(source.allow_llm_sampling),
+            "ai": _ai_state(source),
             "usual": await _usual_waits(db, user.org_id)}
 
 
@@ -1355,12 +1393,17 @@ def _said_columns(f: SetupFlow, df) -> set[str]:
             if len(str(c)) >= 3 and str(c).replace("_", " ").casefold() in text}
 
 
-async def _check_one(db: AsyncSession, user: User, ds: Dataset, f: SetupFlow, lang: str) -> tuple[dict, dict]:
+async def _check_one(db: AsyncSession, user: User, ds: Dataset, f: SetupFlow, lang: str,
+                     on_plain=None) -> tuple[dict, dict]:
     """(findings, cleaning) for one dataset, read as `user`.
 
     The check, then the automatic fixes for what it found (only on a dataset
     this flow made; cleaning.py), then the insights -- on the cleaned rows, so
-    what the person reads and what the dashboard draws are the same data."""
+    what the person reads and what the dashboard draws are the same data.
+
+    B-12: `on_plain(result)` is awaited with the plain (no-model) findings as
+    soon as they exist, before the slow model calls, so they can be shown
+    while the AI's ideas are still coming."""
     import asyncio
     from ..core.capability import require_dataset_read
     from ..services import alerts
@@ -1383,9 +1426,20 @@ async def _check_one(db: AsyncSession, user: User, ds: Dataset, f: SetupFlow, la
     from ..services import column_classes
     classes = await column_classes.ensure(db, ds, df)
     await access.release(db)
-    items = health.column_items(report, df, lang, classes)
+    # B-34: the dataset's own column types, so a column the source keeps as
+    # text but the loader read as numbers is still reported.
+    from ..models.models import DatasetColumn
+    stored = dict((await db.execute(select(DatasetColumn.name, DatasetColumn.dtype)
+                                    .where(DatasetColumn.dataset_id == ds.id))).all())
+    items = health.column_items(report, df, lang, classes, stored_types=stored)
     items += health.generic_rules(df, lang, skip={i["column"] for i in items if i["kind"] == "placeholder"},
                                   column_meta=classes)
+    if on_plain is not None:
+        try:
+            await on_plain({"health": list(items) or [health.good_item(df, lang)], "insights": [],
+                            "rows": int(len(df)), "columns": int(len(df.columns))})
+        except Exception:                                   # noqa: BLE001 -- a preview, never the check
+            logger.exception("guided setup: could not keep the plain findings of dataset %s", ds.id)
     try:
         # A rule that only re-finds what a plain check already found (the same
         # rows, one of the same columns) is said once.
@@ -1450,8 +1504,19 @@ async def write_findings(db: AsyncSession, flow_id: int, dataset_id: int, lang: 
     if user is None:
         return
     cleaned = None
+
+    async def plain(result: dict) -> None:
+        """The plain findings, kept at once with ai_pending (B-12)."""
+        await db.refresh(f)
+        state = dict(f.findings or {})
+        entry = dict(state.get(str(dataset_id)) or {})
+        if entry.get("attempt") != attempt:
+            return
+        state[str(dataset_id)] = {**entry, **result, "pending": False, "ai_pending": True, "failed": None}
+        f.findings = state
+        await db.commit()
     try:
-        (result, cleaned), failed = await _check_one(db, user, ds, f, lang), None
+        (result, cleaned), failed = await _check_one(db, user, ds, f, lang, on_plain=plain), None
     except HTTPException as e:
         result, failed = {}, str(e.detail)
     except Exception:                                       # noqa: BLE001
@@ -1464,8 +1529,10 @@ async def write_findings(db: AsyncSession, flow_id: int, dataset_id: int, lang: 
         # Kept even when a newer check replaced this one: the prep steps exist.
         f.cleaning = {**dict(f.cleaning or {}), str(dataset_id): cleaned}
     if entry.get("attempt") == attempt:
+        # Fixes made while the AI part was still running are kept (B-12).
         state[str(dataset_id)] = {"attempt": attempt, "lang": lang, **result, "failed": failed,
-                                  "fixed": [], "at": datetime.utcnow().isoformat(), "took": _took(entry.get("at"))}
+                                  "fixed": list(entry.get("fixed") or []) if entry.get("ai_pending") else [],
+                                  "at": datetime.utcnow().isoformat(), "took": _took(entry.get("at"))}
         f.findings = state
     await db.commit()
 
@@ -1490,9 +1557,11 @@ async def _start_check(db: AsyncSession, user: User, f: SetupFlow, dataset_id: i
 
 def _finding_out(entry: dict, cleaned: dict | None = None) -> dict:
     from ..services.guided_setup import cleaning
-    stale = entry.get("pending") and _pending_is_stale(entry)
+    stale = (entry.get("pending") or entry.get("ai_pending")) and _pending_is_stale(entry)
     health_items = entry.get("health") or []
     return {"pending": bool(entry.get("pending")) and not stale, "failed": entry.get("failed"),
+            # B-12: the plain findings are in; the AI's ideas are still coming.
+            "ai_pending": bool(entry.get("ai_pending")) and not stale,
             "health": health_items, "insights": entry.get("insights") or [],
             "rows": entry.get("rows"), "columns": entry.get("columns"),
             "fixed": entry.get("fixed") or [], "language": entry.get("lang"), "checked": bool(entry),
@@ -1519,7 +1588,11 @@ async def get_check_step(source_id: int, lang: str = "en", flow: int | None = No
     lang = _language(lang)
     await _ensure_demand(db, user, f, lang)
     out = []
-    for ds in await _journey_datasets(db, user, f):
+    journey = await _journey_datasets(db, user, f)
+    # B-33: a one-click fix on a dataset dashboards already read changes it for
+    # everyone -- the step confirms first, so it needs the count.
+    used = await _dashboards_using(db, user, [d.id for d in journey])
+    for ds in journey:
         entry = dict((f.findings or {}).get(str(ds.id)) or {})
         if not entry or (entry.get("pending") and _pending_is_stale(entry)):
             await _start_check(db, user, f, ds.id, lang)
@@ -1530,6 +1603,7 @@ async def get_check_step(source_id: int, lang: str = "en", flow: int | None = No
                               _failer(f.id, "findings", entry["attempt"], key=str(ds.id)))
         out.append({"id": ds.id, "name": ds.name, "mode": ds.mode, "row_count": ds.row_count,
                     "auto_clean": ds.id in (f.created_ids or []) and ds.mode != "directquery",
+                    "used_by": {"dashboards": used.get(ds.id, 0)},
                     "findings": _finding_of(f, ds.id)})
     # The pages are designed while the person reads this step: by the time they
     # press Next the dashboard is usually ready (PLAN_V2 4f). Once, like any
@@ -1537,7 +1611,8 @@ async def get_check_step(source_id: int, lang: str = "en", flow: int | None = No
     done = bool(out) and all(d["findings"]["checked"] and not d["findings"]["pending"] for d in out)
     if done and (f.demand or {}).get("sentence") and not (f.demand or {}).get("pending") and not f.designs:
         await _start_designs(db, user, f, lang)
-    return {"datasets": out, "demand": _demand_out(f), "usual": await _usual_waits(db, user.org_id)}
+    return {"datasets": out, "demand": _demand_out(f), "ai": _ai_state(source),
+            "usual": await _usual_waits(db, user.org_id)}
 
 
 @router.post("/{source_id}/check/{dataset_id}/run")
@@ -1574,8 +1649,7 @@ async def fix_item(source_id: int, dataset_id: int, body: FixIn, lang: str = "en
         raise HTTPException(404, "Nothing to fix here")
     action = item["action"]
     if body.how == "check":
-        from ..schemas.schemas import DataCheckIn
-        from .datasets import create_data_check
+        from .datasets import DataCheckIn, create_data_check
         rule = action.get("rule")
         if not rule:
             raise HTTPException(400, "This line has no rule to check")
@@ -1587,14 +1661,40 @@ async def fix_item(source_id: int, dataset_id: int, body: FixIn, lang: str = "en
         if step is None:
             raise HTTPException(400, "This line cannot be fixed automatically")
         await set_prep_steps(ds.id, list(prep_steps_of(ds)) + [step], db, user)
+    shape = await _recount(db, user, ds) if body.how == "fix" else None
     await db.refresh(f)
     state = dict(f.findings or {})
     entry = dict(state.get(str(dataset_id)) or {})
+    if shape is not None:
+        entry["rows"], entry["columns"] = shape
     entry["fixed"] = list(dict.fromkeys((entry.get("fixed") or []) + [f"{body.item_id}|{body.how}"]))
     state[str(dataset_id)] = entry
     f.findings = state
     await db.commit()
     return {"findings": _finding_of(f, dataset_id)}
+
+
+async def _recount(db: AsyncSession, user: User, ds: Dataset) -> tuple[int, int] | None:
+    """B-32: the dataset's shape after its prep steps -- a one-click fix that
+    removes rows or columns changes what the wizard and the dataset's own
+    pages should say. Read as `user`, through the same frame the check reads;
+    a recount that fails leaves the old numbers rather than failing the fix."""
+    from ..services import alerts
+    try:
+        await db.refresh(ds)
+        df = await alerts.alert_frame(db, ds, user)
+        await access.release(db)
+    except Exception:                                       # noqa: BLE001
+        logger.exception("guided setup: could not recount dataset %s after a fix", ds.id)
+        return None
+    rows, cols = int(len(df)), int(len(df.columns))
+    # The dataset's own count only from an unrestricted read: a row or column
+    # rule would write one person's slice in as everyone's size.
+    from ..core.rls import resolve_denied_columns, resolve_rls_expr
+    if ds.mode != "directquery" and not await resolve_rls_expr(db, user, ds.id) \
+            and not await resolve_denied_columns(db, user, ds.id):
+        ds.row_count, ds.col_count = rows, cols
+    return rows, cols
 
 
 class UndoIn(BaseModel):
@@ -1684,9 +1784,14 @@ async def findings_for_dataset(dataset_id: int, db: AsyncSession = Depends(get_d
 
 # ── Step 4: Dashboard ───────────────────────────────────────────────────────
 
-async def _plain_design(db: AsyncSession, user: User, ds: Dataset, f: SetupFlow, count: int) -> list[dict]:
+async def _plain_design(db: AsyncSession, user: User, ds: Dataset, f: SetupFlow,
+                        count: int) -> tuple[list[dict], dict]:
     """Without a model: the app's statistics designer, narrowed to what the
-    person asked for. No goal is passed, so it never waits on a model."""
+    person asked for. No goal is passed, so it never waits on a model.
+
+    Returns the pages AND the derived fields (rate measures, durations) their
+    widgets use: the builder creates those on the dataset first, so dropping
+    them shipped widgets naming fields that do not exist (B-05)."""
     from ..schemas.schemas import SuggestDashboardsRequest
     from ..services.guided_setup import answer, demand
     from .datasets import suggest_dashboards
@@ -1699,7 +1804,7 @@ async def _plain_design(db: AsyncSession, user: User, ds: Dataset, f: SetupFlow,
         if widgets:
             out.append({**p, "widgets": widgets, "answer": "", "unanswered": [], "answers": [],
                         "scope_filters": filters})
-    return out
+    return out, dict(got.get("derived") or {})
 
 
 async def write_designs(db: AsyncSession, flow_id: int, lang: str, attempt: str) -> None:
@@ -1782,7 +1887,7 @@ async def write_designs(db: AsyncSession, flow_id: int, lang: str, attempt: str)
             if not proposals:
                 try:
                     await access.release(s)
-                    proposals = await _plain_design(s, owner, ds, f2, count)
+                    proposals, derived = await _plain_design(s, owner, ds, f2, count)
                 except Exception:                               # noqa: BLE001
                     logger.exception("guided setup: the plain design for dataset %s failed", ds.id)
             return ([{"id": uuid.uuid4().hex[:10], "dataset_id": ds.id, "dataset_name": ds.name,
@@ -1846,6 +1951,7 @@ async def get_dashboard_step(source_id: int, lang: str = "en", flow: int | None 
         out["pending"] = True             # the request is being rewritten; the design follows it
     return {"designs": out, "has_data": bool(datasets_), "demand": _demand_out(f),
             "datasets": [{"id": d.id, "name": d.name} for d in datasets_],
+            "ai": _ai_state(source),
             "usual": await _usual_waits(db, user.org_id)}
 
 

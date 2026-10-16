@@ -117,6 +117,9 @@ export const NAVIGATION: NavSection[] = [
       // (`branch in MYSCOPE()`) resolves against, so the two are read together.
       { to: '/admin/org-units', label: 'Organization chart', icon: Network, permission: 'org_admin' },
       { to: '/admin/row-security-rules', label: 'Row security', icon: Lock, permission: 'org_admin' },
+      // The rules Ask AI obeys (a separate system from dataset row security);
+      // reachable only by a link before QA E-07.
+      { to: '/admin/connection-rules', label: 'Connection rules', icon: Lock, permission: 'org_admin' },
       { to: '/admin/column-security-rules', label: 'Column security', icon: EyeOff, permission: 'org_admin' },
       { to: '/admin/export-policy', label: 'Export policy', icon: Download, permission: 'org_admin' },
       { to: '/admin/api-keys', label: 'API keys', icon: Key, permission: 'org_admin' },

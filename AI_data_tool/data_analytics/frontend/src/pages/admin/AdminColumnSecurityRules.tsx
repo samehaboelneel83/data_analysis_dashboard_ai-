@@ -35,8 +35,8 @@ function RuleModal({ roles, datasets, onSaved, onClose }: {
 }) {
   const t = useT()
   const dialogRef = useModalDialog<HTMLDivElement>(onClose)
-  const [roleId, setRoleId] = useState<number | ''>(roles[0]?.id ?? '')
-  const [datasetId, setDatasetId] = useState<number | ''>(datasets[0]?.id ?? '')
+  const [roleId, setRoleId] = useState<number | ''>('')   // nothing pre-picked (QA E-05)
+  const [datasetId, setDatasetId] = useState<number | ''>('')
   const [denied, setDenied] = useState<Set<string>>(new Set())
   const [saving, setSaving] = useState(false)
 
@@ -89,7 +89,8 @@ function RuleModal({ roles, datasets, onSaved, onClose }: {
           <select aria-label={t('pg.adminSecurity.c.roleReq')} value={roleId}
             onChange={e => setRoleId(e.target.value ? Number(e.target.value) : '')} {...inp}>
             <option value="">{t('pg.adminSecurity.c.selectRole')}</option>
-            {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            {roles.map(r => <option key={r.id} value={r.id} disabled={r.is_org_admin}>
+              {r.is_org_admin ? t('pg.adminSecurity.c.roleOptionAdminBypass', { name: r.name }) : r.name}</option>)}
           </select>
         </label>
 

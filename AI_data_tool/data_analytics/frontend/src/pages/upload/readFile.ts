@@ -33,7 +33,8 @@ const HEAD_BYTES = 256 * 1024
 
 export function kindOf(name: string): Kind {
   const ext = name.toLowerCase().split('.').pop() ?? ''
-  if (['csv', 'tsv', 'txt'].includes(ext)) return 'csv'
+  // B-22: only .csv -- the server imports neither .tsv nor .txt.
+  if (ext === 'csv') return 'csv'
   if (['xlsx', 'xls'].includes(ext)) return 'xlsx'
   if (ext === 'json') return 'json'
   if (ext === 'xml') return 'xml'

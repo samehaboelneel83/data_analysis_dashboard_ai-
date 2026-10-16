@@ -63,7 +63,8 @@ describe('SchemaBrowser dataset-mode toggle', () => {
     fireEvent.click(screen.getByText(/Import as Dataset/))
 
     await waitFor(() => expect(dataSourcesApi.queueImport).toHaveBeenCalledWith(
-      1, { dataset_name: 'sales', table: 'sales', query: undefined }, expect.any(String)))
+      // B-24: the default name carries the connection's.
+      1, { dataset_name: 'Live DB — sales', table: 'sales', query: undefined }, expect.any(String)))
     // The request path is not used for an import any more.
     expect(dataSourcesApi.import).not.toHaveBeenCalled()
     // The dialog follows the job, and says it can be closed.
@@ -83,7 +84,7 @@ describe('SchemaBrowser dataset-mode toggle', () => {
     fireEvent.click(screen.getByText('DirectQuery'))
     fireEvent.click(screen.getByText(/Import as Dataset|Create DirectQuery Dataset/))
 
-    await waitFor(() => expect(dataSourcesApi.import).toHaveBeenCalledWith(1, 'sales', 'sales', undefined, 'directquery'))
+    await waitFor(() => expect(dataSourcesApi.import).toHaveBeenCalledWith(1, 'Live DB — sales', 'sales', undefined, 'directquery'))
   })
 })
 

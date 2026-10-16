@@ -19,7 +19,7 @@ import LoadError from '../components/ui/LoadError'
 import LoadingState from '../components/ui/LoadingState'
 import ActionMenu from '../components/ActionMenu'
 import { localDigits } from '../lib/arabicFormats'
-import { Activity, BookOpen, Boxes, ChevronRight, Columns3, Database, GitCompare, RefreshCw, Search, Sparkles, Waypoints } from 'lucide-react'
+import { Activity, BookOpen, Boxes, ChevronRight, Columns3, Database, GitCompare, RefreshCw, Search, Sparkles, Waypoints, X } from 'lucide-react'
 import './connections/connections.css'
 import {
   RelationshipRow, ColumnReview, EntityReview, DriftPanel, SourceHealthPanel,
@@ -43,6 +43,17 @@ import {
  *     user who has to open something to judge it will instead approve without
  *     looking, which converts a review step into a rubber stamp.
  */
+/** The stages of a catalog sync, in order (backend catalog_sync.STAGE_NAMES). */
+const SYNC_STAGES = ['discover', 'sample', 'profile', 'infer_keys', 'describe', 'entities', 'drift', 'link_datasets']
+
+/** "1:05" / "1:02:05" for a running sync. */
+function elapsed(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000))
+  const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), sec = total % 60
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return localDigits(h ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`)
+}
+
 export default function SourceReview() {
   const { id } = useParams<{ id: string }>()
   const sourceId = Number(id)
@@ -91,6 +102,16 @@ export default function SourceReview() {
       .catch(() => setDriftError(tr('pg.dataPages.sr.driftError')))
   }, [tab, drift, sourceId])
   const [pollTimer, setPollTimer] = useState<number | null>(null)
+  // B-29: bumped when a sync ends, so the plain summary above is read again.
+  const [syncedAt, setSyncedAt] = useState(0)
+  // B-04: a ticking clock for "Running for mm:ss" while a sync runs.
+  const [now, setNow] = useState(() => Date.now())
+  const runningRun = run?.status === 'running' && run.id != null
+  useEffect(() => {
+    if (!runningRun) return
+    const id = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(id)
+  }, [runningRun])
   // One search term across both tabs. At 82 tables and 1,354 columns, finding
   // the thing you came for is the primary interaction, not a refinement.
   const [search, setSearch] = useState('')
@@ -188,6 +209,7 @@ export default function SourceReview() {
           window.clearInterval(timer)
           setSyncing(false)
           await load()
+          setSyncedAt(n => n + 1)
           const failed = latest.stages.filter(st => st.status === 'failed').length
           if (latest.status === 'ok') toast.success(tr('pg.dataPages.sr.syncFinished'))
           else if (failed) toast.error(tr('pg.dataPages.sr.syncFailedStages', { n: failed }))
@@ -243,6 +265,23 @@ export default function SourceReview() {
     }
   }
 
+
+  /** B-04: stop a stuck sync. The server records it failed, so Run sync works again. */
+  const cancelSync = async () => {
+    if (run?.id == null) return
+    try {
+      const ended = await metadataApi.cancelSync(sourceId, run.id)
+      if (pollTimer) window.clearInterval(pollTimer)
+      setPollTimer(null)
+      setSyncing(false)
+      setRun(ended)
+      toast.success(tr('pg.dataPages.sr.cancelled'))
+      await load()
+      setSyncedAt(n => n + 1)
+    } catch {
+      toast.error(tr('pg.dataPages.sr.cancelFailed'))
+    }
+  }
 
   const confirmSelected = async () => {
     if (!selected.size) return
@@ -321,14 +360,26 @@ export default function SourceReview() {
             <span className="dl-srv__type" dir="ltr">{queue.source.type}</span>
             <span>{tr('pg.dataPages.sr.stats', { tables: queue.datasets.length, columns: queue.columns.length, pending: pending.length, settled: settled.length })}</span>
           </p>
+          {runningRun && run?.started_at && (
+            <p className="dl-srv__stats" aria-live="polite">
+              {tr('pg.dataPages.sr.runningFor', {
+                time: elapsed(now - new Date(run.started_at).getTime()),
+                step: SYNC_STAGES[run.stages.length] ?? run.stages[run.stages.length - 1]?.name ?? '—' })}
+            </p>
+          )}
         </div>
         <div className="dl-srv__acts">
           <button type="button" className="btn btn-ghost" onClick={runSync} disabled={syncing}>
             <RefreshCw size={15} aria-hidden className={syncing ? 'dl-cn-spin' : undefined} />
             {syncing
-              ? tr('pg.dataPages.sr.syncing', { n: run?.stages?.length ?? 0, total: 6 })
+              ? tr('pg.dataPages.sr.syncing', { n: run?.stages?.length ?? 0, total: Math.max(SYNC_STAGES.length, run?.stages?.length ?? 0) })
               : tr('pg.dataPages.sr.runSync')}
           </button>
+          {runningRun && (
+            <button type="button" className="btn btn-ghost" onClick={() => void cancelSync()}>
+              <X size={15} aria-hidden /> {tr('pg.dataPages.sr.cancelSync')}
+            </button>
+          )}
           {/* Guided setup 4c: the setup is this source's door to a dashboard. */}
           <Link to={`/setup/${sourceId}`} className="btn btn-primary">{tr('setup.review.cta')}</Link>
           <ActionMenu label={tr('connections.more', { name: queue.source.name })} align="end" portal
@@ -337,7 +388,7 @@ export default function SourceReview() {
       </header>
 
       {/* Guided setup phase 5c: plain first; the full review is below. */}
-      <SourceSummary sourceId={sourceId} />
+      <SourceSummary sourceId={sourceId} refreshKey={syncedAt} />
 
       <div className="dl-srv__cards">
         <div className="dl-srv__about">

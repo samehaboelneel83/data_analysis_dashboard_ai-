@@ -1,4 +1,4 @@
-import { useEffect, useRef, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { ArrowUp, Lock } from 'lucide-react'
 import { useT } from '../../i18n'
 import { localDigits } from '../../lib/arabicFormats'
@@ -38,14 +38,23 @@ export default function Composer({ value, onChange, onSend, busy = false, locked
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value])
 
+  // B-18: a locked box is readOnly + aria-disabled, not disabled -- it keeps
+  // focus, so Enter / Ctrl+A typed there stay in it instead of reaching the
+  // page (where Enter cleared the chosen dataset). Enter says why it is locked.
+  const [nudged, setNudged] = useState(false)
+  useEffect(() => { if (!locked) setNudged(false) }, [locked])
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
+      if (locked) { setNudged(true); return }
       if (!busy && value.trim()) onSend()
     }
   }
 
   const disabled = locked || busy
+  const lockedText = lockedHint ?? t('ask.lockedHint')
+  const nudge = locked && nudged
+    ? <span role="status" className="dl-composer__hint">{lockedText}</span> : null
   const empty = !value.trim()
   const count = (
     <span className={`dl-composer__count${value.length > MAX_QUESTION * 0.9 ? ' dl-composer__count--warn' : ''}`} dir="ltr">
@@ -57,9 +66,9 @@ export default function Composer({ value, onChange, onSend, busy = false, locked
       <div className={`dl-composer dl-composer--page${locked ? ' dl-composer--locked' : ''}`}>
         <div className="dl-composer__box">
           <textarea ref={ref} rows={1} value={value} maxLength={MAX_QUESTION}
-            disabled={disabled}
-            onChange={e => onChange(e.target.value)} onKeyDown={onKey}
-            placeholder={locked ? (lockedHint ?? t('ask.lockedHint'))
+            disabled={busy && !locked} readOnly={locked} aria-disabled={locked || undefined}
+            onChange={e => { if (!locked) onChange(e.target.value) }} onKeyDown={onKey}
+            placeholder={locked ? lockedText
               : page.name ? t('ask2.cmp.placeholder', { name: page.name }) : t('ask.placeholder')}
             aria-label={t('ask.questionLabel')}
             aria-describedby={locked ? (page.pill ? 'dl-composer-pill' : undefined) : 'dl-composer-hint'}
@@ -74,6 +83,7 @@ export default function Composer({ value, onChange, onSend, busy = false, locked
               </span>
             )}
             {!locked && count}
+            {nudge}
             <button type="button" className="dl-composer__send"
               onClick={() => { if (!empty) onSend() }} disabled={disabled || empty}
               aria-label={busy ? t('ask.asking') : t('ask2.cmp.send')} title={busy ? t('ask.asking') : t('ask2.cmp.send')}>
@@ -89,9 +99,9 @@ export default function Composer({ value, onChange, onSend, busy = false, locked
       <div className="dl-composer__box">
         {locked && <Lock size={15} className="dl-composer__lock" aria-hidden />}
         <textarea ref={ref} rows={1} value={value} maxLength={MAX_QUESTION}
-          disabled={disabled}
-          onChange={e => onChange(e.target.value)} onKeyDown={onKey}
-          placeholder={locked ? (lockedHint ?? t('ask.lockedHint')) : t('ask.placeholder')}
+          disabled={busy && !locked} readOnly={locked} aria-disabled={locked || undefined}
+          onChange={e => { if (!locked) onChange(e.target.value) }} onKeyDown={onKey}
+          placeholder={locked ? lockedText : t('ask.placeholder')}
           aria-label={t('ask.questionLabel')}
           aria-describedby={locked ? undefined : 'dl-composer-hint'}
           className="dl-composer__input" />
@@ -103,6 +113,7 @@ export default function Composer({ value, onChange, onSend, busy = false, locked
           <ArrowUp size={18} aria-hidden />
         </button>
       </div>
+      {nudge}
       {!locked && (
         <div id="dl-composer-hint" className="dl-composer__hint">
           <span>{t('ask.enterHint')}</span>

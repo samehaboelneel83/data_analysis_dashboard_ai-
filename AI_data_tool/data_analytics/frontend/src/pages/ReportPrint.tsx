@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 import { useT } from '../i18n'
 import { useParams, Link } from 'react-router-dom'
 import { reportsApi, datasetsApi, themesApi } from '../services/api'
@@ -12,6 +12,7 @@ import LoadError from '../components/ui/LoadError'
 import LoadingState from '../components/ui/LoadingState'
 import { applyTheme } from '../components/report/chartUtils'
 import { styleVars } from '../lib/dashboardStyle'
+import { pageFrame } from '../lib/pageSize'
 
 /**
  * Print layout: every page of the report laid out linearly, one report page per
@@ -30,11 +31,15 @@ export default function ReportPrint() {
   const [report, setReport] = useState<Report | null>(null)
   const [dataset, setDataset] = useState<Dataset | null>(null)
   const [error, setError] = useState<unknown>(null)
+  // F-02: the server's "no downloads for you" -- this page is where Save as
+  // PDF and PowerPoint come from, so a refusal leaves only the way back.
+  const [refused, setRefused] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setError(null)
+    setRefused(null)
     try {
-      const r = await reportsApi.get(reportId)
+      const r = await reportsApi.get(reportId, { view: 'print' })
       // Printed in the report's own palette, an org palette included.
       const customs = r.theme?.startsWith('custom:')
         ? Object.fromEntries((await themesApi.list().catch(() => [])).map(t => [`custom:${t.id}`, t.colors]))
@@ -43,9 +48,13 @@ export default function ReportPrint() {
       setReport(r)
       if (r.dataset_id) setDataset(await datasetsApi.get(r.dataset_id))
     } catch (e) {
-      setError(e)
+      const res = (e as { response?: { status?: number; data?: { detail?: unknown } } })?.response
+      if (res?.status === 403) {
+        const d = res.data?.detail
+        setRefused(typeof d === 'string' && d ? d : t('prt.refused'))
+      } else setError(e)
     }
-  }, [reportId])
+  }, [reportId, t])
   useEffect(() => { load() }, [load])
   // Paper is light (QA2 Visual 7). The whole page, not only this subtree: many
   // dark styles are written as [data-theme="dark"] .x and still match through
@@ -62,6 +71,15 @@ export default function ReportPrint() {
     }
   }, [])
 
+  if (refused !== null) return (
+    <div style={{ padding: 40 }}>
+      <div role="alert" className="card" style={{ padding: 20, maxWidth: 560 }}>
+        <h1 style={{ fontSize: 16, margin: '0 0 8px' }}>{t('prt.refusedTitle')}</h1>
+        <p style={{ margin: '0 0 14px' }}>{refused}</p>
+        <Link className="btn btn-sm" to={`/reports/${reportId}`}>{t('prt.back')}</Link>
+      </div>
+    </div>
+  )
   if (error) return <div style={{ padding: 40 }}><LoadError what="this report" error={error} onRetry={load} /></div>
   if (!report) return <div style={{ padding: 40 }}><LoadingState label={t('prt.preparing')} /></div>
 
@@ -104,20 +122,29 @@ export default function ReportPrint() {
         </div>
       </div>
 
-      {pages.map(page => (
+      {pages.map(page => {
+        // C-21: a page with a fixed size prints at that size, on a sheet of
+        // its own shape (a named @page); a flowing page keeps the 1050 px
+        // print width and the paper the browser's print dialog picks.
+        const frame = pageFrame(page)
+        const printW = frame ? frame.w : 1050
+        return (
         <section key={page.id} className="print-page" aria-label={page.name}
-          style={{ padding: 24 }}>
+          style={{ padding: 24, ...(frame ? { maxWidth: frame.w + 50, page: `dl-page-${page.id}` } as CSSProperties : {}) }}>
+          {frame && <style>{/* i18n-ok: CSS */`@page dl-page-${page.id} { size: ${frame.w + 50}px ${frame.h + 90}px; margin: 0; }`}</style>}
           <h2 style={{ fontSize: 16, margin: '0 0 14px' }}>{page.title || page.name}</h2>
           <CrossFilterProvider>
             {/* Paper shows every point: no slider to drag, no window to leave data out. */}
             <StaticChartsContext.Provider value={true}>
-            <div data-print-canvas style={{ position: 'relative', ...styleVars(report?.style),
-              background: 'var(--dl-s-page-bg, transparent)' }}>
+            <div data-print-canvas data-page-frame={frame ? `${frame.w}x${frame.h}` : undefined}
+              style={{ position: 'relative', ...styleVars(report?.style),
+              background: 'var(--dl-s-page-bg, transparent)',
+              ...(frame ? { width: frame.w, minHeight: frame.h } : {}) }}>
               {page.widgets.map(w => {
                 const l = w.layout ?? { x: 0, y: 0, w: 6, h: 4 }
                 // The builder's 12-column grid mapped onto a fixed print width. Absolute
                 // positioning reproduces the authored layout; a flowed list would not.
-                const cell = (1050 - 11 * 8) / 12
+                const cell = (printW - 11 * 8) / 12
                 return (
                   <div key={w.id} data-print-widget style={{
                     position: 'absolute',
@@ -142,7 +169,8 @@ export default function ReportPrint() {
             </StaticChartsContext.Provider>
           </CrossFilterProvider>
         </section>
-      ))}
+        )
+      })}
     </div>
   )
 }

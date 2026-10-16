@@ -196,6 +196,21 @@ async def create_or_update_grant(db: AsyncSession, report: Report, actor: User, 
     return next(r for r in await grant_rows(db, report.id) if r["id"] == grant.id)
 
 
+async def grant_subject(db: AsyncSession, grant: ReportUserGrant) -> str:
+    """Who a share is for, in words: an email, "role Sales", "team Cairo"
+    (AD-18 -- the Activity log said "grant:3")."""
+    if grant.user_id is not None:
+        who = await db.get(User, grant.user_id)
+        return who.email if who is not None else "a removed user"
+    if grant.role_id is not None:
+        role = await db.get(Role, grant.role_id)
+        return f"role {role.name}" if role is not None else "a removed role"
+    if grant.org_unit_id is not None:
+        unit = await db.get(OrgUnit, grant.org_unit_id)
+        return f"team {unit.name}" if unit is not None else "a removed team"
+    return "a share"
+
+
 @router.patch("/{report_id}/grants/{grant_id}")
 async def change_grant(report_id: int, grant_id: int, body: GrantChange, db: AsyncSession = Depends(get_db),
                        current_user: User = Depends(get_current_user)):
@@ -219,8 +234,10 @@ async def change_grant(report_id: int, grant_id: int, body: GrantChange, db: Asy
     if body.can_share is not None:
         grant.can_share = body.can_share
     await audit(db, current_user, "report.share_change", "report", report.id,
-                f"grant:{grant_id}: {grant.level}, export {'yes' if grant.can_export else 'no'}, "
-                f"share {'yes' if grant.can_share else 'no'}, until {_iso(grant.expires_at) or 'no end'}")
+                f"Shared with {await grant_subject(db, grant)}: {grant.level}, "
+                f"{'downloads allowed' if grant.can_export else 'no downloads'}, "
+                f"{'may share on' if grant.can_share else 'may not share on'}, "
+                f"{('until ' + _iso(grant.expires_at)) if grant.expires_at else 'no end date'}")
     await db.commit()
     return next(r for r in await grant_rows(db, report_id) if r["id"] == grant_id)
 
@@ -378,7 +395,14 @@ async def restore(report_id: int, db: AsyncSession = Depends(get_db),
         raise HTTPException(403, "Only the dashboard's owner or an administrator can restore it")
     if report.archived_at is not None:
         report.archived_at = None
-        await audit(db, current_user, "report.restore", "report", report.id, report.name)
+        # F-04: back as a DRAFT. Readers who reached it only by publication do
+        # not get it back until someone publishes it again (through the same
+        # approval gate); named shares, links and schedules are kept as they
+        # were. `published_at` stays, as history.
+        was_published = bool(report.published)
+        report.published = False
+        await audit(db, current_user, "report.restore", "report", report.id,
+                    f"{report.name} (restored as draft{'; was published' if was_published else ''})")
         await db.commit()
     return {"state": publication_state(report)}
 
@@ -516,8 +540,9 @@ async def _catalogue(db: AsyncSession, user: User) -> list[dict]:
     ids = [r[0] for r in rows]
     caps = await effective_capabilities(db, user, ids)
     grants = await report_grants(db, user, ids)
-    from ..core.capability import folder_granted_reports
+    from ..core.capability import folder_granted_reports, team_shared_report_ids
     folder = {} if _is_admin(user) else await folder_granted_reports(db, user)
+    team_shared = await team_shared_report_ids(db, user, ids)
     favorites = set((await db.execute(select(ReportFavorite.report_id).where(ReportFavorite.user_id == user.id))).scalars().all())
     recent = dict((await db.execute(select(RecentView.report_id, RecentView.viewed_at).where(RecentView.user_id == user.id))).all())
     out = []
@@ -536,7 +561,9 @@ async def _catalogue(db: AsyncSession, user: User) -> list[dict]:
                     "data_as_of": _iso(refreshed), "favorite": rid in favorites, "last_viewed": _iso(recent.get(rid)),
                     "can_export": can_export,
                     # How it reached them: named on it, through their role or team, a shared folder, or published.
-                    "via": "owner" if mine else (g.via if g else "folder" if rid in folder else "published")})
+                    "via": "owner" if mine else (g.via if g else "folder" if rid in folder else "published"),
+                    # Shared with one of their teams, whatever decided their rights (F-05).
+                    "via_team": rid in team_shared})
     return out
 
 
@@ -546,7 +573,7 @@ def _in_section(row: dict, section: str) -> bool:
     if row["state"] == "archived":
         return False
     return {"all": True, "mine": row["is_mine"], "shared": row["via"] in ("user", "role", "folder"),
-            "team": row["via"] == "team", "favorites": row["favorite"],
+            "team": row["via"] == "team" or bool(row.get("via_team")), "favorites": row["favorite"],
             "recent": row["last_viewed"] is not None}.get(section, False)
 
 

@@ -2008,8 +2008,95 @@ _SAID_ALREADY = {"sum": ("total", "sum"), "avg": ("average", "avg", "mean"), "me
                  "max": ("max", "maximum", "highest"), "min": ("min", "minimum", "lowest")}
 
 
+#: A linked key is a grouping only when it has few enough values to compare.
+LINKED_MAX_DISTINCT = 60
+
+
+def _singular(word: str) -> str:
+    w = word.casefold()
+    if w.endswith("ies") and len(w) > 4:
+        return w[:-3] + "y"
+    if w.endswith(("ches", "shes", "sses", "xes")):
+        return w[:-2]
+    if w.endswith("s") and not w.endswith("ss") and len(w) > 3:
+        return w[:-1]
+    return w
+
+
+def linked_dimensions(profile: dict, dem: dict | None, links: list[dict]) -> list[dict]:
+    """Key columns that may group a chart "by <entity>" (B-35): a column that
+    links each row to another table THROUGH A RELATIONSHIP SOMEONE DEFINED
+    (`links`: [{"column", "table"}], from `links_of`), when one of the
+    person's questions names that table's entity ("by branch" for
+    `origin_branch_id` -> `branches`). Grouped by the key itself and said so
+    ("by branch (id)"): the related table's names are not joined in, which
+    would change the dataset for everyone who reads it.
+    [{"column", "entity", "table"}]."""
+    if not links:
+        return []
+    text = " ".join(str(q.get("text") or "") for q in (dem or {}).get("questions") or [] if isinstance(q, dict))
+    text += " " + str((dem or {}).get("sentence") or "")
+    said = {_singular(w) for w in re.findall(r"[^\W\d_]+", text.casefold())}
+    cols = {c.get("name"): c for c in profile.get("columns", [])}
+    out, seen = [], set()
+    for link in links:
+        col, table = link.get("column"), str(link.get("table") or "").rsplit(".", 1)[-1]
+        info = cols.get(col)
+        if not info or col in seen or info.get("is_personal") or not table:
+            continue
+        if not 2 <= (info.get("distinct") or 0) <= LINKED_MAX_DISTINCT:
+            continue
+        words = [w for w in re.split(r"[^\w]+|_", table.casefold()) if w]
+        entity = " ".join(words[:-1] + [_singular(words[-1])]) if words else ""
+        if not entity or _singular(words[-1]) not in said:
+            continue
+        seen.add(col)
+        out.append({"column": col, "entity": entity, "table": table})
+    return out
+
+
+def linked_notes(linked: list[dict]) -> list[str]:
+    """What the designer is told about each linked key (free mode)."""
+    return [f"`{d['column']}` is the {d['entity']} each row belongs to (it links to the `{d['table']}` table). "
+            f"To answer a question \"by {d['entity']}\", group by `{d['column']}`; the chart shows the "
+            f"{d['entity']}'s id, so say \"by {d['entity']} (id)\" in its title." for d in linked]
+
+
+async def links_of(db, ds) -> list[dict]:
+    """The keys of this dataset that a relationship someone defined (declared
+    by the database, or confirmed) links to another table: between datasets
+    (`relationships`), or between the connection's tables the dataset reads
+    (`source_relationships`). Inferred links are not used."""
+    from sqlalchemy import select
+    from ...models.models import Dataset, Relationship, SourceObject, SourceRelationship
+    out: list[dict] = []
+    try:
+        rows = (await db.execute(
+            select(Relationship.from_column, Dataset.name)
+            .join(Dataset, Dataset.id == Relationship.to_dataset_id)
+            .where(Relationship.from_dataset_id == ds.id, Relationship.org_id == ds.org_id,
+                   Dataset.org_id == ds.org_id, Relationship.source != "inferred"))).all()
+        out += [{"column": c, "table": t} for c, t in rows]
+        if getattr(ds, "data_source_id", None) and getattr(ds, "source_table", None):
+            name = str(ds.source_table).replace('"', "")
+            objs = (await db.execute(select(SourceObject).where(
+                SourceObject.data_source_id == ds.data_source_id, SourceObject.org_id == ds.org_id))).scalars().all()
+            by_id = {o.id: o for o in objs}
+            mine = {o.id for o in objs if name in (o.name, f"{o.schema_name}.{o.name}")}
+            if mine:
+                rels = (await db.execute(select(SourceRelationship).where(
+                    SourceRelationship.data_source_id == ds.data_source_id,
+                    SourceRelationship.from_object_id.in_(mine),
+                    SourceRelationship.source != "inferred"))).scalars().all()
+                out += [{"column": r.from_column, "table": by_id[r.to_object_id].name}
+                        for r in rels if r.to_object_id in by_id]
+    except Exception:                                           # noqa: BLE001 -- extra groupings, never a gate
+        logger.warning("guided setup: reading the dataset's links failed", exc_info=True)
+    return out
+
+
 def standard_cards(profile: dict, shares: list[dict] | None, column_meta: dict | None,
-                   ineligible: set[str] | frozenset = frozenset()) -> list[dict]:
+                   ineligible: set[str] | frozenset = frozenset(), linked: list[dict] | None = None) -> list[dict]:
     """The plain charts of this data, made from its shape alone: how many, per
     group, over time -- and for each yes/no column its share, for each number
     its total or its typical value. Nothing here is a finding; it is the menu
@@ -2025,6 +2112,9 @@ def standard_cards(profile: dict, shares: list[dict] | None, column_meta: dict |
         (c for c in cols if c.get("role") == "categorical" and not c.get("is_identifier")
          and c["name"] not in made and 2 <= (c.get("distinct") or 0) <= 60),
         key=lambda c: (c.get("distinct") or 0))][:STANDARD_GROUPS]
+    # A key the person's question names through a defined link ("by branch").
+    by_link = {d["column"]: f"{d['entity']} (id)" for d in linked or [] if d["column"] not in ineligible}
+    groups = list(by_link)[:2] + [g for g in groups if g not in by_link]
     numbers = [c["name"] for c in cols if c.get("role") == "numeric" and not c.get("is_identifier")
                and c["name"] not in made][:STANDARD_NUMBERS]
     rates = [c for c in shares or [] if c.get("is") == "yes"][:STANDARD_SHARES]
@@ -2068,12 +2158,16 @@ def standard_cards(profile: dict, shares: list[dict] | None, column_meta: dict |
         add("kpi", title, f"One number: {why}.", {"measure": m, "aggregation": agg})
     for g in groups:
         for m, agg, title, why in measures:
-            add("bar", f"{title} by {label(g)}", f"Compares {why} across each {label(g)}.",
+            if m == g:
+                continue
+            add("bar", f"{title} by {by_link.get(g) or label(g)}",
+                f"Compares {why} across each {by_link.get(g) or label(g)}.",
                 {"dimension": g, "measure": m, "aggregation": agg, "sort": "desc", **({"limit": TOP_N} if agg else {})})
     for d in dates:
         for m, agg, title, why in measures:
             add("line", f"{title} by month", f"Shows how {why} changed month by month.",
                 {"dimension": d, "measure": m, "aggregation": agg, "dimension_granularity": "month"})
+    groups = [g for g in groups if g not in by_link]
     for i, a in enumerate(groups[:3]):
         for b in groups[i + 1:3]:
             add("heatmap", f"Number of records by {label(a)} and {label(b)}",
@@ -2158,7 +2252,8 @@ async def validated_cards(inputs, facts: dict, scoped) -> list[dict]:
 
     out, seen = [], set()
     found = (await asyncio.to_thread(build))[:MAX_FOUND]
-    plain = standard_cards(profile, getattr(inputs, "shares", None), inputs.column_meta, ineligible)
+    plain = standard_cards(profile, getattr(inputs, "shares", None), inputs.column_meta, ineligible,
+                           getattr(inputs, "linked", None))
     for w in found + plain:
         if not isinstance(w, dict) or not isinstance(w.get("config"), dict) or not w.get("widget_type"):
             continue
@@ -2301,8 +2396,13 @@ async def design(db, user, ds, dem: dict | None, entry: dict | None, lang: str, 
     richness = richness_now(richness)
     know = inputs.knowledge
     reading = _reading_for(meaning_map, tables, {str(c) for c in inputs.df.columns})
+    # "by branch" through a key a defined relationship links to `branches` (B-35).
+    inputs.linked = [d for d in linked_dimensions(inputs.profile, dem, await links_of(db, ds))
+                     if d["column"] not in inputs.ineligible()]
+    from .access import release
+    await release(db)
     messages, allowed = build_messages(inputs.profile, dem, words, scoped_rows,
-                                       _outcome_notes(dem, ds.id) + _notes(entry)
+                                       linked_notes(inputs.linked) + _outcome_notes(dem, ds.id) + _notes(entry)
                                        + [f"Rows where `{a['column']}` is " + ", ".join(f"“{v}”" for v in a["values"])
                                           + " are left out of every chart by filters the person can see and remove: "
                                           "they are not the same kind of thing as the rest." for a in apart],
@@ -2315,6 +2415,8 @@ async def design(db, user, ds, dem: dict | None, entry: dict | None, lang: str, 
     gate.foreign = _not_held(foreign, inputs.df)
     gate.group_size = group_size if group_size and group_size in inputs.df.columns else None
     gate.asked_text = {q["id"]: str(q.get("text") or "") for q in dem.get("questions") or [] if q.get("id")}
+    linked_names = {d["column"]: f"{d['entity']} (id)" for d in inputs.linked}
+    gate.names = dict(linked_names)
     gate.wants = {q["id"]: q["wants"] for q in dem.get("questions") or [] if q.get("id") and q.get("wants")}
     gate.about = {q["id"]: list(q["about"]) for q in dem.get("questions") or [] if q.get("id") and q.get("about")}
 
@@ -2334,7 +2436,7 @@ async def design(db, user, ds, dem: dict | None, entry: dict | None, lang: str, 
     if not proposed and mode != "cards":
         got = await client.complete_json(messages, PAGES_SCHEMA, max_tokens=9000, temperature=0.2, enforce=True)
         proposed = [p for p in (got or {}).get("pages") or [] if isinstance(p, dict)][:count]
-        gate.names = clean_names(got, inputs.df.columns)
+        gate.names = {**linked_names, **clean_names(got, inputs.df.columns)}
     if not proposed:
         # In cards mode the caller falls back to the platform's own selection.
         return {"proposals": [], "reason": "failed"}

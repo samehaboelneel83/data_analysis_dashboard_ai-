@@ -1,9 +1,10 @@
 import { sayText } from '../lib/readbackText'
-import { useEffect, useLayoutEffect, useState, useCallback, useRef, useContext } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef, useContext } from 'react'
 import KeyInfluencersResultView from '../components/analysis/KeyInfluencersResult'
 import { pickInfluencerOutcome } from './datasetDetail/influencerOutcome'
 import AggregatesPanel from '../components/dataset/AggregatesPanel'
 import ColumnMeaningPanel from '../components/dataset/ColumnMeaningPanel'
+import ColumnTermsPanel from '../components/dataset/ColumnTermsPanel'
 import AlertsPanel from '../components/dataset/AlertsPanel'
 import PredictionModelsPanel from '../components/dataset/PredictionModelsPanel'
 import { PipelineAlertsForm, PipelineHealthLine, usePipelineHealth } from '../components/dataset/PipelineHealth'
@@ -18,7 +19,8 @@ import NotebookSnippet from '../components/NotebookSnippet'
 import LoadError from '../components/ui/LoadError'
 import LoadingState from '../components/ui/LoadingState'
 import EmptyState from '../components/ui/EmptyState'
-import { findingKey, pinsApi, reportsApi } from '../services/api'
+import { useConfirm } from '../components/ui/ConfirmDialog'
+import { allowAiApi, findingKey, pinsApi, reportsApi } from '../services/api'
 import { navArrows, useDirection } from '../contexts/DirectionContext'
 import { useParams, Link, useLocation, useSearchParams, useNavigate } from 'react-router-dom'
 import { useCrumbTitle } from '../lib/crumb'
@@ -37,7 +39,7 @@ import './datasetDetail/data.css'
 import OutlierDetailsDialog from '../components/report/OutlierDetailsDialog'
 import IconLabel from '../components/ui/IconLabel'
 import {
-  Bot, Plug, FolderOpen, RefreshCw, Sparkles, Pin, Link2, TriangleAlert, Search, ShieldCheck,
+  Bot, Plug, FolderOpen, RefreshCw, Sparkles, Link2, TriangleAlert, Search, ShieldCheck,
   Database, FileText, Pencil, Filter, X,
 } from 'lucide-react'
 import { insightsApi, datasetsApi, analysisApi, dataPreviewApi, filterExprApi, dataSourcesApi, prepApi, alertsApi } from '../services/api'
@@ -182,6 +184,11 @@ export default function DatasetDetail() {
   // in the pipeline beside every other transform. Merge rules: lib/cellEdits.ts.
   const [editCells,  setEditCells]  = useState(false)
   const [keyColumn,  setKeyColumn]  = useState<string>('')
+  const confirm = useConfirm()
+  // B-19: a live (DirectQuery) dataset's preview is one page read from the
+  // source; filter, row filter, ƒx column, group & bin, search and header sort
+  // are not pushed down yet, so they are shown disabled rather than inert.
+  const liveData = ds?.mode === 'directquery'
   const [editingAt,  setEditingAt]  = useState<{ row: number; column: string } | null>(null)
   const [prepSteps,  setPrepSteps]  = useState<PrepStep[]>([])
 
@@ -285,22 +292,25 @@ export default function DatasetDetail() {
       // one (the backend would 400) — skip the request entirely rather than
       // firing a call that can only fail.
       if (ds.mode === 'directquery') { setLoading(false); return }
-      analysisApi.get(dsId).then(setAnalysis)
+      // AD-06 / B-15: "no profile yet" is `null` (200), no longer a 404; an error
+      // (a restricted caller still gets 404) is treated the same way.
+      const none = () => {
+        // Once per dataset: the load runs twice (StrictMode in development,
+        // or a reload of the same dataset), both GETs 404 before either
+        // run lands, and `searchParams` still says new=1 after replaceState
+        // -- two scans and two "Analysis complete" toasts (live QA 2026-09-28).
+        if (searchParams.get('new') === '1' && autoAnalysedRef.current !== dsId) {
+          autoAnalysedRef.current = dsId
+          window.history.replaceState(null, '', window.location.pathname)
+          void runAnalysisRef.current?.()
+        }
+      }
+      analysisApi.get(dsId).then(a => { if (a == null) none(); else setAnalysis(a) })
         // E06: straight after an import the profile is run, not left behind a
         // button -- the first thing a person does with new data is look at it.
         // Only then: a normal visit does not trigger a full scan. `new` is
         // dropped from the address so a reload does not scan again.
-        .catch(() => {
-          // Once per dataset: the load runs twice (StrictMode in development,
-          // or a reload of the same dataset), both GETs 404 before either
-          // run lands, and `searchParams` still says new=1 after replaceState
-          // -- two scans and two "Analysis complete" toasts (live QA 2026-09-28).
-          if (searchParams.get('new') === '1' && autoAnalysedRef.current !== dsId) {
-            autoAnalysedRef.current = dsId
-            window.history.replaceState(null, '', window.location.pathname)
-            void runAnalysisRef.current?.()
-          }
-        })
+        .catch(none)
         .finally(() => setLoading(false))
     }).catch(e => { setLoadError(e ?? new Error('failed')); setLoading(false) })
   }, [dsId])
@@ -329,8 +339,9 @@ export default function DatasetDetail() {
         // DirectQuery previews yet -- local filter/sort/search state is ignored
         // rather than silently sent and dropped server-side (see the note
         // rendered above the table for this same reason).
-        const result = await dataPreviewApi.query(dsId, [], [], PAGE_SIZE, 0)
-        // QAF M5: the server ignores the limit here; draw one page only.
+        // B-19: the server now reads one stable page (offset, size) with the
+        // exact total, so the real offset is sent; the slice is a safety net.
+        const result = await dataPreviewApi.query(dsId, [], [], PAGE_SIZE, pg * PAGE_SIZE)
         if (latest()) setPreview({ ...result, rows: result.rows.slice(0, PAGE_SIZE) })
         return
       }
@@ -350,6 +361,21 @@ export default function DatasetDetail() {
     }
   }, [ds, dsId, page, filterRows, calcCols, sortBy, sortDir, search])
 
+  /** B-08: which columns the saved profile shows to be unique per row, and
+   *  which it shows are not (several rows share a value). */
+  const { uniqueCols, sharedCols } = useMemo(() => {
+    const unique = new Set<string>(), shared = new Set<string>()
+    const rows = ds?.row_count ?? 0
+    const groups = [analysis?.categorical?.columns, analysis?.datetime?.columns] as (Record<string, { n_unique?: number }> | undefined)[]
+    for (const g of groups) {
+      for (const [name, info] of Object.entries(g ?? {})) {
+        if (typeof info?.n_unique !== 'number' || !rows) continue
+        if (info.n_unique >= rows) unique.add(name); else shared.add(name)
+      }
+    }
+    return { uniqueCols: unique, sharedCols: shared }
+  }, [analysis, ds?.row_count])
+
   /** Turn a typed cell into a saved prep step. The whole pipeline is written
    *  wholesale (the prep contract), so the steps the user already had are read
    *  first and carried through -- dropping them would be a silent data change. */
@@ -368,8 +394,27 @@ export default function DatasetDetail() {
     if (String(before ?? '') === raw) return
     const rowKey = String(row[key] ?? '')
     try {
+      // B-08: an edit finds its row by the key's value; on a key several rows
+      // share it changes every one of them -- counted and confirmed first.
+      let allowMany = false
+      if (!uniqueCols.has(keyColumn)) {
+        const onPage = preview.rows.filter(r => String((r as unknown[])[key] ?? '') === rowKey).length
+        let n = onPage
+        try {
+          const hit = await dataPreviewApi.query(dsId, [{ column: keyColumn, op: 'eq', value: rowKey }], calcCols, 1, 0)
+          n = Math.max(onPage, hit.total)
+        } catch { /* the page's own count is the floor */ }
+        if (n > 1) {
+          const ok = await confirm({
+            title: tr('i2d.dd.manyTitle', { n: localDigits(String(n)) }),
+            body: tr('i2d.dd.manyBody', { n: localDigits(String(n)), column: keyColumn, key: rowKey }),
+            confirmLabel: tr('i2d.dd.manyOk', { n: localDigits(String(n)) }), destructive: false })
+          if (!ok) return
+          allowMany = true
+        }
+      }
       const existing = await prepApi.get(dsId)
-      const next = mergeCellEdit(existing, { keyColumn, column, key: rowKey, value })
+      const next = mergeCellEdit(existing, { keyColumn, column, key: rowKey, value, allowMany })
       await prepApi.set(dsId, next)
       setPrepSteps(next)
       toast.success(tr('i2d.dd.cellSaved', { column, key: rowKey }))
@@ -379,7 +424,7 @@ export default function DatasetDetail() {
         ?.response?.data?.detail
       toast.error(detail ?? (err as Error)?.message ?? tr('i2d.dd.cellFailed'))
     }
-  }, [preview, keyColumn, dsId, loadPreview])
+  }, [preview, keyColumn, dsId, loadPreview, uniqueCols, calcCols, confirm, tr])
 
   // Load preview whenever tab is 'data' and ds is ready
   useEffect(() => {
@@ -441,8 +486,27 @@ export default function DatasetDetail() {
   const updateFilter = (id: number, key: string, val: string) =>
     setFilterRows(p => p.map(f => f.id === id ? { ...f, [key]: val } : f))
 
-  const removeFilter = (id: number) =>
-    setFilterRows(p => p.filter(f => f.id !== id))
+  /** B-07: removing a filter that was narrowing the grid re-queries it at
+   *  once -- the panel's × used to change only the list, and with no rows
+   *  left the Apply button was gone, so the grid stayed filtered. */
+  const removeFilter = (id: number) => {
+    const gone = filterRows.find(f => f.id === id)
+    const rest = filterRows.filter(f => f.id !== id)
+    setFilterRows(rest)
+    if (gone && gone.column && gone.value !== '') {
+      setPage(0)
+      loadPreview(0, rest, calcCols, sortBy, sortDir, search)
+    }
+  }
+
+  const clearFilters = () => {
+    const hadActive = filterRows.some(f => f.column && f.value !== '')
+    setFilterRows([])
+    if (hadActive) {
+      setPage(0)
+      loadPreview(0, [], calcCols, sortBy, sortDir, search)
+    }
+  }
 
   const handleCalcColsChanged = (cols: CalcColumn[]) => {
     setCalcCols(cols)
@@ -601,13 +665,39 @@ export default function DatasetDetail() {
   const colTypes: Record<string, string> = Object.fromEntries((ds?.columns ?? []).map(c => [c.name, c.dtype]))
 
   // hooks live above the loading return -- a hook below it renders conditionally
-  const [insights, setInsights] = useState<{ findings: { kind: string; score: number; title: string; detail: string; columns: string[]; novelty?: 'new' | 'changed' | 'unchanged' }[]; narrative: string } | null>(null)
+  const [insights, setInsights] = useState<{ findings: { kind: string; score: number; title: string; detail: string; columns: string[]; novelty?: 'new' | 'changed' | 'unchanged'
+    significant?: boolean | null; p_value?: number | null; p_adjusted?: number | null
+    figures?: { aggregation?: string; per_row?: boolean } | null }[]; narrative: string } | null>(null)
   const [insightsBusy, setInsightsBusy] = useState(false)
   const generateInsights = () => {
     if (!ds) return
     setInsightsBusy(true)
     insightsApi.run(ds.id).then(setInsights).finally(() => setInsightsBusy(false))
   }
+  // AD-10: with AI not allowed for this data, "Ask about this data" says it
+  // answers with the built-in analyses only.
+  const [aiOff, setAiOff] = useState(false)
+  useEffect(() => {
+    setAiOff(false)
+    if (!ds) return
+    let live = true
+    const id = ds.id
+    Promise.resolve().then(() => allowAiApi.get(id))
+      .then(r => { if (live) setAiOff(r?.effective === false) }).catch(() => {})
+    return () => { live = false }
+  }, [ds?.id])
+  // AD-06: opening Insights shows the scan at once for file-backed data --
+  // from the hub ("View full scan →") it is the scan just seen, from the
+  // cache. Live data keeps the explicit button: its scan reads up to 250K rows.
+  useEffect(() => {
+    if (!ds || analysisPick !== 'insights' || insights != null || ds.mode === 'directquery') return
+    let live = true
+    const id = ds.id
+    Promise.resolve().then(() => insightsApi.runShared(id))
+      .then(r => { if (live && r) setInsights(r) }).catch(() => {})
+    return () => { live = false }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ds?.id, ds?.mode, analysisPick])
   // Saved checks and alerts: the Rules & alerts tab count, and the Overview's
   // trust card and "Used by" list.
   const [ruleChecks, setRuleChecks] = useState<DataCheck[] | null>(null)
@@ -923,8 +1013,8 @@ export default function DatasetDetail() {
             )}
           </div>
         )}
-          <Link to={`/ask?dataset=${dsId}`} className="btn btn-sm" title={tr('dataset.askTitle')}>
-            <Bot size={14} aria-hidden /> {tr('ov3.askAbout')}
+          <Link to={`/ask?dataset=${dsId}`} className="btn btn-sm" title={aiOff ? tr('dataset.askTitleNoAi') : tr('dataset.askTitle')}>
+            <Bot size={14} aria-hidden /> {aiOff ? tr('ov3.askAboutNoAi') : tr('ov3.askAbout')}
           </Link>
           {ds.mode !== 'directquery' && <NotebookSnippet datasetId={ds.id} datasetName={ds.name} />}
           {isAdmin && (
@@ -987,6 +1077,7 @@ export default function DatasetDetail() {
           {/* Guided setup phase 5: plain first, the full column table below. */}
           <DatasetHealth datasetId={ds.id} dataSourceId={ds.data_source_id} onChanged={loadDataset} showInsights={false} />
           <ColumnMeaningPanel dataset={ds} canEdit onSaved={loadDataset} analysis={analysis} />
+          <ColumnTermsPanel datasetId={ds.id} columns={(ds.columns ?? []).map(c => c.name)} canEdit={isAdmin} />
           {analysis && (numCols.length > 0 || dtCols.length > 0 || catCols.length > 0) && (
             <details className="dl-cols__details">
               <summary>{tr('cols3.detailed')}</summary>
@@ -1307,22 +1398,19 @@ export default function DatasetDetail() {
                                     {f.novelty === 'new' ? tr('i2d.dd.new') : tr('i2d.dd.changed')}
                                   </span>
                                 )}
-                                <button aria-label={tr('i2d.dd.pinFinding', { title: f.title })}
-                                  title={tr('i2d.dd.pinTitle')}
-                                  onClick={() => void pinsApi
-                                    .create({ dataset_id: ds.id,
-                                              finding_key: findingKey(f) })
-                                    .then(r => toast.success(r.already_pinned
-                                      ? tr('i2d.dd.pinAlready') : tr('i2d.dd.pinned')))
-                                    .catch(() => toast.error(tr('i2d.dd.pinFailed')))}
-                                  style={{ background: 'none', border: 'none', cursor: 'pointer',
-                                    fontSize: 11, padding: 0, marginInlineStart: 'auto' }}><Pin size={12} /></button>
+                                {f.significant === false && (f.p_adjusted ?? f.p_value) != null && (
+                                  // AD-07: the test did not hold -- say so where the finding is read.
+                                  <span data-testid="insight-not-significant" style={{ border: '1px solid var(--border)', color: 'var(--muted)',
+                                    borderRadius: 3, padding: '0 4px', fontSize: 9.5 }}>
+                                    {tr('i2d.dd.notSignificant', { p: Number(f.p_adjusted ?? f.p_value).toFixed(2) })}
+                                  </span>
+                                )}
                                 <span style={{ fontSize: 10.5, color: 'var(--muted)', marginInlineStart: 'auto' }}>{Math.round(f.score * 100)}</span>
                               </div>
                               {/* QA3 D5: own direction; numbers and ranges keep their order */}
                               <div dir="auto" style={{ fontSize: 13, fontWeight: 600, marginBottom: 3 }}>{isolateNumbers(sayText(tr, f.title, (f as { title_i18n?: { key: string; vars?: Record<string, unknown> } | null }).title_i18n as never))}</div>
                               <div dir="auto" style={{ fontSize: 11, color: 'var(--muted)' }}>{isolateNumbers(sayText(tr, f.detail, (f as { detail_i18n?: unknown }).detail_i18n as never))}</div>
-                              <FindingChart datasetId={ds.id} finding={f}
+                              <FindingChart datasetId={ds.id} finding={f} calculatedColumns={calcCols}
                                 columnTypes={Object.fromEntries(ds.columns.map(c => [c.name, c.dtype ?? '']))} />
                             </div>
                           ))}
@@ -1396,7 +1484,17 @@ export default function DatasetDetail() {
               </details>
             </ChecksPanel>
           )}
-          <AlertsPanel datasetId={ds.id} columns={ds.columns ?? []} />
+          {ds.mode === 'directquery' && (
+            // B-20: data checks run when a dataset is refreshed into a file; a
+            // live dataset never is, so they are not offered -- said, not hidden.
+            <section className="dl-rules__card" data-testid="rules-checks-live">
+              <header className="dl-rules__head">
+                <div><h3>{tr('rules3.checksLiveTitle')}</h3><p>{tr('rules3.checksLive')}</p></div>
+              </header>
+              <a href="#dl-rules-alerts">{tr('rules3.checksLiveGo')}</a>
+            </section>
+          )}
+          <div id="dl-rules-alerts"><AlertsPanel datasetId={ds.id} columns={ds.columns ?? []} /></div>
           <section className="dl-rules__card" data-testid="rules-freshness">
             <header className="dl-rules__head">
               <div><h3>{tr('rules3.freshness')}</h3><p>{tr('rules3.freshnessCopy')}</p></div>
@@ -1481,6 +1579,7 @@ export default function DatasetDetail() {
 
           <div className="dl-data3__toolbar" role="toolbar" aria-label={tr('data3.tools')}>
             <button type="button" className="dl-data3__tool" aria-pressed={dataPanel === 'filters'}
+              disabled={liveData} title={liveData ? tr('data3.notLive') : undefined}
               onClick={() => { if (!filterRows.length) addFilter(); setDataPanel(v => (v === 'filters' ? null : 'filters')) }}>
               <Filter size={14} aria-hidden /> {tr('data3.filter')}
             </button>
@@ -1488,12 +1587,7 @@ export default function DatasetDetail() {
               <span key={f.id} className="dl-data3__chip" dir="ltr">
                 {f.column} {OPS.find(o => o.value === f.op)?.label ?? f.op} {f.value}
                 <button type="button" aria-label={tr('data3.removeFilter', { what: `${f.column} ${f.value}` })}
-                  onClick={() => {
-                    const rest = filterRows.filter(x => x.id !== f.id)
-                    removeFilter(f.id)
-                    setPage(0)
-                    loadPreview(0, rest, calcCols, sortBy, sortDir, search)
-                  }}><X size={12} aria-hidden /></button>
+                  onClick={() => removeFilter(f.id)}><X size={12} aria-hidden /></button>
               </span>
             ))}
             {sortBy && (
@@ -1503,14 +1597,17 @@ export default function DatasetDetail() {
               </button>
             )}
             <button type="button" className={`dl-data3__tool${savedFilter ? ' dl-data3__tool--on' : ''}`} aria-pressed={dataPanel === 'global'}
+              disabled={liveData} title={liveData ? tr('data3.notLive') : undefined}
               onClick={() => setDataPanel(v => (v === 'global' ? null : 'global'))}>
               {tr('data3.rowFilter')}{savedFilter ? ` · ${tr('data3.active')}` : ''}
             </button>
             <button type="button" className="dl-data3__tool" aria-pressed={dataPanel === 'calc'}
+              disabled={liveData} title={liveData ? tr('data3.notLive') : undefined}
               onClick={() => setDataPanel(v => (v === 'calc' ? null : 'calc'))}>
               <span className="dl-data3__fx">ƒx</span> {tr('data3.column')}
             </button>
             <button type="button" className="dl-data3__tool" aria-pressed={dataPanel === 'bin'}
+              disabled={liveData} title={liveData ? tr('data3.notLive') : undefined}
               onClick={() => setDataPanel(v => (v === 'bin' ? null : 'bin'))}>{tr('data3.groupBin')}</button>
             <button type="button" className="dl-data3__tool" aria-pressed={dataPanel === 'measures'}
               onClick={() => setDataPanel(v => (v === 'measures' ? null : 'measures'))}>{tr('data3.measures')}</button>
@@ -1523,6 +1620,7 @@ export default function DatasetDetail() {
             <label className="dl-data3__search">
               <Search size={14} aria-hidden />
               <input type="search" value={search} onChange={e => handleSearch(e.target.value)}
+                disabled={liveData} title={liveData ? tr('data3.notLive') : undefined}
                 placeholder={tr('data3.search')} aria-label={tr('data3.search')} />
             </label>
           </div>
@@ -1534,9 +1632,16 @@ export default function DatasetDetail() {
                 <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
                   {tr('data3.f.title')}
                 </span>
-                <button className="btn btn-ghost btn-sm" onClick={addFilter} style={{ fontSize: 11, padding: '2px 7px' }}>
-                  {tr('data3.f.add')}
-                </button>
+                <span style={{ display: 'flex', gap: 4 }}>
+                  {filterRows.length > 0 && (
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={clearFilters} style={{ fontSize: 11, padding: '2px 7px' }}>
+                      {tr('data3.f.clearAll')}
+                    </button>
+                  )}
+                  <button className="btn btn-ghost btn-sm" onClick={addFilter} style={{ fontSize: 11, padding: '2px 7px' }}>
+                    {tr('data3.f.add')}
+                  </button>
+                </span>
               </div>
 
               {filterRows.length === 0 && (
@@ -1550,7 +1655,8 @@ export default function DatasetDetail() {
                       style={{ flex: 1, fontSize: 11, padding: '3px 4px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', minWidth: 0 }}>
                       {allColNames.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
-                    <button onClick={() => removeFilter(f.id)}
+                    <button type="button" onClick={() => removeFilter(f.id)}
+                      aria-label={tr('data3.removeFilter', { what: `${f.column} ${f.value}`.trim() })}
                       style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 14, padding: '0 2px', flexShrink: 0 }}>×</button>
                   </div>
                   <div style={{ display: 'flex', gap: 4 }}>
@@ -1683,6 +1789,7 @@ export default function DatasetDetail() {
                 datasetId={dsId}
                 columns={ds.columns}
                 onChanged={() => {}}
+                canModel={ds.can_model !== false}
               />
             </div>
             </div>
@@ -1702,7 +1809,10 @@ export default function DatasetDetail() {
                     setEditCells(on)
                     setEditingAt(null)
                     if (on) {
-                      if (!keyColumn) setKeyColumn(preview.columns[0])
+                      // B-08: a key unique per row; else an id-looking column the
+                      // profile does not show to be shared; else none -- chosen.
+                      if (!keyColumn) setKeyColumn(preview.columns.find(c => uniqueCols.has(c))
+                        ?? preview.columns.find(c => /(^id$|_id$|^key$)/i.test(c) && !sharedCols.has(c)) ?? '')
                       prepApi.get(dsId).then(setPrepSteps).catch(() => setPrepSteps([]))
                     }
                   }}>
@@ -1713,11 +1823,13 @@ export default function DatasetDetail() {
                     <label htmlFor="cell-edit-key" style={{ fontSize: 11, color: 'var(--muted)' }}>
                       {tr('i2d.dd.rowsBy')}
                     </label>
-                    <select id="cell-edit-key" value={keyColumn || preview.columns[0]}
+                    <select id="cell-edit-key" value={keyColumn}
                       onChange={e => { setKeyColumn(e.target.value); setEditingAt(null) }}
                       style={{ fontSize: 11, padding: '3px 6px', background: 'var(--surface)',
                         border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)' }}>
-                      {preview.columns.map(c => <option key={c} value={c}>{c}</option>)}
+                      {!keyColumn && <option value="">{tr('i2d.dd.chooseKey')}</option>}
+                      {preview.columns.map(c => <option key={c} value={c}>
+                        {sharedCols.has(c) ? `${c} ${tr('i2d.dd.notUnique')}` : c}</option>)}
                     </select>
                     <span style={{ fontSize: 11, color: 'var(--muted)' }}>
                       {tr('i2d.dd.editNote')}
@@ -1755,6 +1867,7 @@ export default function DatasetDetail() {
                               // people who can see it.
                               aria-sort={isSorted ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
                               <button type="button" onClick={() => handleSort(c)}
+                                disabled={liveData} title={liveData ? tr('data3.notLive') : undefined}
                                 // A real button, so the header is reachable by
                                 // Tab and operable by Enter/Space -- a th with
                                 // onClick is neither.
@@ -1777,7 +1890,7 @@ export default function DatasetDetail() {
                     </thead>
                     <tbody>
                       {preview.rows.map((row, i) => {
-                        const activeKey = keyColumn || preview.columns[0]
+                        const activeKey = keyColumn
                         const keyAt = preview.columns.indexOf(activeKey)
                         const rowKey = String((row as unknown[])[keyAt] ?? '')
                         return (
@@ -1787,7 +1900,7 @@ export default function DatasetDetail() {
                             const column = preview.columns[j]
                             // Never the key column: it is how the edit finds its
                             // row, and the backend refuses that step outright.
-                            const canEdit = editCells && column !== activeKey && rowKey !== ''
+                            const canEdit = editCells && !!activeKey && column !== activeKey && rowKey !== ''
                             const isEditing = editingAt?.row === i && editingAt?.column === column
                             return (
                             <td key={j} className={typeof v === 'number' ? 'dl-data3__num' : undefined} style={{
@@ -1827,7 +1940,8 @@ export default function DatasetDetail() {
                       to: localDigits(String(Math.min((page + 1) * PAGE_SIZE, preview.total))),
                       total: localDigits(preview.total.toLocaleString('en-US')) })}
                     {/* B4: the preview's own total against the dataset's rows. */}
-                    {ds.mode !== 'directquery' && preview.total !== ds.row_count
+                    {/* Never to a reader under a row rule: the total is everyone's rows (QA E-14). */}
+                    {ds.mode !== 'directquery' && !ds.row_count_restricted && preview.total !== ds.row_count
                       && ` ${tr('data3.filteredFrom', { n: localDigits(ds.row_count.toLocaleString('en-US')) })}`}
                   </span>
                   <div style={{ display: 'flex', gap: 6 }}>

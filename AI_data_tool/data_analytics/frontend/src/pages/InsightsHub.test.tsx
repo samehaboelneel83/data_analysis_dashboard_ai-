@@ -293,4 +293,39 @@ describe("the preview shows only findings worth the reader's attention", () => {
     expect(await screen.findByText('The only real one')).toBeInTheDocument()
     expect(screen.queryByText('This should not appear.')).toBeNull()
   })
+
+  it('ignores a slower, earlier scan: the card shows the dataset now chosen, and names it (AD-04)', async () => {
+    const OTHER = { id: 7, name: 'Metrics', mode: 'import', created_at: '2026-03-01T00:00:00Z', columns: [] } as any
+    vi.mocked(datasetsApi.list).mockResolvedValue([IMPORT_DS, OTHER])
+    const pending: Record<number, (v: any) => void> = {}
+    vi.mocked(insightsApi.runShared).mockImplementation((id: number) => new Promise(res => { pending[id] = res }) as any)
+    await renderHub(5)
+    await waitFor(() => expect(pending[5]).toBeDefined())
+    fireEvent.change(screen.getByLabelText('Dataset'), { target: { value: '7' } })
+    await waitFor(() => expect(pending[7]).toBeDefined())
+    pending[7]({ narrative: 'Metrics story.', findings: [] })
+    expect(await screen.findByText('Metrics story.')).toBeInTheDocument()
+    pending[5]({ narrative: 'Orders story.', findings: [] })
+    await new Promise(r => setTimeout(r, 20))
+    expect(screen.queryByText('Orders story.')).toBeNull()
+    expect(screen.getByText('Metrics story.')).toBeInTheDocument()
+    expect(screen.getByTestId('insights-top-heading')).toHaveTextContent('Metrics')
+  })
+
+  it('keeps the chosen dataset when a filter chip hides it, and does not scan another (AD-08)', async () => {
+    const { AuthContext } = await import('../contexts/AuthContext')
+    try { localStorage.removeItem('datalytics:dataset-view') } catch { /* ignore */ }
+    const MINE = { id: 8, name: 'My own', mode: 'import', created_by: 1, created_at: '2026-04-01T00:00:00Z', columns: [] } as any
+    const THEIRS = { id: 9, name: 'Projects', mode: 'import', created_by: 2, created_at: '2026-04-02T00:00:00Z', columns: [] } as any
+    vi.mocked(datasetsApi.list).mockResolvedValue([MINE, THEIRS])
+    render(<AuthContext.Provider value={{ user: { id: 1 } } as any}><MemoryRouter><InsightsHub /></MemoryRouter></AuthContext.Provider>)
+    const picker = await screen.findByLabelText('Dataset') as HTMLSelectElement
+    fireEvent.change(picker, { target: { value: '9' } })
+    await waitFor(() => expect(insightsApi.runShared).toHaveBeenCalledWith(9))
+    fireEvent.click(screen.getByRole('radio', { name: /Mine/ }))
+    expect(picker.value).toBe('9')
+    expect(screen.getByRole('option', { name: /Projects.*hidden by filter/ })).toBeInTheDocument()
+    await new Promise(r => setTimeout(r, 20))
+    expect(insightsApi.runShared).toHaveBeenCalledTimes(1)
+  })
 })

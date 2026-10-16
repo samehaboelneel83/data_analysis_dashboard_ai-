@@ -4,11 +4,20 @@
 /* ── Widget hover toolbar (reading only) ──────────────────────── */
 /* Centred on the top edge (QA2 N4): the inline-end corner is where the widget
    keeps its own ⋮ menu, which the toolbar covered in Arabic. */
-.dl-vw-wt { position: absolute; top: -18px; left: 50%; transform: translateX(-50%); z-index: 5; display: flex; gap: 2px; padding: 3px; border-radius: 10px;
-  background: var(--surface); border: 1px solid var(--border); box-shadow: var(--dl-shadow-overlay); opacity: 0; pointer-events: none;
-  transition: opacity var(--dl-dur, .15s); }
-[data-widget-id]:hover > .dl-vw-wt, [data-widget-id]:focus-within > .dl-vw-wt { opacity: 1; pointer-events: auto; }
-@media (hover: none) { .dl-vw-wt { opacity: 1; pointer-events: auto; } }
+/* C-12: INSIDE the tile (top: 4px), not over the tile above; and armed only
+   after a short hover (visibility flips 150ms late), so a pointer passing over
+   a tile on its way to empty canvas cannot click a button. */
+.dl-vw-wt { position: absolute; top: 4px; inset-inline-end: 8px; z-index: 5; display: flex; gap: 2px; padding: 3px; border-radius: 10px;
+  background: var(--surface); border: 1px solid var(--border); box-shadow: var(--dl-shadow-overlay); opacity: 0; pointer-events: none; visibility: hidden;
+  transition: opacity var(--dl-dur, .15s), visibility 0s linear var(--dl-dur, .15s); }
+[data-widget-id]:hover > .dl-vw-wt, [data-widget-id]:focus-within > .dl-vw-wt { opacity: 1; pointer-events: auto; visibility: visible;
+  transition: opacity var(--dl-dur, .15s) .15s, visibility 0s linear .15s; }
+[data-widget-id]:focus-within > .dl-vw-wt { transition: none; }
+@media (hover: none) { .dl-vw-wt { opacity: 1; pointer-events: auto; visibility: visible; } }
+/* C-12: while the toolbar shows, the header makes room for it, so the title
+   truncates (full text on its tooltip) instead of being covered. */
+[data-widget-id]:has(> .dl-vw-wt):hover .dl-whead, [data-widget-id]:has(> .dl-vw-wt):focus-within .dl-whead { padding-inline-end: 112px !important; }
+@media (hover: none) { [data-widget-id]:has(> .dl-vw-wt) .dl-whead { padding-inline-end: 112px !important; } }
 .dl-vw-wt button { width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 7px; background: none; color: var(--muted); cursor: pointer; padding: 0; }
 .dl-vw-wt button:hover { background: var(--surface2); color: var(--text); }
 .dl-vw-av { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; flex: none;

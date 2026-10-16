@@ -21,7 +21,7 @@ from ..core.capability import require_dataset_read
 from ..core.database import get_db
 from ..core.org_scope import check_org
 from .data_sources import _visible_source_ids
-from ..dependencies import get_current_user, require_org_admin, ai_meter
+from ..dependencies import get_current_user, require_org_admin, ai_meter, require_role_capability
 from ..services.llm import UsageMeter
 from ..models.models import (AgentFeedback, AgentMessage, AgentRun, AgentStep,
                              Conversation, Dataset, DataSource,
@@ -347,6 +347,13 @@ async def ask(cid: int, body: AskIn, db: AsyncSession = Depends(get_db),
     db.add(AgentMessage(conversation_id=conv.id, role="assistant",
                         content=run.answer or run.error or "",
                         agent_run_id=run.id))
+    # AD-19 (decision): Ask AI questions appear in Activity -- the thread and
+    # the data it asked about, NEVER the question text, which may hold names
+    # or figures the asker would not post in a shared log.
+    from ..services.audit import record as audit
+    scope = (", ".join(f"dataset #{d}" for d in conv.dataset_ids) if conv.dataset_ids
+             else f"connection #{conv.data_source_id}")
+    await audit(db, user, "agent.ask", "conversation", conv.id, f"Asked about {scope}")
     await db.commit()
     steps = (await db.execute(select(AgentStep).where(
         AgentStep.agent_run_id == run.id).order_by(AgentStep.id))).scalars().all()
@@ -391,7 +398,7 @@ _EXPORT_MEDIA = {
 @router.get("/runs/{run_id}/export")
 async def export_run(run_id: int, format: str = "xlsx",
                      db: AsyncSession = Depends(get_db),
-                     user: User = Depends(get_current_user)):
+                     user: User = Depends(require_role_capability("export"))):
     """One answer's result as a file. Same ownership rule as /runs/{id}; the
     rows come from the stored snapshot, so what downloads is exactly what the
     chat showed -- same RLS, same cap -- in a different format. CSV stays
@@ -516,11 +523,25 @@ async def create_row_policy(body: RowPolicyIn,
     check_org(source, user, "Data source not found")
 
     try:
-        sqlglot.parse_one(body.predicate, dialect=_dialect(source.type),
-                          into=exp.Condition)
+        parsed = sqlglot.parse_one(body.predicate, dialect=_dialect(source.type),
+                                   into=exp.Condition)
     except Exception as exc:
         raise HTTPException(
             422, str(exc).splitlines()[0] if str(exc) else "invalid predicate")
+
+    # Every column the rule reads must exist on that table (QA E-10: a typo was
+    # saved and only failed -- or denied every row -- when someone asked).
+    # USERID()/USEREMAIL()/MYSCOPE() are function calls, not columns.
+    from ..models.models import SourceColumn
+    known = {n for n in (await db.execute(select(SourceColumn.name).where(
+        SourceColumn.source_object_id == obj.id))).scalars().all()}
+    known_ci = {n.lower() for n in known}
+    unknown = sorted({c.name for c in parsed.find_all(exp.Column)
+                      if c.name.lower() not in known_ci})
+    if unknown:
+        cols = ", ".join(sorted(known)) if known else "none known yet -- read the database first"
+        raise HTTPException(
+            422, f"Unknown column {', '.join(repr(u) for u in unknown)} in {obj.name}. Columns: {cols}")
 
     existing = (await db.execute(
         select(ObjectRowPolicy).where(
@@ -534,6 +555,9 @@ async def create_row_policy(body: RowPolicyIn,
                              source_object_id=body.source_object_id,
                              role_id=body.role_id, predicate=body.predicate)
     db.add(policy)
+    from ..services import admin_audit
+    await admin_audit.record(db, user, "connection_rule.create", f"table:{obj.name}",
+                             f"role:{role.name} {body.predicate}")
     await db.commit()
     await db.refresh(policy)
     return {"id": policy.id, "source_object_id": policy.source_object_id,
@@ -546,5 +570,11 @@ async def delete_row_policy(policy_id: int, db: AsyncSession = Depends(get_db),
                             user: User = Depends(require_org_admin)):
     policy = await db.get(ObjectRowPolicy, policy_id)
     check_org(policy, user, "Row policy not found")
+    obj = await db.get(SourceObject, policy.source_object_id)
+    role = await db.get(Role, policy.role_id)
+    from ..services import admin_audit
+    await admin_audit.record(db, user, "connection_rule.delete",
+                             f"table:{obj.name if obj else policy.source_object_id}",
+                             f"role:{role.name if role else policy.role_id} {policy.predicate}")
     await db.delete(policy)
     await db.commit()

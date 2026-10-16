@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { screen, fireEvent, waitFor } from '@testing-library/react'
+import { screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import type { ReactElement } from 'react'
 import { renderWithProviders } from '../test/renderWithProviders'
@@ -49,7 +49,8 @@ describe('Activity in Arabic', () => {
         entity_id: null, detail: null, created_at: '2026-09-01T11:00:00Z' },
     ])
     inArabic(<MonitoringActivity />)
-    const known = await screen.findByText('إنشاء لوحة')
+    // The table cell, not the same name in the Action filter's options (AD-19).
+    const known = await within(await screen.findByRole('table')).findByText('إنشاء لوحة')
     // The code stays reachable for an admin who knows it.
     expect(known).toHaveAttribute('title', 'report.create')
     expect(screen.queryByText('report.create')).toBeNull()

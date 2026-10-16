@@ -2533,6 +2533,15 @@ html[data-presenting="1"] .dl-bleed { margin: 0; block-size: 100%; }
    its quota strip): stacked, full width. */
 .dl-rows__row--stack { flex-direction: column; align-items: stretch; gap: var(--dl-2); }
 .dl-rows__row--stack > * { min-inline-size: 0; }
+/* AD-21: the title block keeps a real width in a wrapping row, so the status,
+   step dots and buttons drop to the next line instead of squeezing the
+   dataset name to one letter per line; on a phone it takes the whole line. */
+.dl-rows__row--stack .dl-rows__main { flex: 1 1 14rem; }
+.dl-rows__acts { margin-inline-start: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+@media (max-width: 600px) {
+  .dl-rows__row--stack .dl-rows__main { flex-basis: 100%; }
+  .dl-rows__acts { margin-inline-start: 0; }
+}
 
 /* A widget header's icon button (delete, more): a bare 26px target in the
    muted ink that firms up on hover. The reference design's chrome -- no
@@ -3125,6 +3134,20 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--da
   .dl-llmep td.acts { flex-direction: row; flex-wrap: wrap; gap: 6px; }
 }
 
+/* AD-20: a table that becomes cards on a phone. Each row is a card and each
+   cell is "Column: value" from its data-label, instead of a 560 px table
+   scrolled sideways with only a faint shadow to say so. Generalises the LLM
+   endpoints table's stacking (above); used by the Monitoring tables. */
+@media (max-width: 600px) {
+  .dl-table-card > .dl-table--stack, .dl-table--stack { min-inline-size: 0; }
+  .dl-table--stack thead { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .dl-table--stack tbody, .dl-table--stack tr { display: block; }
+  .dl-table--stack tr { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .dl-table--stack td { display: flex; gap: 10px; align-items: baseline; padding: 3px 0 !important; border: 0 !important;
+    text-align: start !important; white-space: normal !important; max-width: none !important; }
+  .dl-table--stack td[data-label]::before { content: attr(data-label); flex: 0 0 7.5rem; font-size: 11px; font-weight: 600; color: var(--muted); }
+}
+
 /* Chart tooltips (QA2 Visual 6): Recharts writes each item in its series
    colour, unreadable when that is a dark green on the dark card. The value and
    the label take the text colour; the series name keeps its colour as the cue.
@@ -3192,3 +3215,11 @@ input::placeholder, textarea::placeholder { unicode-bidi: plaintext; }
 
 /* A toast that can be taken back (9-polish). */
 .dl-toast-undo { display: inline-flex; align-items: center; gap: 10px; }
+
+/* C-13: a multi-row card in a tile much wider than tall (a strip across the
+   page) lays its figures side by side; each figure then fits its own share of
+   the width (it is an inline-size container) and the full height. */
+@container dlcard (min-aspect-ratio: 5 / 2) {
+  .dl-card__rows { flex-direction: row; align-items: center; --dl-card-rows: 1; }
+  .dl-card__item { flex: 1 1 0; }
+}

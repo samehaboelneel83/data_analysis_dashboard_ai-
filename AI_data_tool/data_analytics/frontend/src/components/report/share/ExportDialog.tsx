@@ -61,15 +61,15 @@ export default function ExportDialog({ report, activePageId, onClose }: {
   const [phase, setPhase] = useState<Phase>('opt')
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<string>('')
-  // Downloads follow the export policy; when it refuses, every download is
-  // greyed with the server's reason, and Print stays (it is the browser's).
+  // Downloads follow the export policy; when it refuses, every format is
+  // greyed with the server's reason -- Print too (F-02): the print view is
+  // where Save as PDF and PowerPoint come from, and the server refuses it.
   const [blocked, setBlocked] = useState<string | null>(null)
   useEffect(() => {
     Promise.resolve().then(() => authzApi.decisions([{ resource: 'report', id: report.id, action: 'download' }]))
       .then(ds => { const d = ds?.find(x => x.action === 'download'); setBlocked(d && !d.allowed ? d.reason : null) })
       .catch(() => setBlocked(null))
   }, [report.id])
-  useEffect(() => { if (blocked && fmt !== 'print') setFmt('print') }, [blocked, fmt])
 
   const run = async () => {
     if (fmt === 'print') { onClose(); navigate(`/reports/${report.id}/print`); return }
@@ -151,7 +151,7 @@ export default function ExportDialog({ report, activePageId, onClose }: {
             <div className="shx-fmt" role="radiogroup" aria-label={t('shx.ex.format')}>
               {FORMATS.map(f => (
                 <button key={f.k} type="button" role="radio" aria-checked={fmt === f.k} className="shx-fc" onClick={() => setFmt(f.k)}
-                  disabled={!!blocked && f.k !== 'print'} title={blocked && f.k !== 'print' ? blocked : undefined}>
+                  disabled={!!blocked} title={blocked ?? undefined}>
                   <span className="ic" style={{ background: f.bg }} aria-hidden>{f.tag}</span>
                   <span className="tx"><b>{t(f.title)}</b>{t(f.sub)}</span>
                 </button>
@@ -199,7 +199,7 @@ export default function ExportDialog({ report, activePageId, onClose }: {
           <span className="shx-sp" />
           <button type="button" className="btn btn-ghost" onClick={onClose}>{t('common.cancel')}</button>
           <button type="button" className="btn btn-primary" onClick={() => void run()}
-            disabled={(fmt === 'pdf' && chosen.length === 0) || (!!blocked && fmt !== 'print')}>
+            disabled={(fmt === 'pdf' && chosen.length === 0) || !!blocked}>
             {fmt === 'print' ? <Printer size={14} aria-hidden /> : <Download size={14} aria-hidden />}
             {t(fmt === 'pdf' ? 'shx.ex.goPdf' : fmt === 'xlsx' ? 'shx.ex.goXlsx' : fmt === 'package' ? 'shx.ex.goPackage' : 'shx.ex.goPrint')}
           </button>

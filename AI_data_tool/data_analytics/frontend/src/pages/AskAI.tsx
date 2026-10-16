@@ -4,7 +4,7 @@ import { BarChart3, Bot, Code2, History, MessageSquareText, Sparkles } from 'luc
 import EmptyState from '../components/ui/EmptyState'
 import ChatPane from '../components/chat/ChatPane'
 import Composer from '../components/chat/Composer'
-import { agentApi, datasetsApi, dataSourcesApi } from '../services/api'
+import { agentApi, allowAiApi, analysisApi, datasetsApi, dataSourcesApi } from '../services/api'
 import type { AgentConversation, Dataset, DatasetColumn } from '../services/api'
 import { useT } from '../i18n'
 import AskHero from './ask/AskHero'
@@ -13,7 +13,7 @@ import DataPicker, { useItemMeta, type PickerItem } from './ask/DataPicker'
 import HistoryPanel from './ask/HistoryPanel'
 import { signalRobot } from './ask/robotMood'
 import { useConfirm } from '../components/ui/ConfirmDialog'
-import { connectionSuggestionCards, datasetSuggestionCards, type ColumnClasses } from './ask/suggestions'
+import { connectionSuggestionCards, datasetSuggestionCards, nearUniqueLabels, type ColumnClasses } from './ask/suggestions'
 import './ask/ask.css'
 import './ask/askLayout.css'
 import './ask/askCards.css'
@@ -138,6 +138,12 @@ export default function AskAI() {
         const cols: Record<number, DatasetColumn[]> = {}
         for (const d of usable) if (Array.isArray(d.columns) && d.columns.length) cols[d.id] = d.columns
         setColumnsById(cols)
+        // AD-11: the list already carries each dataset's stored classes; the
+        // per-dataset read below is skipped when columns are known, so without
+        // this the suggestions never saw a "level" or a "code".
+        const classes: Record<number, ColumnClasses> = {}
+        for (const d of usable) if (d.column_meta) classes[d.id] = d.column_meta as ColumnClasses
+        setClassesById(m => ({ ...classes, ...m }))
       })
       // A failed dataset list must not read as "no data yet" -- an error
       // dressed as an empty state is the defect, not a degradation.
@@ -241,16 +247,43 @@ export default function AskAI() {
     signalRobot((e.type !== 'blur' && document.activeElement === box) || box.value ? 'compose-on' : 'compose-off')
   }
 
+  // AD-10: the dataset's "Allow AI" answer, read up front so the person learns
+  // before asking -- not from the first answer -- that only the built-in
+  // analyses will answer. The suggestions stay: the no-AI path answers them.
+  const [aiOff, setAiOff] = useState(false)
+  useEffect(() => {
+    setAiOff(false)
+    if (datasetId == null) return
+    let live = true
+    Promise.resolve().then(() => allowAiApi.get(datasetId))
+      .then(r => { if (live) setAiOff(r?.effective === false) })
+      .catch(() => {})
+    return () => { live = false }
+  }, [datasetId])
+
   const scoped = sourceId != null || datasetId != null
   // The pane copies the question into its box when it mounts; after that it is
   // the pane's, so a later scope change does not put it back.
   const paneOpen = scoped && selected !== undefined
   useEffect(() => { if (paneOpen && pendingQ) setPendingQ('') }, [paneOpen, pendingQ])
   const columns = datasetId != null ? columnsById[datasetId] : undefined
+  // AD-11 step 3: which labels have a value per row, from the stored profile
+  // (one cached read; the server withholds it from a reader under a row or
+  // column rule, and then nothing is skipped).
+  const [perRow, setPerRow] = useState<{ id: number; cols: Set<string> } | null>(null)
+  useEffect(() => {
+    if (datasetId == null || typeof analysisApi?.get !== 'function') return
+    let alive = true
+    Promise.resolve().then(() => analysisApi.get(datasetId))
+      .then(p => { if (alive) setPerRow({ id: datasetId, cols: nearUniqueLabels(p) }) })
+      .catch(() => { /* no profile: nothing skipped */ })
+    return () => { alive = false }
+  }, [datasetId])
+  const skip = perRow && perRow.id === datasetId ? perRow.cols : undefined
   const cards = useMemo(
     () => (sourceId != null ? connectionSuggestionCards(t)
-      : datasetSuggestionCards(columns, t, datasetId != null ? classesById[datasetId] : undefined)),
-    [sourceId, columns, t, datasetId, classesById],
+      : datasetSuggestionCards(columns, t, datasetId != null ? classesById[datasetId] : undefined, skip)),
+    [sourceId, columns, t, datasetId, classesById, skip],
   )
   const suggestions = useMemo(() => cards.map(c => c.text), [cards])
   const itemMeta = useItemMeta()
@@ -351,12 +384,15 @@ export default function AskAI() {
           </button>
         </div>
         <div className="dl-ask__pane">
+          {aiOff && (
+            <p role="status" data-testid="ask-ai-off" className="dl-chat__note">{t('ask2.aiOff')}</p>
+          )}
           {selected !== undefined && (() => {
-            const startView = (ask: (q: string) => void, busy: boolean) => (
+            const startView = (ask: (q: string) => void, busy: boolean, reason?: string) => (
               <AskHero id="dl-ask-picked" small title={t('ask2.picked.title')}
                 sub={rich(sourceId != null ? 'ask2.picked.subSource' : 'ask2.picked.sub', scopeItem?.name ?? '')}
                 step={2} stepLabel={t('ask2.step2')}>
-                <SuggestionGrid cards={cards} onAsk={ask} disabled={busy} />
+                <SuggestionGrid cards={cards} onAsk={ask} disabled={busy} disabledReason={reason} />
               </AskHero>
             )
             return sourceId != null

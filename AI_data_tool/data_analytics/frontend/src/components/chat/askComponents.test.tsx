@@ -39,8 +39,28 @@ describe('Composer', () => {
 
   it('locked: visible, inert, and says why', () => {
     render(<Composer value="" onChange={() => {}} onSend={() => {}} locked lockedHint="Choose your data first" />)
-    expect(screen.getByRole('textbox')).toBeDisabled()
+    // B-18: inert but focusable (readOnly + aria-disabled, not disabled), so
+    // keys typed there stay in the box instead of reaching the page.
+    const box = screen.getByRole('textbox')
+    expect(box).toHaveAttribute('aria-disabled', 'true')
+    expect(box).toHaveAttribute('readonly')
     expect(screen.getByPlaceholderText('Choose your data first')).toBeInTheDocument()
+  })
+
+  it('locked: Enter in the box sends nothing and says why, in the box (B-18)', () => {
+    const onSend = vi.fn()
+    for (const page of [undefined, { name: 'Sales' }]) {
+      const { unmount } = render(<Composer value="hello" onChange={() => {}} onSend={onSend} locked
+        lockedHint="Questions are paused" page={page} />)
+      const box = screen.getByRole('textbox')
+      box.focus()
+      expect(box).toHaveFocus()
+      // fireEvent returns false when the handler prevented the default.
+      expect(fireEvent.keyDown(box, { key: 'Enter' })).toBe(false)
+      expect(onSend).not.toHaveBeenCalled()
+      expect(screen.getByRole('status')).toHaveTextContent('Questions are paused')
+      unmount()
+    }
   })
 })
 

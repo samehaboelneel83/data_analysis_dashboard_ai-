@@ -7,7 +7,8 @@
  * button -- never to delete anything, and never to hide a certified dataset.
  * A false positive costs one click; that is why it may be a little generous.
  */
-const TEST_NAME = /^(qa|test|tests|testing|tmp|temp|debug|dummy|scratch|sample)(?=$|[\s_\-.:#\d])|^untitled\b|\bqa[_\s-]?sample\b|\(copy( \d+)?\)$|^copy of\b/i
+// B-27: no bare "qa" prefix ("QA B upload" is a team's real work); qa_sample stays below.
+const TEST_NAME = /^(test|tests|testing|tmp|temp|debug|dummy|scratch|sample)(?=$|[\s_\-.:#\d])|^untitled\b|\bqa[_\s-]?sample\b|^qa[_-]?sample|\(copy( \d+)?\)$|^copy of\b/i
 
 /** 4.7: what the HR evaluation actually found in front of a new user --
  *  "13", "2", "kjhkjhkjhkjh", "claude job check". A bare number, a name of one

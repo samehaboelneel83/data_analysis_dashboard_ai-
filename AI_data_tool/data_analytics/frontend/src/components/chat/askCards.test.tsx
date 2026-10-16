@@ -6,6 +6,8 @@ import { agentApi } from '../../services/api'
 import type { AgentAnswer, AgentMessage } from '../../services/api'
 import { REACTION_MS } from '../../pages/ask/robotMood'
 import { translate } from '../../i18n'
+import { LLM_ENDPOINTS_EVENT } from '../../services/api'
+import SuggestionGrid from '../../pages/ask/SuggestionGrid'
 
 /** Step 10, Part B: the Ask AI page's loading and answer cards. */
 
@@ -426,5 +428,86 @@ describe('sqlTokens', () => {
     expect(toks.map(t => t.text).join('')).toBe(sql)
     expect(toks.filter(t => t.kind === 'kw').map(t => t.text)).toEqual(['SELECT', 'FROM', 'WHERE', 'group'])
     expect(toks.filter(t => t.kind === 'str').map(t => t.text)).toEqual([`'from ''here'''`])
+  })
+})
+
+describe('suggestion cards while new questions are paused (AD-02)', () => {
+  const down = () => act(() => {
+    window.dispatchEvent(new CustomEvent(LLM_ENDPOINTS_EVENT, { detail: { at: Date.now(), data: {
+      llm_enabled: true, default: 'env', auto_pick: null, source: 'environment',
+      endpoints: [{ id: 'env', name: 'Default', model: 'q', enabled: true, is_default: true, strength: 5, context: null,
+        status: { ok: false, latency_ms: null, checked_at: new Date().toISOString(), error: 'ConnectTimeout' } }],
+    } } }))
+  })
+  const cards = [{ text: 'Total revenue by region', icon: 'total' as const, columns: ['revenue', 'region'] }]
+  const withCards = () => pane({
+    startView: (send, busy, reason) => <SuggestionGrid cards={cards} onAsk={send} disabled={busy} disabledReason={reason} />,
+  })
+
+  it('disables every card, explains why, and never sends', async () => {
+    const asked = vi.spyOn(agentApi, 'ask').mockResolvedValue(BAR)
+    const { container } = withCards()
+    down()
+    const all = [...container.querySelectorAll<HTMLButtonElement>('.dl-sug__card')]
+    expect(all.length).toBe(1)
+    for (const c of all) {
+      expect(c).toBeDisabled()
+      expect(c.title).toMatch(/paused/i)
+    }
+    fireEvent.click(all[0])
+    await settle()
+    expect(asked).not.toHaveBeenCalled()
+  })
+
+  it('also refuses the typed question on Enter while paused', async () => {
+    const asked = vi.spyOn(agentApi, 'ask').mockResolvedValue(BAR)
+    pane()
+    down()
+    const box = screen.getByPlaceholderText(/ask|paused/i)
+    fireEvent.change(box, { target: { value: 'total revenue' } })
+    fireEvent.keyDown(box, { key: 'Enter' })
+    await settle()
+    expect(asked).not.toHaveBeenCalled()
+  })
+})
+
+describe('the composer draft (AD-09)', () => {
+  it('is cleared by New chat (the thread becomes null)', async () => {
+    const { useState } = await import('react')
+    function Host() {
+      const [id, setId] = useState<number | null>(7)
+      return <><button type="button" onClick={() => setId(null)}>new chat</button>
+        <ChatPane datasetIds={[1]} conversationId={id} card={{ scopeName: 'Demo — Sales' }} /></>
+    }
+    render(<Host />)
+    await settle()
+    const box = screen.getByPlaceholderText(/ask/i) as HTMLTextAreaElement
+    fireEvent.change(box, { target: { value: 'an old draft' } })
+    expect(box.value).toBe('an old draft')
+    fireEvent.click(screen.getByRole('button', { name: 'new chat' }))
+    await settle()
+    expect((screen.getByPlaceholderText(/ask/i) as HTMLTextAreaElement).value).toBe('')
+  })
+
+  it('keeps a draft handed in at mount', async () => {
+    render(<ChatPane datasetIds={[1]} conversationId={null} initialInput="Total sales" card={{ scopeName: 'S' }} />)
+    await settle()
+    expect((screen.getByPlaceholderText(/ask/i) as HTMLTextAreaElement).value).toBe('Total sales')
+  })
+
+  it('cannot be filled by "Edit question" while new questions are paused', async () => {
+    vi.spyOn(agentApi, 'ask').mockResolvedValue(BAR)
+    pane()
+    await ask()
+    act(() => {
+      window.dispatchEvent(new CustomEvent(LLM_ENDPOINTS_EVENT, { detail: { at: Date.now(), data: {
+        llm_enabled: true, default: 'env', auto_pick: null, source: 'environment',
+        endpoints: [{ id: 'env', name: 'Default', model: 'q', enabled: true, is_default: true, strength: 5, context: null,
+          status: { ok: false, latency_ms: null, checked_at: new Date().toISOString(), error: 'down' } }],
+      } } }))
+    })
+    const edits = screen.getAllByRole('button', { name: new RegExp(translate('en', 'err3.edit'), 'i') })
+    expect(edits.length).toBeGreaterThan(0)
+    for (const b of edits) expect(b).toBeDisabled()
   })
 })

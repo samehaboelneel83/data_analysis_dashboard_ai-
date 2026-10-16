@@ -67,3 +67,16 @@ describe('value axes read compactly (persona test 3.5)', () => {
     expect(tick(950)).toBe('950')
   })
 })
+
+describe('C-02: an abbreviated tick keeps the measure\'s unit', () => {
+  const plain = (s: unknown) => String(s).replace(/[\u2066-\u2069]/g, '')
+  it('a currency axis reads "$ 1.2M", like "$ 600,000" beside it', () => {
+    const tick = valueTick({} as never, { type: 'currency', symbol: '$', decimals: 0 } as never)
+    expect(plain(tick(1_200_000))).toBe('$ 1.2M')
+    expect(plain(tick(600_000))).toBe('$ 600,000')
+  })
+  it('a percent axis keeps its % suffix when compact', () => {
+    const tick = valueTick({ labels_compact: true } as never, { type: 'percent', decimals: 0 } as never)
+    expect(plain(tick(25_000))).toBe('25K%')
+  })
+})

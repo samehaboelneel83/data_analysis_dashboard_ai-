@@ -12,10 +12,12 @@ const ICON: Record<SuggestionIcon, LucideIcon> = {
  * a picture of the kind of answer, and the dataset's own columns it uses, in
  * mono and left to right. A card is sent exactly like a typed question.
  */
-export default function SuggestionGrid({ cards, onAsk, disabled }: {
+export default function SuggestionGrid({ cards, onAsk, disabled, disabledReason }: {
   cards: SuggestionCard[]
   onAsk: (question: string) => void
   disabled?: boolean
+  /** Why the cards are disabled (e.g. new questions are paused), shown where the user clicks. */
+  disabledReason?: string
 }) {
   const t = useT()
   if (!cards.length) return null
@@ -24,7 +26,8 @@ export default function SuggestionGrid({ cards, onAsk, disabled }: {
       {cards.map(c => {
         const Icon = ICON[c.icon]
         return (
-          <button key={c.text} type="button" className="dl-sug__card" disabled={disabled} onClick={() => onAsk(c.text)}>
+          <button key={c.text} type="button" className="dl-sug__card" disabled={disabled}
+            title={disabled ? disabledReason : undefined} onClick={() => onAsk(c.text)}>
             <span className="dl-sug__icon" aria-hidden><Icon size={16} /></span>
             <b dir="auto">{c.text}</b>
             {c.columns.length > 0 && <small dir="ltr">{c.columns.join(' · ')}</small>}

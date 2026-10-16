@@ -7,12 +7,14 @@ import LanguageSwitcher from '../components/LanguageSwitcher'
 import BrandIllustration from '../components/auth/BrandIllustration'
 import { useT, type MessageKey } from '../i18n'
 import './login.css'
+import { rememberReturnTo, returnToFromHistory } from '../lib/returnTo'
 
 const SSO_KEYS: Record<string, MessageKey> = {
   not_configured: 'login.sso.not_configured',
   provider_unreachable: 'login.sso.provider_unreachable',
   denied: 'login.sso.denied',
   no_account: 'login.sso.no_account',
+  platform_admin: 'login.sso.platform_admin',
   no_id_token: 'login.sso.no_id_token',
   email_unverified: 'login.sso.email_unverified',
   validation_failed: 'login.sso.validation_failed',
@@ -93,8 +95,9 @@ export default function Login() {
   }, [])
 
   if (user) {
-    // Already authenticated (e.g. navigated back to /login manually) — bounce home.
-    window.location.replace('/')
+    // Signed in (just now, or navigated back to /login manually): go to the
+    // page that sent the person here, when it is one of ours (AD-12), else home.
+    window.location.replace(returnToFromHistory() ?? '/')
     return null
   }
 
@@ -119,6 +122,7 @@ export default function Login() {
     try {
       const { sso, protocol } = await ssoApi.discover(email.trim())
       if (!sso) { setFormError('login.ssoNone'); return }
+      rememberReturnTo(returnToFromHistory())   // AD-12: survives the IdP round trip
       window.location.href = ssoApi.loginUrl(email.trim(), protocol)   // hand off to the IdP
     } catch {
       setFormError('login.ssoStartFail')

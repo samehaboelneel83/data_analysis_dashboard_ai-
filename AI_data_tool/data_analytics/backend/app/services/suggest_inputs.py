@@ -93,7 +93,7 @@ async def declared_hierarchies(db, dataset_id: int, columns: set[str]) -> list[l
     return out
 
 
-async def prepare(db, user, ds) -> SuggestInputs:
+async def prepare(db, user, ds, *, ask_model: bool = True) -> SuggestInputs:
     from ..core.rls import resolve_denied_columns, resolve_rls_expr
     from . import analysis_frame as frames
     from . import knowledge as knowledge_service
@@ -152,7 +152,9 @@ async def prepare(db, user, ds) -> SuggestInputs:
     # guided setup read the same thing the insights engine does
     # (services/column_classes.py).
     from . import column_classes
-    meta = await column_classes.ensure(db, ds, df)
+    # `ask_model=False`: the statistics engine answers, so nothing here may
+    # wait on a model either (B-10).
+    meta = await column_classes.ensure(db, ds, df, ask=ask_model)
     type_map = await asyncio.to_thread(detect_types, df)
     profile = await asyncio.to_thread(build_profile, df, type_map, meta)
     # Hierarchies the author DECLARED (Region > Country > City) lead the ones

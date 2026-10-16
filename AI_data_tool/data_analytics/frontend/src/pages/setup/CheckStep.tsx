@@ -26,6 +26,7 @@ import PlainSummary from '../../components/ui/PlainSummary'
 import LoadError from '../../components/ui/LoadError'
 import LoadingState from '../../components/ui/LoadingState'
 import { sayText } from '../../lib/readbackText'
+import { useConfirm } from '../../components/ui/ConfirmDialog'
 
 const POLL_MS = 4000
 const POLL_LIMIT = 60
@@ -43,7 +44,12 @@ export default function CheckStep({ sourceId, flow, onNext, onBack }: {
   const [answers, setAnswers] = useState(0)
   const [busy, setBusy] = useState<string | null>(null)
   const [gaveUp, setGaveUp] = useState(false)
+  // A "Fix it" / "Warn me" that failed, shown inline under the findings (B-02).
+  const [fixError, setFixError] = useState<{ datasetId: number; text: string } | null>(null)
   const polls = useRef(0)
+  const confirm = useConfirm()
+  // B-33: datasets whose "changes it for everyone" the person already accepted.
+  const accepted = useRef(new Set<number>())
 
   const load = useCallback(async () => {
     try {
@@ -55,7 +61,8 @@ export default function CheckStep({ sourceId, flow, onNext, onBack }: {
   useEffect(() => { polls.current = 0; load() }, [load])
 
   const checking = !!data?.datasets.some(d => d.findings.pending)
-  const waiting = checking || !!data?.demand?.pending
+  // B-12: keep asking while the AI part of a check is still coming.
+  const waiting = checking || !!data?.demand?.pending || !!data?.datasets.some(d => d.findings.ai_pending)
   useEffect(() => {
     if (!waiting) return
     if (polls.current >= POLL_LIMIT) { setGaveUp(true); return }
@@ -65,16 +72,34 @@ export default function CheckStep({ sourceId, flow, onNext, onBack }: {
 
   const failure = (e: unknown, fallback: string) => {
     const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
-    toast.error(detail ? detailToText(detail) : fallback)
+    const text = detail ? detailToText(detail) : fallback
+    toast.error(text)
+    return text
   }
 
   async function fix(datasetId: number, item: SetupFindingItem, how: 'fix' | 'check') {
+    // B-33: a fix on a dataset this setup did not make, and that dashboards
+    // already read, changes it for everyone -- asked once per dataset.
+    const d = data?.datasets.find(x => x.id === datasetId)
+    const n = d?.used_by?.dashboards ?? 0
+    if (how === 'fix' && d && !d.auto_clean && n > 0 && !accepted.current.has(datasetId)) {
+      const ok = await confirm({
+        title: t('setup.c.inUseTitle', { name: d.name }),
+        body: t('setup.c.inUseBody', { n: num(n) }),
+        confirmLabel: t('setup.c.inUseOk'), destructive: false })
+      if (!ok) return
+      accepted.current.add(datasetId)
+    }
     setBusy(`${item.id}|${how}`)
+    setFixError(null)
     try {
       await setupApi.fix(sourceId, datasetId, item.id, how, language, flow)
       toast.success(how === 'fix' ? t('setup.c.fixed') : t('setup.c.checkSaved'))
       await load()
-    } catch (e) { failure(e, t('setup.c.fixFailed')) } finally { setBusy(null) }
+    } catch (e) {
+      const text = failure(e, t('setup.c.fixFailed'))
+      setFixError({ datasetId, text: text === t('setup.c.fixFailed') ? text : `${t('setup.c.fixFailed')}: ${text}` })
+    } finally { setBusy(null) }
   }
 
   async function undo(datasetId: number, actionId: string | null, redo = false) {
@@ -116,6 +141,8 @@ export default function CheckStep({ sourceId, flow, onNext, onBack }: {
       )}
       {data.datasets.map(d => (
         <DatasetCheck key={d.id} d={d} language={language} gaveUp={gaveUp} busy={busy} usual={data.usual?.check}
+          aiOff={data.ai?.available === false}
+          fixError={fixError?.datasetId === d.id ? fixError.text : null}
           onRetry={retry} onAgain={() => again(d.id)}
           onFix={(item, how) => fix(d.id, item, how)}
           onUndo={(id, redo) => undo(d.id, id, redo)} />
@@ -130,8 +157,10 @@ export default function CheckStep({ sourceId, flow, onNext, onBack }: {
   )
 }
 
-function DatasetCheck({ d, language, gaveUp, busy, usual, onRetry, onAgain, onFix, onUndo }: {
+function DatasetCheck({ d, language, gaveUp, busy, usual, aiOff, fixError, onRetry, onAgain, onFix, onUndo }: {
   d: CheckedDataset; language: string; gaveUp: boolean; busy: string | null; usual?: number
+  aiOff?: boolean
+  fixError?: string | null
   onRetry: () => void; onAgain: () => void
   onFix: (item: SetupFindingItem, how: 'fix' | 'check') => void
   onUndo: (actionId: string | null, redo?: boolean) => void
@@ -172,6 +201,9 @@ function DatasetCheck({ d, language, gaveUp, busy, usual, onRetry, onAgain, onFi
           <p className="setup-ai">{t('setup.u.aiSlow')}{' '}
             <button type="button" className="btn btn-sm" onClick={onRetry}>{t('setup.u.checkAgain')}</button></p>
         )}
+        {!f.pending && f.ai_pending && !gaveUp && (aiOff
+          ? <p className="setup-ai">{t('setup.ai.offCheck')}</p>
+          : <p className="setup-ai setup-ai--pending"><Sparkles size={13} aria-hidden="true" /> {t('setup.k.aiComing')}</p>)}
         {!f.pending && f.failed && <p className="setup-ai">{t('setup.c.failed')} {f.failed !== 'failed' ? f.failed : ''}</p>}
         {!f.pending && f.language && f.language !== language && f.health.length > 0 && (
           <p className="setup-ai">{t('setup.langHintCheck')}</p>
@@ -240,6 +272,7 @@ function DatasetCheck({ d, language, gaveUp, busy, usual, onRetry, onAgain, onFi
                 <FindingsSummary findings={{ ...f, insights: [] }} busy={busy} onFix={onFix}
                   healthTitle={t('setup.k.restTitle')} />
               )}
+              {fixError && <p role="alert" className="setup-ai setup-ai--error">{fixError}</p>}
               <p className="dl-health__more"><Link to={`/datasets/${d.id}?tab=rules`}>{t('setup.c.details')}</Link></p>
             </div>
           )}

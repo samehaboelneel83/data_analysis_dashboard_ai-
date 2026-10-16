@@ -1,3 +1,4 @@
+import { Lock } from 'lucide-react'
 import { semanticAggregationWarning, nonAdditiveKind, SAFE_AGGREGATION } from '../../lib/semanticGuard'
 import { CellLink, isWebAddress } from '../../lib/cellLink'
 import PivotTable, { type PivotData } from './PivotTable'
@@ -9,7 +10,7 @@ import { MapLoading } from './geo/MapDataTable'
 import type { CalcColumnFormat } from '../../services/api'
 import type { Widget, WidgetType } from '../../types/report'
 import type { RuleStyles } from '../../lib/displayRules'
-import { fmtStr, formatValue, EmptyState, seriesColor } from './chartUtils'
+import { fmtStr, formatValue, formatMeasure, formatMeasureCell, measureFormat, EmptyState, seriesColor } from './chartUtils'
 import { CHART_RENDERERS } from './chartRenderers'
 import LatticeRenderer from './chartRenderers/LatticeRenderer'
 import AnimatedRenderer from './chartRenderers/AnimatedRenderer'
@@ -107,12 +108,31 @@ function ImageWidget({ url, alt, fit }: { url: string; alt: string; fit?: string
  *  Arabic layout no longer reads ".Refresh in a moment" (HR re-test). */
 function FetchErrorState({ err, onRetry }: { err: { detail: string; code?: string }; onRetry?: () => void }) {
   const t = useT()
+  // Column security (QA E-12 / SEC-02): say it is restricted, never which
+  // column, and offer no retry -- trying again cannot change a role.
+  if (err.code === 'forbidden_column') {
+    return <EmptyState msg={t('widget.err.restricted')} icon={<Lock size={20} aria-hidden />} />
+  }
   const name = /'([^']+)'/.exec(err.detail ?? '')?.[1] ?? ''
   const msg = err.code === 'source_busy' ? t('widget.err.busy', { name })
     : err.code === 'source_unavailable' ? t('widget.err.unreachable', { name })
     : err.detail
   const retry = (err.code === 'source_unavailable' || err.code === 'source_busy' || err.code === 'quota') && onRetry
   return <EmptyState msg={msg} action={retry ? { label: t('widget.err.retry'), onClick: onRetry! } : undefined} />
+}
+
+/** B-36: a KPI's caption in words ("Distinct shipment id", "Average fee"),
+ *  never the raw "countd(shipment_id)" an axis title uses. */
+const KPI_CAPTION: Record<string, MessageKey> = {
+  count: 'widget.kpiCap.count', countd: 'widget.kpiCap.countd', avg: 'widget.kpiCap.avg', mean: 'widget.kpiCap.avg',
+  median: 'widget.kpiCap.median', min: 'widget.kpiCap.min', max: 'widget.kpiCap.max',
+}
+function kpiCaption(cfg: { measure?: unknown; aggregation?: unknown }, t: TranslateFn): string {
+  const key = KPI_CAPTION[String(cfg.aggregation ?? '').toLowerCase()]
+  if (!key) return seriesName(cfg as never)
+  const m = String(cfg.measure ?? '').replace(/_/g, ' ').trim()
+  const text = t(key, { m })
+  return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
 export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, onClickPoint, broadcasts, allFormats, checked, onToggleSlicerValue, onButtonClick, ruleStyles, parameters, geography, textFilter, onSubmitTextFilter, rangeFilter, onSubmitRangeFilter, treePaths, onTreeChange, gridOpen, onToggleGridBranch, onGridClick, onAssignData, onBrushChange, brushNonce, onAnimationFrame, onApplyFix, onLoadMore, loadingMore }:
@@ -147,8 +167,10 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
 
   // Format for the value column: use measure if set, otherwise fall back to dimension
   // (many widgets aggregate the dimension column directly with no separate measure)
-  const measureFmt = allFormats?.[cfg.measure] ?? allFormats?.[cfg.dimension]
-  const measure2Fmt = allFormats?.[cfg.measure2]
+  // C-02 / F-12: the format of the AGGREGATED value -- a count of a currency
+  // column is a plain count (never in the measure's currency), a share is a percent.
+  const measureFmt = measureFormat(allFormats?.[cfg.measure] ?? allFormats?.[cfg.dimension], cfg.aggregation)
+  const measure2Fmt = measureFormat(allFormats?.[cfg.measure2], cfg.aggregation2)
 
   if (wt === 'text') {
     // Substitute resolved {{agg(column)}} values before link rendering. An unresolved
@@ -325,13 +347,19 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
     const drawable = data?.rows?.length || data?.matrix?.length || data?.cells?.length
       || data?.bars?.length || data?.links?.length || data?.forecast?.length
       || data?.points?.length || data?.series?.length || (data?.value != null ? 1 : 0)
+      // A contour answers with a density `grid`, a tree/network with `nodes` (C-03).
+      || data?.grid?.length || data?.nodes?.length
     const nothingToDraw = !data || !drawable
     // A chart with no dimension is answered by the shaper's raw-table branch
     // (every column, row by row) -- and a line renderer then draws that as a
     // meaningless squiggle. A CHART receiving a raw table is unfinished; a
     // table receiving one is working exactly as designed.
     const rawTableForChart = data?.type === 'table' && familyOf(widget.widget_type) !== 'table'
-    if (missing.length && (nothingToDraw || rawTableForChart)) {
+    // C-14: likewise a measure with no dimension is answered as one scalar
+    // row, which a pie drew as a single solid disc. Only a KPI-like widget
+    // (or a table) is finished with a single number.
+    const scalarForChart = data?.type === 'scalar' && !['table', 'kpi'].includes(familyOf(widget.widget_type))
+    if (missing.length && (nothingToDraw || rawTableForChart || scalarForChart)) {
       return <WidgetPlaceholder widget={widget} missing={missing} onAssignData={onAssignData} />
     }
   }
@@ -349,7 +377,12 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
   // The second channel: a 200 whose body says it failed. A measure that
   // could not be evaluated arrives this way, and until the widget read it
   // the chart renderer got empty rows and drew nothing -- the message lost.
-  if (data?.type === 'error') return <EmptyState msg={String(data.message || 'This widget could not be computed')} />
+  // A measure that failed to evaluate: the evaluator's reason is for whoever
+  // can fix the formula (edit mode); a reader gets a plain sentence (QA E-12).
+  if (data?.type === 'error') {
+    return <EmptyState msg={data.code === 'measure_error' && !onAssignData
+      ? tw('widget.err.measure') : String(data.message || 'This widget could not be computed')} />
+  }
 
   if (data?.type === 'hier_pivot') {
     return <HierPivot data={data} open={gridOpen ?? { rows: [], cols: [] }} rtl={rtl}
@@ -497,14 +530,14 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
           {withTrend && pill}
         </div>
         <div style={{ fontSize: 12, color: 'var(--muted)', maxWidth: '100%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textAlign: withTrend ? 'start' : 'center' }}>
-          {/* A count or an average is not the column itself: "Records" read
+          {/* A count or an average is not the column itself: "Count of x", "Average x" (not "Records" read
               3,576 over the subtitle RATED_AMOUNT (live QA 2026-09-28). A sum
               keeps the column's name, as it always has. */}
           {/* A caption written for the reader (the guided setup's "why")
               instead of "avg(is_late_pct)". */}
           {typeof cfg.caption === 'string' && cfg.caption.trim() ? cfg.caption
             : cfg.measure && cfg.aggregation && String(cfg.aggregation).toLowerCase() !== 'sum'
-              ? seriesName(cfg) : (cfg.measure || cfg.dimension || 'Value')}
+              ? kpiCaption(cfg, tw) : (cfg.measure || cfg.dimension || 'Value')}
         </div>
         {change && (
           <div data-testid="kpi-period-change" dir="ltr" style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -569,18 +602,28 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
     const rows: any[] = data.rows ?? []
     return (
       // Focusable: a card with more figures than its tile scrolls (E10).
-      <div dir={rtl ? 'rtl' : undefined} tabIndex={0} role="region" aria-label={tw('wb.values')}
-        style={{ height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 10, padding: 8, containerType: 'inline-size' }}>
+      // C-13: a SIZE container, so each figure is capped by the tile's height
+      // too (cqb): three rows at 24px plus labels overflowed a short tile.
+      // C-13 (round 2): the outer box is the size container ("dlcard"); a tile
+      // much wider than tall lays the figures side by side (index.css), and
+      // each figure is its own inline-size container so it fits the width it
+      // gets in either layout. The height cap divides by --dl-card-rows, which
+      // the wide layout resets to 1.
+      <div className="dl-card" style={{ height: '100%', containerType: 'size', containerName: 'dlcard',
+        ['--dl-card-rows' as never]: Math.max(rows.length, 1) }}>
+      <div className="dl-card__rows" dir={rtl ? 'rtl' : undefined} tabIndex={0} role="region" aria-label={tw('wb.values')}
+        style={{ height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 10, padding: 8, boxSizing: 'border-box' }}>
         {rows.map((row, i) => (
-          <div key={i} style={{ textAlign: 'center', minWidth: 0 }}>
-            <div title={fmtStr(row.value, allFormats?.[row.name])}
-              style={{ fontSize: fitFigureSize(fmtStr(row.value, allFormats?.[row.name]), 24), fontWeight: 650, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.02em', color: ruleStyles?.rows?.[i]?.fill ?? 'var(--accent)',
+          <div key={i} className="dl-card__item" style={{ textAlign: 'center', minWidth: 0, containerType: 'inline-size' }}>
+            <div title={formatMeasure(row.value, allFormats?.[row.name], cfg.aggregation)}
+              style={{ fontSize: `min(${fitFigureSize(formatMeasure(row.value, allFormats?.[row.name], cfg.aggregation), 24)}, calc(100cqb / (var(--dl-card-rows, 1) * 2.2)))`, fontWeight: 650, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.02em', color: ruleStyles?.rows?.[i]?.fill ?? 'var(--accent)',
                 whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: 1.15 }}>
-              {fmtStr(row.value, allFormats?.[row.name])}
+              {formatMeasure(row.value, allFormats?.[row.name], cfg.aggregation)}
             </div>
             <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>{row.name}</div>
           </div>
         ))}
+      </div>
       </div>
     )
   }
@@ -641,7 +684,7 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
             {data.rows.map((r: { name: unknown; value: unknown }, i: number) => (
               <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
                 <td style={{ padding: '3px 8px' }}>{String(r.name)}</td>
-                <td style={{ padding: '3px 8px', textAlign: 'end' }}>{formatValue(r.value, measureFmt)}</td>
+                <td style={{ padding: '3px 8px', textAlign: 'end' }}>{formatMeasureCell(r.value, measureFmt)}</td>
               </tr>
             ))}
           </tbody>
@@ -807,6 +850,14 @@ function WindowedTable({ rtl, cfg, data, cols: inCols, rows: inRows, ruleStyles,
     : 'Total'
   const rowNumbers = !!cfg.table_row_numbers
   const rowLines = !!cfg.table_row_lines
+  // C-02: which columns hold the measure. Their keys ("value", or a crosstab's
+  // column-dimension values and `__total__`) are not dataset columns, so a
+  // lookup by column name found no format and printed raw floats.
+  const crosstab = data.type === 'crosstab'
+  const mFmt = measureFormat(allFormats?.[data.measure ?? cfg.measure], cfg.aggregation)
+  const isMeasureCol = (c: string, j: number) => grouped ? c === 'value' : crosstab && j > 0
+  const cellText = (v: unknown, c: string, j: number) =>
+    isMeasureCol(c, j) ? formatMeasureCell(v, mFmt) : formatValue(v, allFormats?.[c])
   const banding = !!cfg.table_banding
   const cellPad = cfg.table_condensed ? '2px 6px' : undefined
   const estRowH = cfg.table_condensed ? 24 : 31
@@ -861,7 +912,7 @@ function WindowedTable({ rtl, cfg, data, cols: inCols, rows: inRows, ruleStyles,
               -number cell when there is one. */}
           {totals[j] == null
             ? (j === 0 ? totalLabel : '')
-            : formatValue(totals[j], allFormats?.[c])}
+            : cellText(totals[j], c, j)}
         </td>
       ))}
       {showSpark && <td style={{ padding: cellPad }} />}
@@ -918,7 +969,7 @@ function WindowedTable({ rtl, cfg, data, cols: inCols, rows: inRows, ruleStyles,
                       )}
                       <span style={{ position: 'relative', zIndex: 1, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                         {painted?.icon && <span aria-hidden="true">{painted.icon}</span>}
-                        {isWebAddress(v) ? <CellLink url={v} /> : formatValue(v, allFormats?.[cols[j]])}
+                        {isWebAddress(v) ? <CellLink url={v} /> : cellText(v, cols[j], j)}
                       </span>
                     </td>
                   )

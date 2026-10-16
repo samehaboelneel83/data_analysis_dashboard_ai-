@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { classify, datasetSuggestions, connectionSuggestions, humanize } from './suggestions'
+import { classify, datasetSuggestions, connectionSuggestions, humanize, nearUniqueLabels } from './suggestions'
 import { aliasAggregations, answerToWidget } from '../../components/chat/answerWidget'
 import { autoChart } from '../../components/chat/ResultView'
 import { en } from '../../i18n/en'
@@ -37,6 +37,41 @@ describe('suggestions', () => {
     expect(s).toContain('Average car age years per make')
     expect(s).toContain('Which make has the highest average car age years?')
     expect(s.some(q => /listing no/.test(q))).toBe(false)
+  })
+
+  it('never totals a coordinate (AD-11)', () => {
+    const s = datasetSuggestions([{ name: 'from_city', dtype: 'object' }, { name: 'origin_lat', dtype: 'float64' },
+      { name: 'origin_lon', dtype: 'float64' }], t as never)
+    expect(s.some(q => /origin lat|origin lon/i.test(q) && /^Total|Top 5/.test(q))).toBe(false)
+  })
+
+  it('averages a percentage or a body measure by its name when nothing is stored (AD-11)', () => {
+    const s = datasetSuggestions([{ name: 'task', dtype: 'object' }, { name: 'progress_pct', dtype: 'float64' }], t as never)
+    expect(s.some(q => /^Total/.test(q))).toBe(false)
+    expect(s.some(q => /^Top 5 task/.test(q))).toBe(false)
+    expect(s).toContain('Which task has the highest average progress pct?')
+    const h = datasetSuggestions([{ name: 'group', dtype: 'object' }, { name: 'height', dtype: 'float64' }], t as never)
+    expect(h).not.toContain('Total height by group')
+  })
+
+  it('a stored level class gives highestAvg (AD-11)', () => {
+    const s = datasetSuggestions([{ name: 'team', dtype: 'object' }, { name: 'val2', dtype: 'float64' }], t as never,
+      { val2: { number: 'level' } })
+    expect(s).toContain('Which team has the highest average val2?')
+  })
+
+  it('skips a label with a value per row, read from the stored profile (AD-11 step 3)', () => {
+    const profile = { overview: { rows: 200 },
+      categorical: { columns: { task: { n_unique: 200 }, team: { n_unique: 6 } } } }
+    const skip = nearUniqueLabels(profile)
+    expect([...skip]).toEqual(['task'])
+    const s = datasetSuggestions([{ name: 'task', dtype: 'object' }, { name: 'team', dtype: 'object' },
+      { name: 'hours', dtype: 'float64' }], t as never, undefined, skip)
+    expect(s.some(q => /\btask\b/.test(q))).toBe(false)
+    expect(s).toContain('Total hours by team')
+    // No profile (none run yet, or the reader is under a row rule): nothing is skipped.
+    expect(nearUniqueLabels(null).size).toBe(0)
+    expect(nearUniqueLabels({ overview: { rows: 5 }, categorical: { columns: { a: { n_unique: 5 } } } }).size).toBe(0)
   })
 
   it('falls back to generic questions when the columns say little', () => {

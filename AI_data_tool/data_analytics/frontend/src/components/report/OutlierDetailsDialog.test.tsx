@@ -24,6 +24,19 @@ describe('OutlierDetailsDialog', () => {
     expect(screen.getByTestId('boxplot')).toBeInTheDocument()
   })
 
+  it('puts the inspected column first, in a wide dialog whose cells do not wrap (B-28)', async () => {
+    vi.mocked(outlierApi.details).mockResolvedValue({ ...details,
+      outliers: { ...details.outliers, columns: ['date', 'who', 'amount'], rows: [['2024-01-01', 'r20', 1000]] } })
+    render(<OutlierDetailsDialog datasetId={5} column="amount" onClose={() => {}} />)
+    await waitFor(() => expect(screen.getByText('r20')).toBeInTheDocument())
+    expect(screen.getAllByRole('columnheader').map(h => h.textContent)).toEqual(['amount', 'date', 'who'])
+    const cells = screen.getAllByRole('row')[1].querySelectorAll('td')
+    expect(cells[0]).toHaveTextContent(/^1,?000$/)
+    expect(cells[1]).toHaveTextContent('2024-01-01')
+    expect(cells[1]).toHaveStyle({ whiteSpace: 'nowrap' })
+    expect(screen.getByRole('dialog').style.width).toBe('min(960px, 94vw)')
+  })
+
   it('surfaces the server error for a denied or missing column', async () => {
     vi.mocked(outlierApi.details).mockRejectedValue({ response: { data: { detail: "Column 'amount' not found" } } })
     render(<OutlierDetailsDialog datasetId={5} column="amount" onClose={() => {}} />)

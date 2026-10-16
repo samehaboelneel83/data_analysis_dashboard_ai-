@@ -10,10 +10,11 @@ from ..core.database import get_db
 from ..core.said_errors import refused
 from ..core.config import settings
 from ..core.org_scope import check_org
+from ..core import role_permissions as _role_permissions
 from ..core.capability import (readable_dataset_ids, require_dataset_capability,
                                require_dataset_read, require_dataset_write)
-from ..core.rls import resolve_denied_columns, resolve_rls_expr
-from ..dependencies import get_current_user, require_org_admin, ai_meter
+from ..core.rls import author_items_over_denied, resolve_denied_columns, resolve_rls_expr
+from ..dependencies import get_current_user, require_org_admin, ai_meter, require_role_capability
 from ..services.llm import UsageMeter
 from ..services.audit import record as audit
 from pydantic import BaseModel, Field
@@ -54,6 +55,40 @@ class _SizeBudget:
                      f"for a single batch")
 
 
+_VISIBLE_ROWS_CACHE: dict[tuple, int] = {}
+
+
+async def _visible_row_count(filename: str, rls_expr: str, denied: set[str]) -> int:
+    """Rows of an uploaded file a row rule leaves, cached per file version and
+    expression (the dataset list asks for every dataset at once). Fails closed:
+    a rule that cannot be evaluated leaves 0 rows, as it does everywhere else.
+    Only a count leaves this frame, but it is secured like every other base
+    frame (row rule, then the reader's denied columns dropped)."""
+    import os
+    try:
+        st = os.stat(filename)
+        key = (filename, st.st_mtime, st.st_size, rls_expr)
+    except OSError:
+        return 0
+    if key in _VISIBLE_ROWS_CACHE:
+        return _VISIBLE_ROWS_CACHE[key]
+
+    def _count() -> int:
+        from ..services.ingest import load_file
+        from ..services.widget_data import apply_rls_filter
+        frame = apply_rls_filter(load_file(filename), rls_expr)
+        return int(len(frame.drop(columns=[c for c in denied if c in frame.columns])))
+    try:
+        n = await asyncio.to_thread(_count)
+    except Exception:                                        # noqa: BLE001
+        logger.warning("visible row count failed for %s", filename, exc_info=True)
+        return 0
+    if len(_VISIBLE_ROWS_CACHE) > 512:
+        _VISIBLE_ROWS_CACHE.clear()
+    _VISIBLE_ROWS_CACHE[key] = n
+    return n
+
+
 async def _without_denied_columns(db: AsyncSession, current_user: User, ds: Dataset,
                                   *, with_knowledge: bool = False) -> DatasetOut:
     """Serialize a Dataset with any column this role is denied on it removed
@@ -69,6 +104,21 @@ async def _without_denied_columns(db: AsyncSession, current_user: User, ds: Data
     denied = set(await resolve_denied_columns(db, current_user, ds.id))
     if denied:
         item.columns = [c for c in item.columns if c.name not in denied]
+        # A calculated column over a denied column names it in its formula and
+        # derives its values from it (QA E-13): gone for this reader too.
+        hidden_calc, _ = author_items_over_denied(item.calculated_columns, [], denied)
+        item.calculated_columns = [c for c in item.calculated_columns
+                                   if not (isinstance(c, dict) and c.get("name") in hidden_calc)]
+        # The stored count includes the hidden columns: "13 columns" next to a
+        # list of 12 says one is hidden (QA E-14).
+        item.col_count = max(0, (item.col_count or 0) - len({c.name for c in ds.columns} & denied))
+    # Same for rows: the stored count is everyone's. A reader under a row rule
+    # gets the rows that rule leaves them, never the total (QA E-14).
+    rls_expr = await resolve_rls_expr(db, current_user, ds.id)
+    if rls_expr is not None:
+        item.row_count_restricted = True
+        if ds.mode != "directquery" and ds.filename:
+            item.row_count = await _visible_row_count(ds.filename, rls_expr, denied)
     # Columns the prep pipeline creates (a partition, a split) are real to
     # every widget but absent from the uploaded file's column list; list them
     # so the pickers can offer them. Negative ids: they have no stored row.
@@ -87,6 +137,15 @@ async def _without_denied_columns(db: AsyncSession, current_user: User, ds: Data
     # a shelf of them. The single-dataset read is what the builder and the
     # dataset page load, and they are the surfaces that show this.
     if with_knowledge:
+        # Whether THIS reader may change the data model (calculated columns,
+        # measures): lets the UI hide edit/delete the server would refuse
+        # (QA E-13). Single read only -- a few queries per dataset.
+        from ..core.capability import require_dataset_capability
+        try:
+            await require_dataset_capability(db, current_user, ds.id, "data")
+            item.can_model = True
+        except HTTPException:
+            item.can_model = False
         from ..services import knowledge as knowledge_service
         try:
             know = await knowledge_service.for_dataset(db, ds, denied=denied)
@@ -565,7 +624,7 @@ async def upload_dataset(
     description: str = Form(""),
     sheet: str = Form(""),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role_capability("upload_data")),
 ):
     # An Access file holds many tables and so yields many datasets, which cannot
     # be returned as one DatasetOut. Rejecting here (rather than widening this
@@ -795,7 +854,7 @@ async def upload_datasets(
     description: str = Form(""),
     mode: str = Form("separate"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role_capability("upload_data")),
 ):
     """Upload several files at once.
 
@@ -1357,6 +1416,7 @@ async def export_dataset(
     ds = (await db.execute(select(Dataset).where(Dataset.id == dataset_id))).scalar_one_or_none()
     check_org(ds, current_user, "Dataset not found")
     await require_dataset_read(db, current_user, dataset_id)
+    _role_permissions.check(current_user, "export")       # QA E-08
     policy_ds = await _policy_dataset(db, ds)
     if _exports_disabled(policy_ds, fmt, await _dataset_has_security(db, dataset_id)):
         raise HTTPException(403, "Exports are disabled for this dataset")
@@ -1399,7 +1459,9 @@ async def list_calculated_columns(dataset_id: int, db: AsyncSession = Depends(ge
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
     await require_dataset_read(db, current_user, dataset_id)
-    return ds.calculated_columns or []
+    denied = await resolve_denied_columns(db, current_user, dataset_id)
+    hidden, _ = author_items_over_denied(ds.calculated_columns, [], denied)
+    return [c for c in (ds.calculated_columns or []) if not (isinstance(c, dict) and c.get("name") in hidden)]
 
 
 @router.put("/{dataset_id}/calculated-columns")
@@ -1572,7 +1634,11 @@ async def list_measures(dataset_id: int, db: AsyncSession = Depends(get_db), cur
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
     await require_dataset_read(db, current_user, dataset_id)
-    return ds.measures or []
+    # A measure over a column this reader is denied shows its formula -- and so
+    # the hidden column's name and use (QA E-13): left out for them.
+    denied = await resolve_denied_columns(db, current_user, dataset_id)
+    _, hidden = author_items_over_denied(ds.calculated_columns, ds.measures, denied)
+    return [m for m in (ds.measures or []) if not (isinstance(m, dict) and m.get("name") in hidden)]
 
 
 @router.post("/{dataset_id}/measures")
@@ -2060,6 +2126,13 @@ async def try_data_checks(dataset_id: int, db: AsyncSession = Depends(get_db),
     from ..services.data_checks import known_types
     results = evaluate(df, await load_checks(db, ds.id), previous_rows=None,
                        known_types=await known_types(db, ds.id))
+    # AD-17: a manual run leaves a line in Monitoring > Activity -- counts
+    # only, nothing from the rows. The check results themselves are not
+    # stored: this endpoint stays a "would my checks pass?" preview.
+    from ..services.data_checks import summarize, summary_text
+    await audit(db, current_user, "dataset.checks_run", "dataset", ds.id,
+                summary_text(int(len(df)), summarize(results)))
+    await db.commit()
     import json as _json
     return {"rows": int(len(df)), "results": _json.loads(_json.dumps(results, default=str))}
 
@@ -2435,36 +2508,67 @@ async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
         from ..services import jobs as job_service
         from ..services.suggest_jobs import PANEL_JOB_KIND
         from ..services import ai_context
+        from ..services import llm_endpoints as _llm_endpoints
+        job_off = _llm_endpoints.is_off()           # F-11: "Off -- no AI" travels with the job
         goal = (await ai_context.for_dataset(db, current_user, ds, req.goal)
-                if (req.goal or "").strip() or req.use_profile else "")
+                if not job_off and ((req.goal or "").strip() or _asked_for_profile(req)) else "")
         job, _ = await job_service.enqueue(
             db, user=current_user, kind=PANEL_JOB_KIND,
-            inputs={"dataset_id": dataset_id, "goal": goal, "size": req.size, "fresh": req.fresh},
+            inputs={"dataset_id": dataset_id, "goal": goal, "size": req.size, "fresh": req.fresh,
+                    **({"ai_off": True} if job_off else {})},
             subject=f"Analyst panel: {ds.name}", max_attempts=2)
         return {"job_id": job.id, "state": job.state, "source": "panel"}
 
+    # Their own words, then what they and others have written about them and
+    # this data (profile, connection, dataset) -- services/ai_context.py.
+    # B-10: a blank box is the statistics engine ("no AI involved"); the
+    # profile's "about me" stands in only when the caller asked for it.
+    from ..services import ai_context
+    from ..services import llm_endpoints
+    # F-11: "Off -- no AI" in the top bar: the statistics engine, said so.
+    ai_off = llm_endpoints.is_off()
+    goal = (await ai_context.for_dataset(db, current_user, ds, req.goal)
+            if not ai_off and ((req.goal or "").strip() or _asked_for_profile(req)) else "")
+    # F-03 / AD-01: with every endpoint just seen down, do not wait on one.
+    ai_ok = bool(goal) and llm_endpoints.model_available()[0]
     try:
-        inputs = await sug.prepare(db, current_user, ds)
+        # No goal, or no model: nothing in preparing should ask one either
+        # (column classes).
+        inputs = await sug.prepare(db, current_user, ds, ask_model=ai_ok)
     except sug.SuggestUnavailable as exc:
         raise HTTPException(exc.status, exc.message)
     df, type_map, profile = inputs.df, inputs.type_map, inputs.profile
     probe, drawn, know = inputs.probe, inputs.drawn, inputs.knowledge
 
-    # Their own words, then what they and others have written about them and
-    # this data (profile, connection, dataset) -- services/ai_context.py.
-    from ..services import ai_context
-    goal = (await ai_context.for_dataset(db, current_user, ds, req.goal)
-            if (req.goal or "").strip() or req.use_profile else "")
+    if goal and not ai_ok:
+        return await _statistics_answer(sug, inputs, reason=AI_UNREACHABLE)
     if req.mode == "panel":
         return await sug.panel(inputs, goal, req.size, fresh=req.fresh)
     fields: dict = {"facts": []}
     from ..services.analyst_panel import selection_mode
+    from ..services.ai_deadline import AiStepTimeout, ai_step
     if goal and selection_mode() == "cards":
         # The validated set is the single source of truth: the model chooses
         # among charts already built and drawn (the panel in "cards" mode --
         # one question-reading call and one choosing call), instead of the
         # quick designer inventing its own (settings.suggest_ai_selection).
-        out = await sug.panel(inputs, goal, 24, fresh=req.fresh)
+        from ..services.llm import get_client
+        try:
+            model = get_client()
+        except Exception:                                    # noqa: BLE001
+            model = None
+        if model is None or not getattr(model, "enabled", True):
+            return await _statistics_answer(sug, inputs, reason=AI_UNREACHABLE)
+        try:
+            out = await ai_step(sug.panel(inputs, goal, 24, fresh=req.fresh, client=model),
+                                seconds=SUGGEST_AI_SECONDS, what="Suggest dashboards")
+        except AiStepTimeout:
+            return await _statistics_answer(sug, inputs, reason=AI_UNREACHABLE)
+        picks = (out.get("panel") or {}).get("chosen", len(out.get("proposals") or []))
+        if not picks and getattr(model, "last_error", None):
+            # The model never answered, so nothing was chosen for the goal:
+            # the statistics' pages, said to be such, not "chosen by the AI".
+            return await _statistics_answer(sug, inputs, reason=AI_UNREACHABLE)
         return {**out, "question": None}
     if goal:
         # Measured facts, not column shapes: the designer proposes for the
@@ -2504,11 +2608,14 @@ async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
         df, type_map, profile = inputs.df, inputs.type_map, inputs.profile
         probe, drawn = inputs.probe, inputs.drawn
         from ..services.suggest_dataset_dashboard import suggest_for_dataset
-        proposals, reason = await suggest_for_dataset(
-            profile, goal, req.count, probe=probe, knowledge=know, facts=facts["text"],
-            column_meta=inputs.column_meta, mixed_units=facts.get("mixed_units"),
-            one_to_one=facts.get("one_to_one"), identical=facts.get("identical"),
-            edges=facts.get("edges"))
+        try:
+            proposals, reason = await ai_step(suggest_for_dataset(
+                profile, goal, req.count, probe=probe, knowledge=know, facts=facts["text"],
+                column_meta=inputs.column_meta, mixed_units=facts.get("mixed_units"),
+                one_to_one=facts.get("one_to_one"), identical=facts.get("identical"),
+                edges=facts.get("edges")), seconds=SUGGEST_AI_SECONDS, what="Suggest dashboards")
+        except AiStepTimeout:
+            return await _statistics_answer(sug, inputs, reason=AI_UNREACHABLE)
         source = "model"
     else:
         # No goal, no model: the panel's own statistics -- findings, the
@@ -2516,9 +2623,7 @@ async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
         # records and a drill-through page -- rather than one page of findings
         # (statistics engine 41% of the analysts' questions on one page,
         # five-dataset review 2026-10-02). Same gate, same selection, no model.
-        out = await sug.panel(inputs, None, 24, client=None)
-        return {**out, "source": "insights", "question": None,
-                "proposals": [{**p, "source": "insights"} for p in out["proposals"]]}
+        return await _statistics_answer(sug, inputs, reason=AI_OFF if ai_off else None)
 
     # Each widget states what it actually drew. The proposal's own `why` (a
     # model's expectation, or a finding's text) stays beside it, so a reader
@@ -2566,6 +2671,34 @@ async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
             # off a sample is still a good dashboard; presenting it as though it
             # had seen everything is what would not be.
             "measured": inputs.measured}
+
+
+#: F-03: the longest a model-designed suggestion may take before the
+#: statistics engine answers instead (the browser gives up at 300 s).
+SUGGEST_AI_SECONDS = 240
+#: `reason` when the statistics engine answered because the model could not.
+AI_UNREACHABLE = "ai_unreachable"
+#: `reason` when the person turned AI off in the top-bar picker (F-11).
+AI_OFF = "ai_off"
+_REASON_I18N = {AI_UNREACHABLE: "sdd.aiUnreachable", AI_OFF: "sdd.aiOff"}
+
+
+def _asked_for_profile(req) -> bool:
+    """B-10: only an explicit `use_profile: true` lets the profile's text
+    stand in for a blank goal; the default no longer turns a blank box (which
+    promises "no AI") into a model call."""
+    return bool(req.use_profile) and "use_profile" in req.model_fields_set
+
+
+async def _statistics_answer(sug, inputs, *, reason: str | None = None) -> dict:
+    """The statistics engine's pages: no model, deterministic, instant."""
+    out = await sug.panel(inputs, None, 24, client=None)
+    answer = {**out, "source": "insights", "question": None,
+              "proposals": [{**p, "source": "insights"} for p in out["proposals"]]}
+    if reason:
+        answer["reason"] = reason
+        answer["reason_i18n"] = {"key": _REASON_I18N.get(reason, "sdd.aiUnreachable")}
+    return answer
 
 
 def _drawn_key(widget_type, config) -> str:
@@ -3323,6 +3456,38 @@ async def get_prep_steps(dataset_id: int, db: AsyncSession = Depends(get_db), cu
     return prep_steps_of(ds)
 
 
+async def _refuse_many_row_cell_edits(ds: Dataset, steps: list[dict]) -> None:
+    """B-08: an edit_cells correction finds its row by the key's value; a value
+    several rows share rewrites every one of them. A NEW correction (one not in
+    the saved pipeline) whose key matches more than one row of the dataset is
+    refused unless its step says `allow_many` -- the grid sets that after the
+    person confirmed "this changes N rows". Corrections already saved are left
+    alone: the pipeline is written wholesale, and an old one must not block
+    every later save."""
+    from ..services.prep import prep_steps_of
+    saved = {(st.get("key_column"), st.get("column"), str(e.get("key")))
+             for st in prep_steps_of(ds) if isinstance(st, dict) and st.get("kind") == "edit_cells"
+             for e in st.get("edits") or [] if isinstance(e, dict)}
+    new = [(st["key_column"], str(e.get("key")))
+           for st in steps if isinstance(st, dict) and st.get("kind") == "edit_cells" and not st.get("allow_many")
+           for e in st.get("edits") or []
+           if isinstance(e, dict) and (st.get("key_column"), st.get("column"), str(e.get("key"))) not in saved]
+    if not new or not ds.filename:
+        return
+    try:
+        df = await asyncio.to_thread(load_file, ds.filename)
+    except Exception:                                       # noqa: BLE001 -- the file is checked elsewhere
+        return
+    for key_column, key in new:
+        if key_column not in df.columns:
+            continue
+        n = int((df[key_column].astype(str) == key).sum())
+        if n > 1:
+            raise HTTPException(400, f"'{key_column}' = '{key}' matches {n} rows, so this correction would "
+                                     f"change all {n} of them. Pick a column that is unique per row, or "
+                                     f"confirm the change for every matching row.")
+
+
 @router.put("/{dataset_id}/prep-steps")
 async def set_prep_steps(dataset_id: int, steps: list[dict], db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Replace the dataset's prep pipeline wholesale (same replace-don't-merge
@@ -3355,6 +3520,7 @@ async def set_prep_steps(dataset_id: int, steps: list[dict], db: AsyncSession = 
         validate_prep_steps(steps, known, join_columns)
     except ValueError as e:
         raise refused(400, e)
+    await _refuse_many_row_cell_edits(ds, steps)
 
     meta = dict(ds.column_meta or {})
     if steps:
@@ -3805,7 +3971,7 @@ async def _validated_join_columns(
     return join_columns
 
 
-async def _refuse_if_ungovernable(db: AsyncSession, source_ids: list[int]) -> dict:
+async def _refuse_if_ungovernable(db: AsyncSession, source_ids: list[int], *, what: str = "snapshot") -> dict:
     """Refuse to snapshot governed data, and honour every source's export policy.
 
     **The security decision this feature turns on.** Every read applies the
@@ -3832,6 +3998,12 @@ async def _refuse_if_ungovernable(db: AsyncSession, source_ids: list[int]) -> di
     strictest: dict | bool | None = None
     for sid in source_ids:
         if await _dataset_has_security(db, sid):
+            if what == "dataflow":
+                raise HTTPException(
+                    403, "A dataflow cannot read a dataset with row- or column-security "
+                         "rules: its output would freeze one person's filtered view as "
+                         "everyone's data. Remove the rules, or build the dataflow on a "
+                         "dataset without them.")
             raise HTTPException(
                 403, "Cannot save a snapshot of a dataset that has row- or "
                      "column-security rules: the result would freeze one "
@@ -3911,7 +4083,9 @@ async def _write_frame_as_dataset_file(db: AsyncSession, org_id: int, out):
 @router.post("/{dataset_id}/materialize", response_model=DatasetOut)
 async def materialize_dataset(
     dataset_id: int, req: MaterializeRequest,
-    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    # QA E-08: a new dataset, whatever it is made from, is "Add data".
+    current_user: User = Depends(require_role_capability("upload_data")),
 ):
     """Run this dataset's pipeline once and save the result as a NEW dataset.
 
@@ -4110,7 +4284,9 @@ async def _build_aggregate_file(db: AsyncSession, current_user: User, ds: Datase
 @router.post("/{dataset_id}/aggregates", response_model=DatasetOut, status_code=201)
 async def create_aggregate(
     dataset_id: int, req: AggregateCreateRequest,
-    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    # QA E-08: a new dataset, whatever it is made from, is "Add data".
+    current_user: User = Depends(require_role_capability("upload_data")),
 ):
     """A scheduled GROUP BY over a DirectQuery dataset, saved as a new dataset.
 
@@ -4449,9 +4625,16 @@ async def data_preview(dataset_id: int, req: DataPreviewRequest, db: AsyncSessio
         check_org(source, current_user, "Data source not found")
         source_cfg = dict(source.config or {})
         source_cfg["type"] = source.type
+        # B-19: one PAGE, read in a stable order with the exact total
+        # (direct_query._run_table_page). Without `page` a table over the row
+        # cap was a random sample, reshuffled on every Next/Prev, and the
+        # offset was ignored.
+        dq_config: dict = {"page": {"offset": max(0, req.offset), "size": max(1, min(req.limit, 500))}}
+        if req.sort_by:
+            dq_config.update(sort_col=req.sort_by, sort=req.sort_dir)
         try:
             result = run_direct_query(
-                source_cfg, ds, {}, widget_type="table", rls_filter_expr=rls_expr,
+                source_cfg, ds, dq_config, widget_type="table", rls_filter_expr=rls_expr,
                 cache_ttl_seconds=source.cache_ttl_seconds, cache_epoch=source.cache_epoch,
                 org_id=current_user.org_id,
             )

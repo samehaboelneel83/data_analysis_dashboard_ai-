@@ -30,13 +30,21 @@ vi.mock('../../services/api', () => ({
     autoGenerate: vi.fn().mockResolvedValue({ proposals: [] }),
     preflight: vi.fn().mockResolvedValue({ columns: [], denied: [] }),
   },
-  adminRolesApi: { list: vi.fn().mockResolvedValue([{ id: 1, name: 'Analyst', is_org_admin: false }]) },
+  adminRolesApi: { list: vi.fn().mockResolvedValue([
+    { id: 1, name: 'Analyst', is_org_admin: false }, { id: 3, name: 'Admin', is_org_admin: true }]) },
   datasetsApi: { list: vi.fn().mockResolvedValue([dataset, dataset2]) },
+  orgUnitsApi: { list: vi.fn().mockResolvedValue([]) },
 }))
 
-import { adminRlsRulesApi } from '../../services/api'
+import { adminRlsRulesApi, orgUnitsApi } from '../../services/api'
 
 const renderPage = () => render(<ConfirmProvider><AdminRowSecurityRules /></ConfirmProvider>)
+
+// Nothing is pre-selected (QA E-05), so a test picks the role and dataset itself.
+const pickRoleAndDataset = (datasetId = '1') => {
+  fireEvent.change(screen.getByLabelText('Role *'), { target: { value: '1' } })
+  fireEvent.change(screen.getByLabelText('Dataset *'), { target: { value: datasetId } })
+}
 
 describe('AdminRowSecurityRules load failure', () => {
   it('shows a persistent LoadError banner instead of the empty-state cards when the initial load fails', async () => {
@@ -69,6 +77,7 @@ describe('AdminRowSecurityRules — S0b codeless builder', () => {
     renderPage()
     await waitFor(() => expect(screen.getByRole('button', { name: 'New rule' })).not.toBeDisabled())
     fireEvent.click(screen.getByRole('button', { name: 'New rule' }))
+    pickRoleAndDataset()
 
     const columnSelect = screen.getByLabelText('Column') as HTMLSelectElement
     const suggestedGroup = columnSelect.querySelector('optgroup[label="Suggested (looks like a user/owner column)"]')
@@ -81,6 +90,7 @@ describe('AdminRowSecurityRules — S0b codeless builder', () => {
     renderPage()
     await waitFor(() => expect(screen.getByRole('button', { name: 'New rule' })).not.toBeDisabled())
     fireEvent.click(screen.getByRole('button', { name: 'New rule' }))
+    pickRoleAndDataset()
 
     expect(screen.getByText('owner_email == USEREMAIL()')).toBeInTheDocument()
   })
@@ -89,6 +99,7 @@ describe('AdminRowSecurityRules — S0b codeless builder', () => {
     renderPage()
     await waitFor(() => expect(screen.getByRole('button', { name: 'New rule' })).not.toBeDisabled())
     fireEvent.click(screen.getByRole('button', { name: 'New rule' }))
+    pickRoleAndDataset()
 
     fireEvent.change(screen.getByLabelText('Column'), { target: { value: 'region' } })
     fireEvent.change(screen.getByLabelText('Match'), { target: { value: 'literal' } })
@@ -102,6 +113,7 @@ describe('AdminRowSecurityRules — S0b codeless builder', () => {
     renderPage()
     await waitFor(() => expect(screen.getByRole('button', { name: 'New rule' })).not.toBeDisabled())
     fireEvent.click(screen.getByRole('button', { name: 'New rule' }))
+    pickRoleAndDataset()
 
     fireEvent.click(screen.getByRole('button', { name: 'Use this expression' }))
     expect(screen.getByPlaceholderText("region == 'North'")).toHaveValue('owner_email == USEREMAIL()')
@@ -117,6 +129,7 @@ describe('AdminRowSecurityRules — S0b codeless builder', () => {
     renderPage()
     await waitFor(() => expect(screen.getByRole('button', { name: 'New rule' })).not.toBeDisabled())
     fireEvent.click(screen.getByRole('button', { name: 'New rule' }))
+    pickRoleAndDataset()
 
     expect((screen.getByLabelText('Column') as HTMLSelectElement).value).toBe('owner_email')
     expect(screen.getByText('owner_email == USEREMAIL()')).toBeInTheDocument()
@@ -163,6 +176,7 @@ describe('AdminRowSecurityRules — S0c auto-generate', () => {
     renderPage()
     await waitFor(() => expect(screen.getByRole('button', { name: /Auto-generate rules/ })).not.toBeDisabled())
     fireEvent.click(screen.getByRole('button', { name: /Auto-generate rules/ }))
+    pickRoleAndDataset()
 
     await waitFor(() => expect(screen.getByText('`owner_email` == USEREMAIL()')).toBeInTheDocument())
 
@@ -180,6 +194,7 @@ describe('overlap notice', () => {
     vi.mocked(adminRlsRulesApi.preflight).mockResolvedValue({ columns: ['region'], denied: ['region'] })
     renderPage()
     fireEvent.click(await screen.findByRole('button', { name: /new rule/i }))
+    pickRoleAndDataset()
     fireEvent.change(screen.getByPlaceholderText("region == 'North'"), { target: { value: "region == 'North'" } })
     // 300 ms debounce inside a 1 s default findBy is the load-flake shape; give it room.
     expect(await screen.findByText(/reads region, which this role cannot see/i, {}, { timeout: 3000 })).toBeInTheDocument()
@@ -217,5 +232,59 @@ describe('AdminRowSecurityRules — U1 row action menu', () => {
     fireEvent.click(within(dlg).getByRole('button', { name: /Delete/i }))
 
     await waitFor(() => expect(adminRlsRulesApi.delete).toHaveBeenCalledWith(1))
+  })
+})
+
+describe('AdminRowSecurityRules — nothing pre-selected (QA E-05)', () => {
+  it('New rule starts with no role and no dataset, and admin roles cannot be picked', async () => {
+    renderPage()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'New rule' })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('button', { name: 'New rule' }))
+    expect(screen.getByLabelText('Role *')).toHaveValue('')
+    expect(screen.getByLabelText('Dataset *')).toHaveValue('')
+    const admin = screen.getByRole('option', { name: /Admin \(admin, rules don.t apply\)/ }) as HTMLOptionElement
+    expect(admin.disabled).toBe(true)
+  })
+
+  it('Auto-generate starts with no role and no dataset, and admin roles cannot be picked', async () => {
+    vi.mocked(adminRlsRulesApi.autoGenerate).mockClear()
+    renderPage()
+    await waitFor(() => expect(screen.getByRole('button', { name: /Auto-generate rules/ })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('button', { name: /Auto-generate rules/ }))
+    expect(screen.getByLabelText('Role *')).toHaveValue('')
+    expect(screen.getByLabelText('Dataset *')).toHaveValue('')
+    expect((screen.getByRole('option', { name: /Admin \(admin/ }) as HTMLOptionElement).disabled).toBe(true)
+    expect(adminRlsRulesApi.autoGenerate).not.toHaveBeenCalled()
+  })
+})
+
+describe('MYSCOPE hint examples (QA E-18 step 4)', () => {
+  const unit = (id: number, name: string, match_value: string) =>
+    ({ id, parent_id: null, name, level_name: null, match_value, position: id, child_count: 0 })
+
+  it('lists a few of the scope values the organization chart gives today', async () => {
+    vi.mocked(orgUnitsApi.list).mockResolvedValueOnce([
+      unit(1, 'Cairo Branch', 'Cairo'), unit(2, 'Giza Branch', 'Giza'), unit(3, 'Alex', 'Alexandria'),
+      unit(4, 'Aswan', 'Aswan'), unit(5, 'Luxor', 'Luxor'), unit(6, 'Suez', 'Suez'), unit(7, 'Dup', 'Cairo'),
+    ] as never)
+    renderPage()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'New rule' })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('button', { name: 'New rule' }))
+    pickRoleAndDataset()
+    fireEvent.change(screen.getByLabelText('Match'), { target: { value: 'myscope' } })
+    const examples = await screen.findByTestId('myscope-examples')
+    expect(examples).toHaveTextContent('Cairo')
+    expect(examples).toHaveTextContent('Luxor')
+    expect(examples).not.toHaveTextContent('Suez')
+    expect(examples).toHaveTextContent('+1 more')
+  })
+
+  it('says so when no unit exists yet', async () => {
+    renderPage()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'New rule' })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('button', { name: 'New rule' }))
+    pickRoleAndDataset()
+    fireEvent.change(screen.getByLabelText('Match'), { target: { value: 'myscope' } })
+    expect(await screen.findByTestId('myscope-examples')).toHaveTextContent('No units yet')
   })
 })

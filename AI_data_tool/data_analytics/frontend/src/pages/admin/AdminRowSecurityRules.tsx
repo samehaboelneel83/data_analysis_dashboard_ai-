@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { fieldStyle } from '../../components/ui/fieldStyle'
 import { useT, type MessageKey } from '../../i18n'
 import { nodesT } from '../../i18n/pages/adminSecurity'
-import { adminRlsRulesApi, adminRolesApi, datasetsApi } from '../../services/api'
+import { adminRlsRulesApi, adminRolesApi, datasetsApi, orgUnitsApi } from '../../services/api'
 import type { RowSecurityRule, RlsRuleProposal, Role, Dataset, DatasetColumn } from '../../services/api'
 import toast from 'react-hot-toast'
 import { Z_OVERLAY } from '../../lib/zIndex'
@@ -56,8 +56,8 @@ function RuleModal({ initial, roles, datasets, onSave, onClose }: {
   const t = useT()
   const dialogRef = useModalDialog<HTMLDivElement>(onClose)
   const isEdit = !!initial
-  const [roleId, setRoleId] = useState<number | ''>(initial?.role_id ?? roles[0]?.id ?? '')
-  const [datasetId, setDatasetId] = useState<number | ''>(initial?.dataset_id ?? datasets[0]?.id ?? '')
+  const [roleId, setRoleId] = useState<number | ''>(initial?.role_id ?? '')
+  const [datasetId, setDatasetId] = useState<number | ''>(initial?.dataset_id ?? '')
   const [filterExpr, setFilterExpr] = useState(initial?.filter_expr ?? '')
   const [saving, setSaving] = useState(false)
   const [overlap, setOverlap] = useState<string[]>([])
@@ -86,6 +86,22 @@ function RuleModal({ initial, roles, datasets, onSave, onClose }: {
   const otherColumns = dsColumns.filter(c => !isUserishColumn(c))
   const [pickedColumn, setPickedColumn] = useState(suggestedColumns[0]?.name ?? dsColumns[0]?.name ?? '')
   const [matchTarget, setMatchTarget] = useState<MatchTarget>('useremail')
+  // QA E-18 step 4: the values MYSCOPE() can produce in this org today (the
+  // org chart's match values), read once when the admin picks MYSCOPE().
+  const [scopeValues, setScopeValues] = useState<string[] | null>(null)
+  useEffect(() => {
+    if (matchTarget !== 'myscope' || scopeValues !== null) return
+    let live = true
+    ;(async () => {
+      try {
+        const units = await orgUnitsApi.list()
+        if (live) setScopeValues([...new Set(units.map(u => (u.match_value ?? '').trim()).filter(Boolean))])
+      } catch {
+        // Unknown is not "no units": say nothing rather than something wrong.
+      }
+    })()
+    return () => { live = false }
+  }, [matchTarget, scopeValues])
   const [literalValue, setLiteralValue] = useState('')
 
   // Re-derive the picked column whenever the dataset changes — otherwise a column
@@ -136,7 +152,8 @@ function RuleModal({ initial, roles, datasets, onSave, onClose }: {
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{t('pg.adminSecurity.c.roleReq')}</div>
           <select value={roleId} onChange={e => setRoleId(e.target.value ? Number(e.target.value) : '')} disabled={isEdit} title={isEdit ? t('pg.adminSecurity.rls.fixed') : undefined} {...inp}>
             <option value="">{t('pg.adminSecurity.c.selectRole')}</option>
-            {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            {roles.map(r => <option key={r.id} value={r.id} disabled={r.is_org_admin}>
+              {r.is_org_admin ? t('pg.adminSecurity.c.roleOptionAdminBypass', { name: r.name }) : r.name}</option>)}
           </select>
         </label>
 
@@ -189,6 +206,17 @@ function RuleModal({ initial, roles, datasets, onSave, onClose }: {
                   link: <a href="/admin/org-units">{t('pg.adminSecurity.rls.orgChart')}</a>,
                   code: <code dir="ltr">Sales</code>, // i18n-ok: an example match value
                 })}
+                {scopeValues !== null && (
+                  <div data-testid="myscope-examples" style={{ marginTop: 4 }}>
+                    {scopeValues.length === 0
+                      ? t('pg.adminSecurity.rls.myscopeNoUnits')
+                      : nodesT(t, 'pg.adminSecurity.rls.myscopeExamples', {
+                          values: <>{scopeValues.slice(0, 5).map((v, i) => (
+                            <span key={v}>{i > 0 && t('pg.adminSecurity.rls.myscopeSep')}<code dir="ltr">{v}</code></span>
+                          ))}{scopeValues.length > 5 && <> {t('pg.adminSecurity.rls.myscopeMore', { n: scopeValues.length - 5 })}</>}</>,
+                        })}
+                  </div>
+                )}
               </div>
             )}
 
@@ -262,8 +290,8 @@ function AutoGenerateModal({ roles, datasets, onApplied, onClose }: {
 }) {
   const t = useT()
   const dialogRef = useModalDialog<HTMLDivElement>(onClose)
-  const [roleId, setRoleId] = useState<number | ''>(roles[0]?.id ?? '')
-  const [datasetId, setDatasetId] = useState<number | ''>(datasets[0]?.id ?? '')
+  const [roleId, setRoleId] = useState<number | ''>('')
+  const [datasetId, setDatasetId] = useState<number | ''>('')
   const [proposals, setProposals] = useState<RlsRuleProposal[]>([])
   const [checked, setChecked] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(false)
@@ -331,7 +359,8 @@ function AutoGenerateModal({ roles, datasets, onApplied, onClose }: {
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{t('pg.adminSecurity.c.roleReq')}</div>
           <select aria-label={t('pg.adminSecurity.c.roleReq')} value={roleId} onChange={e => setRoleId(e.target.value ? Number(e.target.value) : '')} {...inp}>
             <option value="">{t('pg.adminSecurity.c.selectRole')}</option>
-            {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            {roles.map(r => <option key={r.id} value={r.id} disabled={r.is_org_admin}>
+              {r.is_org_admin ? t('pg.adminSecurity.c.roleOptionAdminBypass', { name: r.name }) : r.name}</option>)}
           </select>
         </label>
 

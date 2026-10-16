@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { fieldStyle } from '../../components/ui/fieldStyle'
 import { useT } from '../../i18n'
 import { useDirection } from '../../contexts/DirectionContext'
-import { connectorFieldLabel } from '../../i18n/pages/adminPlatform'
+import { connectorFieldLabel, connectorOptionLabel } from '../../i18n/pages/adminPlatform'
 import { Plug, Plus } from 'lucide-react'
 import { customConnectorsApi, dataSourcesApi } from '../../services/api'
 import type { CustomConnector, ConnectorSpec } from '../../services/api'
@@ -33,6 +33,13 @@ function PresetModal({ initial, catalog, onSave, onClose }: {
 
   const spec = catalog.find(s => s.key === baseType)
   const inp = { style: fieldStyle }
+
+  // An emptied field is unset, not "" (the server would read "" as a value).
+  const setValue = (name: string, v: unknown) => setValues(p => {
+    const next = { ...p }
+    if (v === '' || v === undefined) delete next[name]; else next[name] = v
+    return next
+  })
 
   const toggleLocked = (name: string) => setLocked(prev => {
     const next = new Set(prev)
@@ -91,10 +98,22 @@ function PresetModal({ initial, catalog, onSave, onClose }: {
               {/* QA5 F4: not the admin's own login -- distinct name/id and
                   autocomplete off / new-password, so the browser does not
                   fill the admin's saved username and password in here. */}
-              <input value={(values[f.name] as string) ?? ''} onChange={e => setValues(p => ({ ...p, [f.name]: e.target.value }))}
-                type={f.kind === 'password' ? 'password' : 'text'} {...inp}
+              {/* Typed by kind, as in ConnectionModal (QA E-11: Port "abc" and a
+                  free-text TLS mode were accepted). */}
+              {f.kind === 'select' ? (
+                <select value={(values[f.name] as string) ?? ''} onChange={e => setValue(f.name, e.target.value)} {...inp}
+                  id={`connector-${f.name}`} name={`connector-${f.name}`}>
+                  <option value="">—</option>
+                  {f.options.map(o => <option key={o} value={o}>{connectorOptionLabel(t, language, f.name, o)}</option>)}
+                </select>
+              ) : (
+              <input value={(values[f.name] as string | number) ?? ''}
+                onChange={e => setValue(f.name, f.kind === 'number' && e.target.value !== '' ? Number(e.target.value) : e.target.value)}
+                type={f.kind === 'password' ? 'password' : f.kind === 'number' ? 'number' : 'text'} {...inp}
+                {...(f.kind === 'number' ? { min: f.name === 'port' ? 1 : 0, max: f.name === 'port' ? 65535 : undefined, step: 1, inputMode: 'numeric' as const } : {})}
                 id={`connector-${f.name}`} name={`connector-${f.name}`}
                 autoComplete={f.kind === 'password' ? 'new-password' : 'off'} />
+              )}
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--muted)', paddingBottom: 6 }}>
               <input type="checkbox" checked={locked.has(f.name)} onChange={() => toggleLocked(f.name)} />

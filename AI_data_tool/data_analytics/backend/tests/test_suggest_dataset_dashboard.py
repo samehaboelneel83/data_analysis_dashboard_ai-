@@ -349,10 +349,54 @@ class TestACategoryAxisStaysReadable:
         return build_profile(df)
 
     def test_a_bar_chart_over_many_categories_is_capped(self):
+        # F-14: a bar chart is laid on its side and shows up to 20; beyond that, the top 20.
         got = polish_widget(
             {"widget_type": "bar", "title": "x",
              "config": {"dimension": "dept", "measure": "cost", "aggregation": "sum"}},
             self.cfg(26))
+        assert got["config"]["limit"] == 20 and got["config"]["orientation"] == "horizontal"
+        got = polish_widget(
+            {"widget_type": "bar", "title": "x",
+             "config": {"dimension": "dept", "measure": "cost", "aggregation": "sum"}},
+            self.cfg(35))
+        assert got["config"]["limit"] == 20
+
+    def test_fourteen_countries_are_drawn_whole_on_a_bar_chart(self):
+        """F-14: "Rows by country" showed "12 of 14 (row limit)" -- a bar
+        chart of 13 to 20 categories is drawn whole, on its side so the
+        labels fit."""
+        got = polish_widget(
+            {"widget_type": "bar", "title": "x",
+             "config": {"dimension": "dept", "measure": "cost", "aggregation": "count"}},
+            self.cfg(14))
+        assert "limit" not in got["config"] and got["config"]["orientation"] == "horizontal"
+
+    def test_a_tile_of_many_bars_is_tall_enough_for_them(self):
+        """F-14 step 2: 14 bars on their side in a 4-row tile were stubs
+        under crowded labels; the tile grows with the bars it draws."""
+        from app.services.analyst_panel import layout_section
+        bar = {"widget_type": "bar", "title": "Rows by country", "row_count": 14,
+               "config": {"dimension": "country", "aggregation": "count", "orientation": "horizontal"}}
+        few = {"widget_type": "bar", "title": "Rows by region", "row_count": 5,
+               "config": {"dimension": "region", "aggregation": "count"}}
+        slots = {w["title"]: s for w, s in layout_section([bar, few], "composition")}
+        assert slots["Rows by country"]["h"] >= 7          # ceil(14 / 3) + 2
+        assert next(iter(s for _w, s in layout_section([few], "composition")))["h"] == 4
+        many = {**bar, "row_count": 60}
+        assert layout_section([many], "composition")[0][1]["h"] <= 9
+
+    def test_an_orientation_the_model_chose_is_kept(self):
+        got = polish_widget(
+            {"widget_type": "bar", "title": "x",
+             "config": {"dimension": "dept", "measure": "cost", "aggregation": "sum", "orientation": "vertical"}},
+            self.cfg(14))
+        assert got["config"]["orientation"] == "vertical" and "limit" not in got["config"]
+
+    def test_a_ring_of_many_slices_is_still_cut_to_twelve(self):
+        got = polish_widget(
+            {"widget_type": "donut", "title": "x",
+             "config": {"dimension": "dept", "measure": "cost", "aggregation": "sum"}},
+            self.cfg(14))
         assert got["config"]["limit"] == 12
 
     def test_a_handful_of_categories_is_left_alone(self):
