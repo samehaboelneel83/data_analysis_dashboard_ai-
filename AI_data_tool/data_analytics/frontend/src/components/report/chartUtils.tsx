@@ -156,7 +156,23 @@ export function measureFormat(fmt: CalcColumnFormat | null | undefined, aggregat
   const agg = typeof aggregation === 'string' ? aggregation.toLowerCase() : ''
   if (isCountAggregation(agg)) return { type: 'integer' } as CalcColumnFormat
   if (agg === 'pct') return { type: 'percent', decimals: 1 } as CalcColumnFormat
+  // UAT-9: the average of a true/false column is the share that is true --
+  // 51%, not 0.51 (marker from withTrueFalseMeasure; never an author's format).
+  if (fmt?.true_false) return ['avg', 'mean', 'average'].includes(agg)
+    ? { type: 'percent', decimals: 1, ratio: true } as CalcColumnFormat : undefined
   return fmt ?? undefined
+}
+
+/** UAT-9: the formats a widget draws with, given its widget-data result.
+ *  The server says when the measure is the average of a true/false column
+ *  (`measure_true_false`: the source holds a bool, which the column type
+ *  cannot show); the measure then gets the true/false marker, which
+ *  measureFormat turns into a percent. An author's own format wins. */
+export function withTrueFalseMeasure<F extends object>(formats: Record<string, F | undefined>, measure: unknown,
+                                                        data: unknown): Record<string, F | undefined> {
+  if (!(data as { measure_true_false?: unknown } | null)?.measure_true_false
+      || typeof measure !== 'string' || !measure || formats[measure]) return formats
+  return { ...formats, [measure]: { type: 'none', true_false: true } as unknown as F }
 }
 
 /** One measure value as text, the same way in every table, crosstab, matrix,
@@ -203,7 +219,7 @@ function fmtStrLatin(value: unknown, fmt?: CalcColumnFormat | null): string {
         ? isolateLtr(`${pre}${loc(num)} ${sym}${suf}`)
         : isolateLtr(`${pre}${sym} ${loc(num)}${suf}`)
     }
-    case 'percent':  return isNaN(num) ? '—' : isolateLtr(`${pre}${num.toFixed(dec)}%${suf}`)
+    case 'percent':  return isNaN(num) ? '—' : isolateLtr(`${pre}${(fmt.ratio ? num * 100 : num).toFixed(dec)}%${suf}`)
     case 'bar':      return isNaN(num) ? '—' : loc(num, 1)
     case 'badge':    return isNaN(num) ? '—' : `${pre}${loc(num)}${suf}`
     case 'colorscale': return isNaN(num) ? '—' : `${pre}${loc(num)}${suf}`

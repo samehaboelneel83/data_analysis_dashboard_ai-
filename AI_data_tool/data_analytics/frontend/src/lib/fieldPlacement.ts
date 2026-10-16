@@ -38,7 +38,15 @@ export function coordinateAxis(column: string): 'lat' | 'lon' | null {
 
 const COORD_ROLES = new Set(['lat', 'lon', 'lat2', 'lon2'])
 
-export function roleForField(specs: RoleField[], config: Record<string, unknown>, column: string, numeric: boolean): RoleField | null {
+/**
+ * UAT-2: `countsText` -- the widget may count a text field in its Measure
+ * (COUNT_MEASURE_WIDGETS). Then a text field given to a widget that needs
+ * nothing BUT a measure -- a KPI, whose dimension is optional and only picks
+ * one group's value -- fills the measure (to be counted) instead of the
+ * dimension, which made a card read "3", the first order's row count.
+ */
+export function roleForField(specs: RoleField[], config: Record<string, unknown>, column: string, numeric: boolean,
+  countsText = false): RoleField | null {
   const has = (v: unknown) => v === column || (Array.isArray(v) && v.includes(column))
   if (specs.some(rf => has(config[configKeyFor(rf.role)]))) return null
   const empty = specs.filter(rf => !rf.multi && !config[configKeyFor(rf.role)])
@@ -52,7 +60,11 @@ export function roleForField(specs: RoleField[], config: Record<string, unknown>
     && (Array.isArray(config.levels) ? config.levels.length : 0) < HIER_MAX_DEPTH)
   if (!numeric) {
     const fits = empty.filter(rf => !isNumericRole(rf))
-    return fits.find(rf => rf.required) ?? fits[0] ?? levels ?? null
+    const required = fits.find(rf => rf.required)
+    if (required) return required
+    const measureOnly = countsText && !specs.some(rf => rf.required && !isNumericRole(rf))
+    const counted = measureOnly ? empty.find(rf => rf.role === 'measure' && rf.required) : undefined
+    return counted ?? fits[0] ?? levels ?? null
   }
   // A quantity is never a nesting level: with Value taken it makes a new chart.
   // Nor a coordinate: a measure like `shipments` (2-40) is not a longitude.

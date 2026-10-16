@@ -156,6 +156,9 @@ export const PANEL_AR: Record<string, string> = {
   'Name:': 'الاسم:',
   'Aggregation:': 'التجميع:',
   'Every measure on this chart uses it.': 'تستخدمه كل المقاييس في هذا المخطط.',
+  // UAT-7: a Table draws one value per row; several values are a Matrix.
+  'A table shows one value per row. To show several values side by side (with their own columns), convert it to a Matrix and add them to its Values.': 'يعرض الجدول قيمة واحدة لكل صف. لعرض عدة قيم جنبًا إلى جنب (لكل منها عمود)، حوّله إلى مصفوفة وأضفها إلى قيمها.',
+  'Convert to Matrix': 'التحويل إلى مصفوفة',
   'Same as first measure': 'مثل المقياس الأول',
   '✎ Edit hierarchy': '✎ تعديل التسلسل الهرمي',
   'Bar layout': 'تخطيط الأعمدة',
@@ -475,6 +478,8 @@ export const ROLE_AR: Record<string, string> = {
   'Saved model': 'نموذج محفوظ', 'Models to compare': 'نماذج للمقارنة',
   // Field groups in the Add dialog and the column pickers
   'Categories': 'الفئات', 'Dates': 'التواريخ', 'Numbers': 'الأرقام', 'Calculated': 'محسوبة', 'Hierarchies': 'التسلسلات الهرمية', 'Geography': 'الجغرافيا',
+  // UAT-2: text fields a Measure counts
+  'Counted': 'للعدّ',
 }
 
 /** A data-role label (or one half of it) in the current language: "Dimension

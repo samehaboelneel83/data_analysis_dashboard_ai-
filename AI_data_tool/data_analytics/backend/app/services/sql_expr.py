@@ -254,8 +254,25 @@ _DAYS_BETWEEN = {
 }
 
 
+_TEXT_MATH = ("text can't be used in arithmetic ({op}) -- '{what}' is text; "
+              "a database would coerce it silently ('SO-1' * 1 is 0 in SQLite). "
+              "Use VALUE(...) on an Import dataset, or a number")
+
+
 class _CalcTranslator(_Translator):
     dialect: str | None = None
+
+    @staticmethod
+    def _text_operand(node: ast.AST) -> str | None:
+        """A text literal in arithmetic (UAT-1). Only literals: a live
+        dataset's column types come from a 50-row probe in which a NUMERIC
+        column arrives as Decimal objects and reads as text, so refusing by
+        column type would refuse real sums. A text COLUMN in arithmetic is left
+        to the source (PostgreSQL, SQL Server and Oracle raise; SQLite and
+        MySQL coerce)."""
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        return None
 
     def _datediff(self, args: list) -> str:
         if len(args) not in (2, 3):
@@ -287,6 +304,12 @@ class _CalcTranslator(_Translator):
         raise ExpressionTranslationError(f"a {type(value).__name__} literal")
 
     def translate(self, node: ast.AST) -> str:
+        if isinstance(node, ast.BinOp):
+            for side in (node.left, node.right):
+                what = self._text_operand(side)
+                if what is not None:
+                    op = {ast.Add: "+", ast.Sub: "-", ast.Mult: "*", ast.Div: "/"}.get(type(node.op), "?")
+                    raise ExpressionTranslationError(_TEXT_MATH.format(op=op, what=what))
         # Division: pandas never integer-divides and yields NaN on /0.
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
             return (f"(1.0 * {self.translate(node.left)} / "

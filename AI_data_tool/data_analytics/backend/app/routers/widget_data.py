@@ -166,6 +166,25 @@ def _refuse_denied_measures(config: dict, filters, measure_defs: list, calc_cols
 
 
 
+_UNKNOWN_FIELD_NAME = re.compile(r"^'(.+?)' is not a column")
+
+
+def _refuse_hidden_field(result, denied) -> None:
+    """UAT-3: a widget that cannot be drawn without a column this reader may
+    not see (a bar's avg of `salary`) answered 200 "'salary' is not a column or
+    measure on this dataset" -- the column was dropped from the frame first --
+    while a KPI over a measure built on it got 403 `forbidden_column` and the
+    UI's lock (E-12). Same refusal now, same words. Only for a field the widget
+    NEEDS: a table or an embed listing several columns still just leaves the
+    hidden one out, as designed."""
+    if not denied or not isinstance(result, dict) or result.get("type") != "error" \
+            or result.get("code") != "unknown_field":
+        return
+    m = _UNKNOWN_FIELD_NAME.match(str(result.get("message") or ""))
+    if m and m.group(1) in set(denied):
+        raise widget_error(403, "forbidden_column", "This widget references a column your role cannot access")
+
+
 class _DirectQueryCalcView:
     """Read-only stand-in for a DirectQuery Dataset whose base query carries
     calculated columns as extra SELECT layers. Everything but `columns` and
@@ -840,6 +859,7 @@ async def _resolve_widget_data(
             org_id=current_user.org_id, dataset_id=ds_id,
             custom_functions=ds_custom_functions,
         )
+        _refuse_hidden_field(result, denied)
         if bin_plan is not None:
             from ..services import auto_bin
             result = auto_bin.finish(result, bin_plan)

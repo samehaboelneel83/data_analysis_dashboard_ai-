@@ -1049,6 +1049,20 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
     if (ours.length === 0) setLocalSelected(null)
   }, [activeFilters, widget.id])
 
+  // UAT-6: a slicer's ticks MIRROR its own active filter. They were local
+  // state nothing else updated, so "Reset filters" (or a bookmark, or a chip
+  // removed from the filter bar) left the old value highlighted -- and the
+  // next click re-emitted it beside the new one.
+  const slicerColumn = widget.widget_type === 'slicer'
+    ? ((widget.config as { dimension?: string; column?: string }).dimension ?? (widget.config as { column?: string }).column ?? null)
+    : null
+  useEffect(() => {
+    if (!slicerColumn) return
+    const own = activeFilters.find(f => f.sourceWidgetId === widget.id && f.column === slicerColumn)
+    const want: unknown[] = own == null ? [] : Array.isArray(own.value) ? own.value : [own.value]
+    setChecked(prev => (prev.size === want.length && want.every(v => prev.has(v)) ? prev : new Set(want)))
+  }, [activeFilters, widget.id, slicerColumn])
+
   // Tooltip-page hover preview — a floating panel rendering another page's widgets.
   // Never wired on isPreview instances, which caps recursion at one level.
   const tooltipPageId = (mergedConfig as { tooltipPageId?: number }).tooltipPageId

@@ -44,8 +44,11 @@ async def test_a_widget_on_a_denied_column_returns_nothing(client, db_session, t
                           json={"widget_type": "bar",
                                 "config": {"dimension": "dept", "measure": "salary", "aggregation": "avg"}},
                           headers=headers)
-    # The column ceased to exist before shaping: an empty result, never salary data.
-    assert r.status_code == 200
+    # Never salary data. Since UAT-3 the widget is refused outright with the
+    # same 403 `forbidden_column` a measure over the column gets (it was a 200
+    # "'salary' is not a column" -- tests/test_uat3_hidden_column_refusal.py).
+    assert r.status_code == 403
+    assert r.json()["code"] == "forbidden_column"
     body = r.json()
     text = str(body)
     assert "90000" not in text and "85000" not in text

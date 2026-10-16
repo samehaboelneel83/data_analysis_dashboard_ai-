@@ -10,7 +10,7 @@ import { MapLoading } from './geo/MapDataTable'
 import type { CalcColumnFormat } from '../../services/api'
 import type { Widget, WidgetType } from '../../types/report'
 import type { RuleStyles } from '../../lib/displayRules'
-import { fmtStr, formatValue, formatMeasure, formatMeasureCell, measureFormat, EmptyState, seriesColor } from './chartUtils'
+import { fmtStr, formatValue, formatMeasure, formatMeasureCell, measureFormat, withTrueFalseMeasure, EmptyState, seriesColor } from './chartUtils'
 import { CHART_RENDERERS } from './chartRenderers'
 import LatticeRenderer from './chartRenderers/LatticeRenderer'
 import AnimatedRenderer from './chartRenderers/AnimatedRenderer'
@@ -135,7 +135,7 @@ function kpiCaption(cfg: { measure?: unknown; aggregation?: unknown }, t: Transl
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
-export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, onClickPoint, broadcasts, allFormats, checked, onToggleSlicerValue, onButtonClick, ruleStyles, parameters, geography, textFilter, onSubmitTextFilter, rangeFilter, onSubmitRangeFilter, treePaths, onTreeChange, gridOpen, onToggleGridBranch, onGridClick, onAssignData, onBrushChange, brushNonce, onAnimationFrame, onApplyFix, onLoadMore, loadingMore }:
+export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, onClickPoint, broadcasts, allFormats: givenFormats, checked, onToggleSlicerValue, onButtonClick, ruleStyles, parameters, geography, textFilter, onSubmitTextFilter, rangeFilter, onSubmitRangeFilter, treePaths, onTreeChange, gridOpen, onToggleGridBranch, onGridClick, onAssignData, onBrushChange, brushNonce, onAnimationFrame, onApplyFix, onLoadMore, loadingMore }:
   { widget: Widget; data: any; fetchError?: { detail: string; code?: string } | null; onRetry?: () => void; localSelected: unknown; onClickPoint: (v: unknown) => void; broadcasts: boolean; allFormats?: Record<string, CalcColumnFormat | undefined>; checked?: Set<unknown>; onToggleSlicerValue?: (v: unknown) => void; onButtonClick?: () => void; ruleStyles?: RuleStyles; parameters?: Record<string, unknown>; geography?: Record<string, number>;
     textFilter?: string; onSubmitTextFilter?: (value: string, column: string) => void
     /** A range slicer's current bounds, and how it applies new ones. */
@@ -164,6 +164,11 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
   // widgetIsRtl for why reading it as a plain boolean would make the
   // app-wide switch do nothing.
   const rtl = widgetIsRtl(cfg.rtl, appRtl)
+  // UAT-9: the server's word that the measure averages a true/false column.
+  const allFormats = useMemo(() => {
+    const shown = withTrueFalseMeasure(givenFormats ?? {}, cfg.measure, data)
+    return givenFormats || Object.keys(shown).length ? shown : givenFormats
+  }, [givenFormats, cfg.measure, data])
 
   // Format for the value column: use measure if set, otherwise fall back to dimension
   // (many widgets aggregate the dimension column directly with no separate measure)
@@ -536,8 +541,17 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
           {/* A caption written for the reader (the guided setup's "why")
               instead of "avg(is_late_pct)". */}
           {typeof cfg.caption === 'string' && cfg.caption.trim() ? cfg.caption
-            : cfg.measure && cfg.aggregation && String(cfg.aggregation).toLowerCase() !== 'sum'
-              ? kpiCaption(cfg, tw) : (cfg.measure || cfg.dimension || 'Value')}
+            : (() => {
+              const base = cfg.measure && cfg.aggregation && String(cfg.aggregation).toLowerCase() !== 'sum'
+                ? kpiCaption(cfg, tw) : (cfg.measure || (cfg.dimension ? tw('widget.kpiRows') : 'Value'))
+              // UAT-2: with a dimension the card shows ONE group's value (the
+              // first). Said so -- "3" under "order_id" read as the total.
+              const groups = data.type !== 'scalar' && cfg.dimension && Array.isArray(data.rows) ? data.rows.length : 0
+              const group = groups > 1 && first && typeof first === 'object' && !Array.isArray(first) ? first.name : undefined
+              return group != null
+                ? tw('widget.kpiOneGroup', { caption: String(base), dim: String(cfg.dimension), group: String(group), n: groups })
+                : base
+            })()}
         </div>
         {change && (
           <div data-testid="kpi-period-change" dir="ltr" style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>

@@ -21,7 +21,7 @@ import type { Dataset, DatasetColumn, CalcColumn, CalcColumnFormat, MeasureDef, 
 import CalcColumnsPanel from '../components/report/CalcColumnsPanel'
 import ColumnFormatsPanel from '../components/report/ColumnFormatsPanel'
 import type { Report, ReportPage, Widget, WidgetType, PageType, Bookmark, BookmarkState } from '../types/report'
-import { WIDGET_CATALOG, ROLE_SPECS, configKeyFor, AGGREGATIONS, HIERARCHY_WIDGETS, HIER_MAX_DEPTH } from '../types/report'
+import { WIDGET_CATALOG, ROLE_SPECS, configKeyFor, AGGREGATIONS, HIERARCHY_WIDGETS, HIER_MAX_DEPTH, COUNT_MEASURE_WIDGETS } from '../types/report'
 import { hierarchyChain } from '../lib/hierarchyUtils'
 import type { HierarchyNode, RoleField } from '../types/report'
 import WidgetRenderer from '../components/report/WidgetRenderer'
@@ -87,7 +87,7 @@ import { useUndoStack, IdAliases, describeConfigChange, changedKeys } from './re
 import { ASSIGN_DATA_EVENT, ADD_DATASET_EVENT, missingRequiredRoles } from '../components/report/WidgetPlaceholder'
 import { PATCH_WIDGET_EVENT } from '../components/report/TruncationNote'
 import { CONVERT_WIDGET_EVENT } from '../components/report/ConvertToMenu'
-import { defaultSummary, fieldUse, nonAdditiveKind, SAFE_AGGREGATION } from '../lib/semanticGuard'
+import { countSummary, defaultSummary, fieldUse, nonAdditiveKind, SAFE_AGGREGATION } from '../lib/semanticGuard'
 import { readPending, clearPending, type PendingEdit } from '../lib/pendingEdits'
 import DatasetPickerDialog from '../components/dataset/DatasetPickerDialog'
 import toast from 'react-hot-toast'
@@ -2449,7 +2449,8 @@ export default function ReportBuilder() {
     const cfg = w.config as Record<string, unknown>
     // QA4 E2: one rule (lib/fieldPlacement): never the same column twice,
     // never a text field in a numeric role; null makes a new chart instead.
-    const target = roleForField(ROLE_SPECS[w.widget_type] ?? [], cfg, columnName, isNumericField)
+    const target = roleForField(ROLE_SPECS[w.widget_type] ?? [], cfg, columnName, isNumericField,
+      COUNT_MEASURE_WIDGETS.has(w.widget_type))
     if (!target) return null
     // A multi role (a hierarchy's levels) takes the field as its next entry.
     const key = configKeyFor(target.role)
@@ -2467,7 +2468,10 @@ export default function ReportBuilder() {
     // the resulting choice is visible and editable in the widget config panel
     // instead of being an invisible server-side default.
     const defaultAgg = columnMeta[columnName]?.aggregation
-    if (defaultAgg && target.role.startsWith('measure')) next.aggregation = defaultAgg
+    // UAT-2: a text field in a measure is COUNTED -- distinct values for an
+    // id (order_id -> orders), rows otherwise; never summed.
+    if (!isNumericField && target.role === 'measure') next.aggregation = countSummary(columnName, columnMeta)
+    else if (defaultAgg && target.role.startsWith('measure')) next.aggregation = defaultAgg
     // The semantic veto on the drag path: a dragged latitude, id or year starts
     // on the aggregation that means something for it, never on Sum.
     else if (target.role.startsWith('measure')) {
@@ -2516,7 +2520,9 @@ export default function ReportBuilder() {
     if (!w) return
     const plan = planFieldOnWidget(w, columnName, isNumericField)
     if (!plan) {
-      toast(tr('bc.shell.t.noEmptyLeft', { widget: w.title || w.widget_type, col: columnName }))
+      // UAT-7: a second value on a Table is a Matrix's job -- said, not a bare "no empty field".
+      const tableValue = w.widget_type === 'table' && isNumericField && !!(w.config as { measure?: unknown }).measure
+      toast(tr(tableValue ? 'bc.shell.t.tableOneValue' : 'bc.shell.t.noEmptyLeft', { widget: w.title || w.widget_type, col: columnName }))
       return
     }
     // QA3 A5: the open Properties shows the role just filled.

@@ -311,6 +311,21 @@ export function roleAccepts(role: string): RoleColumnKind {
   return 'any'
 }
 
+/** UAT-2: the counting aggregations -- the only ones that mean something for
+ *  a text, date or id field in a measure slot ("Orders = Count distinct of
+ *  order_id"). Sum, average, median... of text stay unavailable. */
+export const COUNTING_AGGREGATIONS: readonly string[] = ['count', 'countd']
+
+/** UAT-2: the widget types whose Measure may hold a text (or date) field,
+ *  counted. Each is drawn by the server's grouped series shaper, which
+ *  counts any column (`_agg_series` count / countd). Not a map (C-09: a
+ *  coordinate stays a number), not a histogram, scatter or other shaper that
+ *  reads the measure as numbers. */
+export const COUNT_MEASURE_WIDGETS: ReadonlySet<string> = new Set([
+  'kpi', 'table', 'bar', 'line', 'area', 'pie', 'donut', 'treemap', 'funnel',
+  'step', 'dot_plot', 'needle', 'crosstab', 'matrix',
+])
+
 /**
  * Map widgets that draw filled REGIONS, and so can be pointed at an uploaded
  * boundary set instead of the built-in countries.

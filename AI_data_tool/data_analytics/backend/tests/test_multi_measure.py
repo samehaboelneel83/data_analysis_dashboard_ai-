@@ -128,6 +128,10 @@ class TestThroughTheWidgetEndpoint:
             "widget_type": "bar",
             "config": {"dimension": "dept", "measure": "headcount", "extra_measures": ["salary"],
                        "aggregation": "sum"}})
-        assert r.status_code == 200
+        # The chart cannot be drawn without the hidden measure: since UAT-3 the
+        # same 403 `forbidden_column` lock as any widget over a hidden column
+        # (it was a 200 error tile "'salary' is not a column ...").
+        assert r.status_code == 403 and r.json()["code"] == "forbidden_column"
         text = str(r.json())
+        assert "salary" not in text
         assert "175000" not in text and "90000" not in text and "60000" not in text
