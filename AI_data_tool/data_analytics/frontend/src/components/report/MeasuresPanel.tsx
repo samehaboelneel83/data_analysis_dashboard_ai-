@@ -138,6 +138,11 @@ export default function MeasuresPanel({ datasetId, columns, onChanged, canModel 
       const body: { expression: string; group_by?: string } = { expression: editing.expression }
       if (groupBy) body.group_by = groupBy
       setPreview(await measuresApi.preview(datasetId, body))
+    } catch (e: any) {
+      // A refused preview (e.g. a live source too large to read whole, UAT-4)
+      // says why instead of leaving the Test button silent.
+      const detail = e?.response?.data?.detail
+      setPreview({ ok: false, error: typeof detail === 'string' ? detail : t('pg.panelsA.previewFailed') })
     } finally {
       setBusy(false)
     }

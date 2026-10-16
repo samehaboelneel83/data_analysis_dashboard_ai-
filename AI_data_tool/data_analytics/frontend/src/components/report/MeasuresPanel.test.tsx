@@ -129,6 +129,19 @@ describe('MeasuresPanel', () => {
     expect(await screen.findByText(/Unknown column: nope/)).toBeInTheDocument()
   })
 
+  it('shows why a refused preview was refused (UAT-4: live source)', async () => {
+    vi.mocked(measuresApi.preview).mockRejectedValue({
+      response: { status: 422, data: { detail: "The measure can't be tested on this live (DirectQuery) source: too big" } },
+    })
+    render(<MeasuresPanel datasetId={1} columns={columns} onChanged={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: /Add measure/i }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Write a formula myself' }))
+    fireEvent.change(screen.getByPlaceholderText(/SUM\(/i), { target: { value: 'SUM(sales)' } })
+    fireEvent.click(screen.getByRole('button', { name: /Test/i }))
+
+    expect(await screen.findByText(/can't be tested on this live/)).toBeInTheDocument()
+  })
+
   it('deletes a measure', async () => {
     vi.mocked(measuresApi.list).mockResolvedValue([{ name: 'Margin', expression: 'SUM(a)' }])
     render(<MeasuresPanel datasetId={1} columns={columns} onChanged={vi.fn()} />)
