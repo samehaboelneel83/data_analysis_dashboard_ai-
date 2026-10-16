@@ -26,6 +26,8 @@ import { AGGREGATIONS, COUNTING_AGGREGATIONS, COUNT_MEASURE_WIDGETS, DUAL_MEASUR
 import { dtypeShort } from '../../lib/dtypeName'
 import { useT } from '../../i18n'
 import { ASSIGN_DATA_EVENT, ADD_DATASET_EVENT, emptyPickerReason } from './WidgetPlaceholder'
+import { CONVERT_WIDGET_EVENT } from './ConvertToMenu'
+import { convertConfig } from '../../lib/convertWidget'
 import { fieldUse, semanticAggregationWarning, nonAdditiveKind, SAFE_AGGREGATION, defaultSummary, countSummary } from '../../lib/semanticGuard'
 import { savePending, clearPending } from '../../lib/pendingEdits'
 import type { DatasetColumn, Dataset } from '../../services/api'
@@ -1343,6 +1345,24 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
     }
     return null
   }
+  // UAT-7: a Table is one value per row (a single Measure; the server's
+  // table shaper and multi-measure path draw one value). Where its author
+  // wants a second value column, say so and offer the type that has them.
+  const toMatrix = () => {
+    const config = convertConfig('table', { ...migrated, dimension: roleValues.category,
+      measure: roleValues.measure, aggregation: agg }, 'matrix')
+    if (!config) return
+    window.dispatchEvent(new CustomEvent(CONVERT_WIDGET_EVENT, { detail: {
+      widgetId: widget.id, widget_type: 'matrix', config, label: L('Convert to Matrix') } }))
+  }
+  const tableOneValue = wt === 'table' && roleValues.measure && roleValues.category ? (
+    <div role="note" data-testid="table-one-value" style={{ fontSize: 11, color: 'var(--muted)', margin: '6px 0 8px', lineHeight: 1.4 }}>
+      {L('A table shows one value per row. To show several values side by side (with their own columns), convert it to a Matrix and add them to its Values.')}{' '}
+      <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '0 6px' }} onClick={toMatrix}>
+        {L('Convert to Matrix')}
+      </button>
+    </div>
+  ) : null
   const dataRolesPane = (
     <div data-testid="data-roles-pane" style={{ marginBottom: 8 }}>
       {pageWidgets.length > 1 && (
@@ -1360,6 +1380,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
       <DataRolesList specs={roleSpecs} values={assignedFields} kindOf={fieldKind} displayName={displayName}
         onAdd={role => setAddRole(role)} onRemove={removeField} renderDetails={fieldDetails} addBlocked={addBlocked}
         onDropField={dropFieldOnRole} />
+      {tableOneValue}
       {/* C-10: which of a point/bubble map's two modes is in force. */}
       {(wt === 'map_points' || wt === 'map_bubbles') && (roleValues.category || roleValues.lat || roleValues.lon) && (
         <div data-testid="map-mode-hint" style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
@@ -3055,6 +3076,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           <DataRolesList specs={roleSpecs} values={assignedFields} kindOf={fieldKind} displayName={displayName}
             onAdd={role => setAddRole(role)} onRemove={removeField} addBlocked={addBlocked}
             onDropField={dropFieldOnRole} />
+          {tableOneValue}
         </AssignDataDialog>
       )}
       {addRole && (() => {

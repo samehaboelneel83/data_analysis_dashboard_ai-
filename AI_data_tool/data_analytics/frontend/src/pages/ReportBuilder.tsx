@@ -2520,7 +2520,9 @@ export default function ReportBuilder() {
     if (!w) return
     const plan = planFieldOnWidget(w, columnName, isNumericField)
     if (!plan) {
-      toast(tr('bc.shell.t.noEmptyLeft', { widget: w.title || w.widget_type, col: columnName }))
+      // UAT-7: a second value on a Table is a Matrix's job -- said, not a bare "no empty field".
+      const tableValue = w.widget_type === 'table' && isNumericField && !!(w.config as { measure?: unknown }).measure
+      toast(tr(tableValue ? 'bc.shell.t.tableOneValue' : 'bc.shell.t.noEmptyLeft', { widget: w.title || w.widget_type, col: columnName }))
       return
     }
     // QA3 A5: the open Properties shows the role just filled.
