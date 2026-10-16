@@ -3075,7 +3075,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           focusRole={assignRole} onClose={() => setAssignOpen(false)}>
           <DataRolesList specs={roleSpecs} values={assignedFields} kindOf={fieldKind} displayName={displayName}
             onAdd={role => setAddRole(role)} onRemove={removeField} addBlocked={addBlocked}
-            onDropField={dropFieldOnRole} />
+            onDropField={dropFieldOnRole} replaceFull />
           {tableOneValue}
         </AssignDataDialog>
       )}

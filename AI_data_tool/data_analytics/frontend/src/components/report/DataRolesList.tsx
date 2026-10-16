@@ -34,6 +34,11 @@ export interface DataRolesListProps {
   /** C-27: a field dragged from the Fields panel and dropped on a role.
    *  Returns false when the role cannot take it (the drop is refused). */
   onDropField?: (role: string, column: string) => boolean
+  /** UAT-8: a full one-field role offers "Change" (the picker, choosing
+   *  replaces) instead of a greyed "+ Add". The Assign data dialog's job is
+   *  to choose a role's field; there a greyed button read as a pick that did
+   *  nothing. The Properties pane keeps the greyed + Add (replace with ×). */
+  replaceFull?: boolean
 }
 
 /** "Dimension (Group / X-axis)" -> heading "Dimension", hint "Group / X-axis". */
@@ -75,7 +80,7 @@ export function FieldIcon({ kind }: { kind: FieldKind }) {
   return (<svg {...common}><path d="M3 13V6M6.3 13V3M9.6 13V8M13 13V5" /><path d="M2 13.5h12" /></svg>)
 }
 
-export default function DataRolesList({ specs, values, kindOf, displayName, onAdd, onRemove, renderDetails, addBlocked, onDropField }: DataRolesListProps) {
+export default function DataRolesList({ specs, values, kindOf, displayName, onAdd, onRemove, renderDetails, addBlocked, onDropField, replaceFull }: DataRolesListProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   // C-27: the role a field is being dragged over, and one that just refused a drop.
   const [dropOver, setDropOver] = useState<string | null>(null)
@@ -103,7 +108,8 @@ export default function DataRolesList({ specs, values, kindOf, displayName, onAd
         // its "+ Add", greyed; replacing is done from the field's × or from
         // Assign data.
         const blocked = addBlocked?.(rf.role) ?? null
-        const canAdd = !blocked && (rf.multi || fields.length === 0)
+        const change = !!replaceFull && !rf.multi && fields.length > 0
+        const canAdd = !blocked && (rf.multi || fields.length === 0 || change)
         const sectionId = `data-role-section-${rf.role}`
         return (
           <section key={rf.role} data-roles-section={rf.role}
@@ -140,13 +146,13 @@ export default function DataRolesList({ specs, values, kindOf, displayName, onAd
                   <span style={{ fontSize: 11, color: 'var(--danger, #c0392b)' }} title={t('bc.canvas.roleRequired')}>*</span>
                 )}
               </button>
-              <button type="button" onClick={() => onAdd(rf.role)} aria-label={t('bc.canvas.addRole', { role: heading })}
+              <button type="button" onClick={() => onAdd(rf.role)} aria-label={t(change ? 'bc.canvas.changeRole' : 'bc.canvas.addRole', { role: heading })}
                 disabled={!canAdd}
                 title={blocked ?? (canAdd ? undefined : t('bc.canvas.roleTakesOne', { role: heading }))}
                 style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none',
                   cursor: canAdd ? 'pointer' : 'default', font: 'inherit', fontSize: 13, padding: '2px 4px',
                   color: canAdd ? 'var(--text)' : 'var(--muted)', opacity: canAdd ? 1 : 0.55 }}>
-                <span aria-hidden style={{ fontSize: 16, lineHeight: 1 }}>+</span> {t('bc.canvas.add')}
+                {change ? t('bc.canvas.change') : <><span aria-hidden style={{ fontSize: 16, lineHeight: 1 }}>+</span> {t('bc.canvas.add')}</>}
               </button>
             </div>
             {!isCollapsed && (
