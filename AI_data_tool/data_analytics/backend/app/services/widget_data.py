@@ -5121,6 +5121,17 @@ def _arith(op: str, a, b):
     if ta or tb:
         if op == "+" and ta and tb:
             return a + b
+        # Text that is ENTIRELY number-like ("100199", " 42 ") is read as that
+        # number, so `REPLACE(id, "SO-", "") * 1` means 100199 -- what its
+        # author meant, and what calculated columns saved before UAT-1 rely on.
+        # Anything else is refused below: never repeated, never guessed.
+        try:
+            a2 = _text_to_number(a, "VALUE", allow_dates=False) if ta else a
+            b2 = _text_to_number(b, "VALUE", allow_dates=False) if tb else b
+        except ValueError:
+            pass
+        else:
+            return _ARITH_FNS[op](a2, b2)
         sample = _text_sample(a if ta else b)
         raise ValueError(
             f"Text can't be used in arithmetic ({op}): {sample!r} is text. "

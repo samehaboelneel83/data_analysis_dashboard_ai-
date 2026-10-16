@@ -13,8 +13,11 @@ Chosen behaviour:
 - TONUMBER on text that is entirely ISO dates ("2024-03-01") -> epoch days, as
   before. VALUE never reads a date.
 - Any other text -> a clear error naming an offending value. Never a date guess.
-- Arithmetic (+ - * / % // **) with text on either side -> a readable error
-  pointing at VALUE(); text + text stays concatenation.
+- Arithmetic (+ - * / % // **) with text: text that is ENTIRELY number-like
+  ("100199", " 42 ") is read as that number (so `REPLACE(order_id, "SO-", "") * 1`
+  is 100199, never "100199100199", and calculated columns saved before this
+  change keep working); any other text -> a readable error pointing at VALUE();
+  text + text stays concatenation.
 - DirectQuery: TONUMBER/VALUE refuse with the reason; arithmetic with a text
   literal refuses with the same VALUE() hint. (A text COLUMN is left to the
   source: live column types come from a probe that reads NUMERIC as text.)
@@ -92,18 +95,31 @@ class TestValue:
 
 
 class TestTextArithmetic:
-    @pytest.mark.parametrize("expr", ['REPLACE(order_id, "SO-", "") * 1', "order_id * 1",
-                                      "RIGHT(order_id, 6) + 1", "order_id / 2", "order_id - 1"])
-    def test_number_like_text_times_number_raises_pointing_to_value(self, expr):
+    @pytest.mark.parametrize("expr", ["order_id * 1", "order_id / 2", "order_id - 1"])
+    def test_text_that_is_not_a_number_raises_pointing_to_value(self, expr):
         df = pd.DataFrame({"order_id": ["SO-100199", "SO-100200"]})
         with pytest.raises(ValueError, match=r"VALUE\("):
             _eval_expr(expr, df)
 
-    def test_digits_text_times_one_raises_and_value_fixes_it(self):
+    @pytest.mark.parametrize("expr,want", [('REPLACE(order_id, "SO-", "") * 1', [100199, 100200]),
+                                           ("RIGHT(order_id, 6) + 1", [100200, 100201]),
+                                           ('REPLACE(order_id, "SO-", "") * 2', [200398, 200400])])
+    def test_number_like_text_in_arithmetic_is_read_as_a_number(self, expr, want):
+        df = pd.DataFrame({"order_id": ["SO-100199", "SO-100200"]})
+        assert _eval_expr(expr, df).tolist() == want
+
+    def test_digits_text_times_one_is_the_number_and_value_agrees(self):
         df = pd.DataFrame({"t": ["100199"]})
-        with pytest.raises(ValueError, match=r"VALUE\("):
-            _eval_expr("t * 1", df)
+        assert _eval_expr("t * 1", df).tolist() == [100199]
         assert _eval_expr("VALUE(t) * 2", df).tolist() == [200398]
+
+    def test_calc_columns_saved_before_the_fix_keep_working(self):
+        """The UAT dashboards were built on `REPLACE(id, prefix, "") * 1`
+        columns; refusing them broke Orders / Shipments / Headcount tiles."""
+        df = apply_calculated_columns(_ids(), [{"name": "order_no", "expression": 'REPLACE(order_id, "SO-", "") * 1'}])
+        assert pd.api.types.is_numeric_dtype(df["order_no"])
+        assert df["order_no"].nunique() == 4200
+        assert df["order_no"].min() == 100000 and df["order_no"].max() == 104199
 
     def test_word_text_times_one_raises(self):
         df = pd.DataFrame({"t": ["abc"]})
@@ -124,7 +140,7 @@ class TestTextArithmetic:
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "x.csv")
             pd.DataFrame({"order_id": ["SO-100199"]}).to_csv(path, index=False)
-            out = preview_expression(path, 'REPLACE(order_id, "SO-", "") * 1')
+            out = preview_expression(path, 'order_id * 1')
         assert out["ok"] is False
         assert "VALUE(" in out["error"]
         assert out["problem"]["code"] == "text_math"
