@@ -42,6 +42,7 @@ Supported aggregations
 """
 
 import copy
+import functools
 import datetime as _dt
 import json
 import os
@@ -5772,9 +5773,68 @@ def get_widget_data(
         key = single_flight.key_of("file", file_path, stamp, config, widget_type, calculated_columns, filter_expr,
                                    rls_filter_expr, use_cache, measures, sorted(drop_columns or []), prep_steps,
                                    custom_functions)
-    return single_flight.run(key, lambda: _get_widget_data(
+    result = single_flight.run(key, lambda: _get_widget_data(
         file_path, config, widget_type, calculated_columns, filter_expr, rls_filter_expr, use_cache, measures,
         drop_columns, prep_steps, prep_aux_frames, org_id, dataset_id, custom_functions))
+    # UAT-9: the average of a true/false column is the share that is true,
+    # shown as a percent. Said HERE, after whichever engine answered (pandas,
+    # DuckDB's pre-aggregated frame, a cache hit), because only the source
+    # file still knows the column is a bool: detect_types files it under
+    # 'numeric', and an aggregated frame holds plain numbers.
+    if isinstance(result, dict) and result.get("type") not in ("error", "empty") \
+            and _averages_a_true_false_column(file_path, config, calculated_columns, measures, prep_steps):
+        result = {**result, "measure_true_false": True}  # a copy: single_flight shares the dict
+    return result
+
+
+_MEAN_AGGREGATIONS = frozenset({"avg", "mean", "average"})
+
+
+def _averages_a_true_false_column(file_path: str, config: dict, calculated_columns, measures,
+                                  prep_steps) -> bool:
+    """True when the chart's measure is the average of a source column that
+    holds true/false. Not for a calculated column or a defined measure of
+    that name, nor after preparation steps (which may recast the column)."""
+    measure = config.get("measure")
+    agg = str(config.get("aggregation") or config.get("agg") or "").lower()
+    if not isinstance(measure, str) or not measure or agg not in _MEAN_AGGREGATIONS or prep_steps:
+        return False
+    shadowed = {c.get("name") for c in (calculated_columns or []) if isinstance(c, dict)} \
+        | {m.get("name") for m in (measures or []) if isinstance(m, dict)}
+    if measure in shadowed:
+        return False
+    try:
+        st = os.stat(file_path)
+    except OSError:
+        return False
+    return measure in _true_false_columns(os.path.abspath(file_path), st.st_mtime_ns, st.st_size)
+
+
+@functools.lru_cache(maxsize=256)
+def _true_false_columns(file_path: str, _mtime_ns: int, _size: int) -> frozenset:
+    """The bool columns of a dataset file, as the pandas path loads them.
+    From the parquet schema (the dataset itself, or a CSV's fresh sidecar:
+    a footer read); a CSV without one is typed the way pd.read_csv types it.
+    Keyed on the file's stamp, so a refresh is seen."""
+    from .frame_cache import parquet_of
+    try:
+        pq_path = parquet_of(file_path)
+        if pq_path:
+            import pyarrow as pa
+            import pyarrow.parquet as pq
+            schema = pq.read_schema(pq_path)
+            return frozenset(f.name for f in schema if pa.types.is_boolean(f.type))
+        if file_path.lower().endswith(".csv"):
+            # Only the columns a sample says could be true/false are read in full.
+            head = pd.read_csv(file_path, nrows=1000)
+            maybe = [c for c in head.columns if head[c].dtype == bool]
+            if not maybe:
+                return frozenset()
+            full = pd.read_csv(file_path, usecols=maybe)
+            return frozenset(c for c in maybe if full[c].dtype == bool)
+    except Exception:  # noqa: BLE001 -- a display hint must never break a render
+        return frozenset()
+    return frozenset()
 
 
 def _get_widget_data(
