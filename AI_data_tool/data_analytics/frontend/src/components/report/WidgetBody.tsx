@@ -10,7 +10,7 @@ import { MapLoading } from './geo/MapDataTable'
 import type { CalcColumnFormat } from '../../services/api'
 import type { Widget, WidgetType } from '../../types/report'
 import type { RuleStyles } from '../../lib/displayRules'
-import { fmtStr, formatValue, formatMeasure, formatMeasureCell, measureFormat, EmptyState, seriesColor } from './chartUtils'
+import { fmtStr, formatValue, formatMeasure, formatMeasureCell, measureFormat, withTrueFalseMeasure, EmptyState, seriesColor } from './chartUtils'
 import { CHART_RENDERERS } from './chartRenderers'
 import LatticeRenderer from './chartRenderers/LatticeRenderer'
 import AnimatedRenderer from './chartRenderers/AnimatedRenderer'
@@ -135,7 +135,7 @@ function kpiCaption(cfg: { measure?: unknown; aggregation?: unknown }, t: Transl
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
-export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, onClickPoint, broadcasts, allFormats, checked, onToggleSlicerValue, onButtonClick, ruleStyles, parameters, geography, textFilter, onSubmitTextFilter, rangeFilter, onSubmitRangeFilter, treePaths, onTreeChange, gridOpen, onToggleGridBranch, onGridClick, onAssignData, onBrushChange, brushNonce, onAnimationFrame, onApplyFix, onLoadMore, loadingMore }:
+export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, onClickPoint, broadcasts, allFormats: givenFormats, checked, onToggleSlicerValue, onButtonClick, ruleStyles, parameters, geography, textFilter, onSubmitTextFilter, rangeFilter, onSubmitRangeFilter, treePaths, onTreeChange, gridOpen, onToggleGridBranch, onGridClick, onAssignData, onBrushChange, brushNonce, onAnimationFrame, onApplyFix, onLoadMore, loadingMore }:
   { widget: Widget; data: any; fetchError?: { detail: string; code?: string } | null; onRetry?: () => void; localSelected: unknown; onClickPoint: (v: unknown) => void; broadcasts: boolean; allFormats?: Record<string, CalcColumnFormat | undefined>; checked?: Set<unknown>; onToggleSlicerValue?: (v: unknown) => void; onButtonClick?: () => void; ruleStyles?: RuleStyles; parameters?: Record<string, unknown>; geography?: Record<string, number>;
     textFilter?: string; onSubmitTextFilter?: (value: string, column: string) => void
     /** A range slicer's current bounds, and how it applies new ones. */
@@ -164,6 +164,11 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
   // widgetIsRtl for why reading it as a plain boolean would make the
   // app-wide switch do nothing.
   const rtl = widgetIsRtl(cfg.rtl, appRtl)
+  // UAT-9: the server's word that the measure averages a true/false column.
+  const allFormats = useMemo(() => {
+    const shown = withTrueFalseMeasure(givenFormats ?? {}, cfg.measure, data)
+    return givenFormats || Object.keys(shown).length ? shown : givenFormats
+  }, [givenFormats, cfg.measure, data])
 
   // Format for the value column: use measure if set, otherwise fall back to dimension
   // (many widgets aggregate the dimension column directly with no separate measure)

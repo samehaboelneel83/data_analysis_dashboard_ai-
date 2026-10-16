@@ -72,7 +72,7 @@ import { countLabel } from '../lib/fieldHints'
 import { boundarySetsApi, type BoundaryPack } from '../services/api'
 import PackTermsConfirm from '../components/report/PackTermsConfirm'
 import { describeFilter } from '../components/report/ViewerKit'
-import { fieldHints, hintTitle, numericRanges, withTrueFalseFormats } from '../lib/fieldHints'
+import { fieldHints, hintTitle, numericRanges } from '../lib/fieldHints'
 import { PRE_AGGREGATED_HINT } from '../lib/aggregateDisclosure'
 import { CrossFilterProvider, useCrossFilter } from '../components/report/CrossFilterContext'
 import CollapsibleSide from '../components/report/CollapsibleSide'
@@ -334,8 +334,6 @@ export default function ReportBuilder() {
   // already computed server-side and simply never surfaced next to the fields.
   const [analysis,      setAnalysis]      = useState<any>(null)
   const [columnFormats, setColumnFormats] = useState<Record<string, CalcColumnFormat>>({})
-  // UAT-9: a true/false column's average reads as a percent where no format says otherwise.
-  const shownFormats = useMemo(() => withTrueFalseFormats(columnFormats, analysis), [columnFormats, analysis])
   const [activeView, setActiveView] = useState<'report' | 'data' | 'model'>('report')
   // A phone opens a dashboard to READ it: the studio's two side panels left
   // no room for the canvas at 390px. It starts in View there (Edit remains a
@@ -4203,7 +4201,7 @@ export default function ReportBuilder() {
                           parameters={effectiveParams}
                           onSetParameter={stableOnSetParameter}
                           calculatedColumns={calcCols}
-                          columnFormats={shownFormats} geography={geography}
+                          columnFormats={columnFormats} geography={geography}
                           datasets={datasets} relationships={relationships}
                           editMode={false}
                           promptFilter={activePromptFilter}
@@ -4421,7 +4419,7 @@ export default function ReportBuilder() {
                         parameters={effectiveParams}
                         onSetParameter={stableOnSetParameter}
                         calculatedColumns={calcCols}
-                        columnFormats={shownFormats} geography={geography}
+                        columnFormats={columnFormats} geography={geography}
                         datasets={datasets} relationships={relationships}
                         selected={editMode && selectedW?.id === widget.id}
                         isMultiSelected={editMode && multiSelectedIds.has(widget.id)}
@@ -4820,7 +4818,7 @@ export default function ReportBuilder() {
           render={w => (
             <WidgetRenderer widget={w} datasetId={report.dataset_id} reportId={reportId} allowExport={mayDownload}
               parameters={effectiveParams} onSetParameter={stableOnSetParameter}
-              calculatedColumns={calcCols} columnFormats={shownFormats} geography={geography}
+              calculatedColumns={calcCols} columnFormats={columnFormats} geography={geography}
               datasets={datasets} relationships={relationships} editMode={false}
               promptFilter={activePromptFilter} onFetchComplete={handleFetchComplete}
               pages={report.pages} reportDisplayRules={report.display_rules ?? EMPTY_RULES}
@@ -4928,7 +4926,7 @@ export default function ReportBuilder() {
               parameters={effectiveParams}
               onSetParameter={stableOnSetParameter}
               calculatedColumns={calcCols}
-              columnFormats={shownFormats} geography={geography}
+              columnFormats={columnFormats} geography={geography}
               datasets={datasets} relationships={relationships}
               editMode={false}
               promptFilter={popupPage.prompt_column && promptValues[popupPage.id]
@@ -4958,7 +4956,7 @@ export default function ReportBuilder() {
               parameters={effectiveParams}
               onSetParameter={stableOnSetParameter}
               calculatedColumns={calcCols}
-              columnFormats={shownFormats} geography={geography}
+              columnFormats={columnFormats} geography={geography}
               datasets={datasets} relationships={relationships}
               editMode={false}
               promptFilter={activePromptFilter}
