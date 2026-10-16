@@ -472,6 +472,8 @@ export const ar: Record<MessageKey, string> = {
   'widget.kpiCap.median': 'وسيط {m}',
   'widget.kpiCap.min': 'أدنى {m}',
   'widget.kpiCap.max': 'أعلى {m}',
+  'widget.kpiOneGroup': '{caption} لـ {dim} {group} (1 من {n} مجموعات)',
+  'widget.kpiRows': 'الصفوف',
   'widget.err.measure': 'تعذّر حساب هذا المقياس.',
   'widget.image.failed': 'تعذّر تحميل الصورة. تحقّق من رابط الصورة.',
   'models.dqTrainNote': 'تستعلم هذه البيانات من مصدرها مباشرة: يقرأ التدريب منها حتى 250,000 صف كما يُسمح لك برؤيتها، وتذكر بطاقة النموذج إن استُخدمت عيّنة.',

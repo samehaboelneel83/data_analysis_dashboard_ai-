@@ -157,6 +157,19 @@ export function defaultSummary(column: string | undefined | null, meta?: MetaMap
   return isIntensive(column) ? 'avg' : 'sum'
 }
 
+/** UAT-2: how a text, date or id field placed in a measure slot is counted:
+ *  an identifier (order_id, invoice_no) by its distinct values -- the number
+ *  of orders, not of rows -- anything else by its non-empty rows. An author's
+ *  own counting aggregation for the column wins. */
+export function countSummary(column: string | undefined | null, meta?: MetaMap): 'count' | 'countd' {
+  if (!column) return 'count'
+  const agg = String(meta?.[column]?.aggregation ?? '').trim().toLowerCase()
+  const named = SUMMARY_ALIASES[agg] ?? agg
+  if (named === 'count' || named === 'countd') return named
+  if (meta?.[column]?.role === 'identifier' || ID_NAME.test(column)) return 'countd'
+  return 'count'
+}
+
 /** A recorded identifier, or one named like one and not marked a measure. */
 export function isIdentifier(column: string | undefined | null, meta?: MetaMap): boolean {
   if (!column) return false

@@ -472,6 +472,8 @@ export const en = {
   'widget.kpiCap.median': 'Median {m}',
   'widget.kpiCap.min': 'Lowest {m}',
   'widget.kpiCap.max': 'Highest {m}',
+  'widget.kpiOneGroup': '{caption} for {dim} {group} (1 of {n} groups)',
+  'widget.kpiRows': 'Rows',
   'widget.err.measure': 'This measure could not be calculated.',
   'widget.image.failed': 'The image could not be loaded. Check the image URL.',
   'models.dqTrainNote': 'This dataset queries its source live: training reads up to 250,000 rows from it, as you are allowed to see them, and the model card says if it used a sample.',

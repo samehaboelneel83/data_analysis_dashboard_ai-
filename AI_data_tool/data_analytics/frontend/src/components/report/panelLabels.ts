@@ -475,6 +475,8 @@ export const ROLE_AR: Record<string, string> = {
   'Saved model': 'نموذج محفوظ', 'Models to compare': 'نماذج للمقارنة',
   // Field groups in the Add dialog and the column pickers
   'Categories': 'الفئات', 'Dates': 'التواريخ', 'Numbers': 'الأرقام', 'Calculated': 'محسوبة', 'Hierarchies': 'التسلسلات الهرمية', 'Geography': 'الجغرافيا',
+  // UAT-2: text fields a Measure counts
+  'Counted': 'للعدّ',
 }
 
 /** A data-role label (or one half of it) in the current language: "Dimension

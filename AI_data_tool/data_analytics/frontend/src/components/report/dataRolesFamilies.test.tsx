@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, act, within, cleanup } from '@testing-library/react'
 import WidgetConfigPanel from './WidgetConfigPanel'
 import { CrossFilterProvider } from './CrossFilterContext'
-import { ROLE_SPECS, MULTI_MEASURE_WIDGETS, PIVOT_WIDGETS, roleAccepts, configKeyFor } from '../../types/report'
+import { ROLE_SPECS, MULTI_MEASURE_WIDGETS, PIVOT_WIDGETS, COUNT_MEASURE_WIDGETS, roleAccepts, configKeyFor } from '../../types/report'
 import type { Widget, ReportPage, WidgetType } from '../../types/report'
 import type { DatasetColumn } from '../../services/api'
 
@@ -32,8 +32,12 @@ const EVERYTHING = COLUMNS.map(c => c.name)
 // number (a formula column may be text, so it stays offered).
 const CATEGORIES = ['region', 'product', 'ordered_at', 'margin']
 
-const expectedFor = (role: string) => {
+// UAT-2: a Measure the widget can count also takes text and dates, counted.
+const COUNTED = ['region', 'product', 'ordered_at']
+
+const expectedFor = (role: string, type: string) => {
   const kind = roleAccepts(role)
+  if (role === 'measure' && COUNT_MEASURE_WIDGETS.has(type)) return [...NUMBERS, ...COUNTED]
   return kind === 'numeric' ? NUMBERS : kind === 'datetime' ? DATES : kind === 'category' ? CATEGORIES : EVERYTHING
 }
 
@@ -86,7 +90,7 @@ describe('+ Add offers the fields each role can use, for every object family', (
   for (const [type, specs] of FAMILIES) {
     describe(type, () => {
       for (const rf of specs) {
-        const want = expectedFor(rf.role)
+        const want = expectedFor(rf.role, type)
         const kind = roleAccepts(rf.role)
         it(`${rf.label ?? rf.role}: offers ${kind === 'any' ? 'every field' : kind === 'numeric' ? 'numbers only' : kind === 'category' ? 'no plain numbers' : 'dates only'}, and saves to ${configKeyFor(rf.role)}`, () => {
           const onUpdate = renderPanel(type)
