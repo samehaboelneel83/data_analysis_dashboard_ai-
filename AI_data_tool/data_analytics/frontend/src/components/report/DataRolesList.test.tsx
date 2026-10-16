@@ -242,12 +242,21 @@ describe('C-27: a field dropped onto a role in the Properties pane', () => {
     act(() => { vi.advanceTimersByTime(700) })
     expect(lastConfig(onUpdate)).toMatchObject({ dimension: 'region', measure: 'sales' })
   })
-  it('a text field dropped on the Measure role is refused', () => {
-    const onUpdate = renderPanel(bar({ dimension: 'ordered_at' }))
+  it('a text field dropped on a Measure that cannot count it is refused', () => {
+    // A histogram bins numbers: no text there (UAT-2 counts text only where
+    // the shaper counts any column).
+    const onUpdate = renderPanel({ ...bar({}), widget_type: 'histogram' } as Widget)
     const section = document.querySelector('[data-roles-section="measure"]') as HTMLElement
     fireEvent.drop(section, { dataTransfer: dt('region') })
     act(() => { vi.advanceTimersByTime(700) })
     expect(onUpdate.mock.calls.every(c => c[0].measure !== 'region')).toBe(true)
+  })
+  it('UAT-2: a text field dropped on a bar Measure is counted, not refused', () => {
+    const onUpdate = renderPanel(bar({ dimension: 'ordered_at' }))
+    const section = document.querySelector('[data-roles-section="measure"]') as HTMLElement
+    fireEvent.drop(section, { dataTransfer: dt('region') })
+    act(() => { vi.advanceTimersByTime(700) })
+    expect(onUpdate.mock.calls.at(-1)![0]).toMatchObject({ measure: 'region', aggregation: 'count' })
   })
 })
 

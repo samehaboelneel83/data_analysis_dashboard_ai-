@@ -254,6 +254,12 @@ export interface CalcColumnFormat {
    *  compact one. Turn it off to reproduce SAS exactly, naming the unit in the
    *  axis title instead. */
   scale_suffix?: boolean
+  /** UAT-9, derived in the client and never saved: the column holds
+   *  true/false (0/1), so its AVERAGE is the share that is true and shows as
+   *  a percent. Formats nothing else (type 'none'). */
+  true_false?: boolean
+  /** A percent whose value is a fraction (0.51 -> 51%). */
+  ratio?: boolean
 }
 
 export interface CalcColumn {

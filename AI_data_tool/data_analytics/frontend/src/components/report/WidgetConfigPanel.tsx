@@ -22,11 +22,13 @@ import type { GraphLayer } from './GraphLayersEditor'
 import { toDraftPin, toStoredPin } from './MapPinsEditor'
 import type { MapPin, StoredPin } from './MapPinsEditor'
 import { ADDITIVE_AGGREGATIONS, BOUNDARY_SET_WIDGETS, PIN_WIDGETS, FACETABLE_WIDGETS, FACET_MAX_PANELS, FORECAST_DEFAULT_PERIODS, FORECAST_MAX_PERIODS, FORECAST_MIN_PERIODS, HIERARCHY_WIDGETS, HIER_MAX_DEPTH, PARTITION_WIDGETS } from '../../types/report'
-import { AGGREGATIONS, DUAL_MEASURE_WIDGETS, MULTI_MEASURE_WIDGETS, PIVOT_WIDGETS, ROLE_SPECS, configKeyFor, roleAccepts } from '../../types/report'
+import { AGGREGATIONS, COUNTING_AGGREGATIONS, COUNT_MEASURE_WIDGETS, DUAL_MEASURE_WIDGETS, MULTI_MEASURE_WIDGETS, PIVOT_WIDGETS, ROLE_SPECS, configKeyFor, roleAccepts } from '../../types/report'
 import { dtypeShort } from '../../lib/dtypeName'
 import { useT } from '../../i18n'
 import { ASSIGN_DATA_EVENT, ADD_DATASET_EVENT, emptyPickerReason } from './WidgetPlaceholder'
-import { fieldUse, semanticAggregationWarning, nonAdditiveKind, SAFE_AGGREGATION, defaultSummary } from '../../lib/semanticGuard'
+import { CONVERT_WIDGET_EVENT } from './ConvertToMenu'
+import { convertConfig } from '../../lib/convertWidget'
+import { fieldUse, semanticAggregationWarning, nonAdditiveKind, SAFE_AGGREGATION, defaultSummary, countSummary } from '../../lib/semanticGuard'
 import { savePending, clearPending } from '../../lib/pendingEdits'
 import type { DatasetColumn, Dataset } from '../../services/api'
 import InteractionSettings from './InteractionSettings'
@@ -919,6 +921,20 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
     }))
   }
 
+  // UAT-2: a text, date or id field in the Measure, COUNTED ("Orders = Count
+  // distinct of order_id"). Offered only where the widget's shaper counts any
+  // column (COUNT_MEASURE_WIDGETS) -- never in a map's coordinates (C-09) or
+  // any other numeric role -- and only with the counting aggregations.
+  const countsText = COUNT_MEASURE_WIDGETS.has(wt) && !isModel
+  const isCountedField = (name: string | undefined): boolean => {
+    const c = name ? effectiveCols.find(col => col.name === name) : undefined
+    return !!c && !isMeasureCol(c) && c.dtype !== 'boolean' && c.dtype !== 'bool'
+  }
+  const countedOptions = (): { value: string; label: string; group?: string }[] => countsText
+    ? effectiveCols.filter(c => isCountedField(c.name)).map(c => ({ value: c.name, label: c.name, group: 'Counted' }))
+    : []
+  const countedMeasure = countsText && isCountedField(roleValues.measure)
+
   // Group aggregations for display
   const aggGroups = AGGREGATIONS.reduce<Record<string, typeof AGGREGATIONS[number][]>>((acc, a) => {
     ;(acc[a.group] ??= []).push(a)
@@ -928,10 +944,12 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
    *  listed even when it would not be offered, so it is never silently
    *  replaced. A partition chart (sunburst, icicle) offers only additive ones:
    *  a wedge is a share of its parent. */
-  const aggOptionGroups = (current: string, partitionRule: boolean) =>
-    Object.entries(aggGroups).map(([group, items]) => (
+  const aggOptionGroups = (current: string, partitionRule: boolean, counted = false) =>
+    Object.entries(aggGroups).filter(([, items]) => !counted
+      || items.some(a => COUNTING_AGGREGATIONS.includes(a.value) || a.value === current)).map(([group, items]) => (
       <optgroup key={group} label={`── ${L(group)} ──`}>
         {items
+          .filter(a => !counted || COUNTING_AGGREGATIONS.includes(a.value) || a.value === current)
           .filter(a => !partitionRule || !PARTITION_WIDGETS.includes(wt) || ADDITIVE_AGGREGATIONS.includes(a.value))
           .filter(a => aggregationOffered(wt, a.value) || a.value === current)
           .map(a => <option key={a.value} value={a.value}>{L(a.label)}</option>)}
@@ -1185,7 +1203,10 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
   // each: the first is `measure`, the rest `extra_measures`. Not beside a
   // series split, which fills the series slot already.
   const multiMeasure = MULTI_MEASURE_WIDGETS.includes(wt) && !roleValues.category2
+  // A counted text measure is one field: its count shares no aggregation
+  // with a second, numeric measure.
   const extendable = (role: string) => !!extraKeyFor(wt, role, roleValues)
+    && !(role === 'measure' && countedMeasure)
   const roleSpecs = (ROLE_SPECS[wt] ?? []).map(rf => extendable(rf.role) ? { ...rf, multi: true } : rf)
   type RoleSpec = (typeof roleSpecs)[number]
   const fieldsOf = (rf: RoleSpec): string[] =>
@@ -1195,10 +1216,12 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
   const setFields = (rf: RoleSpec, values: string[]) => {
     if (extendable(rf.role)) {
       const key = extraKeyFor(wt, rf.role, roleValues)!
+      const counted = rf.role === 'measure' && countsText && isCountedField(values[0])
       if (rf.role === 'category') pickCategory(values[0] ?? '')
       else if (rf.role === 'category2') pickColumns(values[0] ?? '')
       else setRole(rf.role, values[0] ?? '')
-      setExtraFields(prev => ({ ...prev, [key]: values.slice(1) }))
+      setExtraFields(prev => ({ ...prev, [key]: counted ? [] : values.slice(1) }))
+      if (rf.role === 'measure' && values[0] && (counted || (countsText && isCountedField(roleValues.measure)))) summariseMeasure(values[0])
       return
     }
     if (rf.multi) { setMultiRoleValues(prev => ({ ...prev, [rf.role]: values })); return }
@@ -1210,12 +1233,23 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
     // Only over the defaults: an aggregation the author picked is kept.
     const col = values[0]
     if (col && rf.role === 'measure') {
-      const s = defaultSummary(col)
-      if ((agg === 'sum' && s !== 'sum') || (!roleValues.measure && agg === 'count')) setAgg(s)
+      summariseMeasure(col)
     } else if (col && rf.role === 'measure2' && !agg2) {
       const s = defaultSummary(col)
       if (s !== agg) setAgg2(s)
     }
+  }
+  /** The aggregation a newly chosen measure starts on. */
+  function summariseMeasure(col: string) {
+    // UAT-2: a text field is counted (distinct values for an id); a number
+    // that replaces one leaves the count it inherited.
+    if (countsText && isCountedField(col)) {
+      if (!COUNTING_AGGREGATIONS.includes(agg) || !roleValues.measure || !isCountedField(roleValues.measure)) setAgg(countSummary(col))
+      return
+    }
+    const s = defaultSummary(col)
+    if (countsText && isCountedField(roleValues.measure) && COUNTING_AGGREGATIONS.includes(agg)) { setAgg(s); return }
+    if ((agg === 'sum' && s !== 'sum') || (!roleValues.measure && agg === 'count')) setAgg(s)
   }
   const assignedFields: Record<string, string[]> = Object.fromEntries(roleSpecs.map(rf => [rf.role, fieldsOf(rf)]))
   // QA6 B4: the Fields panel's rule (fieldUse), so "year" is a category here too.
@@ -1274,7 +1308,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
         {axes && first && nameField('data-role-name-measure', yAxisLabel, setYAxisLabel, f)}
         <label htmlFor="data-role-aggregation" style={detailLabel}>{L("Aggregation:")}</label>
         <select id="data-role-aggregation" value={agg} onChange={e => setAgg(e.target.value)} style={{ width:'100%' }}>
-          {aggOptionGroups(agg, true)}
+          {aggOptionGroups(agg, true, countedMeasure)}
         </select>
         {extraMeasures.length > 0 && multiMeasure && (
           <div style={{ fontSize: 11, color:'var(--muted)', marginTop: 4 }}>{L("Every measure on this chart uses it.")}</div>
@@ -1311,6 +1345,24 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
     }
     return null
   }
+  // UAT-7: a Table is one value per row (a single Measure; the server's
+  // table shaper and multi-measure path draw one value). Where its author
+  // wants a second value column, say so and offer the type that has them.
+  const toMatrix = () => {
+    const config = convertConfig('table', { ...migrated, dimension: roleValues.category,
+      measure: roleValues.measure, aggregation: agg }, 'matrix')
+    if (!config) return
+    window.dispatchEvent(new CustomEvent(CONVERT_WIDGET_EVENT, { detail: {
+      widgetId: widget.id, widget_type: 'matrix', config, label: L('Convert to Matrix') } }))
+  }
+  const tableOneValue = wt === 'table' && roleValues.measure && roleValues.category ? (
+    <div role="note" data-testid="table-one-value" style={{ fontSize: 11, color: 'var(--muted)', margin: '6px 0 8px', lineHeight: 1.4 }}>
+      {L('A table shows one value per row. To show several values side by side (with their own columns), convert it to a Matrix and add them to its Values.')}{' '}
+      <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '0 6px' }} onClick={toMatrix}>
+        {L('Convert to Matrix')}
+      </button>
+    </div>
+  ) : null
   const dataRolesPane = (
     <div data-testid="data-roles-pane" style={{ marginBottom: 8 }}>
       {pageWidgets.length > 1 && (
@@ -1328,6 +1380,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
       <DataRolesList specs={roleSpecs} values={assignedFields} kindOf={fieldKind} displayName={displayName}
         onAdd={role => setAddRole(role)} onRemove={removeField} renderDetails={fieldDetails} addBlocked={addBlocked}
         onDropField={dropFieldOnRole} />
+      {tableOneValue}
       {/* C-10: which of a point/bubble map's two modes is in force. */}
       {(wt === 'map_points' || wt === 'map_bubbles') && (roleValues.category || roleValues.lat || roleValues.lon) && (
         <div data-testid="map-mode-hint" style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
@@ -1364,7 +1417,9 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
       // tree's predictors) takes every column the dataset has.
       // A model's response is never one of its own predictors.
       const responseCol = isModel ? (roleValues.response || roleValues.measure) : undefined
-      return (roleAccepts(rf.role) === 'numeric' ? measureOptions(selected) : colOptions)
+      // UAT-2: an empty Measure also offers the fields it can count.
+      const counted = rf.role === 'measure' && selected.length === 0 ? countedOptions() : []
+      return [...(roleAccepts(rf.role) === 'numeric' ? measureOptions(selected) : colOptions), ...counted]
         .filter(o => !responseCol || o.value !== responseCol || selected.includes(o.value))
     }
     const kind = roleAccepts(rf.role)
@@ -1384,7 +1439,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
         : ordered
     }
     const narrowed =
-      kind === 'numeric'  ? measureOptions([chosen])
+      kind === 'numeric'  ? [...measureOptions([chosen]), ...(rf.role === 'measure' ? countedOptions() : [])]
     : kind === 'datetime' ? colOptions.filter(o =>
         effectiveCols.find(c => c.name === o.value)?.dtype === 'datetime')
     : kind === 'category' ? colOptions.filter(o =>
@@ -2138,9 +2193,12 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               {L("Aggregation")}
             </label>
             <select id="cfg-aggregation" value={agg} onChange={e => setAgg(e.target.value)} style={{ width:'100%' }}>
-              {Object.entries(aggGroups).map(([group, items]) => (
+              {Object.entries(aggGroups).filter(([, items]) => !countedMeasure
+                || items.some(a => COUNTING_AGGREGATIONS.includes(a.value) || a.value === agg)).map(([group, items]) => (
                 <optgroup key={group} label={`── ${L(group)} ──`}>
                   {items
+                    // UAT-2: a counted text field has no sum or average.
+                    .filter(a => !countedMeasure || COUNTING_AGGREGATIONS.includes(a.value) || a.value === agg)
                     // A sunburst/icicle wedge is a share of its parent, so an
                     // aggregation that does not add up would make the geometry
                     // lie. Filtering here means the user never picks one the
@@ -3017,7 +3075,8 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           focusRole={assignRole} onClose={() => setAssignOpen(false)}>
           <DataRolesList specs={roleSpecs} values={assignedFields} kindOf={fieldKind} displayName={displayName}
             onAdd={role => setAddRole(role)} onRemove={removeField} addBlocked={addBlocked}
-            onDropField={dropFieldOnRole} />
+            onDropField={dropFieldOnRole} replaceFull />
+          {tableOneValue}
         </AssignDataDialog>
       )}
       {addRole && (() => {

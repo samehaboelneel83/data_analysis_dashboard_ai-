@@ -536,8 +536,17 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
           {/* A caption written for the reader (the guided setup's "why")
               instead of "avg(is_late_pct)". */}
           {typeof cfg.caption === 'string' && cfg.caption.trim() ? cfg.caption
-            : cfg.measure && cfg.aggregation && String(cfg.aggregation).toLowerCase() !== 'sum'
-              ? kpiCaption(cfg, tw) : (cfg.measure || cfg.dimension || 'Value')}
+            : (() => {
+              const base = cfg.measure && cfg.aggregation && String(cfg.aggregation).toLowerCase() !== 'sum'
+                ? kpiCaption(cfg, tw) : (cfg.measure || (cfg.dimension ? tw('widget.kpiRows') : 'Value'))
+              // UAT-2: with a dimension the card shows ONE group's value (the
+              // first). Said so -- "3" under "order_id" read as the total.
+              const groups = data.type !== 'scalar' && cfg.dimension && Array.isArray(data.rows) ? data.rows.length : 0
+              const group = groups > 1 && first && typeof first === 'object' && !Array.isArray(first) ? first.name : undefined
+              return group != null
+                ? tw('widget.kpiOneGroup', { caption: String(base), dim: String(cfg.dimension), group: String(group), n: groups })
+                : base
+            })()}
         </div>
         {change && (
           <div data-testid="kpi-period-change" dir="ltr" style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>

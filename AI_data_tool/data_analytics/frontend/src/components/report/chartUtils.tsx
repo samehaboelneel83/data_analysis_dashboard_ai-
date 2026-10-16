@@ -156,6 +156,10 @@ export function measureFormat(fmt: CalcColumnFormat | null | undefined, aggregat
   const agg = typeof aggregation === 'string' ? aggregation.toLowerCase() : ''
   if (isCountAggregation(agg)) return { type: 'integer' } as CalcColumnFormat
   if (agg === 'pct') return { type: 'percent', decimals: 1 } as CalcColumnFormat
+  // UAT-9: the average of a true/false column is the share that is true --
+  // 51%, not 0.51. Only where the author set no format of their own.
+  if (fmt?.true_false) return ['avg', 'mean', 'average'].includes(agg)
+    ? { type: 'percent', decimals: 1, ratio: true } as CalcColumnFormat : undefined
   return fmt ?? undefined
 }
 
@@ -203,7 +207,7 @@ function fmtStrLatin(value: unknown, fmt?: CalcColumnFormat | null): string {
         ? isolateLtr(`${pre}${loc(num)} ${sym}${suf}`)
         : isolateLtr(`${pre}${sym} ${loc(num)}${suf}`)
     }
-    case 'percent':  return isNaN(num) ? '—' : isolateLtr(`${pre}${num.toFixed(dec)}%${suf}`)
+    case 'percent':  return isNaN(num) ? '—' : isolateLtr(`${pre}${(fmt.ratio ? num * 100 : num).toFixed(dec)}%${suf}`)
     case 'bar':      return isNaN(num) ? '—' : loc(num, 1)
     case 'badge':    return isNaN(num) ? '—' : `${pre}${loc(num)}${suf}`
     case 'colorscale': return isNaN(num) ? '—' : `${pre}${loc(num)}${suf}`
