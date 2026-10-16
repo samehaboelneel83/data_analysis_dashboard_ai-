@@ -3,6 +3,9 @@ import { fireEvent, waitFor, within } from '@testing-library/react'
 import { renderWithProviders as render, screen } from '../../test/renderWithProviders'
 import CalcColumnsPanel from './CalcColumnsPanel'
 
+const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
+vi.mock('react-hot-toast', () => ({ default: toastMock }))
+
 vi.mock('../../services/api', () => ({
   columnsApi: { duplicate: vi.fn() },
   calcColumnsApi: { list: vi.fn().mockResolvedValue([]), save: vi.fn(), delete: vi.fn(), preview: vi.fn() },
@@ -82,6 +85,44 @@ describe('deleting a calculated column something still uses (E05)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Delete anyway' }))
 
     await waitFor(() => expect(calcColumnsApi.delete).toHaveBeenLastCalledWith(3, 'unit', true))
+  })
+})
+
+
+describe('deleting says what happened (UAT-5)', () => {
+  // UAT: the × was clicked, no DELETE ever reached the server, and the
+  // columns stayed with nothing on screen. The control is now a labelled,
+  // finger-sized button, and every outcome is said.
+  it('the × is a labelled button naming the column', async () => {
+    const { calcColumnsApi } = await import('../../services/api')
+    vi.mocked(calcColumnsApi.list).mockResolvedValue([{ name: 'tmp_a', expression: 'x' }] as never)
+    render(<CalcColumnsPanel datasetId={3} columns={[]} onChanged={vi.fn()} />)
+    expect(await screen.findByRole('button', { name: 'Delete tmp_a' })).toBeInTheDocument()
+  })
+
+  it('confirms a deletion', async () => {
+    const { calcColumnsApi } = await import('../../services/api')
+    vi.mocked(calcColumnsApi.list).mockResolvedValue([{ name: 'tmp_a', expression: 'x' }] as never)
+    vi.mocked(calcColumnsApi.delete).mockReset().mockResolvedValueOnce([] as never)
+    const onChanged = vi.fn()
+    render(<CalcColumnsPanel datasetId={3} columns={[]} onChanged={onChanged} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete tmp_a' }))
+    fireEvent.click(await screen.findByRole('button', { name: /^delete$/i }))
+    await waitFor(() => expect(toastMock.success).toHaveBeenCalledWith(expect.stringContaining('tmp_a')))
+    expect(onChanged).toHaveBeenLastCalledWith([])
+    expect(screen.queryByText('tmp_a')).toBeNull()
+  })
+
+  it('a refusal other than "in use" is shown, not swallowed', async () => {
+    const { calcColumnsApi } = await import('../../services/api')
+    vi.mocked(calcColumnsApi.list).mockResolvedValue([{ name: 'tmp_a', expression: 'x' }] as never)
+    vi.mocked(calcColumnsApi.delete).mockReset().mockRejectedValueOnce(
+      Object.assign(new Error('403'), { response: { status: 403, data: { detail: 'This dataset was shared with you to view, not to change.' } } }))
+    render(<CalcColumnsPanel datasetId={3} columns={[]} onChanged={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete tmp_a' }))
+    fireEvent.click(await screen.findByRole('button', { name: /^delete$/i }))
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith('This dataset was shared with you to view, not to change.'))
+    expect(screen.getByText('tmp_a')).toBeInTheDocument()
   })
 })
 

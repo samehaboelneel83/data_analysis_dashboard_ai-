@@ -1756,14 +1756,37 @@ async def preview_measure_expr(dataset_id: int, req: MeasurePreviewRequest, db: 
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
     await require_dataset_read(db, current_user, dataset_id)
-    if not ds.filename:
-        raise HTTPException(404, "Dataset not found")
+    live_dq = ds.mode == "directquery"
+    if not ds.filename and not live_dq:
+        raise HTTPException(400, "This dataset has no rows to preview yet")
     rls_expr = await resolve_rls_expr(db, current_user, dataset_id)
     # Column security too, not just row security. Without this, previewing
     # SUM(<denied column>) computed the exact aggregate the rule hides --
     # verified live before the fix. Dropping the column makes the evaluator
     # report it as unknown, which is the honest answer for this caller.
     denied = await resolve_denied_columns(db, current_user, dataset_id)
+
+    # UAT-4: a live (DirectQuery) dataset has no file, and this answered 404
+    # "Dataset not found". Its rows are read live as Insights reads them
+    # (analysis_frame: row security pushed down with the query, denied columns
+    # dropped on arrival). A preview over a SAMPLE would be an estimate shown
+    # as the answer, so a source larger than one live read is refused instead.
+    live_frame = None
+    if live_dq:
+        from ..services import analysis_frame as _frames
+        source = await db.get(DataSource, ds.data_source_id) if ds.data_source_id else None
+        check_org(source, current_user, "Dataset not found")
+        try:
+            live = await _frames.load_directquery_frame(db, ds, rls_filter_expr=rls_expr, denied=set(denied or []))
+        except _frames.FrameUnavailable as exc:
+            raise HTTPException(422, f"The measure can't be tested on this live (DirectQuery) source: {exc}")
+        if live.sampled:
+            raise HTTPException(
+                422, f"The measure can't be tested on this live (DirectQuery) source: it holds "
+                     f"{live.total_rows:,} rows, more than one live preview reads "
+                     f"({live.rows_analysed:,}), so the result would be an estimate. "
+                     f"Save the measure and check it in a widget, which the source computes in full.")
+        live_frame = live.frame
 
     from ..services.prep import apply_prep_steps, prep_steps_of, resolve_join_frames
     _mp_steps = prep_steps_of(ds)
@@ -1772,9 +1795,12 @@ async def preview_measure_expr(dataset_id: int, req: MeasurePreviewRequest, db: 
     def _run():
         from ..services.measure_eval import preview_measure
         from ..services.widget_data import apply_rls_filter, apply_calculated_columns
-        df = load_file(ds.filename)
-        df = apply_rls_filter(df, rls_expr)
-        df = apply_prep_steps(df, _mp_steps, _mp_aux)
+        if live_frame is not None:
+            df = live_frame                    # secured at the source (above)
+        else:
+            df = load_file(ds.filename)
+            df = apply_rls_filter(df, rls_expr)
+            df = apply_prep_steps(df, _mp_steps, _mp_aux)
         present = [c for c in denied if c in df.columns]
         if present:
             df = df.drop(columns=present)

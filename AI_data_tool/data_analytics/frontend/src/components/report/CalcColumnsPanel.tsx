@@ -4,6 +4,7 @@ import { columnsApi, calcColumnsApi, customFunctionsApi } from '../../services/a
 import type { CalcColumn, CalcColumnFormat, CustomFunction, DatasetColumn } from '../../services/api'
 import CustomFunctionsPanel from './CustomFunctionsPanel'
 import { useConfirm } from '../ui/ConfirmDialog'
+import toast from 'react-hot-toast'
 
 import { funcCats, type FuncCat } from './calcColumns/catalog'
 import { BuilderModal } from './calcColumns/BuilderModal'
@@ -70,15 +71,25 @@ export default function CalcColumnsPanel({ datasetId, columns, onChanged }: Prop
     } catch (e: any) {
       // E05: something still names it, so the server refused with the list.
       // This used to reject unhandled -- the person confirmed and nothing happened.
-      if (e?.response?.status !== 409) throw e
+      // UAT-5: any other refusal (no edit right, server error) rejected
+      // unhandled too -- the column stayed and nothing said why.
+      if (e?.response?.status !== 409) { toast.error(failure(e)); return }
       if (!await confirm({
         title: tr('pg.panelsA.inUse', { name }),
         body: tr('pg.panelsA.inUseBody', { detail: String(e.response.data?.detail ?? '').replace(/ Delete anyway with \?force=true\./, '') }),
         confirmLabel: tr('pg.panelsA.deleteAnyway'), destructive: true,
       })) return
-      updated = await calcColumnsApi.delete(datasetId, name, true)
+      try {
+        updated = await calcColumnsApi.delete(datasetId, name, true)
+      } catch (e2: any) { toast.error(failure(e2)); return }
     }
     setCalcCols(updated); onChanged(updated)
+    toast.success(tr('pg.panelsA.calc.deleted', { name }))
+  }
+
+  const failure = (e: any): string => {
+    const detail = e?.response?.data?.detail
+    return typeof detail === 'string' && detail ? detail : tr('pg.panelsA.calc.deleteFailed')
   }
 
   return (
@@ -129,8 +140,12 @@ export default function CalcColumnsPanel({ datasetId, columns, onChanged }: Prop
           </div>
           <button style={{ background:'none', border:'none', cursor:'pointer', color:'var(--muted)', fontSize:12, padding:'0 3px' }}
             title={tr('pg.panelsA.edit')} onClick={() => openEdit(col)}>✏</button>
-          <button style={{ background:'none', border:'none', cursor:'pointer', color:'var(--muted)', fontSize:14, padding:'0 3px' }}
-            title={tr('pg.panelsA.delete')} onClick={() => del(col.name)}>×</button>
+          {/* UAT-5: a 14px glyph with 3px padding was easy to miss (the UAT's
+              clicks never reached the server); a 24px target named for the column. */}
+          <button type="button" style={{ background:'none', border:'none', cursor:'pointer', color:'var(--muted)', fontSize:14,
+            minInlineSize: 24, minBlockSize: 24, padding:'2px 6px' }}
+            title={tr('pg.panelsA.delete')} aria-label={tr('pg.panelsA.calc.deleteNamed', { name: col.name })}
+            onClick={() => del(col.name)}>×</button>
         </div>
       ))}
 

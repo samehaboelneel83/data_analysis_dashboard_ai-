@@ -157,9 +157,10 @@ async def test_a_denied_source_column_denies_the_measures_built_on_it(
     # `amount_sum` is dropped from the frame before the widget ever sees it, so
     # the requested measure column doesn't exist. That used to fall back to
     # counting rows per group -- no sums leaked, but a count under a sum's name.
-    # Since E05 slice 2 an unresolvable field is an explicit error instead:
-    # still nothing withheld is revealed, and nothing misleading is drawn.
-    assert r.status_code == 200, r.text
+    # Since E05 slice 2 an unresolvable field is an explicit error instead;
+    # since UAT-3, when that field is one the role may not see, the error is
+    # the same 403 `forbidden_column` a measure over it gets (and names nothing).
+    assert r.status_code == 403, r.text
     if engine["name"] == "duckdb":
         # The widget's own measure IS the denied column: duck_agg.plan()
         # validates "amount_sum" against the VISIBLE columns only (denied ones
@@ -170,8 +171,8 @@ async def test_a_denied_source_column_denies_the_measures_built_on_it(
         assert not engine["ran"], (
             f"expected DuckDB to decline on a denied measure column, but it ran ({engine['reason']!r})")
     body = r.json()
-    assert body["type"] == "error" and body["code"] == "unknown_field", body
-    assert body["rows"] == [] and "amount_sum" in body["message"]
+    assert body["code"] == "forbidden_column", body
+    assert "amount" not in str(body)
 
     count_widget = dict(BAR, config={"dimension": "region", "measure": "row_count", "aggregation": "sum"})
     r2 = await client.post(f"/api/v1/datasets/{agg.id}/widget-data", json=count_widget, headers=headers)

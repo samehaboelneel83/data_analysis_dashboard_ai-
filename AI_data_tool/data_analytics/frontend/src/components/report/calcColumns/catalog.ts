@@ -45,6 +45,7 @@ export const funcCats = (t: TranslateFn): FuncCat[] => [
       { label: 'REVERSE(col)',          snippet: 'REVERSE()',          back: 1, hint: t('pg.panelsA.calc.hint.reverse') }, // i18n-ok
       { label: 'LPAD(col,w,"0")',       snippet: 'LPAD(, 5, "0")',     back: 8, hint: t('pg.panelsA.calc.hint.lpad') }, // i18n-ok
       { label: 'RPAD(col,w," ")',       snippet: 'RPAD(, 5, " ")',     back: 8, hint: t('pg.panelsA.calc.hint.rpad') }, // i18n-ok
+      { label: 'VALUE(col)',            snippet: 'VALUE()',            back: 1, hint: t('pg.panelsA.calc.hint.value') }, // i18n-ok
       { label: 'to_text(x)',            snippet: 'str()',              back: 1, hint: t('pg.panelsA.calc.hint.to_text') }, // i18n-ok
     ],
   },

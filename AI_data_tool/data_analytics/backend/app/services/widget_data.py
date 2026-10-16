@@ -5023,6 +5023,151 @@ def _validate_expr_safety(expr: str) -> None:
             raise ValueError("Expression references a disallowed identifier")
 
 
+# ── Text -> number (UAT-1, 16 Oct 2026) ──────────────────────────────────────
+# TONUMBER once sent text through pd.to_datetime(errors='coerce'), so the
+# digits of "SO-100199" became 1999-10-01 (10,865 epoch days) and most ids came
+# out empty -- a wrong count distinct with no warning. Text is now read as a
+# number by a strict pattern; what is neither a number nor (for TONUMBER) an
+# ISO date is an error naming the value, never a guess.
+_ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹٫٬", "0123456789012345678" "9.,")
+_NUMBER_TEXT = _re.compile(r"^[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)?(?:\.\d+)?(?:[eE][+-]?\d+)?$")
+_ISO_DATE_TEXT = _re.compile(r"^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?$")
+
+
+def _is_text_value(v) -> bool:
+    """True for text: a str, or a column/array whose values are text."""
+    if isinstance(v, (str, np.str_)):
+        return True
+    if isinstance(v, np.ndarray):
+        if v.dtype.kind in "US":
+            return True
+        if v.dtype == object:
+            return any(isinstance(x, str) for x in v[:50] if x is not None)
+        return False
+    if isinstance(v, pd.Series):
+        dt = v.dtype
+        if isinstance(dt, pd.CategoricalDtype):
+            return pd.api.types.is_object_dtype(dt.categories.dtype) or pd.api.types.is_string_dtype(dt.categories.dtype)
+        if pd.api.types.is_string_dtype(dt) or dt == object:
+            first = v.dropna()
+            return bool(len(first)) and isinstance(first.iloc[0], str)
+    return False
+
+
+def _text_to_number(s, fn: str, allow_dates: bool):
+    """Numbers read from text `s` (a Series or a single value). Empty text is
+    NA. With `allow_dates`, text that is ALL ISO dates gives epoch days."""
+    scalar = not isinstance(s, (pd.Series, np.ndarray))
+    ser = pd.Series([s]) if scalar else pd.Series(s)
+    if pd.api.types.is_datetime64_any_dtype(ser):
+        if not allow_dates:
+            raise ValueError(f"{fn}() reads numbers from text; this is a date. "
+                             f"Use TONUMBER() for days since 1970-01-01.")
+        out = (ser - pd.Timestamp("1970-01-01")).dt.days.astype("Int64")
+        return out.iloc[0] if scalar else out
+    if pd.api.types.is_bool_dtype(ser):
+        out = ser.astype("Int64")
+        return out.iloc[0] if scalar else out
+    if pd.api.types.is_numeric_dtype(ser):
+        return s
+    txt = ser.map(lambda x: None if x is None or (not isinstance(x, str) and pd.isna(x))
+                  else str(x).translate(_ARABIC_DIGITS).strip())
+    empty = txt.isna() | (txt == "")
+    is_num = txt.map(lambda x: isinstance(x, str) and x != "" and bool(_NUMBER_TEXT.match(x))
+                     and any(c.isdigit() for c in x))
+    bad = ~empty & ~is_num
+    if bad.any():
+        is_date = txt.map(lambda x: isinstance(x, str) and bool(_ISO_DATE_TEXT.match(x)))
+        if allow_dates and not (~empty & ~is_date).any():
+            out = (pd.to_datetime(txt.where(~empty), errors="coerce", format="ISO8601")
+                   - pd.Timestamp("1970-01-01")).dt.days.astype("Int64")
+            return out.iloc[0] if scalar else out
+        example = ser[bad].iloc[0]
+        n_bad = int(bad.sum())
+        what = "neither a number nor a date (YYYY-MM-DD)" if allow_dates else "not a number"
+        raise ValueError(
+            f"{fn}(): {n_bad} value(s) are {what}, e.g. {str(example)!r}. Nothing was guessed. "
+            f"Take the number out of the text first, e.g. VALUE(REPLACE(col, \"SO-\", \"\")) "
+            f"or VALUE(RIGHT(col, 6)).")
+    nums = pd.to_numeric(txt.where(~empty).str.replace(",", "", regex=False), errors="coerce")
+    if nums.notna().any() and (nums.dropna() % 1 == 0).all() and nums.dropna().abs().max() < 2 ** 53:
+        nums = nums.astype("Int64")
+    if isinstance(s, pd.Series):
+        nums.index = s.index
+    return nums.iloc[0] if scalar else nums
+
+
+_ARITH_FNS = {
+    "+": lambda a, b: a + b, "-": lambda a, b: a - b, "*": lambda a, b: a * b,
+    "/": lambda a, b: a / b, "%": lambda a, b: a % b, "//": lambda a, b: a // b,
+    "**": lambda a, b: a ** b,
+}
+_ARITH_SYMBOL = {_ast.Add: "+", _ast.Sub: "-", _ast.Mult: "*", _ast.Div: "/",
+                 _ast.Mod: "%", _ast.FloorDiv: "//", _ast.Pow: "**"}
+
+
+def _text_sample(v):
+    if isinstance(v, (str, np.str_)):
+        return str(v)
+    vals = pd.Series(v).dropna()
+    return str(vals.iloc[0]) if len(vals) else ""
+
+
+def _arith(op: str, a, b):
+    """`a op b`, refusing text: Python repeats a string on `* n` and pandas
+    follows ("100199" * 2 == "100199100199"), so arithmetic with text was
+    silently wrong. Text + text stays concatenation."""
+    ta, tb = _is_text_value(a), _is_text_value(b)
+    if ta or tb:
+        if op == "+" and ta and tb:
+            return a + b
+        sample = _text_sample(a if ta else b)
+        raise ValueError(
+            f"Text can't be used in arithmetic ({op}): {sample!r} is text. "
+            f"Use VALUE(...) to read text as a number, e.g. VALUE(REPLACE(col, \"SO-\", \"\")) {op} 1, "
+            f"or CONCAT(...) to join text.")
+    return _ARITH_FNS[op](a, b)
+
+
+class _GuardedArithmetic(_ast.NodeTransformer):
+    """`a * b` -> _ARITH_('*', a, b), so arithmetic with text is refused."""
+
+    def visit_BinOp(self, node):  # noqa: N802
+        self.generic_visit(node)
+        sym = _ARITH_SYMBOL.get(type(node.op))
+        if sym is None:
+            return node
+        return _ast.copy_location(_ast.Call(func=_ast.Name(id="_ARITH_", ctx=_ast.Load()),
+                                            args=[_ast.Constant(sym), node.left, node.right],
+                                            keywords=[]), node)
+
+
+def _arith_touches_text(expr: str, df: pd.DataFrame) -> bool:
+    """True when `expr` does arithmetic and reads a text column or a text
+    literal -- df.eval would repeat strings, so such an expression goes
+    through the guarded Python path instead."""
+    mapping: dict = {}
+
+    def _sub(m):
+        key = f"bt{len(mapping)}x"
+        mapping[key] = m.group(1)
+        return key
+    try:
+        tree = _ast.parse(_re.sub(r"`([^`]+)`", _sub, expr), mode="eval")
+    except SyntaxError:
+        return False
+    if not any(isinstance(n, _ast.BinOp) and type(n.op) in _ARITH_SYMBOL for n in _ast.walk(tree)):
+        return False
+    for n in _ast.walk(tree):
+        if isinstance(n, _ast.Constant) and isinstance(n.value, str):
+            return True
+        if isinstance(n, _ast.Name):
+            col = mapping.get(n.id, n.id)
+            if col in df.columns and _is_text_value(df[col]):
+                return True
+    return False
+
+
 def _build_safe_ns(df: pd.DataFrame) -> tuple[dict, dict]:
     """Return (safe_globals, local_ns) for evaluating expressions against df."""
     def IF(cond, true_val, false_val):  # noqa: N802
@@ -5214,10 +5359,16 @@ def _build_safe_ns(df: pd.DataFrame) -> tuple[dict, dict]:
         return _as_datetime(s)
 
     def TONUMBER(s):  # noqa: N802
-        """Epoch days, matching TODATE's numeric input. NaT becomes NA rather than a
-        misleading zero, which would plot as 1970."""
-        dt = _as_datetime(s)
-        return (dt - pd.Timestamp("1970-01-01")).dt.days.astype("Int64")
+        """A date -> epoch days, matching TODATE's numeric input (NaT -> NA, never
+        a zero that would plot as 1970). Number-like text -> that number; text
+        that is all ISO dates (YYYY-MM-DD) -> epoch days; any other text is an
+        error (UAT-1: digits were once read as a guessed date)."""
+        return _text_to_number(s, "TONUMBER", allow_dates=True)
+
+    def VALUE(s):  # noqa: N802
+        """Text -> number, Excel's VALUE: "1,234.5" -> 1234.5, " 42 " -> 42,
+        empty -> empty. Anything that is not a number is an error, never a guess."""
+        return _text_to_number(s, "VALUE", allow_dates=False)
 
     # ── Advanced statistics ────────────────────────────────────────────────────
     def PERCENTILE(s, q):  # noqa: N802
@@ -5379,7 +5530,8 @@ def _build_safe_ns(df: pd.DataFrame) -> tuple[dict, dict]:
         'MONTHNAME': MONTHNAME, 'DAYNAME': DAYNAME,
         # date construction and coercion
         'DATEFROMYMD': DATEFROMYMD, 'DATEADD': DATEADD, 'DATEDIFF': DATEDIFF,
-        'TODAY': TODAY, 'NOW': NOW, 'TODATE': TODATE, 'TONUMBER': TONUMBER,
+        'TODAY': TODAY, 'NOW': NOW, 'TODATE': TODATE, 'TONUMBER': TONUMBER, 'VALUE': VALUE,
+        '_ARITH_': _arith,
         # advanced statistics
         'PERCENTILE': PERCENTILE, 'MODE': MODE, 'CORR': CORR, 'COVAR': COVAR,
         'SKEW': SKEW, 'KURTOSIS': KURTOSIS, 'IQR': IQR, 'SE': SE,
@@ -5403,10 +5555,13 @@ def _eval_expr(expr: str, df: pd.DataFrame):
     # (the mechanism behind the `@df.to_csv(...)` bypass), without affecting normal
     # bare-column-name resolution, which pandas resolves via its own DataFrame-level
     # resolver, independent of these kwargs.
-    try:
-        return df.eval(expr, local_dict={}, global_dict={}, resolvers=())
-    except Exception:
-        pass
+    # Not for arithmetic over text: pandas repeats strings ("100199" * 2) where
+    # the guarded Python path below refuses (UAT-1).
+    if not _arith_touches_text(expr, df):
+        try:
+            return df.eval(expr, local_dict={}, global_dict={}, resolvers=())
+        except Exception:
+            pass
     # --- Python eval fallback: replace `col name` with safe identifiers ---
     safe_globals, local_ns = _build_safe_ns(df)
     processed = expr
@@ -5420,6 +5575,7 @@ def _eval_expr(expr: str, df: pd.DataFrame):
     processed = _re.sub(r'`([^`]+)`', _replace, processed)
     local_ns.update(extra)
     tree = _ElementwiseLogic().visit(_ast.parse(processed, mode='eval'))
+    tree = _GuardedArithmetic().visit(tree)
     code = compile(_ast.fix_missing_locations(tree), '<expression>', 'eval')
     return eval(code, safe_globals, local_ns)  # noqa: S307
 
